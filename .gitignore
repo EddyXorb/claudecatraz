@@ -6,3 +6,5 @@ workspace/
 
 # Local env overrides
 .env.local
+
+claude
