@@ -1,4 +1,21 @@
 services:
+  gitlab-mcp:
+    image: zereight050/gitlab-mcp:latest
+    container_name: gitlab-mcp
+    environment:
+      - STREAMABLE_HTTP=true
+      - REMOTE_AUTHORIZATION=true
+      - HOST=0.0.0.0
+      - PORT=3002
+      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   claude-dev-env:
     container_name: claude-dev-env
     build:
@@ -14,16 +31,15 @@ services:
         DEV_UID: ${DEV_UID:-1000}
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GITLAB_URL=${GITLAB_URL:-}
       - GITLAB_TOKEN=${GITLAB_TOKEN:-}
     volumes:
-      # Bind-mount Claude home from host so auth tokens persist across restarts.
-      # Authenticate once on the host with `claude`, then the container reuses the session.
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
-      # Project directory — set PROJECT_DIR or pass --project-dir to start.py
       - ${PROJECT_DIR:-./workspace}:/workspace
     command: ["python3", "/entrypoint.py"]
     working_dir: /workspace
     tty: true
     stdin_open: true
     restart: unless-stopped
+    depends_on:
+      gitlab-mcp:
+        condition: service_healthy

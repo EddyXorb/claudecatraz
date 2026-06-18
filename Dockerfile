@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     cmake gcc-multilib g++-multilib gcovr \
     lsb-release software-properties-common gnupg \
     libssl-dev libclang-dev \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Python tools — system-wide so any user can call them
@@ -62,8 +63,6 @@ RUN userdel -r ubuntu 2>/dev/null || true && \
     useradd -m -u ${DEV_UID} -s /bin/bash dev
 
 COPY entrypoint.py /entrypoint.py
-RUN chown dev:dev /entrypoint.py
 
-USER dev
 ENV HOME=/home/dev
 WORKDIR /workspace

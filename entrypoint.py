@@ -48,28 +48,43 @@ def ensure_claude_json() -> None:
     Claude Code stores onboarding/subscription state in ~/.claude.json (next to ~/.claude/).
     Our bind mount only covers ~/.claude/ (the directory), so we store it as
     ~/.claude/.claude.json and symlink it into place at startup.
+
+    Claude Code never persists `bypassPermissionsModeAccepted`, so spawned RC sessions
+    would hang waiting for a one-time accept prompt that never appears.  We force the
+    key to true every startup, before execvp.
     """
     home = Path.home()
     stored = home / ".claude" / ".claude.json"
     target = home / ".claude.json"
 
-    if target.exists() or target.is_symlink():
-        return
+    if not (target.exists() or target.is_symlink()):
+        if not stored.exists():
+            stored.parent.mkdir(parents=True, exist_ok=True)
+            stored.write_text(json.dumps({
+                "hasCompletedOnboarding": True,
+                "lastOnboardingVersion": "1.0",
+                "bypassPermissionsModeAccepted": True,
+                "projects": {
+                    "/workspace": {"hasTrustDialogAccepted": True},
+                },
+            }, indent=2))
+        target.symlink_to(stored)
 
-    if not stored.exists():
-        stored.parent.mkdir(parents=True, exist_ok=True)
-        stored.write_text(json.dumps({
-            "hasCompletedOnboarding": True,
-            "lastOnboardingVersion": "1.0",
-            "bypassPermissionsModeAccepted": True,
-            "projects": {
-                "/workspace": {
-                    "hasTrustDialogAccepted": True,
-                }
-            },
-        }, indent=2))
-
-    target.symlink_to(stored)
+    # The file exists – patch the two fields that Claude Code never writes back.
+    actual = stored if target.is_symlink() else target
+    if actual.exists():
+        data = read_json(actual)
+        changed = False
+        if not data.get("bypassPermissionsModeAccepted"):
+            data["bypassPermissionsModeAccepted"] = True
+            changed = True
+        projects = data.setdefault("projects", {})
+        ws = projects.setdefault("/workspace", {})
+        if not ws.get("hasTrustDialogAccepted"):
+            ws["hasTrustDialogAccepted"] = True
+            changed = True
+        if changed:
+            actual.write_text(json.dumps(data, indent=2))
 
 
 def ensure_settings() -> None:
@@ -84,24 +99,49 @@ def ensure_settings() -> None:
 
 
 def configure_gitlab() -> None:
-    url = os.environ.get("GITLAB_URL", "").strip()
     token = os.environ.get("GITLAB_TOKEN", "").strip()
-    if not url or not token:
+    if not token:
         return
 
-    p = Path.home() / ".claude" / "settings.json"
-    cfg = read_json(p)
-    cfg.setdefault("mcpServers", {})
-    cfg["mcpServers"]["gitlab"] = {
-        "type": "http",
-        "url": url.rstrip("/") + "/api/v4/mcp",
-        "headers": {"Authorization": f"Bearer {token}"},
-    }
-    p.write_text(json.dumps(cfg, indent=2))
-    print(f"GitLab MCP configured: {cfg['mcpServers']['gitlab']['url']}", flush=True)
+    import subprocess
+    # Remove stale entry first (idempotent — ignore errors if it doesn't exist)
+    subprocess.run(["claude", "mcp", "remove", "gitlab"], capture_output=True)
+    result = subprocess.run(
+        [
+            "claude", "mcp", "add",
+            "--transport", "http",
+            "gitlab",
+            "http://gitlab-mcp:3002/mcp",
+            "--header", f"Authorization: Bearer {token}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        print("GitLab MCP registered: http://gitlab-mcp:3002/mcp", flush=True)
+    else:
+        print(f"GitLab MCP registration failed: {result.stderr.strip()}", flush=True)
+
+
+def drop_to_dev() -> None:
+    """If running as root, fix /workspace ownership and re-exec as the dev user via gosu."""
+    if os.getuid() != 0:
+        return
+    import pwd
+    try:
+        pw = pwd.getpwnam("dev")
+    except KeyError:
+        sys.exit("error: user 'dev' not found in container")
+
+    workspace = Path("/workspace")
+    if workspace.exists():
+        os.chown(workspace, pw.pw_uid, pw.pw_gid)
+
+    os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
 
 def cmd_start() -> None:
+    drop_to_dev()
     creds = Path.home() / ".claude" / ".credentials.json"
     if not creds.exists():
         sys.exit(
@@ -114,7 +154,13 @@ def cmd_start() -> None:
     ensure_settings()
     configure_gitlab()
 
-    os.execvp("claude", ["claude", "--dangerously-skip-permissions", "--remote-control"])
+    os.execvp("claude", [
+        "claude",
+        "--dangerously-skip-permissions",
+        "--remote-control",
+        "--permission-mode", "bypassPermissions",
+        "--debug-file", "/home/dev/.claude/rc-debug.log",
+    ])
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
