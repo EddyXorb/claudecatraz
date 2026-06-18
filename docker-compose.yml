@@ -2,6 +2,7 @@ services:
   gitlab-mcp:
     image: zereight050/gitlab-mcp:latest
     container_name: gitlab-mcp
+    profiles: ["gitlab"]
     environment:
       - STREAMABLE_HTTP=true
       - REMOTE_AUTHORIZATION=true
@@ -31,7 +32,8 @@ services:
         DEV_UID: ${DEV_UID:-1000}
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GITLAB_TOKEN=${GITLAB_TOKEN:-}
+      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN:-}
+      - GITLAB_API_URL=${GITLAB_API_URL}
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
@@ -43,3 +45,4 @@ services:
     depends_on:
       gitlab-mcp:
         condition: service_healthy
+        required: false

@@ -5,6 +5,7 @@ Container entrypoint — and host-side credential sync tool.
   python3 entrypoint.py          # inside container: configure + exec claude
   python3 entrypoint.py sync     # on host: copy .credentials.json into CLAUDE_HOME
 """
+
 import argparse
 import json
 import os
@@ -22,12 +23,15 @@ def read_json(p: Path) -> dict:
 
 # ── host-side sync ────────────────────────────────────────────────────────────
 
+
 def cmd_sync(claude_home: Path) -> None:
     src = Path.home() / ".claude" / ".credentials.json"
     dst = claude_home / ".credentials.json"
 
     if not src.exists():
-        sys.exit(f"error: {src} not found — authenticate with `claude` on the host first")
+        sys.exit(
+            f"error: {src} not found — authenticate with `claude` on the host first"
+        )
     if claude_home.exists() and claude_home.stat().st_uid == 0:
         sys.exit(
             f"error: {claude_home} is owned by root (Docker created it automatically).\n"
@@ -42,6 +46,7 @@ def cmd_sync(claude_home: Path) -> None:
 
 
 # ── container startup ─────────────────────────────────────────────────────────
+
 
 def ensure_claude_json() -> None:
     """
@@ -60,14 +65,20 @@ def ensure_claude_json() -> None:
     if not (target.exists() or target.is_symlink()):
         if not stored.exists():
             stored.parent.mkdir(parents=True, exist_ok=True)
-            stored.write_text(json.dumps({
-                "hasCompletedOnboarding": True,
-                "lastOnboardingVersion": "1.0",
-                "bypassPermissionsModeAccepted": True,
-                "projects": {
-                    "/workspace": {"hasTrustDialogAccepted": True},
-                },
-            }, indent=2))
+            stored.write_text(
+                json.dumps(
+                    {
+                        "hasCompletedOnboarding": True,
+                        "lastOnboardingVersion": "1.0",
+                        "bypassPermissionsModeAccepted": True,
+                        "remoteDialogSeen": True,
+                        "projects": {
+                            "/workspace": {"hasTrustDialogAccepted": True},
+                        },
+                    },
+                    indent=2,
+                )
+            )
         target.symlink_to(stored)
 
     # The file exists – patch the two fields that Claude Code never writes back.
@@ -92,27 +103,62 @@ def ensure_settings() -> None:
     if p.exists():
         return
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({
-        "theme": "dark",
-        "hasCompletedOnboarding": True,
-    }, indent=2))
+    p.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "hasCompletedOnboarding": True,
+            },
+            indent=2,
+        )
+    )
+
+
+def configure_git() -> None:
+    token = os.environ.get("GITLAB_GIT_TOKEN", "").strip()
+    if not token:
+        return
+
+    api_url = os.environ.get("GITLAB_API_URL", "https://gitlab.com").strip()
+    host = (
+        api_url.removesuffix("/api/v4")
+        .rstrip("/")
+        .removeprefix("https://")
+        .removeprefix("http://")
+    )
+
+    netrc = Path.home() / ".netrc"
+    lines = [
+        l
+        for l in (netrc.read_text().splitlines() if netrc.exists() else [])
+        if host not in l
+    ]
+    lines.append(f"machine {host} login oauth2 password {token}")
+    netrc.write_text("\n".join(lines) + "\n")
+    netrc.chmod(0o600)
+    print(f"Git credentials configured for {host}", flush=True)
 
 
 def configure_gitlab() -> None:
-    token = os.environ.get("GITLAB_TOKEN", "").strip()
+    token = os.environ.get("GITLAB_API_TOKEN", "").strip()
     if not token:
         return
 
     import subprocess
+
     # Remove stale entry first (idempotent — ignore errors if it doesn't exist)
     subprocess.run(["claude", "mcp", "remove", "gitlab"], capture_output=True)
     result = subprocess.run(
         [
-            "claude", "mcp", "add",
-            "--transport", "http",
+            "claude",
+            "mcp",
+            "add",
+            "--transport",
+            "http",
             "gitlab",
             "http://gitlab-mcp:3002/mcp",
-            "--header", f"Authorization: Bearer {token}",
+            "--header",
+            f"Authorization: Bearer {token}",
         ],
         capture_output=True,
         text=True,
@@ -128,6 +174,7 @@ def drop_to_dev() -> None:
     if os.getuid() != 0:
         return
     import pwd
+
     try:
         pw = pwd.getpwnam("dev")
     except KeyError:
@@ -152,25 +199,36 @@ def cmd_start() -> None:
 
     ensure_claude_json()
     ensure_settings()
+    configure_git()
     configure_gitlab()
 
-    os.execvp("claude", [
+    os.execvp(
         "claude",
-        "--dangerously-skip-permissions",
-        "--remote-control",
-        "--permission-mode", "bypassPermissions",
-        "--debug-file", "/home/dev/.claude/rc-debug.log",
-    ])
+        [
+            "claude",
+            "remote-control",
+            "--permission-mode",
+            "bypassPermissions",
+            "--spawn",
+            "same-dir",
+            "--debug-file",
+            "/home/dev/.claude/rc-debug.log",
+        ],
+    )
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="command")
 
-    sync = sub.add_parser("sync", help="Copy .credentials.json from ~/.claude/ into CLAUDE_HOME")
+    sync = sub.add_parser(
+        "sync", help="Copy .credentials.json from ~/.claude/ into CLAUDE_HOME"
+    )
     sync.add_argument(
         "--claude-home",
         default=os.environ.get("CLAUDE_HOME", str(Path(__file__).parent / "claude")),
