@@ -169,6 +169,30 @@ def configure_gitlab() -> None:
         print(f"GitLab MCP registration failed: {result.stderr.strip()}", flush=True)
 
 
+def configure_github() -> None:
+    import subprocess
+
+    # Presence of the github-mcp service is detected by whether the hostname resolves.
+    # We always try; if the container isn't up the MCP add will simply fail silently.
+    result = subprocess.run(
+        ["getent", "hosts", "github-mcp"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return
+
+    subprocess.run(["claude", "mcp", "remove", "github"], capture_output=True)
+    result = subprocess.run(
+        ["claude", "mcp", "add", "--transport", "http", "github", "http://github-mcp:3003/mcp"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        print("GitHub MCP registered: http://github-mcp:3003/mcp", flush=True)
+    else:
+        print(f"GitHub MCP registration failed: {result.stderr.strip()}", flush=True)
+
+
 def drop_to_dev() -> None:
     """If running as root, fix /workspace ownership and re-exec as the dev user via gosu."""
     if os.getuid() != 0:
@@ -201,6 +225,7 @@ def cmd_start() -> None:
     ensure_settings()
     configure_git()
     configure_gitlab()
+    configure_github()
 
     os.execvp(
         "claude",

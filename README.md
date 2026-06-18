@@ -1,6 +1,6 @@
 # claude-dev-env
 
-Dockerisierte Claude Code Umgebung für autonome Agenten-Sessions, gesteuert über Remote Control. Enthält einen GitLab MCP Sidecar als einzige Schnittstelle zur GitLab-API.
+Dockerisierte Claude Code Umgebung für autonome Agenten-Sessions, gesteuert über Remote Control. GitLab- und GitHub-Integration laufen als optionale MCP-Sidecar.
 
 ## Architektur
 
@@ -8,75 +8,84 @@ Dockerisierte Claude Code Umgebung für autonome Agenten-Sessions, gesteuert üb
 Host (VSCode / Browser)
         │  Remote Control (claude.ai)
         ▼
-┌─────────────────────┐        ┌──────────────────────┐
-│   claude-dev-env    │──MCP──▶│     gitlab-mcp       │
-│                     │        │                      │
-│  Claude Code        │        │  zereight/gitlab-mcp │
-│  + Toolchain        │        │  GITLAB_API_TOKEN    │──▶ gitlab.com API
-│  (C++/Rust/Python)  │        │  (api scope)         │
-└─────────────────────┘        └──────────────────────┘
-        │
+┌─────────────────────┐     ┌──────────────────────┐
+│   claude-dev-env    │─MCP▶│     gitlab-mcp       │──▶ gitlab.com API
+│                     │     │  GITLAB_API_TOKEN    │
+│  Claude Code        │     └──────────────────────┘
+│  + Toolchain        │
+│  (C++/Rust/Python)  │─MCP▶┌──────────────────────┐
+│                     │     │     github-mcp       │──▶ api.github.com
+└─────────────────────┘     │  GITHUB_TOKEN        │
+        │                   └──────────────────────┘
         │ git over HTTPS
         ▼ (GITLAB_GIT_TOKEN, read/write_repository)
    gitlab.com
 ```
 
-Der Agent hat **keinen direkten Zugriff** auf den GitLab API-Token. Alle GitLab-Operationen laufen über den MCP-Sidecar.
+Der Agent hat keinen direkten Zugriff auf GitHub-Tokens, aber leider schon auf git gitlab tokens (das ging nicht anders). Alle API-Operationen laufen über die jeweiligen MCP-Sidecar.
 
 ## Dateien
 
-| Datei | Zweck |
-|-------|-------|
-| `docker-compose.yml` | Definiert beide Services und ihre Umgebungsvariablen |
-| `Dockerfile` | Build-Image: Ubuntu 24.04 mit Clang, Rust, Python/uv, Conan, Node, Claude Code |
-| `entrypoint.py` | Startet den Container; konfiguriert git-Credentials und MCP-Verbindung |
-| `.env` | Tokens und Konfiguration (nicht committen) |
-| `claude/` | Persistierter Claude-Home (`~/.claude` im Container, bind-gemountet) |
-| `workspace/` | Arbeitsverzeichnis für Projekte (bind-gemountet) |
+| Datei                | Zweck                                                                          |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `docker-compose.yml` | Definiert alle Services und ihre Umgebungsvariablen                            |
+| `Dockerfile`         | Build-Image: Ubuntu 24.04 mit Clang, Rust, Python/uv, Conan, Node, Claude Code |
+| `entrypoint.py`      | Startet den Container; konfiguriert git-Credentials und MCP-Verbindungen       |
+| `.env`               | Tokens und Konfiguration (nicht committen)                                     |
+| `claude/`            | Persistierter Claude-Home (`~/.claude` im Container, bind-gemountet)           |
+| `workspace/`         | Arbeitsverzeichnis für Projekte (bind-gemountet)                               |
 
 ## Sicherheitsmaßnahmen
 
-**Token-Trennung:** Zwei separate Tokens mit minimalen Scopes.
-- `GITLAB_API_TOKEN` (nur im MCP-Container): `api`-Scope für alle GitLab-API-Operationen
-- `GITLAB_GIT_TOKEN` (nur im Claude-Container): `read_repository` + `write_repository` für git — keine API-Calls möglich
+**Token-Trennung:** Separate Tokens mit minimalen Scopes.
 
-**MCP Tool-Einschränkungen:** Der MCP-Sidecar blockiert per `GITLAB_DENIED_TOOLS_REGEX` alle schreibenden Operationen außer:
-- `create_merge_request` — MR anlegen
-- `create_merge_request_note` — Kommentar schreiben
-- `create_merge_request_discussion_note` — Antwort in einem Thread
-- `create_merge_request_thread` — neuen Diskussions-Thread starten
+- `GITLAB_API_TOKEN` (nur im `gitlab-mcp`-Container): `api`-Scope für GitLab-API-Operationen
+- `GITLAB_GIT_TOKEN` (nur im `claude-dev-env`-Container): `read_repository` + `write_repository` für git — keine API-Calls möglich
+- `GITHUB_TOKEN` (nur im `github-mcp`-Container): Claude sieht ihn nie
+
+**MCP Tool-Einschränkungen (GitLab):** Der `gitlab-mcp`-Sidecar blockiert per `GITLAB_DENIED_TOOLS_REGEX`:
+
+- alle `delete_*`-Tools
+- weitere destruktive Einzeloperationen (`update_default_branch`, `unprotect_branch`, `create_or_update_file`, `merge_merge_request`)
 
 **Kein Root:** Claude Code läuft als unprivilegierter User `dev`. Der Entrypoint wechselt via `gosu` zu diesem User, sobald `/workspace`-Ownership gesetzt ist.
 
 ## Einrichtung
 
-### 1. GitLab aktivieren (optional)
+### 1. Compose-Profile wählen
 
-GitLab-Integration ist optional. Ohne sie startet nur `claude-dev-env`.
+Die GitLab- und GitHub-Integration sind optional. Docker Compose *Profile* steuern, welche Sidecar-Services starten. Aktiv werden Profile über `COMPOSE_PROFILES` in `.env`:
 
-Docker Compose unterstützt *Profiles* — Services können einem benannten Profil zugeordnet werden und starten dann nur, wenn dieses Profil aktiv ist. `gitlab-mcp` gehört zum Profil `gitlab`. Aktiv wird ein Profil über die Umgebungsvariable `COMPOSE_PROFILES`:
+| Wert            | Was startet          |
+| --------------- | -------------------- |
+| *(leer)*        | nur `claude-dev-env` |
+| `gitlab`        | + `gitlab-mcp`       |
+| `github`        | + `github-mcp`       |
+| `gitlab,github` | alle drei            |
 
-```dotenv
-# .env
-COMPOSE_PROFILES=gitlab   # gitlab-mcp wird gestartet
-# COMPOSE_PROFILES=        # auskommentiert → nur claude-dev-env startet
-```
-
-`claude-dev-env` hat `required: false` auf seiner Abhängigkeit zu `gitlab-mcp`. Das bedeutet: wenn `gitlab-mcp` gar nicht existiert (Profil inaktiv), startet `claude-dev-env` trotzdem. Ist das Profil aktiv, wartet `claude-dev-env` dennoch bis `gitlab-mcp` healthy ist, bevor es startet.
+`claude-dev-env` hat `required: false` auf beiden Abhängigkeiten — es startet immer, wartet aber auf einen aktiven Sidecar, bis dieser healthy ist.
 
 ### 2. Tokens erstellen
 
-**GitLab API Token** (für MCP-Sidecar):
+**GitLab API Token** (für `gitlab-mcp`):
+
 - Group → Settings → Access Tokens
 - Scopes: `api`
-- In `.env` als `GITLAB_API_TOKEN` eintragen
+- In `.env` als `GITLAB_API_TOKEN`
 
-**GitLab Git Token** (für git-Operationen im Claude-Container):
+**GitLab Git Token** (für git-Operationen im `claude-dev-env`):
+
 - Group → Settings → Access Tokens
 - Scopes: `read_repository`, `write_repository`
-- In `.env` als `GITLAB_GIT_TOKEN` eintragen
+- In `.env` als `GITLAB_GIT_TOKEN`
 
-### 2. Claude-Credentials synchronisieren
+**GitHub Token** (für `github-mcp`):
+
+- GitHub → Settings → Developer settings → Personal access tokens
+- Fine-Grained Token empfohlen; Scopes je nach Bedarf
+- In `.env` als `GITHUB_TOKEN`
+
+### 3. Claude-Credentials synchronisieren
 
 Einmalig auf dem Host (Claude Code muss dort installiert und eingeloggt sein):
 
@@ -84,21 +93,21 @@ Einmalig auf dem Host (Claude Code muss dort installiert und eingeloggt sein):
 python3 entrypoint.py sync
 ```
 
-### 3. `.env` befüllen
-
-```bash
-cp .env.example .env   # falls vorhanden, sonst direkt .env bearbeiten
-```
+### 4. `.env` befüllen
 
 Mindestens setzen:
 ```
 ANTHROPIC_API_KEY=...
+COMPOSE_PROFILES=gitlab,github   # oder leer lassen
+
+GITLAB_API_URL=https://gitlab.com/api/v4
 GITLAB_API_TOKEN=...
 GITLAB_GIT_TOKEN=...
-GITLAB_API_URL=https://gitlab.com/api/v4   # oder eigene Instanz
+
+GITHUB_TOKEN=...
 ```
 
-### 4. Starten
+### 5. Starten
 
 ```bash
 docker compose up -d

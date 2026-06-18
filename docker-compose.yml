@@ -18,6 +18,21 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server:latest
+    container_name: github-mcp
+    profiles: ["github"]
+    environment:
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
+    command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "3003"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   claude-dev-env:
     container_name: claude-dev-env
     build:
@@ -45,5 +60,8 @@ services:
     restart: unless-stopped
     depends_on:
       gitlab-mcp:
+        condition: service_healthy
+        required: false
+      github-mcp:
         condition: service_healthy
         required: false
