@@ -1,0 +1,8 @@
+# Claude auth tokens and MCP config — never commit
+claude-home/
+
+# Local project workspace
+workspace/
+
+# Local env overrides
+.env.local

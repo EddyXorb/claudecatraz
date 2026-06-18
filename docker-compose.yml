@@ -1,0 +1,29 @@
+services:
+  claude-dev-env:
+    container_name: claude-dev-env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UV_VERSION: ${UV_VERSION}
+        CLANG_VERSION: ${CLANG_VERSION}
+        RUST_VERSION: ${RUST_VERSION}
+        CONAN_VERSION: ${CONAN_VERSION}
+        NODE_VERSION: ${NODE_VERSION:-22}
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
+        DEV_UID: ${DEV_UID:-1000}
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITLAB_URL=${GITLAB_URL:-}
+      - GITLAB_TOKEN=${GITLAB_TOKEN:-}
+    volumes:
+      # Bind-mount Claude home from host so auth tokens persist across restarts.
+      # Authenticate once on the host with `claude`, then the container reuses the session.
+      - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
+      # Project directory — set PROJECT_DIR or pass --project-dir to start.py
+      - ${PROJECT_DIR:-./workspace}:/workspace
+    command: ["python3", "/entrypoint.py"]
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
