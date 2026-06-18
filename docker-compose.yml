@@ -9,6 +9,7 @@ services:
       - HOST=0.0.0.0
       - PORT=3002
       - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
+      - GITLAB_DENIED_TOOLS_REGEX=^delete_|update_default_branch|create_or_update_file|unprotect_branch|merge_merge_request
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
       interval: 3s
