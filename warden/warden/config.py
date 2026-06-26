@@ -32,6 +32,10 @@ class Config:
     max_open_branches: int = 10
     max_writes_per_hour: int = 60
     allowed_projects: tuple[str, ...] = ()
+    # Numeric project ids of ``allowed_projects``, resolved at reconcile. GitLab's
+    # ``/projects/:id`` accepts the url-encoded path OR the numeric id, so the
+    # allowlist must know both forms (filled in by AppContext.reconcile).
+    allowed_project_ids: tuple[str, ...] = ()
     api_url: str = "https://gitlab.com/api/v4"
     read_token: str = ""
     write_token: str = ""
@@ -47,8 +51,15 @@ class Config:
         return self.api_url.removesuffix("/api/v4")
 
     def project_allowed(self, project: str) -> bool:
-        """Default-deny path-prefix match against ``ALLOWED_PROJECTS`` (Q9)."""
+        """Default-deny match against ``ALLOWED_PROJECTS`` (Q9).
+
+        A request may name the project by url-encoded path *or* by numeric id
+        (GitLab treats them interchangeably). Match either: the path by
+        exact/prefix, or the numeric id against the reconcile-resolved set.
+        """
         project = normalize_project(project)
+        if project in self.allowed_project_ids:
+            return True
         for allowed in self.allowed_projects:
             allowed = allowed.strip("/")
             if project == allowed or project.startswith(allowed + "/"):

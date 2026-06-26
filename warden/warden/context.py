@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import time
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from .audit import AuditLog
@@ -83,20 +84,32 @@ class AppContext:
         """Rebuild branch/MR counters from GitLab. Returns True on full success."""
         sa = await self.resolve_service_account()
         ok = True
+        resolved_ids: list[str] = []
         for project in self.cfg.allowed_projects:
             pid = project_id(project)
             try:
+                numeric_id = await self._resolve_project_id(pid)
                 branches = await self._list_claude_branches(pid)
                 mrs = await self._list_claude_mrs(pid, sa)
             except Exception as exc:  # keep state locked on any failure
                 print(f"warden: reconcile failed for {project}: {exc}", file=sys.stderr)
                 ok = False
                 continue
+            resolved_ids.append(numeric_id)
             self.state.replace_branches(project, branches)
             self.state.replace_mrs(project, mrs)
+        # Teach the allowlist the numeric-id alias of each project so requests that
+        # address /projects/<id>/… (instead of the path) are not wrongly R6-denied.
+        self.cfg = replace(self.cfg, allowed_project_ids=tuple(resolved_ids))
         if ok:
             self.state.mark_reconciled()
         return ok
+
+    async def _resolve_project_id(self, pid: str) -> str:
+        """Map a url-encoded project path to its numeric id (GET /projects/:path)."""
+        resp = await self.upstream.get_json(f"projects/{pid}", TokenKind.READ)
+        resp.raise_for_status()
+        return str(resp.json()["id"])
 
     async def _get_paginated(self, path: str) -> list[Any]:
         """Fetch every page of a GitLab list endpoint (W8.2).
