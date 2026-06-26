@@ -17,10 +17,11 @@ from urllib.parse import parse_qsl, unquote
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
-from .allowlist import match_endpoint
+from .api_endpoints import match_endpoint, mr_owned_by_claude
 from .context import AppContext
 from .errors import deny_json
-from .policy import Channel, Decision, ProxyRequest, TokenKind, decide
+from .model import Channel, ProxyRequest, TokenKind
+from .policy import decide
 from .upstream import stream_upstream
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
@@ -96,7 +97,7 @@ async def handle(request: Request) -> StreamingResponse:
     )
 
     # Ownership lookup (W6.2) only when an endpoint needs it — before deciding.
-    if ep is not None and "mr_owned_by_claude" in ep.checks:
+    if ep is not None and mr_owned_by_claude in ep.checks:
         if iid is not None and project:
             req.mr_owner_ok = await ctx.mr_owned_by_claude(project, iid)
 

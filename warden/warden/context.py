@@ -14,7 +14,7 @@ from typing import Optional
 
 from .audit import AuditLog
 from .config import Config
-from .policy import TokenKind
+from .model import TokenKind
 from .state import State
 from .upstream import Upstream, project_id
 

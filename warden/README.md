@@ -30,8 +30,9 @@ warden/
 ├── Dockerfile              # python:3.12-slim, non-root, read-only rootfs
 ├── warden/
 │   ├── pktline.py          # pkt-line parser (pure)        ← W7.2
+│   ├── model.py            # core policy data types (pure)
 │   ├── policy.py           # decide(req, state, cfg) (pure) ← W5
-│   ├── allowlist.py        # write-endpoint table (pure)   ← W6.1
+│   ├── api_endpoints.py    # REST write-endpoint table (pure) ← W6.1
 │   ├── config.py           # env → Config, hard validation ← W10
 │   ├── state.py            # SQLite quota state             ← W8
 │   ├── audit.py            # JSONL logger                   ← W11
@@ -44,7 +45,7 @@ warden/
 └── tests/                  # policy / pktline / quota / api / git / redteam
 ```
 
-`pktline.py`, `policy.py`, `allowlist.py` are transport-free and pure — the
+`pktline.py`, `model.py`, `policy.py`, `api_endpoints.py` are transport-free and pure — the
 foundation of the test strategy and auditability (W2).
 
 ## Develop

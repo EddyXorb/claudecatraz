@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from starlette.responses import JSONResponse, Response
 
+from .model import Decision
 from .pktline import FLUSH, pkt_line
-from .policy import Decision
 
 GIT_RECEIVE_RESULT = "application/x-git-receive-pack-result"
 

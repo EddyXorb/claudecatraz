@@ -24,104 +24,13 @@ audit log, so the file is self-contained without re-reading the README:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from enum import Enum
+from dataclasses import replace
 from typing import Optional
 
-from .allowlist import EndpointKind, WriteEndpoint, match_endpoint
+from .api_endpoints import EndpointKind, WriteEndpoint, match_endpoint
 from .config import Config
+from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .pktline import RefCommand
-
-
-class TokenKind(str, Enum):
-    READ = "READ"
-    WRITE = "WRITE"
-    NONE = "NONE"
-
-
-class Channel(str, Enum):
-    """The proxy path a request arrived on."""
-
-    API = "api"  # REST reverse-proxy (api_proxy)
-    GIT = "git"  # git Smart-HTTP proxy (git_proxy)
-
-
-@dataclass(frozen=True)
-class Decision:
-    allow: bool
-    rule: str  # "R1".."R6" — for the audit log
-    reason: str
-    token: TokenKind = TokenKind.NONE  # which upstream token, if allow
-
-
-@dataclass(frozen=True)
-class StateView:
-    """Snapshot of the quota counters (W5). ``locked`` ⇒ fail-safe deny (§6.11)."""
-
-    open_mrs: int = 0
-    open_branches: int = 0
-    writes_last_hour: int = 0
-    locked: bool = False
-
-
-@dataclass
-class ProxyRequest:
-    """The parsed intent handed to :func:`decide` — no transport state."""
-
-    channel: Channel
-    project: str
-    method: str = ""
-    path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
-    endpoint: Optional[WriteEndpoint] = None  # matched write endpoint (api)
-    fields: dict = field(default_factory=dict)  # extracted body/query fields
-    ref_commands: list[RefCommand] = field(default_factory=list)  # git push
-    # Resolved by api_proxy via an upstream lookup (W6.2); None ⇒ unverifiable.
-    mr_owner_ok: Optional[bool] = None
-
-
-# --- pure check predicates (W6) -------------------------------------------------
-# Each returns (ok, rule, reason). Names are referenced from allowlist.WRITE_ENDPOINTS.
-
-
-def _src_branch_prefix(req: ProxyRequest, state: StateView, cfg: Config):
-    src = req.fields.get("source_branch", "")
-    if src.startswith(cfg.branch_prefix):
-        return True, "R3", "ok"
-    return False, "R2", f"source_branch {src!r} without prefix {cfg.branch_prefix!r}"
-
-
-def _ref_prefix(req: ProxyRequest, state: StateView, cfg: Config):
-    ref = req.fields.get("ref", "")
-    if ref.startswith(cfg.branch_prefix):
-        return True, "R3", "ok"
-    return False, "R2", f"ref {ref!r} without prefix {cfg.branch_prefix!r}"
-
-
-def _mr_owned_by_claude(req: ProxyRequest, state: StateView, cfg: Config):
-    if req.mr_owner_ok is True:
-        return True, "R3", "ok"
-    if req.mr_owner_ok is None:
-        return False, "R3", "MR ownership could not be verified"
-    return False, "R3", "MR not owned by the service account"
-
-
-def _not_merge_intent(req: ProxyRequest, state: StateView, cfg: Config):
-    if req.fields.get("state_event") == "merge":
-        return False, "R4", "state_event=merge is a merge alias"
-    return True, "R3", "ok"
-
-
-def _always_deny(req: ProxyRequest, state: StateView, cfg: Config):
-    return False, "R4", "merge is never permitted"
-
-
-_CHECKS = {
-    "src_branch_prefix": _src_branch_prefix,
-    "ref_prefix": _ref_prefix,
-    "mr_owned_by_claude": _mr_owned_by_claude,
-    "not_merge_intent": _not_merge_intent,
-    "ALWAYS_DENY": _always_deny,
-}
 
 
 def project_gate(project: str, cfg: Config) -> Optional[Decision]:
@@ -209,10 +118,10 @@ def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     if ep is None:
         return Decision(False, "R3", f"write endpoint not in allowlist: {req.method} {req.path}")
 
-    for name in ep.checks:
-        ok, rule, reason = _CHECKS[name](req, state, cfg)
-        if not ok:
-            return Decision(False, rule, reason)
+    for check in ep.checks:
+        denied = check(req, state, cfg)
+        if denied is not None:
+            return denied
 
     # R5 quotas, evaluated only for endpoints that actually write.
     quota = _quota_check(ep, state, cfg)

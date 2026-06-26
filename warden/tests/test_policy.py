@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 
 from warden.config import Config
+from warden.model import ProxyRequest, StateView, TokenKind
 from warden.pktline import RefCommand
-from warden.policy import ProxyRequest, StateView, TokenKind, check_ref, decide
+from warden.policy import check_ref, decide
 
 ZERO = "0" * 40
 SHA = "a" * 40

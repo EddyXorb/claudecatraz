@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from warden.config import Config
-from warden.policy import ProxyRequest, decide
+from warden.model import ProxyRequest
+from warden.policy import decide
 from warden.state import State
 
 

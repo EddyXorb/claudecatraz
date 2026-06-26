@@ -17,7 +17,8 @@ from starlette.responses import Response
 from .context import AppContext
 from .errors import deny_json, git_reject_response
 from .pktline import capabilities, parse_commands, read_until_flush
-from .policy import Channel, ProxyRequest, TokenKind, check_ref, decide, project_gate
+from .model import Channel, ProxyRequest, TokenKind
+from .policy import check_ref, decide, project_gate
 from .upstream import stream_upstream
 
 

@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from .policy import StateView
+from .model import StateView
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS writes (
