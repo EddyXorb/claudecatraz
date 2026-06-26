@@ -417,9 +417,10 @@ Schlüsselmaßnahmen:
   Internet-Route. Sein einziger Nachbar ist der Warden.
 - Der **Warden** hängt zusätzlich an einem zweiten Netz mit Internet-Egress. Optional
   über die Firewall auf `gitlab.com` allowlisten.
-- Im Agent-Container: **kein** `GITLAB_API_TOKEN`, **kein** `GITLAB_GIT_TOKEN`. `.netrc`
-  bzw. die REST-Basis-URL zeigen auf den Warden (Dummy- oder kurzlebiges Session-
-  Credential, das nur intern gilt).
+- Im Agent-Container: **kein** `GITLAB_API_TOKEN`, **kein** `GITLAB_GIT_TOKEN`, **kein**
+  `.netrc`. Die REST-Basis-URL zeigt auf den Warden; git nutzt eine kanonische Remote-URL
+  + globalen `insteadOf`-Rewrite auf den Warden (W3.1). Es gibt kein Agent-seitiges
+  Credential — der Warden verlangt keine Auth (W9.3).
 - Agent läuft als non-root (wie heute), aber das ist hier zweitrangig — die Grenze ist
   das Netz, nicht der User.
 - **Host-seitiges Arbeiten:** `workspace/` ist bind-gemountet; VSCode auf dem Host
@@ -459,7 +460,11 @@ GET  /<repo>/info/refs?service=git-receive-pack    → push-Advertise           
 POST /<repo>/git-receive-pack                      → push                          → prüfen!
 ```
 
-1. Agents `git remote origin` = `http://gitlab-warden/git/<project>.git`.
+1. Agents Repo-Remote bleibt **kanonisch** (`https://gitlab.com/<project>.git`) — identisch
+   zum Normal-Clone, damit der Host direkt im Workspace arbeiten kann. Die Umleitung auf den
+   Warden steht **nur** in der globalen Container-git-Config:
+   `git config --global url."http://gitlab-warden:8080/git/".insteadOf "https://gitlab.com/"`
+   (Details + Begründung „Ergonomie ≠ Sicherheitsgrenze": [`02-warden.md` W3.1](./02-warden.md)).
 2. **Lesen** (`upload-pack`, `info/refs`): unverändert an gitlab.com streamen, Read-Token
    injizieren. Nichts wird gespeichert (R1).
 3. **Push** (`git-receive-pack`): Der Warden liest die **Kommando-Sektion** am Anfang des
