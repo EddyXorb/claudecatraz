@@ -47,7 +47,7 @@ async def test_log_appends_across_calls(tmp_path):
     al.log({"rule": "R4", "decision": "deny"})
     await al.stop()
 
-    rules = [json.loads(l)["rule"] for l in path.read_text().splitlines()]
+    rules = [json.loads(line)["rule"] for line in path.read_text().splitlines()]
     assert rules == ["R1", "R4"]  # O_APPEND, in order
 
 

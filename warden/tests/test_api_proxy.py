@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from warden.api_proxy import _iid_from_path, _project_from_path
 

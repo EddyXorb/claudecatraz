@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import time
 import uuid
+from typing import AsyncIterator, Optional
 
 from starlette.requests import Request
 from starlette.responses import Response
 
 from .context import AppContext
 from .errors import deny_json, git_reject_response
-from .pktline import capabilities, parse_commands, read_until_flush
-from .model import Channel, ProxyRequest, TokenKind
+from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
+from .pktline import RefCommand, capabilities, parse_commands, read_until_flush
 from .policy import check_ref, decide, project_gate
 from .upstream import stream_upstream
 
@@ -139,7 +140,7 @@ async def receive_pack(request: Request) -> Response:
         if cmd.is_create:
             ctx.state.add_branch(project, ref)
 
-    async def body():
+    async def body() -> AsyncIterator[bytes]:
         yield head
         async for chunk in rest:
             yield chunk
@@ -173,7 +174,17 @@ def _forward_encoding(request: Request) -> dict[str, str]:
     return {"Content-Encoding": enc} if enc else {}
 
 
-def _audit(ctx, project, commands, decision, cid, state, started, *, status):
+def _audit(
+    ctx: AppContext,
+    project: str,
+    commands: list[RefCommand],
+    decision: Decision,
+    cid: str,
+    state: StateView,
+    started: float,
+    *,
+    status: Optional[int],
+) -> None:
     ctx.audit.log(
         {
             "channel": "git",

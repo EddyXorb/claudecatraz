@@ -10,6 +10,7 @@ Override any env var on the command line:
     GITLAB_URL=https://mygitlab.example.com uv run dev.py
 """
 import os
+
 import uvicorn
 
 os.environ.setdefault("GITLAB_URL", "https://gitlab.com")

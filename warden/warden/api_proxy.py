@@ -20,7 +20,7 @@ from starlette.responses import StreamingResponse
 from .api_endpoints import match_endpoint, mr_owned_by_claude
 from .context import AppContext
 from .errors import deny_json
-from .model import Channel, ProxyRequest, TokenKind
+from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .policy import decide
 from .upstream import stream_upstream
 
@@ -123,7 +123,16 @@ async def handle(request: Request) -> StreamingResponse:
     return stream_upstream(resp)
 
 
-def _audit(ctx, req, decision, cid, state, started, *, upstream_status):
+def _audit(
+    ctx: AppContext,
+    req: ProxyRequest,
+    decision: Decision,
+    cid: str,
+    state: StateView,
+    started: float,
+    *,
+    upstream_status: Optional[int],
+) -> None:
     ctx.audit.log(
         {
             "channel": "api",

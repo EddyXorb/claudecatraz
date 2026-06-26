@@ -8,7 +8,6 @@ succeeds — never "empty = 0 used = all free".
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import time
 from pathlib import Path
@@ -73,8 +72,8 @@ class State:
 
     def upsert_mr(self, project: str, iid: int, state: str) -> None:
         self._db.execute(
-            "INSERT OR REPLACE INTO claude_mrs (project, iid, state, created) "
-            "VALUES (?, ?, ?, COALESCE((SELECT created FROM claude_mrs WHERE project=? AND iid=?), ?))",
+            "INSERT OR REPLACE INTO claude_mrs (project, iid, state, created) VALUES "
+            "(?, ?, ?, COALESCE((SELECT created FROM claude_mrs WHERE project=? AND iid=?), ?))",
             (project, iid, state, project, iid, self._clock()),
         )
         self._db.commit()
@@ -82,7 +81,9 @@ class State:
     # --- views -----------------------------------------------------------------
     def writes_last_hour(self) -> int:
         cutoff = self._clock() - WINDOW_SECONDS
-        row = self._db.execute("SELECT count(*) AS c FROM writes WHERE ts > ?", (cutoff,)).fetchone()
+        row = self._db.execute(
+            "SELECT count(*) AS c FROM writes WHERE ts > ?", (cutoff,)
+        ).fetchone()
         return int(row["c"])
 
     def open_branches(self) -> int:

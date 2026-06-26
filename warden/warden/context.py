@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from .audit import AuditLog
 from .config import Config
@@ -27,7 +27,7 @@ class AppContext:
         state: State,
         audit: AuditLog,
         *,
-        clock=time.time,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.cfg = cfg
         self.upstream = upstream

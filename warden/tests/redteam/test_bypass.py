@@ -7,10 +7,7 @@ connect, flooding, exfil) is environment-level and lives outside this unit suite
 
 from __future__ import annotations
 
-import base64
-
 import httpx
-import pytest
 
 from warden.pktline import FLUSH, pkt_line
 
