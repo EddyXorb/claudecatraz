@@ -1,0 +1,37 @@
+name: dockerfile lint
+
+on:
+  push:
+    paths:
+      - "Dockerfile"
+      - "forward-proxy/Dockerfile"
+      - "warden/Dockerfile"
+      - ".github/workflows/dockerfile-lint.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "forward-proxy/Dockerfile"
+      - "warden/Dockerfile"
+      - ".github/workflows/dockerfile-lint.yml"
+
+jobs:
+  hadolint:
+    name: hadolint (${{ matrix.dockerfile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile:
+          - Dockerfile
+          - forward-proxy/Dockerfile
+          - warden/Dockerfile
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Lint ${{ matrix.dockerfile }}
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+          # DL3008/DL3015: apt-get version pinning / --no-install-recommends are
+          # warnings, not errors, in a dev-environment image — don't fail the build.
+          failure-threshold: error
