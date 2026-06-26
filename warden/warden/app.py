@@ -15,6 +15,11 @@ from .context import AppContext
 
 def create_app(ctx: AppContext) -> Starlette:
     """Agent-facing app on port 8080: API proxy + git Smart-HTTP (W4)."""
+    # The /git/ prefix is load-bearing: it separates git Smart-HTTP routes from
+    # /api/v4/… on the same port. Repos keep their canonical remote URL
+    # (https://gitlab.com/…); the entrypoint injects a global git insteadOf rewrite
+    # (https://gitlab.com/ → http://gitlab-warden:8080/git/) so the prefix is added
+    # transparently at transport time without touching .git/config. See W3.1.
     routes = [
         Route("/git/{project:path}/info/refs", git_proxy.advertise, methods=["GET"]),
         Route("/git/{project:path}/git-upload-pack", git_proxy.upload_pack, methods=["POST"]),
