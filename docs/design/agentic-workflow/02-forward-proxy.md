@@ -1,59 +1,162 @@
-# 02 — Forward-Proxy — Umsetzungsplan (Übersicht)
+# 02 — Forward-Proxy
 
-Konkretisierung des Research-/Build-Egress aus [`README.md`](./README.md) §6.6. Der
-Forward-Proxy ist der **zweite, vom Warden getrennte** Egress-Punkt: Über ihn darf der
-Agent zum Recherchieren und Bauen ins Internet — aber nur zu einer kuratierten
-Domain-Allowlist. Er hält **keine** Credentials und ist **keine** R1–R6-Komponente; er
-adressiert allein **Exfiltration & Supply-Chain** (§3, „Internet ≠ GitLab-Macht").
+Squid-basierter Allowlist-Egress für Research und Build. Implementiert.
 
-Status: **Implementierungs-Entwurf.** Dieser Plan ist in **Teilabschnitte** zerlegt; sie
-liegen im Ordner [`02-forward-proxy/`](./02-forward-proxy/). Dieses Dokument ist nur noch
-die **Kurzzusammenfassung + Wegweiser**.
+Der Forward-Proxy ist der **zweite, vom Warden getrennte** Egress-Punkt: Über ihn darf der Agent ins Internet — aber nur zu einer kuratierten Domain-Allowlist. Er hält **keine** Credentials und ist **keine** R1–R6-Komponente; er adressiert allein **Exfiltration & Supply-Chain**.
 
----
+```
+claude-dev-env ──http(s)_proxy:3128──▶ forward-proxy (Squid) ──egress-net──▶ Internet
+               NUR allowlistete Ziele; HTTPS per SNI-peek+splice (kein TLS-Decrypt)
+```
 
-## Was gebaut wird (in einem Satz)
-
-Ein **Squid**-Container als reiner Allowlist-Egress: HTTPS wird per **SNI-peek + splice
-ohne TLS-Aufbruch** gefiltert (kein CA im Agenten), Plain-HTTP per `dstdomain`,
-**default-deny**, keine Credentials, alles in `access.log` auditiert. Der Agent erreicht
-das Internet **nur** über diesen Proxy (Research/Build) bzw. den Warden (GitLab); seine
-eigene Internet-Route ist per `internal`-Netz strukturell gekappt.
+**Restrisiko:** Allowlistete Hosts mit Schreib-/Echo-Eigenschaften bleiben theoretische Exfil-Kanäle — Liste eng halten + Logs auditieren.
 
 ---
 
-## Teilabschnitte (interne Reihenfolge)
+## Entscheidungen
 
-Das Zahlenpräfix gibt die **Reihenfolge innerhalb des Forward-Proxy-Plans** an
-(unabhängig von der projektweiten `01/02/03`-Nummerierung in der README);
-**gleiches Präfix = parallel umsetzbar.**
-
-| Stufe | Teil | Inhalt |
-| ----- | ---- | ------ |
-| **01** | [`01-scope-and-decisions.md`](./02-forward-proxy/01-scope-and-decisions.md) | Auftrag & Abgrenzung, Produktwahl (Squid), TLS-Grundsatzentscheidung (kein MITM), Detailfragen |
-| **02** | [`02-network-isolation.md`](./02-forward-proxy/02-network-isolation.md) | Netz-Topologie, `agent-net internal`, DNS-dicht, Fail-closed-Bezug (geteilt mit Warden) |
-| **03** | [`03-squid-config.md`](./02-forward-proxy/03-squid-config.md) | `squid.conf` (default-deny, SNI-peek) + `allowlist.txt` |
-| **03** | [`03-deployment.md`](./02-forward-proxy/03-deployment.md) | `docker-compose`-Service + Agent-Env (`http(s)_proxy`/`no_proxy`) |
-| **04** | [`04-logging.md`](./02-forward-proxy/04-logging.md) | `access.log` (audit-Format, SNI), Anbindung an Observability |
-| **04** | [`04-testing.md`](./02-forward-proxy/04-testing.md) | Allowlist-/Umgehungs-Tests, Einordnung in die Red-Team-Suite |
-
-**Begründung der Stufen:** **01** sind die Grundsatzentscheidungen (Produkt, kein
-TLS-MITM) — Lesestoff, kein Build. **02** ist die Netz-Umstellung, Voraussetzung für alles
-Weitere (und mit dem Warden geteilt). **03** baut den filternden Proxy: `squid.conf`/
-Allowlist und das Compose-/Env-Wiring sind voneinander unabhängig → gleiches Präfix. **04**
-ist Betrieb/Nachweis (Logging, Tests), beides unabhängig → gleiches Präfix.
+| # | Entscheidung |
+| - | ------------ |
+| Produkt | **Squid** — `dstdomain`-ACLs, SNI-peek ohne Bump, `access.log`. |
+| TLS | **Kein MITM** — SNI-peek + splice: Squid filtert am SNI-Servernamen im Handshake, ohne zu entschlüsseln. Kein CA im Agenten, kein Cert-Pinning-Bruch. |
+| CONNECT vs. SNI | SNI-peek, damit CONNECT-Host-Spoofing abgefangen wird. |
+| Ports | Nur 80/443; CONNECT auf alles andere → deny. |
+| IP-Literale | Nicht erlaubt — kein `dstdomain`-Treffer → default-deny. |
+| Proxy-Auth | Keine — Netz ist die Grenze. |
+| Caching | Aus (`cache deny all`) — Filter + Audit, kein Disk-State. |
+| DNS | Squid löst selbst auf; Agent hat keine direkte DNS-Route → DNS-Tunneling strukturell zu. |
+| GitHub | Vorerst nicht allowlistet. Bei Bedarf als „Code (read)"-Kategorie ergänzen. |
 
 ---
 
-## Einordnung im Gesamtprojekt
+## Netz-Topologie
 
-- **Abhängigkeit:** gehört zur projektweiten Stufe **02** und setzt Stufe **01** voraus
-  (Token-Entfernung; die GitLab-native Schicht ist für den Proxy irrelevant). Unabhängig
-  vom [`02-warden.md`](./02-warden.md) — beide `02`-Container sind parallel baubar, teilen
-  sich aber die Netz-Umstellung aus
-  [`02-network-isolation.md`](./02-forward-proxy/02-network-isolation.md).
-- **Kein R1–R6-Bezug:** adressiert ausschließlich Exfiltration/Supply-Chain (§3, §6.6),
-  nicht die GitLab-Policy.
-- **Tests:** der Exfil-Block ist Fall A11 der übergreifenden Red-Team-Suite
-  ([`03-testing-redteam.md`](./03-testing-redteam.md)); Logs fließen optional in
-  [`03-observability.md`](./03-observability.md).
+```
+claude-dev-env (NUR agent-net) ──CONNECT/GET:3128──▶ forward-proxy ──egress-net──▶ Internet
+```
+
+- **`agent-net` ist `internal: true`** → kein direkter Internet- oder DNS-Pfad für den Agenten.
+- Nur Forward-Proxy (und Warden) haben Zugang zu `egress-net`.
+- Fail-closed: fällt der Proxy aus, verliert der Agent Research/Build-Egress — kein Direktzugriff möglich.
+
+---
+
+## `config/squid.conf`
+
+```squid
+http_port 3128
+visible_hostname forward-proxy
+
+acl allowed_domains dstdomain "/etc/squid/allowlist.txt"
+
+# SNI-peek für HTTPS (kein Bump/Decrypt)
+acl step1 at_step SslBump1
+ssl_bump peek step1
+acl allowed_sni ssl::server_name "/etc/squid/allowlist.txt"
+ssl_bump splice allowed_sni
+ssl_bump terminate all
+
+acl safe_ports port 80 443
+acl CONNECT method CONNECT
+http_access deny CONNECT !safe_ports
+
+http_access allow allowed_domains
+http_access deny all               # DEFAULT-DENY
+
+cache deny all
+
+logformat audit %ts.%03tu %>a %Ss/%03>Hs %<st %rm %ru %ssl::>sni
+access_log /var/log/squid/access.log audit
+```
+
+`dstdomain` und `ssl::server_name` lesen **dieselbe** `allowlist.txt` → eine Wahrheit für HTTP und HTTPS.
+
+---
+
+## `config/allowlist.txt`
+
+```
+# Paket-Registries
+.npmjs.org
+.crates.io
+static.crates.io
+.pypi.org
+files.pythonhosted.org
+.conan.io
+center.conan.io
+# Toolchain
+apt.llvm.org
+sh.rustup.rs
+static.rust-lang.org
+deb.nodesource.com
+# Doku & Q&A
+docs.gitlab.com
+doc.rust-lang.org
+docs.python.org
+stackoverflow.com
+# GitHub vorerst nicht im Scope
+```
+
+`.domain` = inkl. Subdomains. Paketmanager folgen Redirects auf CDNs → transitive Hosts müssen mit drauf.
+
+Allowlist-Reload ohne Neustart: `docker compose exec forward-proxy squid -k reconfigure`.
+
+---
+
+## Deployment
+
+```yaml
+  forward-proxy:
+    build: ./forward-proxy           # squid mit SSL-Support
+    networks: [agent-net, egress-net]
+    volumes:
+      - ./config/squid.conf:/etc/squid/squid.conf:ro
+      - ./config/allowlist.txt:/etc/squid/allowlist.txt:ro
+      - ./logs/squid:/var/log/squid
+    read_only: true
+    tmpfs: [/var/spool/squid, /tmp]
+    healthcheck:
+      test: ["CMD", "squidclient", "-h", "127.0.0.1", "mgr:info"]
+    restart: unless-stopped
+```
+
+Agent-Env:
+
+```yaml
+  claude-dev-env:
+    networks: [agent-net]
+    environment:
+      - http_proxy=http://forward-proxy:3128
+      - https_proxy=http://forward-proxy:3128
+      - no_proxy=gitlab-warden       # GitLab läuft über den Warden
+```
+
+Build-Egress (cargo/npm/pip/conan) läuft über denselben Proxy. Claude Codes WebSearch läuft serverseitig über Anthropic — nicht über diesen Proxy.
+
+---
+
+## Logging
+
+`access.log` im `audit`-Format: Zeitstempel, Client, Squid-Status, Methode, Ziel-URL, SNI. Rotation per `squid -k rotate`. Auswertbar als Exfil-Erkennungsnetz; fließt optional in den Observability-Stack ein (→ [`03-observability.md`](./03-observability.md)).
+
+```bash
+grep <ziel> logs/squid/access.log
+```
+
+---
+
+## Tests
+
+Übergreifende Red-Team-Suite → [`03-testing-redteam.md`](./03-testing-redteam.md) (Fall A11).
+
+| Was | Erwartung |
+| --- | --------- |
+| `pip install`/`npm install`/`cargo fetch` über den Proxy | ✅ erfolgreich |
+| `curl https://allowlisted` | ✅ splice, durchgereicht |
+| `curl https://evil.example.com` | ❌ `ssl_bump terminate` |
+| `curl http://evil.example.com` | ❌ `http_access deny all` |
+| CONNECT zu allowlistetem Host:22 | ❌ `!safe_ports` |
+| CONNECT zu IP-Literal | ❌ kein `dstdomain`-Treffer |
+| Exfil-POST zu nicht-allowlistetem Host | ❌ block + im `access.log` sichtbar |
+
+Allowlist gegen einen Clean-Build testen — fehlende CDN-Hosts führen zu stillen Build-Brüchen.
