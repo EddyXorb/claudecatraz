@@ -62,6 +62,7 @@ Laufzeitdaten in `state/`/`logs/` (Bind-Mounts, gitignored). Details: Design §1
 - **Allowlist pflegen:** `config/allowlist.txt` (eine Domain je Zeile, `.domain` = inkl. Subdomains). Reload ohne Neustart: `docker compose exec forward-proxy squid -k reconfigure`.
 - **Squid-Config:** `config/squid.conf` (host-editierbar, read-only gemountet — **keine Secrets**).
 - **Egress prüfen:** `grep <ziel> logs/squid/access.log`.
+- **GitLab-Entscheidungen prüfen:** Warden-Audit-Viewer im Browser unter **<http://172.31.0.2:9090/>** (Admin-Port, nur vom Host) — siehe [🔍 Audit-Log im Browser ansehen](#-audit-log-im-browser-ansehen).
 - **Interim:** Bis der Warden (`02-warden.md`) existiert, laufen die GitLab/GitHub-MCP-Sidecars über `egress-net` (im `no_proxy` des Agenten) und der direkte `git`-Push zu `gitlab.com` über den Proxy (daher in der Allowlist).
 
 ## Einrichtung
@@ -112,6 +113,21 @@ docker compose up -d
 ```
 
 Der Agent ist danach über Remote Control unter claude.ai erreichbar.
+
+> ### 🔍 Audit-Log im Browser ansehen
+>
+> **Viewer-URL: <http://172.31.0.2:9090/>**
+>
+> Der **Warden** (ab Stufe 02) serviert ein read-only Web-UI über **jede** GitLab-Entscheidung
+> (allow/deny mit Regel R1–R6, R4/R5 hervorgehoben) — gefiltert nach Kanal/Entscheidung/Regel/Projekt.
+>
+> - Die IP **`172.31.0.2`** ist im Compose fest verdrahtet (`ADMIN_HOST` + `admin-net`-`ipv4_address`)
+>   und ändert sich nie. Port **9090**.
+> - Erreichbar **nur vom Host**, **nicht** vom Agenten — eigenes `admin-net`, bewusst ohne
+>   veröffentlichten Host-Port (W3). Deshalb geht `localhost:9090` *nicht*.
+> - localhost gewünscht? Loopback-Tunnel auf dem Host:
+>   `socat TCP-LISTEN:9090,bind=127.0.0.1,reuseaddr,fork TCP:172.31.0.2:9090`
+> - Rohes JSONL: <http://172.31.0.2:9090/audit> · Health: <http://172.31.0.2:9090/healthz>
 
 **Egress testen** (Allowlist hält, Rest geblockt — Red-Team A11):
 
