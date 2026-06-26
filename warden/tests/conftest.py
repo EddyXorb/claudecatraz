@@ -61,11 +61,3 @@ async def client(ctx) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
         yield c
     await ctx.upstream.aclose()
-
-
-def aiter_bytes(*chunks: bytes):
-    async def gen():
-        for c in chunks:
-            yield c
-
-    return gen()
