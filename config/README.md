@@ -1,22 +1,21 @@
-# `config/` — host-editierbare Konfiguration (read-only gemountet)
+# `config/` — host-editable configuration (mounted read-only)
 
-Dieser Ordner enthält die **zu konfigurierenden, nicht-geheimen** Dateien der Sandbox. Er
-wird **read-only** in die Container gemountet und ist bewusst **vom Host aus editierbar**
-(z. B. in VSCode), damit Policy/Allowlist ohne Image-Rebuild gepflegt werden können.
+This folder holds the **configurable, non-secret** files of the sandbox. It is mounted
+**read-only** into the containers and is intentionally **host-editable** (e.g. in VSCode),
+so policy/allowlist can be maintained without rebuilding an image.
 
-**Grundregel: hier liegt NIE ein Geheimnis.** Tokens/Secrets gehören ausschließlich in
-`.env` (gitignored) und gehen nur an den jeweils berechtigten Service. Begründung und
-Gesamtbild: `docs/design/agentic-workflow/README.md` §11.
+**Core rule: NO secret ever lives here.** Tokens/secrets belong exclusively in `.env`
+(gitignored) and go only to the authorized service. Rationale and full picture:
+`docs/design/agentic-workflow/README.md` §11.
 
-| Datei | Für | Wirkt ab | Doku |
-| ----- | --- | -------- | ---- |
-| `allowlist.txt` | Forward-Proxy (Squid): erlaubte Domains | Stufe 02 | `02-forward-proxy/03-squid-config.md` |
-| `squid.conf` | Forward-Proxy (Squid): Filter-Konfiguration | Stufe 02 | `02-forward-proxy/03-squid-config.md` |
-| `warden.toml` | Warden: Präfix, Limits, erlaubte Projekte | Stufe 02 | `02-warden.md` (W10) |
+| File | For | Applies in | Docs |
+| ---- | --- | ---------- | ---- |
+| `allowlist.txt` | Forward-proxy (Squid): allowed domains | stage 02 | `02-forward-proxy/03-squid-config.md` |
+| `squid.conf` | Forward-proxy (Squid): filter configuration | stage 02 | `02-forward-proxy/03-squid-config.md` |
+| `warden.toml` | Warden: prefix, limits, allowed projects | stage 02 | `02-warden.md` (W10) |
 
-**Versionierung:** `config/` wird **bewusst committet** (es ist das Policy-Artefakt). Im
-Gegensatz dazu sind `.env` (Secrets) sowie `state/` und `logs/` (Laufzeitdaten)
-gitignored.
+**Versioning:** `config/` is **deliberately committed** (it is the policy artifact). In
+contrast, `.env` (secrets) and `state/` / `logs/` (runtime data) are gitignored.
 
-**Status:** Stufe 01 (Bootstrap-Härtung) legt diese Dateien als Gerüst an; sie werden erst
-mit den Stufe-02-Containern (Warden, Forward-Proxy) wirksam.
+**Status:** stage 01 (bootstrap hardening) lays down these files as scaffolding; they only
+take effect with the stage-02 containers (Warden, forward-proxy).
