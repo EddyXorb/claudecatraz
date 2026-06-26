@@ -47,7 +47,13 @@ def _stream_upstream(ctx: AppContext, resp) -> StreamingResponse:
 
 
 async def advertise(request: Request) -> Response:
-    """GET …/info/refs?service=… — ref advertisement, passed through (W7.1)."""
+    """GET …/info/refs?service=… — ref advertisement, passed through (W7.1).
+
+    Discovery phase for every git operation: ``git clone``, ``git fetch``, and
+    ``git push`` all start here. The client sends ``?service=git-upload-pack``
+    (clone/fetch) or ``?service=git-receive-pack`` (push); the server replies with
+    the list of refs it knows about.
+    """
     ctx: AppContext = request.app.state.ctx
     project = _project(request)
     service = request.query_params.get("service", "git-upload-pack")
@@ -71,7 +77,12 @@ async def advertise(request: Request) -> Response:
 
 
 async def upload_pack(request: Request) -> Response:
-    """POST …/git-upload-pack — fetch, passed through with read-token (R1)."""
+    """POST …/git-upload-pack — fetch, passed through with read-token (R1).
+
+    Data phase of ``git clone`` and ``git fetch``: the client negotiates which
+    objects it needs (want/have lines) and the server streams back a packfile.
+    Read-only; never modifies the remote.
+    """
     ctx: AppContext = request.app.state.ctx
     project = _project(request)
 
@@ -92,7 +103,13 @@ async def upload_pack(request: Request) -> Response:
 
 
 async def receive_pack(request: Request) -> Response:
-    """POST …/git-receive-pack — parse ref commands, then stream (W7.3)."""
+    """POST …/git-receive-pack — parse ref commands, then stream (W7.3).
+
+    Data phase of ``git push``: the client sends ref-update commands followed by
+    a packfile with the new objects. This handler buffers only the command section
+    (KB-sized) to inspect and police the refs, then streams the untouched pack
+    upstream — SHA-preserving, without buffering the packfile in memory.
+    """
     ctx: AppContext = request.app.state.ctx
     project = _project(request)
     correlation_id = str(uuid.uuid4())
