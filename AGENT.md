@@ -114,7 +114,7 @@ kein manuelles `--proxy`-Flag nötig.
 Alle eigenen Branches mit dem in WARDEN_BRANCH_PREFIX gesetzten Wert beginnen:
 
 ```bash
-git checkout -b claude/mein-feature
+git checkout -b WARDEN_BRANCH_PREFIX/mein-feature
 ```
 
 Pushes auf andere Branch-Namen werden vom Warden abgewiesen.
