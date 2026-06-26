@@ -88,11 +88,8 @@ docs.gitlab.com
 doc.rust-lang.org
 docs.python.org
 stackoverflow.com
-# Code (read) — ggf. auf Raw-/API-Read einschränken (Q4 in 01-scope-and-decisions.md)
-github.com
-raw.githubusercontent.com
-objects.githubusercontent.com
-codeload.github.com
+# Hinweis: GitHub (github.com & Co.) ist vorerst NICHT im Scope und daher nicht
+# allowlistet. Bei Bedarf später als eigene "Code (read)"-Kategorie ergänzen.
 ```
 
 **Pflege als Daten, nicht Code** (analog Warden W6.1): Allowlist-Edit = Review eines

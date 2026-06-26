@@ -1,41 +1,28 @@
 services:
-  gitlab-mcp:
-    image: zereight050/gitlab-mcp:latest
-    container_name: gitlab-mcp
-    profiles: ["gitlab"]
-    # agent-net: vom Agenten erreichbar; egress-net: eigener Upstream zu gitlab.com.
-    # (Bis der Warden existiert ist die MCP-Sidecar der GitLab-Pfad — sie laeuft am
-    #  Forward-Proxy vorbei, daher steht ihr Hostname im no_proxy des Agenten.)
-    networks: [agent-net, egress-net]
+  gitlab-warden:
+    container_name: gitlab-warden
+    build:
+      context: ./warden
+      dockerfile: Dockerfile
+    profiles: ["warden"]
     environment:
-      - STREAMABLE_HTTP=true
-      - REMOTE_AUTHORIZATION=true
-      - HOST=0.0.0.0
-      - PORT=3002
-      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
-      - GITLAB_READ_ONLY_MODE=${GITLAB_READ_ONLY_MODE:-true}
-      - GITLAB_DENIED_TOOLS_REGEX=^delete_|update_default_branch|create_or_update_file|unprotect_branch|merge_merge_request
+      - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
+      - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
+      - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS}
+      - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-claude/}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+    volumes:
+      - warden-state:/var/lib/warden
+      - warden-logs:/var/log/warden
+      - ${WARDEN_CONFIG:-./config/warden.toml}:/etc/warden/warden.toml:ro
+    networks:
+      - agent-net
+      - egress-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
-      interval: 3s
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/healthz')"]
+      interval: 10s
       timeout: 3s
-      retries: 10
-      start_period: 5s
-    restart: unless-stopped
-
-  github-mcp:
-    image: ghcr.io/github/github-mcp-server:latest
-    container_name: github-mcp
-    profiles: ["github"]
-    networks: [agent-net, egress-net]
-    environment:
-      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
-    command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "3003"]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/health"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
+      retries: 5
       start_period: 5s
     restart: unless-stopped
 
@@ -96,11 +83,17 @@ services:
       - HTTPS_PROXY=http://forward-proxy:3128
       # Nicht ueber den Proxy: lokale MCP-Sidecars + loopback. (Im Zielbild ersetzt
       # der Warden diese durch no_proxy=gitlab-warden — 03-deployment.md.)
-      - no_proxy=gitlab-mcp,github-mcp,localhost,127.0.0.1
-      - NO_PROXY=gitlab-mcp,github-mcp,localhost,127.0.0.1
+      - no_proxy=gitlab-warden,localhost,127.0.0.1
+      - NO_PROXY=gitlab-warden,localhost,127.0.0.1
+      # Stufe 02 (Warden): GITLAB_URL zeigt auf den Warden; git nutzt insteadOf-Rewrite
+      # (entrypoint.py configure_git_warden). Kein Token im Agent-Container (R6/W9.3).
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
+    # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
+    # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.
+    # Bis dahin: Default-Bridge (Internet-Zugriff für api.anthropic.com).
     command: ["python3", "/entrypoint.py"]
     working_dir: /workspace
     tty: true
@@ -109,13 +102,14 @@ services:
     depends_on:
       forward-proxy:
         condition: service_healthy
-      gitlab-mcp:
-        condition: service_healthy
-        required: false
-      github-mcp:
+      gitlab-warden:
         condition: service_healthy
         required: false
 
 networks:
   agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Proxy (+ MCP-Sidecars)
   egress-net: {}                   # Internet — nur Forward-Proxy & MCP-Sidecars
+
+volumes:
+  warden-state: {}
+  warden-logs: {}

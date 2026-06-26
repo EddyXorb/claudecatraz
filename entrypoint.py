@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +45,13 @@ def cmd_sync(claude_home: Path) -> None:
     shutil.copy2(src, dst)
     print(f"Credentials copied: {src} → {dst}")
 
+    # Sync ~/.claude.json — contains organizationUuid and passesEligibilityCache needed
+    # for Remote Control eligibility without a network call on startup.
+    host_claude_json = Path.home() / ".claude.json"
+    if host_claude_json.exists():
+        shutil.copy2(host_claude_json, claude_home / ".claude.json")
+        print(f"Claude config copied: {host_claude_json} → {claude_home / '.claude.json'}")
+
 
 # ── container startup ─────────────────────────────────────────────────────────
 
@@ -66,18 +74,8 @@ def ensure_claude_json(claude_home: Path) -> None:
         if not stored.exists():
             stored.parent.mkdir(parents=True, exist_ok=True)
             stored.write_text(
-                json.dumps(
-                    {
-                        "hasCompletedOnboarding": True,
-                        "lastOnboardingVersion": "1.0",
-                        "bypassPermissionsModeAccepted": True,
-                        "remoteDialogSeen": True,
-                        "projects": {
-                            "/workspace": {"hasTrustDialogAccepted": True},
-                        },
-                    },
-                    indent=2,
-                )
+                json.dumps({"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
+                           indent=2)
             )
         target.symlink_to(stored)
 
@@ -86,9 +84,10 @@ def ensure_claude_json(claude_home: Path) -> None:
     if actual.exists():
         data = read_json(actual)
         changed = False
-        if not data.get("bypassPermissionsModeAccepted"):
-            data["bypassPermissionsModeAccepted"] = True
-            changed = True
+        for key in ("bypassPermissionsModeAccepted", "remoteDialogSeen"):
+            if not data.get(key):
+                data[key] = True
+                changed = True
         projects = data.setdefault("projects", {})
         ws = projects.setdefault("/workspace", {})
         if not ws.get("hasTrustDialogAccepted"):
@@ -114,83 +113,29 @@ def ensure_settings(claude_home: Path) -> None:
     )
 
 
-def configure_git() -> None:
-    token = os.environ.get("GITLAB_GIT_TOKEN", "").strip()
-    if not token:
-        return
-
-    api_url = os.environ.get("GITLAB_API_URL", "https://gitlab.com").strip()
-    host = (
-        api_url.removesuffix("/api/v4")
-        .rstrip("/")
-        .removeprefix("https://")
-        .removeprefix("http://")
+def configure_git_warden() -> None:
+    """Set up global git insteadOf rewrite so canonical GitLab URLs are transparently
+    redirected to the Warden inside the container (W3.1). The repo's .git/config
+    stays untouched; the rewrite lives only in ~/.gitconfig."""
+    gitlab_base = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/"
+    warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
+    subprocess.run(
+        ["git", "config", "--global", f"url.{warden_git}.insteadOf", gitlab_base],
+        check=True,
     )
-
-    netrc = Path.home() / ".netrc"
-    lines = [
-        l
-        for l in (netrc.read_text().splitlines() if netrc.exists() else [])
-        if host not in l
-    ]
-    lines.append(f"machine {host} login oauth2 password {token}")
-    netrc.write_text("\n".join(lines) + "\n")
-    netrc.chmod(0o600)
-    print(f"Git credentials configured for {host}", flush=True)
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
 
-def configure_gitlab() -> None:
-    token = os.environ.get("GITLAB_API_TOKEN", "").strip()
-    if not token:
-        return
-
-    import subprocess
-
-    # Remove stale entry first (idempotent — ignore errors if it doesn't exist)
-    subprocess.run(["claude", "mcp", "remove", "gitlab"], capture_output=True)
-    result = subprocess.run(
-        [
-            "claude",
-            "mcp",
-            "add",
-            "--transport",
-            "http",
-            "gitlab",
-            "http://gitlab-mcp:3002/mcp",
-            "--header",
-            f"Authorization: Bearer {token}",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        print("GitLab MCP registered: http://gitlab-mcp:3002/mcp", flush=True)
-    else:
-        print(f"GitLab MCP registration failed: {result.stderr.strip()}", flush=True)
-
-
-def configure_github() -> None:
-    import subprocess
-
-    # Presence of the github-mcp service is detected by whether the hostname resolves.
-    # We always try; if the container isn't up the MCP add will simply fail silently.
-    result = subprocess.run(
-        ["getent", "hosts", "github-mcp"],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        return
-
-    subprocess.run(["claude", "mcp", "remove", "github"], capture_output=True)
-    result = subprocess.run(
-        ["claude", "mcp", "add", "--transport", "http", "github", "http://github-mcp:3003/mcp"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        print("GitHub MCP registered: http://github-mcp:3003/mcp", flush=True)
-    else:
-        print(f"GitHub MCP registration failed: {result.stderr.strip()}", flush=True)
+# NOTE (Stufe 01 — Bootstrap-Härtung, R6):
+# Die früheren Funktionen configure_git() und configure_gitlab() wurden bewusst entfernt.
+# Sie injizierten GitLab-Credentials in den Agent-Container:
+#   - configure_git()    schrieb GITLAB_GIT_TOKEN (write_repository) in ~/.netrc
+#   - configure_gitlab() registrierte das MCP mit Authorization: Bearer GITLAB_API_TOKEN
+# Beide Tokens lagen damit im Prozessraum des Agenten und galten als kompromittiert
+# (docs/design/agentic-workflow, §3/§4). Der Agent hält ab jetzt KEIN GitLab-Token.
+# GitLab-Zugriff kehrt in Stufe 02 über den Warden zurück (git Smart-HTTP-Proxy + REST-
+# Filter); der git-Remote zeigt dann auf den Warden, nicht auf gitlab.com.
+# GitHub ist vorerst nicht im Scope (configure_github wurde entfernt).
 
 
 def drop_to_dev() -> None:
@@ -223,9 +168,8 @@ def cmd_start(claude_home: Path) -> None:
 
     ensure_claude_json(claude_home)
     ensure_settings(claude_home)
-    configure_git()
-    configure_gitlab()
-    configure_github()
+    if os.environ.get("GITLAB_API_URL", "").startswith("http://gitlab-warden"):
+        configure_git_warden()
 
     os.execvp(
         "claude",

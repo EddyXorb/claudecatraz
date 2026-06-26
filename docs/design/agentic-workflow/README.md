@@ -417,9 +417,10 @@ Schlüsselmaßnahmen:
   Internet-Route. Sein einziger Nachbar ist der Warden.
 - Der **Warden** hängt zusätzlich an einem zweiten Netz mit Internet-Egress. Optional
   über die Firewall auf `gitlab.com` allowlisten.
-- Im Agent-Container: **kein** `GITLAB_API_TOKEN`, **kein** `GITLAB_GIT_TOKEN`. `.netrc`
-  bzw. die REST-Basis-URL zeigen auf den Warden (Dummy- oder kurzlebiges Session-
-  Credential, das nur intern gilt).
+- Im Agent-Container: **kein** `GITLAB_API_TOKEN`, **kein** `GITLAB_GIT_TOKEN`, **kein**
+  `.netrc`. Die REST-Basis-URL zeigt auf den Warden; git nutzt eine kanonische Remote-URL
+  + globalen `insteadOf`-Rewrite auf den Warden (W3.1). Es gibt kein Agent-seitiges
+  Credential — der Warden verlangt keine Auth (W9.3).
 - Agent läuft als non-root (wie heute), aber das ist hier zweitrangig — die Grenze ist
   das Netz, nicht der User.
 - **Host-seitiges Arbeiten:** `workspace/` ist bind-gemountet; VSCode auf dem Host
@@ -459,7 +460,11 @@ GET  /<repo>/info/refs?service=git-receive-pack    → push-Advertise           
 POST /<repo>/git-receive-pack                      → push                          → prüfen!
 ```
 
-1. Agents `git remote origin` = `http://gitlab-warden/git/<project>.git`.
+1. Agents Repo-Remote bleibt **kanonisch** (`https://gitlab.com/<project>.git`) — identisch
+   zum Normal-Clone, damit der Host direkt im Workspace arbeiten kann. Die Umleitung auf den
+   Warden steht **nur** in der globalen Container-git-Config:
+   `git config --global url."http://gitlab-warden:8080/git/".insteadOf "https://gitlab.com/"`
+   (Details + Begründung „Ergonomie ≠ Sicherheitsgrenze": [`02-warden.md` W3.1](./02-warden.md)).
 2. **Lesen** (`upload-pack`, `info/refs`): unverändert an gitlab.com streamen, Read-Token
    injizieren. Nichts wird gespeichert (R1).
 3. **Push** (`git-receive-pack`): Der Warden liest die **Kommando-Sektion** am Anfang des
@@ -589,21 +594,23 @@ Supply-Chain-Risiko, nicht R1–R6 (siehe §3, „Internet ≠ GitLab-Macht").
 | Paket-Registries | `registry.npmjs.org`, `crates.io`, `static.crates.io`, `pypi.org`, `files.pythonhosted.org`, `center.conan.io` |
 | Toolchain        | `apt.llvm.org`, `sh.rustup.rs`, `static.rust-lang.org`, `deb.nodesource.com` |
 | Doku & Q&A       | `docs.gitlab.com`, `doc.rust-lang.org`, `docs.python.org`, `stackoverflow.com` |
-| Code (read)      | `github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com` |
+
+> **GitHub vorerst nicht im Scope.** Externe Code-Reads (github.com & Co.) sind bewusst
+> **nicht** allowlistet, solange GitHub aus dem Design herausgehalten wird. Bei Bedarf
+> später als eigene „Code (read)"-Kategorie ergänzen (reine Raw-/API-Read-Pfade).
 
 **Zusätzlich, unabhängig vom Proxy:** Claude Codes eingebaute **WebSearch** läuft
 serverseitig über Anthropic, nicht über den Agenten-Egress → kann immer aktiv sein, null
 Exfil-Risiko. Build-Egress (cargo/npm/pip/conan) ist Teil derselben Allowlist.
 
-**Restrisiko:** Allowlistete Hosts mit Schreib-/Echo-Eigenschaften (z. B. GitHub-Gists,
-Such-Endpunkte) bleiben theoretische Exfil-Kanäle. Liste eng halten, bei Bedarf
-GitHub auf reine Raw-/API-Read-Pfade einschränken, Proxy-Logs auditieren.
+**Restrisiko:** Allowlistete Hosts mit Schreib-/Echo-Eigenschaften (z. B. Paket-Upload-APIs,
+Such-Endpunkte) bleiben theoretische Exfil-Kanäle. Liste eng halten, Proxy-Logs auditieren.
 
 **Konfiguration (Env des forward-proxy bzw. Agenten):**
 
 ```
 # forward-proxy
-EGRESS_ALLOWLIST=registry.npmjs.org,crates.io,pypi.org,center.conan.io,docs.gitlab.com,github.com,...
+EGRESS_ALLOWLIST=registry.npmjs.org,crates.io,pypi.org,center.conan.io,docs.gitlab.com,...
 
 # Agent
 http_proxy=http://forward-proxy:3128
