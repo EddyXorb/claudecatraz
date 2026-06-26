@@ -1,0 +1,186 @@
+name: squid CI
+
+on:
+  push:
+    paths:
+      - "forward-proxy/**"
+      - "config/squid.conf"
+      - "config/allowlist.txt"
+      - ".github/workflows/squid-ci.yml"
+  pull_request:
+    paths:
+      - "forward-proxy/**"
+      - "config/squid.conf"
+      - "config/allowlist.txt"
+      - ".github/workflows/squid-ci.yml"
+
+jobs:
+  build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build forward-proxy image
+        run: docker build ./forward-proxy --tag forward-proxy:ci
+
+      - name: Export image
+        run: docker save forward-proxy:ci | gzip > /tmp/forward-proxy-ci.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forward-proxy-image
+          path: /tmp/forward-proxy-ci.tar.gz
+          retention-days: 1
+
+  lint:
+    name: Config lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Allowlist format
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          errors = []
+          with open("config/allowlist.txt") as f:
+              for lineno, raw in enumerate(f, 1):
+                  line = raw.rstrip("\n")
+                  if line.startswith("#") or not line.strip():
+                      continue
+                  if re.search(r"\s", line):
+                      errors.append(f"line {lineno}: whitespace in entry: {line!r}")
+                  if line.startswith(".") and line.count(".") < 2:
+                      errors.append(f"line {lineno}: suspicious single-label .domain: {line!r}")
+          for e in errors:
+              print(e, file=sys.stderr)
+          sys.exit(bool(errors))
+          EOF
+
+      - name: squid.conf sanity checks
+        run: |
+          # Pflichtzeilen: Port, default-deny, kein Cache
+          grep -q '^http_port'             config/squid.conf || { echo "FAIL: http_port missing"; exit 1; }
+          grep -q '^http_access deny all'  config/squid.conf || { echo "FAIL: default-deny missing"; exit 1; }
+          grep -q '^cache deny all'        config/squid.conf || { echo "FAIL: cache deny all missing"; exit 1; }
+          # SNI-peek muss vor ssl_bump splice stehen
+          peek_line=$(grep -n '^ssl_bump peek'   config/squid.conf | head -1 | cut -d: -f1)
+          splice_line=$(grep -n '^ssl_bump splice' config/squid.conf | head -1 | cut -d: -f1)
+          [ -n "$peek_line" ] && [ -n "$splice_line" ] || { echo "FAIL: ssl_bump peek/splice missing"; exit 1; }
+          [ "$peek_line" -lt "$splice_line" ] || { echo "FAIL: ssl_bump peek must come before splice"; exit 1; }
+          echo "squid.conf: all checks passed"
+
+  smoke:
+    name: Proxy smoke tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: forward-proxy-image
+          path: /tmp
+
+      - name: Load image
+        run: docker load < /tmp/forward-proxy-ci.tar.gz
+
+      - name: Start proxy
+        run: |
+          mkdir -p /tmp/squid-logs
+          docker run -d --name squid-ci \
+            -p 3128:3128 \
+            -v "$PWD/config/squid.conf:/etc/squid/squid.conf:ro" \
+            -v "$PWD/config/allowlist.txt:/etc/squid/allowlist.txt:ro" \
+            -v "/tmp/squid-logs:/var/log/squid" \
+            --tmpfs /var/spool/squid \
+            --tmpfs /var/run \
+            --tmpfs /tmp \
+            forward-proxy:ci
+
+      - name: Wait for port 3128
+        run: |
+          for i in $(seq 1 30); do
+            bash -c 'echo > /dev/tcp/127.0.0.1/3128' 2>/dev/null \
+              && echo "Ready after ${i}s" && exit 0
+            sleep 1
+          done
+          echo "Proxy did not become ready in 30 s"
+          docker logs squid-ci
+          exit 1
+
+      # ── Erlaubte Ziele (Allowlist) ───────────────────────────────────────────
+
+      - name: "ALLOW — pypi.org"
+        run: |
+          code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
+                   https://pypi.org/ 2>/dev/null); rc=$?
+          echo "rc=$rc code=$code"
+          [ "$rc" -eq 0 ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ] \
+            || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
+
+      - name: "ALLOW — registry.npmjs.org"
+        run: |
+          code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
+                   https://registry.npmjs.org/ 2>/dev/null); rc=$?
+          echo "rc=$rc code=$code"
+          [ "$rc" -eq 0 ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ] \
+            || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
+
+      # ── Geblockte Ziele (default-deny + SNI-terminate) ───────────────────────
+
+      - name: "DENY — example.com (nicht allowlisted)"
+        run: |
+          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   https://example.com/ 2>/dev/null); rc=$?
+          echo "rc=$rc code=$code"
+          { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
+            && echo "PASS" \
+            || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
+
+      - name: "DENY — IP-Literal (kein dstdomain-Treffer)"
+        run: |
+          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   https://1.1.1.1/ 2>/dev/null); rc=$?
+          echo "rc=$rc code=$code"
+          { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
+            && echo "PASS" \
+            || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
+
+      - name: "DENY — non-safe port (:8443)"
+        run: |
+          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   https://pypi.org:8443/ 2>/dev/null); rc=$?
+          echo "rc=$rc code=$code"
+          { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
+            && echo "PASS" \
+            || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
+
+      - name: "DENY — plain HTTP nicht-allowlisted"
+        run: |
+          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   http://evil.example.net/ 2>/dev/null); rc=$?
+          echo "rc=$rc code=$code"
+          { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
+            && echo "PASS" \
+            || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
+
+      # ── Audit-Log: Blocks müssen sichtbar sein ───────────────────────────────
+
+      - name: Audit log — blocked requests sichtbar
+        run: |
+          sleep 2
+          echo "=== access.log ==="
+          cat /tmp/squid-logs/access.log
+          grep -Eq 'example\.(com|net)|1\.1\.1\.1' /tmp/squid-logs/access.log \
+            && echo "PASS: denied requests in audit log" \
+            || { echo "FAIL: denied requests missing from access.log"; exit 1; }
+
+      - name: Dump container logs
+        if: always()
+        run: docker logs squid-ci
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f squid-ci || true
