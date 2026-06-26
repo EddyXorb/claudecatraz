@@ -4,6 +4,22 @@
 (:class:`ProxyRequest`) and a snapshot of the counters (:class:`StateView`),
 never the network. That is what makes it directly unit-testable (§8.1) and the
 basis of the audit trail.
+
+Rules enforced — every :class:`Decision` is tagged with one of these for the
+audit log, so the file is self-contained without re-reading the README:
+
+  R1  Read pass-through  REST GET/HEAD/OPTIONS and git upload-pack/info-refs are
+                         streamed upstream with the READ token.
+  R2  git write limits   push only to <branch_prefix> branches; no branch
+                         deletes; no tag pushes.
+  R3  API write filter   only allowlisted write endpoints, with ownership checks
+                         (source_branch prefix; MR authored by the service acct).
+  R4  Merge block        merging an MR is never permitted (incl. the
+                         state_event=merge alias).
+  R5  Quota & rate       max open branches/MRs, max writes/hour; a locked
+                         (unreconciled) state denies (fail-safe, §6.11).
+  R6  Project boundary   the project must be in ALLOWED_PROJECTS; the agent
+                         itself holds no GitLab token.
 """
 
 from __future__ import annotations
