@@ -8,6 +8,32 @@ und mehrere Architekturoptionen fest. Es ist noch keine Implementierung.
 
 ---
 
+## Umsetzungspläne (Reihenfolge)
+
+Dieses Dokument ist die **Spezifikation** (Regeln, Bedrohungsmodell, Architektur). Die
+konkrete Umsetzung ist in nummerierte Pläne aufgeteilt. Das Zahlenpräfix gibt die
+**Reihenfolge** an; **gleiches Präfix = parallel umsetzbar** (keine Abhängigkeit
+untereinander):
+
+| Stufe | Plan | Inhalt | Abhängt von |
+| ----- | ---- | ------ | ----------- |
+| **01** | [`01-bootstrap-hardening.md`](./01-bootstrap-hardening.md) | Token-Leak schließen (§4/R6), dediziertes Claude-Konto (§3.2) | — |
+| **01** | [`01-gitlab-native.md`](./01-gitlab-native.md) | GitLab-native Schicht §7 (Service Account, Protected Branches, Push Rules, Tokens, Read-Scope) — Zero-Code | — |
+| **02** | [`02-warden.md`](./02-warden.md) | Warden: API-Filter, git-G1-Proxy, State, Logging (§6) | 01 |
+| **02** | [`02-forward-proxy.md`](./02-forward-proxy.md) | Research-/Build-Egress: Squid-Allowlist, Netz-Isolation (§6.6) | 01 |
+| **03** | [`03-observability.md`](./03-observability.md) | Log-Viewer + optional Grafana/Loki (§6.8) | 02 |
+| **03** | [`03-testing-redteam.md`](./03-testing-redteam.md) | Teststrategie, Red-Team-Suite, CI (§8) | 02 |
+
+Begründung der Stufen: **01** ist kostenlos/Zero-Code und schließt sofort die akute
+R6-Lücke — beide 01-Pläne sind voneinander unabhängig. **02** baut die zwei Egress-
+Container (Warden, Forward-Proxy); sie sind untereinander unabhängig, brauchen aber die
+01-Grundlage (Tokens/Service-Account bzw. Token-Entfernung). **03** ist additiv und setzt
+den laufenden 02-Stack voraus. Die ausführliche, schritt-granulare Roadmap steht in §10;
+die **konsolidierte, vollständige `docker-compose.yml` samt `config/`-Ordner** (das
+Synthese-Artefakt aller Pläne) steht in **§11**.
+
+---
+
 ## Begriffe (vorab)
 
 Zwei Begriffe tauchen im ganzen Dokument auf; hier vorab erklärt:
@@ -1113,3 +1139,197 @@ Schicht *nicht* abdeckt — nicht zuerst auf das Produkt committen.
 10. **Transparenz-Ausbau:** Log-Viewer bzw. Grafana/Loki (§6.8).
 11. **Red-Team-Suite (§8.2) grün:** alle Umgehungsversuche automatisiert abgewehrt; in CI
     verankert (§8.4).
+
+---
+
+## 11. Referenz-Deployment (`docker-compose` + `config/`)
+
+Die Detailpläne zeigen jeweils nur ihren Ausschnitt. Hier steht die **konsolidierte,
+vollständige** Zielkonfiguration als eine Stelle, die alles zusammenführt — der Stand
+**nach Stufe 02** (Warden + Forward-Proxy aktiv, kein MCP-Sidecar, §6.12).
+
+### 11.1 Prinzip: drei Arten von Konfiguration, sauber getrennt
+
+| Art | Wohin | Beispiele | Sichtbar für |
+| --- | ----- | --------- | ------------ |
+| **Secrets** | `.env` (gitignored, **nie** committen) | `GITLAB_READ_TOKEN`, `GITLAB_WRITE_TOKEN`, `ANTHROPIC_API_KEY` | nur der jeweilige Service (Warden bzw. Agent) |
+| **Host-editierbare Tunables** | **`config/`** (read-only gemountet) | Allowlist, Branch-Präfix, Limits, erlaubte Projekte, `squid.conf` | Warden / Proxy (read-only), **keine** Secrets |
+| **Laufzeit-State** | **Bind-Mounts** neben dem Compose-File (`./state/`, `./logs/`) | SQLite-Quoten-State, Audit-Logs, Egress-Log | nur der schreibende Service; **vom Host direkt einsehbar** |
+
+**Kernregel:** In `config/` liegt **nie ein Geheimnis**. Der Ordner ist bewusst
+host-editierbar (der Nutzer pflegt Allowlist & Limits direkt von außen, z. B. in VSCode)
+und wird **read-only** in die Container gemountet — beides verträgt sich nur, wenn dort
+keine Tokens stehen. Secrets kommen ausschließlich aus `.env` in die Env des **berechtigten**
+Service (Tokens nur in den Warden, nie in den Agenten — R6, §3).
+
+### 11.2 On-Disk-Layout neben dem Compose-File
+
+**Alles liegt als gewöhnliche Dateien/Ordner neben der `docker-compose.yml`** — keine
+Docker-Named-Volumes. So lassen sich Config, State und Logs mit normalen Werkzeugen
+(`cat`, `tail -f`, `grep`, `git`, ein Editor) **ohne Docker-Tools** einsehen und
+auditieren:
+
+```
+<compose-dir>/
+├── docker-compose.yml
+├── .env                     # Secrets (gitignored)            → §11.3
+├── config/                  # read-only gemountet, host-editierbar (KEINE Secrets)
+│   ├── allowlist.txt        #   Forward-Proxy: erlaubte Domains
+│   ├── squid.conf           #   Forward-Proxy: Squid-Konfiguration (default-deny, SNI-peek)
+│   └── warden.toml          #   Warden: Präfix, Limits, erlaubte Projekte (W10)
+├── workspace/               # Agenten-Working-Clone — auch host-seitig editiert (VSCode), §6
+├── claude/                  # Claude-Home (nur Sandbox-Credential, §3.2)
+├── state/                   # Laufzeit-State (read-write Bind-Mount)
+│   └── warden/              #   SQLite-Quoten-State (state.db + WAL), durabel (§6.11)
+└── logs/                    # Audit-Logs (read-write Bind-Mount) — direkt tailbar
+    ├── warden/              #   warden-audit.jsonl (+ gerendertes .txt), §6.8
+    └── squid/               #   access.log (Egress-Audit, §6.6)
+```
+
+- **`config/`** sind die **einzigen** Dateien, die der Nutzer im Normalbetrieb editiert.
+  Änderungen wirken ohne Image-Rebuild: Allowlist/Squid per `squid -k reconfigure`,
+  `warden.toml` per Warden-Neustart. Inhalte in den Detailplänen:
+  [`allowlist.txt` + `squid.conf`](./02-forward-proxy/03-squid-config.md),
+  [`warden.toml`](./02-warden.md) (W10).
+- **`state/` und `logs/`** schreibt nur der jeweils berechtigte Service; für den Menschen
+  sind sie **read-only-Lektüre** (das Audit-Log nie von Hand ändern — §6.8). Die Container
+  haben read-only Root-FS und schreiben **ausschließlich** in diese Bind-Mounts (+ tmpfs).
+- **Anlegen vor dem ersten Start:** Die Ordner `state/warden`, `logs/warden`, `logs/squid`
+  müssen existieren und dem Container-User (`DEV_UID`) gehören, sonst legt Docker sie als
+  `root` an und der non-root-Service kann nicht schreiben (§11.6).
+
+### 11.3 `.env` (Secrets — gitignored)
+
+```dotenv
+# Anthropic — dediziertes Sandbox-Konto (§3.2), NICHT das Primärkonto
+ANTHROPIC_API_KEY=
+
+# GitLab — NUR der Warden bekommt diese (nie der Agent, R6)
+GITLAB_READ_TOKEN=      # read_api, read_repository
+GITLAB_WRITE_TOKEN=     # api (Service-Account/Developer, §7)
+
+# Host-Pfade
+CLAUDE_HOME=./claude
+PROJECT_DIR=./workspace
+```
+
+### 11.4 Vollständige `docker-compose.yml`
+
+```yaml
+# Zielzustand nach Stufe 02. Secrets via .env, Tunables via ./config (read-only),
+# State/Logs via Bind-Mounts neben dem Compose-File (./state, ./logs) → ohne Docker-Tools
+# auditierbar. Agent hält KEIN GitLab-Token (R6).
+
+services:
+  # ── Agent ────────────────────────────────────────────────────────────────
+  claude-dev-env:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEV_UID: ${DEV_UID:-1000}
+        # weitere Build-Args wie gehabt (UV/CLANG/RUST/CONAN/NODE/CLAUDE_CODE_VERSION)
+    networks: [agent-net]                       # NUR agent-net → keine Internet-/GitLab-Route
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}  # dediziertes Sandbox-Konto (§3.2)
+      - GITLAB_API_URL=http://gitlab-warden:8080/api/v4   # REST über den Warden
+      - http_proxy=http://forward-proxy:3128    # Research/Build-Egress (§6.6)
+      - https_proxy=http://forward-proxy:3128
+      - no_proxy=gitlab-warden                  # GitLab läuft über den Warden, nicht den Proxy
+      # KEIN GITLAB_API_TOKEN / GITLAB_GIT_TOKEN (R6, §4)
+    volumes:
+      - ${CLAUDE_HOME:-./claude}:/home/dev/.claude     # nur Sandbox-Credential (§3.2)
+      - ${PROJECT_DIR:-./workspace}:/workspace         # host-seitig editierbar (VSCode), §6
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    depends_on:
+      gitlab-warden:  { condition: service_healthy }
+      forward-proxy:  { condition: service_healthy }
+
+  # ── Warden (einzige Vertrauensgrenze, hält ALLE GitLab-Tokens) ────────────
+  gitlab-warden:
+    build: ./warden
+    networks: [agent-net, egress-net, admin-net]
+    environment:                                # Secrets NUR hier, aus .env
+      - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
+      - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
+    volumes:
+      - ./config/warden.toml:/etc/warden/warden.toml:ro   # host-editierbar, KEINE Secrets
+      - ./state/warden:/var/lib/warden                    # SQLite-Quoten-State (durabel, §6.11)
+      - ./logs/warden:/var/log/warden                     # Audit-JSONL (§6.8)
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Forward-Proxy (Research/Build-Egress, hält KEINE Credentials) ─────────
+  forward-proxy:
+    build: ./forward-proxy                      # squid mit SSL-Support
+    networks: [agent-net, egress-net]
+    volumes:
+      - ./config/squid.conf:/etc/squid/squid.conf:ro      # host-editierbar
+      - ./config/allowlist.txt:/etc/squid/allowlist.txt:ro
+      - ./logs/squid:/var/log/squid                       # Egress-Audit (§6.6)
+    read_only: true
+    tmpfs: [/var/spool/squid, /tmp]
+    healthcheck:
+      test: ["CMD", "squidclient", "-h", "127.0.0.1", "mgr:info"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Warden + Proxy
+  egress-net: {}                   # Internet — nur Warden & Proxy
+  admin-net:  {}                   # Healthz/Log-Viewer (Port 9090) — kein Agent
+
+# Kein top-level `volumes:`-Block — alle Mounts sind Bind-Mounts auf ./config, ./state,
+# ./logs, ./workspace, ./claude (siehe §11.2), damit alles ohne Docker-Tools auditierbar ist.
+```
+
+### 11.5 Warum diese Topologie die Regeln trägt (Kurzbezug)
+
+- **R6 / Credential-Isolation:** Tokens stehen nur in der Warden-Env (`.env`), nie beim
+  Agenten; `agent-net` ist `internal: true` → der Agent hat **keinen** Netzweg an
+  `gitlab.com` vorbei am Warden (§3, §6.11). Fail-closed ist strukturell.
+- **`config/` read-only + ohne Secrets:** host-editierbare Policy (Allowlist, Limits,
+  Präfix) ohne Image-Rebuild, ohne je ein Geheimnis preiszugeben (§11.1).
+- **Kein MCP-Sidecar:** der Agent spricht `git` + REST direkt gegen den Warden (§6.12).
+- **Host-Workspace:** `workspace/` bind-gemountet → VSCode am Host teilt den Clone; der
+  Schreibpfad ist SHA-erhaltend (G1, §6.2), nicht die Commit-API.
+- **Auditierbarkeit ohne Docker-Tools:** Config, State und Logs liegen als gewöhnliche
+  Dateien neben dem Compose-File (§11.2). Audit-Log lesen = `tail -f logs/warden/warden-audit.jsonl`,
+  Egress prüfen = `grep logs/squid/access.log`, Quoten-State inspizieren = `sqlite3
+  state/warden/state.db` — alles ohne `docker volume inspect`/`docker cp`. Das Audit-Log
+  ist Quelle der Wahrheit (§6.8); die Bind-Mounts machen es unmittelbar greifbar.
+
+### 11.6 Verzeichnisse anlegen & Berechtigungen
+
+Bind-Mounts existieren als echte Host-Ordner — sie müssen **vor dem ersten Start**
+angelegt sein und dem Container-User gehören, sonst legt Docker sie als `root` an und der
+non-root-Service (read-only Root-FS, `DEV_UID`) kann **nicht** in `state/`/`logs/`
+schreiben:
+
+```bash
+mkdir -p config state/warden logs/warden logs/squid workspace claude
+chown -R "${DEV_UID:-1000}" state logs            # Schreibziele dem Service-User geben
+# config/ bleibt dem Host-Editor; wird ohnehin read-only gemountet
+```
+
+`config/` ist read-only gemountet (Schreibschutz strukturell), `state/` und `logs/`
+read-write nur für den jeweiligen Service. `git`-seitig: `state/` und `logs/` gehören in
+`.gitignore` (Laufzeitdaten), `config/` wird **versioniert** (Policy-Artefakt), `.env`
+ist gitignored (Secrets).
+
+> **Bezug zur Bestandsaufnahme (§4):** Diese Compose ersetzt die heutige
+> MCP-Sidecar-Variante, die `GITLAB_API_TOKEN` in den Agenten reicht. Der Übergang ist
+> gestaffelt: Stufe 01 zieht zuerst nur die Tokens
+> ([`01-bootstrap-hardening.md`](./01-bootstrap-hardening.md)), Stufe 02 stellt auf obige
+> Zieltopologie um.
