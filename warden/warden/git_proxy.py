@@ -35,9 +35,7 @@ async def advertise(request: Request) -> Response:
     service = request.query_params.get("service", "git-upload-pack")
 
     if not ctx.cfg.project_allowed(project):
-        return deny_json(
-            decision=_deny("R6", f"project {project!r} not in allowlist")
-        )
+        return deny_json(decision=_deny("R6", f"project {project!r} not in allowlist"))
 
     resp = await ctx.upstream.git_get(
         project,
@@ -56,6 +54,7 @@ async def advertise(request: Request) -> Response:
 async def upload_pack(request: Request) -> Response:
     """POST …/git-upload-pack — fetch, passed through with read-token (R1)."""
     ctx: AppContext = request.app.state.ctx
+    print("test")
     project = _project(request)
     if not ctx.cfg.project_allowed(project):
         return deny_json(_deny("R6", f"project {project!r} not in allowlist"))
@@ -64,7 +63,9 @@ async def upload_pack(request: Request) -> Response:
         project,
         "git-upload-pack",
         body=request.stream(),
-        content_type=request.headers.get("content-type", "application/x-git-upload-pack-request"),
+        content_type=request.headers.get(
+            "content-type", "application/x-git-upload-pack-request"
+        ),
         token=TokenKind.READ,
     )
 
@@ -95,7 +96,9 @@ async def receive_pack(request: Request) -> Response:
     caps = capabilities(head)
     sideband = "side-band-64k" in caps or "side-band" in caps
 
-    req = ProxyRequest(channel="git", project=project, method="POST", ref_commands=commands)
+    req = ProxyRequest(
+        channel="git", project=project, method="POST", ref_commands=commands
+    )
     state = ctx.state.view()
     decision = decide(req, state, ctx.cfg)
 
@@ -109,7 +112,16 @@ async def receive_pack(request: Request) -> Response:
             d = check_ref(c, state, ctx.cfg)
             per_ref.append(d if not d.allow else decision)
         per_ref = per_ref or [decision]
-        _audit(ctx, project, commands, decision, correlation_id, state, started, status=None)
+        _audit(
+            ctx,
+            project,
+            commands,
+            decision,
+            correlation_id,
+            state,
+            started,
+            status=None,
+        )
         return git_reject_response(per_ref, refs or [""], sideband=sideband)
 
     # Record writes before the upstream call (idempotency / fail-safe, §6.11).
@@ -128,11 +140,22 @@ async def receive_pack(request: Request) -> Response:
         project,
         "git-receive-pack",
         body=body(),
-        content_type=request.headers.get("content-type", "application/x-git-receive-pack-request"),
+        content_type=request.headers.get(
+            "content-type", "application/x-git-receive-pack-request"
+        ),
         token=TokenKind.WRITE,
         extra_headers=_forward_encoding(request),
     )
-    _audit(ctx, project, commands, decision, correlation_id, state, started, status=resp.status_code)
+    _audit(
+        ctx,
+        project,
+        commands,
+        decision,
+        correlation_id,
+        state,
+        started,
+        status=resp.status_code,
+    )
 
     async def body_iter():
         try:
