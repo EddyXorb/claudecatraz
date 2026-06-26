@@ -80,24 +80,70 @@ Der Agent spricht **ausschließlich** Port 8080, **plain HTTP** (kein TLS nötig
 einzige Geheimnis — der Upstream-Token — verlässt den Agenten nie; TLS gibt es erst
 Warden→gitlab.com). Die Vertrauensgrenze ist das Netz, nicht ein Transportzertifikat.
 
-**Was der Agent konfiguriert bekommt** (Container-Env / Dateien):
+**Was der Agent konfiguriert bekommt** (Container-Env / globale git-Config):
 
 ```
 # REST gegen den Warden statt gitlab.com
 GITLAB_API_URL=http://gitlab-warden:8080/api/v4
 
-# git remote zeigt auf den Warden; .netrc mit DUMMY-Credential (W9.3)
-#   origin = http://gitlab-warden:8080/git/<group>/<project>.git
-~/.netrc:  machine gitlab-warden login agent password x
+# git: die Repo-Remote bleibt KANONISCH (https://gitlab.com/...), die Umleitung
+# auf den Warden steht NUR in der globalen Container-git-Config (~/.gitconfig),
+# nie in der .git/config des Repos:
+git config --global \
+  url."http://gitlab-warden:8080/git/".insteadOf "https://gitlab.com/"
+GIT_TERMINAL_PROMPT=0      # Warden fordert keine Auth (W9.3) → git fragt nie interaktiv
 
 # Research/Build-Egress unverändert (§6.6)
 http_proxy=http://forward-proxy:3128
 no_proxy=gitlab-warden
 ```
 
-Der Agent hält **kein** echtes GitLab-Token (R6). Das Dummy-`.netrc`-Credential dient
-nur dazu, dass `git` nicht interaktiv nach einem Passwort fragt — der Warden ignoriert
-es (W9.3).
+Der Agent hält **kein** echtes GitLab-Token (R6). Es gibt **kein** `.netrc` mehr: Da der
+Warden auf Port 8080 keine Auth verlangt (W9.3), genügt `GIT_TERMINAL_PROMPT=0`, damit
+`git` bei der ohnehin tokenlosen Verbindung nicht interaktiv nachfragt.
+
+### W3.1 Kanonische Remote-URL + `insteadOf` — „beide Welten"
+
+**Ziel:** Ein im Workspace geklontes Repo soll **dieselbe** `.git/config` haben wie ein
+normaler Clone (`remote.origin.url = https://gitlab.com/<group>/<project>.git`) — damit
+der **Host** direkt im bind-gemounteten Workspace `git fetch/push` machen kann (mit
+*seinen* Credentials, direkt gegen gitlab.com) — und der **Container** trotzdem jeden
+git-Zugriff über den Warden zwingt.
+
+Mechanik (verifiziert mit git 2.43):
+
+| Ebene | Inhalt | Wer sieht es |
+| ----- | ------ | ------------ |
+| `<repo>/.git/config` → `remote.origin.url` | `https://gitlab.com/<group>/<project>.git` (kanonisch) | Host **und** Container |
+| `~/.gitconfig` (global) → `url.…insteadOf` | Rewrite `https://gitlab.com/` → `http://gitlab-warden:8080/git/` | **nur** Container (`/home/dev`, nicht gemountet) |
+
+`insteadOf` wirkt **nur zur Transportzeit** und schreibt die `.git/config` **nicht** um:
+`git config --get remote.origin.url` liefert die kanonische URL; `git clone https://gitlab.com/…`
+speichert ebenfalls die kanonische URL. Damit ist die persistierte Remote-Config
+byte-identisch zum Normal-Clone. (Einziger kosmetischer Unterschied: `git remote -v` zeigt
+*im Container* die umgeschriebene Adresse — `.git/config` und Host bleiben unberührt.)
+
+- **Container → Warden:** `https://gitlab.com/grp/repo.git/info/refs?service=…` wird zu
+  `http://gitlab-warden:8080/git/grp/repo.git/info/refs?service=…` umgeschrieben und trifft
+  die git-Routen (W4). Die `/git/`-Basis im Rewrite-Ziel erhält das Routen-Präfix, ohne
+  dass der Warden etwas ändern muss.
+- **Host → gitlab.com:** Der Host hat diese globale Regel **nicht** (sein `$HOME` ist ein
+  anderes; nur `/workspace` und `/home/dev/.claude` sind gemountet, **nicht** `~/.gitconfig`).
+  Also geht Host-`git` direkt zu gitlab.com.
+- **Self-hosted:** Der Rewrite-Präfix ist die kanonische GitLab-Basis-URL (Default
+  `https://gitlab.com`); bei eigener Instanz entsprechend `GITLAB_BASE_URL` setzen
+  (host-editierbare, **nicht-geheime** Config, [`README §11`](./README.md)).
+
+> **`insteadOf` ist Ergonomie, keine Sicherheitsgrenze (R6).** Würde ein kompromittierter
+> Agent den Rewrite entfernen, liefe `git` direkt gegen `https://gitlab.com` — und scheitert,
+> weil `agent-net` `internal: true` ist (keine Route hinaus). Spräche er stattdessen
+> *direkt* `http://gitlab-warden:8080/git/…` an, greifen R1–R6 unverändert: der Warden prüft
+> jede Anfrage unabhängig davon, wie die URL zustande kam, und hält als einziger den
+> Upstream-Token gegen die einzige fest verdrahtete Upstream-Instanz. Die Durchsetzung liegt
+> im **Netz + Warden**, nicht im URL-Rewrite.
+
+Gesetzt wird die globale Regel **einmalig beim Container-Start** (Entrypoint), da sie
+keinerlei Secret enthält (R6 bleibt gewahrt).
 
 ---
 
@@ -372,8 +418,9 @@ Zwei GitLab-Tokens (§7.5), **nur** im Warden-Container (Env/Secret):
 
 Der Bedrohungsraum auf `agent-net` ist **nur der Agent selbst** (kein Multi-Tenant), und
 er bekommt durch „Authentifizieren" keine zusätzlichen Rechte — der Warden poliziert
-ohnehin jeden Request. Daher: Der Warden **fordert keine** Credentials vom Agenten an und
-ignoriert das Dummy-`.netrc`. Begründung steht hier, damit niemand später „aus Reflex"
+ohnehin jeden Request. Daher: Der Warden **fordert keine** Credentials vom Agenten an
+(kein `WWW-Authenticate`-Challenge); agent-seitig genügt `GIT_TERMINAL_PROMPT=0`, ein
+`.netrc` gibt es nicht. Begründung steht hier, damit niemand später „aus Reflex"
 eine Agent-seitige Auth einbaut, die nur Scheinsicherheit wäre. (Wer den Audit-Trail je
 Agent-Identität schärfen will: optional ein statisches, nicht-geheimes
 `X-Agent-Id`-Header-Logging — rein informativ, nie autorisierend.)
@@ -499,7 +546,7 @@ Fragen, die die Umsetzung aufwirft, mit getroffener Entscheidung. ✅ = entschie
 
 | # | Frage | Entscheidung |
 | - | ----- | ------------ |
-| Q1 | Auth Agent→Warden? | ✅ **Keine.** Netz ist die Grenze; Agent gewinnt durch Auth nichts (W9.3). Dummy-`.netrc` nur gegen git-Prompt. |
+| Q1 | Auth Agent→Warden? | ✅ **Keine.** Netz ist die Grenze; Agent gewinnt durch Auth nichts (W9.3). Kein `.netrc`; `GIT_TERMINAL_PROMPT=0` gegen git-Prompt. |
 | Q2 | TLS Agent↔Warden? | ✅ **Plain HTTP** auf `agent-net`. TLS erst Warden→gitlab.com. Kein Geheimnis auf der internen Strecke. |
 | Q3 | Darf der Agent eigene `claude/*`-Branches **löschen**? | ✅ **Nein, nie.** Delete (new-oid = Null) → immer reject (R2), konform zu §6.2. Aufräumen offener Branches macht ein Mensch oder ein separater, nicht vom Agenten gesteuerter Job. |
 | Q4 | Read- vs. Write-Token-Wahl | ✅ Per Route/Decision: GET+upload-pack → READ; receive-pack+erlaubte API-Writes → WRITE. |
