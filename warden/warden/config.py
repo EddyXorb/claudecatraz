@@ -30,6 +30,7 @@ class Config:
     audit_log_path: str = "/var/log/warden/audit.jsonl"
     agent_port: int = 8080
     admin_port: int = 9090
+    admin_host: str = "0.0.0.0"
 
     @property
     def git_base(self) -> str:
@@ -80,6 +81,7 @@ def from_env(env: Optional[Mapping[str, str]] = None, *, strict: bool = True) ->
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
         agent_port=_int("AGENT_PORT", 8080),
         admin_port=_int("ADMIN_PORT", 9090),
+        admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
     )
 
     if strict:

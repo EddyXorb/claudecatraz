@@ -4,6 +4,8 @@ services:
     build:
       context: ./warden
       dockerfile: Dockerfile
+      args:
+        DEV_UID: ${DEV_UID:-1000}
     profiles: ["warden"]
     environment:
       - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
@@ -11,15 +13,22 @@ services:
       - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS}
       - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-claude/}
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      # Admin-Port nur auf admin-net (W3): statische IP des admin-net-Interface.
+      - ADMIN_HOST=172.31.0.2
     volumes:
-      - warden-state:/var/lib/warden
-      - warden-logs:/var/log/warden
+      # Bind-Mounts statt Named Volumes → SQLite-State + Audit-JSONL ohne Docker-Tools
+      # auditierbar (W12). DEV_UID steuert Owner, damit Host-User lesen kann.
+      - ./state/warden:/var/lib/warden
+      - ./logs/warden:/var/log/warden
       - ${WARDEN_CONFIG:-./config/warden.toml}:/etc/warden/warden.toml:ro
     networks:
-      - agent-net
-      - egress-net
+      agent-net: {}
+      egress-net: {}
+      admin-net:
+        ipv4_address: 172.31.0.2
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/healthz')"]
+      # Healthcheck läuft im Container; admin-net-IP (172.31.0.2) ist lokal erreichbar.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://172.31.0.2:9090/healthz')"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -74,7 +83,6 @@ services:
     networks: [agent-net]
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN:-}
       - GITLAB_API_URL=${GITLAB_API_URL}
       # Research/Build-Egress ueber den Forward-Proxy (§6.6):
       - http_proxy=http://forward-proxy:3128
@@ -109,7 +117,9 @@ services:
 networks:
   agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Proxy (+ MCP-Sidecars)
   egress-net: {}                   # Internet — nur Forward-Proxy & MCP-Sidecars
-
-volumes:
-  warden-state: {}
-  warden-logs: {}
+  # admin-net: nur für Host/Betreiber → Port 9090 (Log-Viewer, Healthz). Kein Agent. (W3)
+  admin-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24

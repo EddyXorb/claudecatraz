@@ -43,7 +43,7 @@ async def _serve() -> None:
     )
     admin = uvicorn.Server(
         uvicorn.Config(
-            create_admin_app(ctx), host="0.0.0.0", port=cfg.admin_port, log_level="warning"
+            create_admin_app(ctx), host=cfg.admin_host, port=cfg.admin_port, log_level="warning"
         )
     )
     reconcile_task = asyncio.create_task(_periodic_reconcile(ctx))

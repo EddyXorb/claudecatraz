@@ -15,8 +15,10 @@ RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim
 
-# Non-root runtime user.
-RUN useradd --system --uid 10001 --create-home warden
+# Non-root runtime user. DEV_UID passt den Owner an die Host-UID an, damit
+# Bind-gemountete State- und Log-Verzeichnisse ohne Docker-Tools lesbar sind (W12).
+ARG DEV_UID=10001
+RUN useradd --uid ${DEV_UID} --create-home warden
 
 COPY --from=build /app /app
 ENV PATH="/app/.venv/bin:$PATH"
