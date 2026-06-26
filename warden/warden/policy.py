@@ -101,17 +101,32 @@ _CHECKS = {
 }
 
 
+def project_gate(project: str, cfg: Config) -> Optional[Decision]:
+    """R6 project allowlist — the single source of truth (W6.4).
+
+    Returns a deny :class:`Decision` if ``project`` is set but not allowlisted,
+    else ``None`` (gate passed). Shared by :func:`decide` and the git read paths
+    so the rule lives in exactly one place. An empty ``project`` passes: API
+    routes without a project id in the path are gated elsewhere.
+    """
+    if project and not cfg.project_allowed(project):
+        return Decision(False, "R6", f"project {project!r} not in allowlist")
+    return None
+
+
 def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     """Default-deny. Every allow path is explicit (W5)."""
     if req.channel == "git":
         # git always targets a concrete project — it must be allowlisted (R6).
-        if not cfg.project_allowed(req.project):
-            return Decision(False, "R6", f"project {req.project!r} not in allowlist")
+        denied = project_gate(req.project, cfg)
+        if denied is not None:
+            return denied
         return _decide_git(req, state, cfg)
     if req.channel == "api":
         # Project allowlist applies where a project id appears in the path (W6.4).
-        if req.project and not cfg.project_allowed(req.project):
-            return Decision(False, "R6", f"project {req.project!r} not in allowlist")
+        denied = project_gate(req.project, cfg)
+        if denied is not None:
+            return denied
         return _decide_api(req, state, cfg)
     return Decision(False, "R6", f"unknown channel {req.channel!r}")
 

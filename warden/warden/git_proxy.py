@@ -17,7 +17,7 @@ from starlette.responses import Response, StreamingResponse
 from .context import AppContext
 from .errors import deny_json, git_reject_response
 from .pktline import capabilities, parse_commands, read_until_flush
-from .policy import ProxyRequest, TokenKind, check_ref, decide
+from .policy import ProxyRequest, TokenKind, check_ref, decide, project_gate
 
 
 def _project(request: Request) -> str:
@@ -28,14 +28,33 @@ def _service_token(service: str) -> TokenKind:
     return TokenKind.WRITE if service == "git-receive-pack" else TokenKind.READ
 
 
+def _stream_upstream(ctx: AppContext, resp) -> StreamingResponse:
+    """Stream an upstream git response back to the client, closing it after (W7)."""
+
+    async def body_iter():
+        try:
+            async for chunk in resp.aiter_raw():
+                yield chunk
+        finally:
+            await resp.aclose()
+
+    return StreamingResponse(
+        body_iter(),
+        status_code=resp.status_code,
+        headers=ctx.upstream.response_headers(resp),
+        media_type=resp.headers.get("content-type"),
+    )
+
+
 async def advertise(request: Request) -> Response:
     """GET …/info/refs?service=… — ref advertisement, passed through (W7.1)."""
     ctx: AppContext = request.app.state.ctx
     project = _project(request)
     service = request.query_params.get("service", "git-upload-pack")
 
-    if not ctx.cfg.project_allowed(project):
-        return deny_json(decision=_deny("R6", f"project {project!r} not in allowlist"))
+    denied = project_gate(project, ctx.cfg)
+    if denied is not None:
+        return deny_json(denied)
 
     resp = await ctx.upstream.git_get(
         project,
@@ -54,10 +73,11 @@ async def advertise(request: Request) -> Response:
 async def upload_pack(request: Request) -> Response:
     """POST …/git-upload-pack — fetch, passed through with read-token (R1)."""
     ctx: AppContext = request.app.state.ctx
-    print("test")
     project = _project(request)
-    if not ctx.cfg.project_allowed(project):
-        return deny_json(_deny("R6", f"project {project!r} not in allowlist"))
+
+    denied = project_gate(project, ctx.cfg)
+    if denied is not None:
+        return deny_json(denied)
 
     resp = await ctx.upstream.git_post_stream(
         project,
@@ -68,20 +88,7 @@ async def upload_pack(request: Request) -> Response:
         ),
         token=TokenKind.READ,
     )
-
-    async def body_iter():
-        try:
-            async for chunk in resp.aiter_raw():
-                yield chunk
-        finally:
-            await resp.aclose()
-
-    return StreamingResponse(
-        body_iter(),
-        status_code=resp.status_code,
-        headers=ctx.upstream.response_headers(resp),
-        media_type=resp.headers.get("content-type"),
-    )
+    return _stream_upstream(ctx, resp)
 
 
 async def receive_pack(request: Request) -> Response:
@@ -156,32 +163,13 @@ async def receive_pack(request: Request) -> Response:
         started,
         status=resp.status_code,
     )
-
-    async def body_iter():
-        try:
-            async for chunk in resp.aiter_raw():
-                yield chunk
-        finally:
-            await resp.aclose()
-
-    return StreamingResponse(
-        body_iter(),
-        status_code=resp.status_code,
-        headers=ctx.upstream.response_headers(resp),
-        media_type=resp.headers.get("content-type"),
-    )
+    return _stream_upstream(ctx, resp)
 
 
 def _forward_encoding(request: Request) -> dict[str, str]:
     # gzip stays gzip; the body is forwarded untouched (W7.4).
     enc = request.headers.get("content-encoding")
     return {"Content-Encoding": enc} if enc else {}
-
-
-def _deny(rule: str, reason: str):
-    from .policy import Decision
-
-    return Decision(False, rule, reason)
 
 
 def _audit(ctx, project, commands, decision, cid, state, started, *, status):
