@@ -1,7 +1,7 @@
 # Warden — single trust boundary (§6.7): small, pinned, non-root, read-only rootfs.
 FROM python:3.12-slim AS build
 
-COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.24 /uv /usr/local/bin/uv
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
