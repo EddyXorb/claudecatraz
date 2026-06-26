@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -114,6 +115,19 @@ def ensure_settings(claude_home: Path) -> None:
     )
 
 
+def configure_git_warden() -> None:
+    """Set up global git insteadOf rewrite so canonical GitLab URLs are transparently
+    redirected to the Warden inside the container (W3.1). The repo's .git/config
+    stays untouched; the rewrite lives only in ~/.gitconfig."""
+    gitlab_base = os.environ.get("GITLAB_BASE_URL", "https://gitlab.com/").rstrip("/") + "/"
+    warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
+    subprocess.run(
+        ["git", "config", "--global", f"url.{warden_git}.insteadOf", gitlab_base],
+        check=True,
+    )
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
+
+
 # NOTE (Stufe 01 — Bootstrap-Härtung, R6):
 # Die früheren Funktionen configure_git() und configure_gitlab() wurden bewusst entfernt.
 # Sie injizierten GitLab-Credentials in den Agent-Container:
@@ -156,7 +170,8 @@ def cmd_start(claude_home: Path) -> None:
 
     ensure_claude_json(claude_home)
     ensure_settings(claude_home)
-    # GitLab-/GitHub-MCP-Konfiguration entfernt (R6 / GitHub out-of-scope, Stufe 01).
+    if os.environ.get("GITLAB_API_URL", "").startswith("http://gitlab-warden"):
+        configure_git_warden()
 
     os.execvp(
         "claude",
