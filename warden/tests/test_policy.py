@@ -212,3 +212,23 @@ def test_git_project_not_allowlisted_denied(cfg):
     )
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R6"
+
+
+def test_git_empty_push_denied(cfg):
+    # A push that carries no ref commands has nothing to authorise → default-deny.
+    d = decide(_git(), StateView(), cfg)
+    assert not d.allow and d.rule == "R2"
+
+
+# --- remaining allow / default-deny edges --------------------------------------
+def test_mr_update_without_merge_intent_allowed(cfg):
+    # The non-merge edit path: owned MR, no state_event=merge → allowed (R3).
+    req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="new title")
+    req.mr_owner_ok = True
+    d = decide(req, StateView(), cfg)
+    assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
+
+
+def test_unknown_channel_default_denied(cfg):
+    d = decide(ProxyRequest(channel="bogus", project=""), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"

@@ -45,7 +45,7 @@ class StateView:
 class ProxyRequest:
     """The parsed intent handed to :func:`decide` — no transport state."""
 
-    channel: str  # 'api' | 'git'
+    channel: str  # 'api' | 'git' TODO: make this enum
     project: str
     method: str = ""
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests

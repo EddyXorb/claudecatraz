@@ -78,3 +78,27 @@ async def test_push_delete_rejected(client, respx_router):
     resp = await client.post(RECV, content=body)
     assert b"ng refs/heads/claude/feature" in resp.content
     assert b"warden: R2" in resp.content
+
+
+async def test_advertise_denied_for_project_outside_allowlist(client, respx_router):
+    # A non-allowlisted project must not even be discoverable over git (R6).
+    resp = await client.get("/git/other/secret.git/info/refs?service=git-upload-pack")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_upload_pack_denied_for_project_outside_allowlist(client, respx_router):
+    resp = await client.post("/git/other/secret.git/git-upload-pack", content=b"0032want ...")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_push_forwards_content_encoding(client, respx_router):
+    # gzip stays gzip: the Content-Encoding header is passed upstream untouched (W7.4).
+    body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
+    route = respx_router.route(method="POST", url__regex=r".*/git-receive-pack$").mock(
+        return_value=httpx.Response(200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH))
+    )
+    resp = await client.post(RECV, content=body, headers={"content-encoding": "gzip"})
+    assert resp.status_code == 200
+    assert route.calls.last.request.headers.get("content-encoding") == "gzip"
