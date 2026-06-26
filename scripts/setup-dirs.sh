@@ -14,7 +14,10 @@ DEV_UID="${DEV_UID:-1000}"
 mkdir -p config state/warden logs/warden logs/squid workspace claude
 
 # Schreibziele dem Service-User geben; config/ bleibt dem Host-Editor (read-only gemountet)
-chown -R "$DEV_UID" state logs 2>/dev/null || \
-  echo "Hinweis: chown auf state/ logs/ uebersprungen (ggf. mit sudo ausfuehren)."
+if ! chown -R "$DEV_UID" state logs 2>/dev/null; then
+  echo "FEHLER: chown state/ logs/ auf UID $DEV_UID fehlgeschlagen."
+  echo "        Bitte mit sudo erneut ausfuehren:  sudo $0"
+  exit 1
+fi
 
 echo "Verzeichnisse bereit: config/ state/ logs/ workspace/ claude/  (DEV_UID=$DEV_UID)"

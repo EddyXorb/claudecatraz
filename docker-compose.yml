@@ -88,12 +88,11 @@ services:
       - https_proxy=http://forward-proxy:3128
       - HTTP_PROXY=http://forward-proxy:3128
       - HTTPS_PROXY=http://forward-proxy:3128
-      # Nicht ueber den Proxy: lokale MCP-Sidecars + loopback. (Im Zielbild ersetzt
-      # der Warden diese durch no_proxy=gitlab-warden — 03-deployment.md.)
+      # gitlab-warden direkt (kein Proxy); loopback ebenfalls.
       - no_proxy=gitlab-warden,localhost,127.0.0.1
       - NO_PROXY=gitlab-warden,localhost,127.0.0.1
-      # Stufe 02 (Warden): GITLAB_URL zeigt auf den Warden; git nutzt insteadOf-Rewrite
-      # (entrypoint.py configure_git_warden). Kein Token im Agent-Container (R6/W9.3).
+      # Kanonische GitLab-URL fuer den insteadOf-Rewrite auf gitlab-warden (entrypoint.py).
+      # Kein Token im Agent-Container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude

@@ -168,8 +168,7 @@ def cmd_start(claude_home: Path) -> None:
 
     ensure_claude_json(claude_home)
     ensure_settings(claude_home)
-    if os.environ.get("GITLAB_API_URL", "").startswith("http://gitlab-warden"):
-        configure_git_warden()
+    configure_git_warden()
 
     os.execvp(
         "claude",

@@ -18,17 +18,22 @@ FROM python:3.12-slim
 # Non-root runtime user. DEV_UID passt den Owner an die Host-UID an, damit
 # Bind-gemountete State- und Log-Verzeichnisse ohne Docker-Tools lesbar sind (W12).
 ARG DEV_UID=10001
-RUN useradd --uid ${DEV_UID} --create-home warden
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gosu \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid ${DEV_UID} --create-home warden
 
 COPY --from=build /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 
 # State/log volumes (rootfs stays read-only at runtime; see docker-compose).
-RUN mkdir -p /var/lib/warden /var/log/warden \
-    && chown -R warden:warden /var/lib/warden /var/log/warden
+# Ownership is fixed at container start by docker-entrypoint.sh (bind-mount override).
+RUN mkdir -p /var/lib/warden /var/log/warden
 
-USER warden
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 WORKDIR /app
 EXPOSE 8080 9090
 
-ENTRYPOINT ["python", "-m", "warden"]
+ENTRYPOINT ["docker-entrypoint.sh"]

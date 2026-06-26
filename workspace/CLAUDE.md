@@ -44,16 +44,16 @@ git clone https://gitlab.com/group/project.git   # geht transparent durch den Wa
 git fetch && git push origin claude/mein-branch   # ebenso
 ```
 
-REST-Calls (MR erstellen, CI triggern etc.) gegen `$GITLAB_URL`:
+REST-Calls (MR erstellen, CI triggern etc.) direkt gegen den Warden (`gitlab-warden:8080`):
 
 ```bash
 # MR erstellen
-curl -sS "$GITLAB_API_URL/projects/<id>/merge_requests" \
+curl -sS "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests" \
   -H "Content-Type: application/json" \
   -d '{"source_branch":"claude/mein-branch","target_branch":"main","title":"..."}'
 
 # CI-Pipeline triggern
-curl -sS -X POST "$GITLAB_API_URL/projects/<id>/pipeline" \
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
   -H "Content-Type: application/json" \
   -d '{"ref":"claude/mein-branch"}'
 ```
