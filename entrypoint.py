@@ -48,7 +48,7 @@ def cmd_sync(claude_home: Path) -> None:
 # ── container startup ─────────────────────────────────────────────────────────
 
 
-def ensure_claude_json() -> None:
+def ensure_claude_json(claude_home: Path) -> None:
     """
     Claude Code stores onboarding/subscription state in ~/.claude.json (next to ~/.claude/).
     Our bind mount only covers ~/.claude/ (the directory), so we store it as
@@ -59,7 +59,7 @@ def ensure_claude_json() -> None:
     key to true every startup, before execvp.
     """
     home = Path.home()
-    stored = home / ".claude" / ".claude.json"
+    stored = claude_home / ".claude.json"
     target = home / ".claude.json"
 
     if not (target.exists() or target.is_symlink()):
@@ -98,8 +98,8 @@ def ensure_claude_json() -> None:
             actual.write_text(json.dumps(data, indent=2))
 
 
-def ensure_settings() -> None:
-    p = Path.home() / ".claude" / "settings.json"
+def ensure_settings(claude_home: Path) -> None:
+    p = claude_home / "settings.json"
     if p.exists():
         return
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -211,9 +211,9 @@ def drop_to_dev() -> None:
     os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
 
-def cmd_start() -> None:
+def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
-    creds = Path.home() / ".claude" / ".credentials.json"
+    creds = claude_home / ".credentials.json"
     if not creds.exists():
         sys.exit(
             f"error: {creds} not found.\n"
@@ -221,8 +221,8 @@ def cmd_start() -> None:
             f"  python3 entrypoint.py sync"
         )
 
-    ensure_claude_json()
-    ensure_settings()
+    ensure_claude_json(claude_home)
+    ensure_settings(claude_home)
     configure_git()
     configure_gitlab()
     configure_github()
@@ -237,7 +237,7 @@ def cmd_start() -> None:
             "--spawn",
             "same-dir",
             "--debug-file",
-            "/home/dev/.claude/rc-debug.log",
+            str(claude_home / "rc-debug.log"),
         ],
     )
 
@@ -248,6 +248,11 @@ def cmd_start() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--claude-home",
+        default=os.environ.get("CLAUDE_HOME", str(Path.home() / ".claude")),
+        help="Claude config directory [env: CLAUDE_HOME, default: ~/.claude]",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -265,7 +270,7 @@ def main() -> None:
     if args.command == "sync":
         cmd_sync(Path(args.claude_home).resolve())
     else:
-        cmd_start()
+        cmd_start(Path(args.claude_home).resolve())
 
 
 if __name__ == "__main__":
