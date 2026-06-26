@@ -46,14 +46,14 @@ async def test_api_branch_creation_default_denied(client, respx_router):
         f"/api/v4/projects/{PROJ}/repository/branches",
         json={"branch": "claude/x", "ref": "main"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 403 and resp.json()["rule"] == "R3"
 
 
 async def test_push_prefix_lookalike_blocked(client, respx_router):
-    # "claudex/" must not satisfy the "claude/" prefix in a way that matters;
-    # but "evilclaude/..." certainly must be rejected.
+    # "claudex/feature" shares the leading "claude" but misses the slash
+    # separator, so it must NOT satisfy the "claude/" prefix.
     body = (
-        pkt_line(f"{ZERO} {SHA1} refs/heads/evil-claude/x\x00report-status\n".encode())
+        pkt_line(f"{ZERO} {SHA1} refs/heads/claudex/feature\x00report-status\n".encode())
         + FLUSH
         + b"PACK"
     )

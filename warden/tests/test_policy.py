@@ -6,7 +6,7 @@ import pytest
 
 from warden.config import Config
 from warden.pktline import RefCommand
-from warden.policy import ProxyRequest, StateView, TokenKind, decide
+from warden.policy import ProxyRequest, StateView, TokenKind, check_ref, decide
 
 ZERO = "0" * 40
 SHA = "a" * 40
@@ -39,7 +39,6 @@ def test_r1_get_without_project_allowed(cfg):
 
 def test_r6_project_not_in_allowlist_denied(cfg):
     req = ProxyRequest(channel="api", project="other/secret", method="GET", path="/projects/other%2Fsecret")
-    req.project = "other/secret"
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R6"
 
@@ -51,7 +50,7 @@ def test_r3_create_mr_with_prefix_allowed(cfg):
         StateView(),
         cfg,
     )
-    assert d.allow and d.token == TokenKind.WRITE
+    assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
 
 
 def test_r2_create_mr_wrong_prefix_denied(cfg):
@@ -68,9 +67,11 @@ def test_r3_note_requires_ownership(cfg):
     req.mr_owner_ok = True
     assert decide(req, StateView(), cfg).allow
     req.mr_owner_ok = False
-    assert not decide(req, StateView(), cfg).allow
+    d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R3"
     req.mr_owner_ok = None  # unverifiable → default-deny
-    assert not decide(req, StateView(), cfg).allow
+    d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R3"
 
 
 def test_r3_pipeline_ref_prefix(cfg):
@@ -169,6 +170,38 @@ def test_git_max_branches_blocks_create(cfg):
     state = StateView(open_branches=cfg.max_open_branches)
     d = decide(_git((ZERO, SHA, "refs/heads/claude/new")), state, cfg)
     assert not d.allow and d.rule == "R5"
+
+
+def test_git_locked_state_denies_push(cfg):
+    state = StateView(locked=True)
+    d = decide(_git((ZERO, SHA, "refs/heads/claude/feature")), state, cfg)
+    assert not d.allow and d.rule == "R5"
+
+
+def test_git_rate_limit_blocks_push(cfg):
+    state = StateView(writes_last_hour=cfg.max_writes_per_hour)
+    d = decide(_git((ZERO, SHA, "refs/heads/claude/feature")), state, cfg)
+    assert not d.allow and d.rule == "R5"
+
+
+def test_git_multiref_quota_accounts_within_batch(cfg):
+    # max-1 open branches + two creates in one push must reject the batch (not
+    # let both pass against the same stale snapshot).
+    state = StateView(open_branches=cfg.max_open_branches - 1)
+    d = decide(
+        _git(
+            (ZERO, SHA, "refs/heads/claude/a"),
+            (ZERO, SHA, "refs/heads/claude/b"),
+        ),
+        state,
+        cfg,
+    )
+    assert not d.allow and d.rule == "R5"
+
+
+def test_git_tag_push_rejected_with_tag_message(cfg):
+    d = check_ref(RefCommand(ZERO, SHA, "refs/tags/claude/v1"), StateView(), cfg)
+    assert not d.allow and d.rule == "R2" and "tag" in d.reason
 
 
 def test_git_project_not_allowlisted_denied(cfg):

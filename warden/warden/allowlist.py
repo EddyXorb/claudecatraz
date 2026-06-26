@@ -7,6 +7,7 @@ Anything without a match is default-denied and audited (§6.9: "ageing safely").
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 
@@ -19,7 +20,7 @@ class WriteEndpoint:
     rule: str  # R-id for the audit log
     kind: str  # 'mr' | 'note' | 'pipeline' | 'merge' | ... — for quota accounting
 
-    @property
+    @functools.cached_property
     def regex(self) -> re.Pattern[str]:
         # {id}/{iid} → one non-slash, URL-encoded path segment.
         segments = []

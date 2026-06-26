@@ -8,7 +8,7 @@ basis of the audit trail.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Optional
 
@@ -119,25 +119,37 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
 def _decide_git(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     """Per ref-command: prefix / delete / create-count / rate (W7.2).
 
-    Atomic: a single forbidden command rejects the whole push (Q10).
+    Atomic: a single forbidden command rejects the whole push (Q10). Quotas are
+    accounted *within* the batch — the commands in one push are not free of each
+    other, so N creates against ``max_open_branches - 1`` must reject.
     """
     if not req.ref_commands:
         return Decision(False, "R2", "no ref commands in push")
+    pending_branches = 0
+    pending_writes = 0
     for cmd in req.ref_commands:
-        d = check_ref(cmd, state, cfg)
+        view = replace(
+            state,
+            open_branches=state.open_branches + pending_branches,
+            writes_last_hour=state.writes_last_hour + pending_writes,
+        )
+        d = check_ref(cmd, view, cfg)
         if not d.allow:
             return d
+        pending_writes += 1
+        if cmd.is_create:
+            pending_branches += 1
     return Decision(True, "R2", "ok", TokenKind.WRITE)
 
 
 def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
+    if cmd.ref.startswith("refs/tags/"):  # tags are never claude/* branches
+        return Decision(False, "R2", "tag pushes are not permitted")
     ref = cmd.ref
     if ref.startswith("refs/heads/"):
         ref = ref[len("refs/heads/") :]
     if not ref.startswith(cfg.branch_prefix):  # R2
         return Decision(False, "R2", f"branch {ref!r} without prefix {cfg.branch_prefix!r}")
-    if cmd.ref.startswith("refs/tags/"):  # tags are not claude/* branches
-        return Decision(False, "R2", "tag pushes are not permitted")
     if cmd.is_delete:  # R2: deleting a branch is never allowed (Q3)
         return Decision(False, "R2", f"deleting branch {ref!r} is forbidden")
     if state.locked:  # §6.11 fail-safe
