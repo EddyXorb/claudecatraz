@@ -1,0 +1,18 @@
+# Warden — non-secret tunables. Host-editable, mounted read-only.
+# NO tokens here! Secrets (GITLAB_READ_TOKEN/GITLAB_WRITE_TOKEN) come from .env.
+# Applies in stage 02 (Warden).
+# Details: docs/design/agentic-workflow/02-warden.md (W10)
+
+branch_prefix        = "claude/"          # R2: only branches with this prefix
+max_open_mrs         = 5                   # R5
+max_open_branches    = 10                  # R5
+max_writes_per_hour  = 60                  # R5
+allowed_projects     = ["group/proj-a", "group/proj-b"]   # empty => fail-closed!
+gitlab_api_url       = "https://gitlab.com/api/v4"
+gitlab_git_base      = "https://gitlab.com"
+reconcile_interval_s = 300
+state_db_path        = "/var/lib/warden/state.db"
+audit_log_path       = "/var/log/warden/audit.jsonl"
+
+# Data-driven write-endpoint allowlist (W6.1) — either here as [[write_endpoints]]
+# or in a sibling file. Branch deletion is never allowed (R2, W7.2).

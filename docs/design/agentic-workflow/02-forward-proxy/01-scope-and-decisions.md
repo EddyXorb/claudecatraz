@@ -29,8 +29,8 @@ erreichbar sind — und sonst nichts.
   ihn nichts gegen `gitlab.com` tun (kein Token).
 
 **Ehrliches Restrisiko (aus §6.6):** Allowlistete Hosts mit Schreib-/Echo-Eigenschaften
-(GitHub-Gists, Such-Endpunkte, Paket-Upload-APIs) bleiben theoretische Exfil-Kanäle. Der
-Proxy **begrenzt**, er eliminiert nicht. Gegenmittel: Liste eng halten + Logs auditieren
+(Paket-Upload-APIs, Such-Endpunkte) bleiben theoretische Exfil-Kanäle. Der Proxy
+**begrenzt**, er eliminiert nicht. Gegenmittel: Liste eng halten + Logs auditieren
 ([`04-logging.md`](./04-logging.md)).
 
 ---
@@ -86,7 +86,7 @@ durch IP-Allowlist oder TLS-Bump nachschärfbar (Trade-off dokumentiert).
 | Q1 | TLS aufbrechen (MITM)? | ✅ **Nein.** SNI-peek + splice, kein CA im Agenten (§3). |
 | Q2 | CONNECT-Host vs. echtes SNI? | ✅ Per SNI-ACL gefiltert → CONNECT-Host-Spoofing abgefangen (§3). |
 | Q3 | Subdomain-Wildcards? | ✅ `.domain`-Notation (Subdomains inkl.), exakte Hosts ohne Punkt ([`03-squid-config.md`](./03-squid-config.md)). |
-| Q4 | GitHub voll oder read-only? | ⚠️ Start: `github.com` + Raw/Codeload. Bei Exfil-Sorge auf reine Read-Pfade einschränken (§6.6). |
+| Q4 | GitHub im Scope? | ✅ **Nein, vorerst raus.** github.com & Co. nicht allowlistet; bei Bedarf später als „Code (read)"-Kategorie ergänzen. |
 | Q5 | Ports? | ✅ Nur 80/443 (`safe_ports`); CONNECT auf alles andere → deny. |
 | Q6 | IP-Literale erlauben? | ✅ **Nein** — nur Domains in der Allowlist; IP-CONNECT trifft keine `dstdomain`-ACL → default-deny. |
 | Q7 | Proxy-Auth (Agent→Proxy)? | ✅ **Keine** — wie bei Warden (W9.3): Netz ist die Grenze, Auth gäbe Scheinsicherheit. |

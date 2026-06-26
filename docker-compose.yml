@@ -1,4 +1,7 @@
 services:
+  # Stufe 01: inert — REMOTE_AUTHORIZATION erwartet den Token vom Client (Agent), der ihn
+  # ab jetzt nicht mehr hält (R6). Wird in Stufe 02 durch den Warden ersetzt
+  # (docs/design/agentic-workflow). Profil-gegated, bis dahin ohne Wirkung.
   gitlab-mcp:
     image: zereight050/gitlab-mcp:latest
     container_name: gitlab-mcp
@@ -13,21 +16,6 @@ services:
       - GITLAB_DENIED_TOOLS_REGEX=^delete_|update_default_branch|create_or_update_file|unprotect_branch|merge_merge_request
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    restart: unless-stopped
-
-  github-mcp:
-    image: ghcr.io/github/github-mcp-server:latest
-    container_name: github-mcp
-    profiles: ["github"]
-    environment:
-      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
-    command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "3003"]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/health"]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -49,8 +37,10 @@ services:
         DEV_UID: ${DEV_UID:-1000}
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN:-}
-      - GITLAB_API_URL=${GITLAB_API_URL}
+      # R6 / Stufe 01 (Bootstrap-Härtung): KEIN GitLab-Token mehr im Agent-Container.
+      # Jedes Credential im Agenten gilt als kompromittiert (docs/design/agentic-workflow,
+      # §3/§4). GitLab-Zugriff kehrt in Stufe 02 über den Warden zurück
+      # (GITLAB_API_URL zeigt dann auf http://gitlab-warden:8080/api/v4).
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
@@ -61,8 +51,5 @@ services:
     restart: unless-stopped
     depends_on:
       gitlab-mcp:
-        condition: service_healthy
-        required: false
-      github-mcp:
         condition: service_healthy
         required: false
