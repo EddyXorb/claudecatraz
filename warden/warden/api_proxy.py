@@ -12,7 +12,7 @@ import re
 import time
 import uuid
 from typing import Optional
-from urllib.parse import unquote
+from urllib.parse import parse_qsl, unquote
 
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
@@ -21,6 +21,7 @@ from .allowlist import match_endpoint
 from .context import AppContext
 from .errors import deny_json
 from .policy import Decision, ProxyRequest, TokenKind, decide
+from .upstream import stream_upstream
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
 _API_PREFIX = "/api/v4"
@@ -65,8 +66,6 @@ async def _extract_fields(request: Request, body: bytes) -> dict:
             if isinstance(data, dict):
                 fields.update({k: v for k, v in data.items() if isinstance(v, (str, int, bool))})
         elif "application/x-www-form-urlencoded" in ctype:
-            from urllib.parse import parse_qsl
-
             fields.update(dict(parse_qsl(body.decode())))
     except (ValueError, UnicodeDecodeError):
         pass
@@ -86,6 +85,7 @@ async def handle(request: Request) -> StreamingResponse:
     fields = await _extract_fields(request, body)
 
     ep = None if method in ("GET", "HEAD", "OPTIONS") else match_endpoint(method, rest_path)
+    iid = _iid_from_path(rest_path)
     req = ProxyRequest(
         channel="api",
         project=project,
@@ -97,7 +97,6 @@ async def handle(request: Request) -> StreamingResponse:
 
     # Ownership lookup (W6.2) only when an endpoint needs it — before deciding.
     if ep is not None and "mr_owned_by_claude" in ep.checks:
-        iid = _iid_from_path(rest_path)
         if iid is not None and project:
             req.mr_owner_ok = await ctx.mr_owned_by_claude(project, iid)
 
@@ -110,7 +109,7 @@ async def handle(request: Request) -> StreamingResponse:
 
     # Record the write *before* the upstream call (idempotency / fail-safe, §6.11).
     if decision.token == TokenKind.WRITE and ep is not None:
-        ctx.state.record_write("api", ep.kind, str(_iid_from_path(rest_path) or project))
+        ctx.state.record_write("api", ep.kind, str(iid or project))
 
     resp = await ctx.upstream.open_rest(
         method,
@@ -120,20 +119,7 @@ async def handle(request: Request) -> StreamingResponse:
         token=decision.token,
     )
     _audit(ctx, req, decision, correlation_id, state, started, upstream_status=resp.status_code)
-
-    async def body_iter():
-        try:
-            async for chunk in resp.aiter_raw():
-                yield chunk
-        finally:
-            await resp.aclose()
-
-    return StreamingResponse(
-        body_iter(),
-        status_code=resp.status_code,
-        headers=ctx.upstream.response_headers(resp),
-        media_type=resp.headers.get("content-type"),
-    )
+    return stream_upstream(resp)
 
 
 def _audit(ctx, req, decision, cid, state, started, *, upstream_status):

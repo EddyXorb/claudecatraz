@@ -98,27 +98,41 @@ class AppContext:
             self.state.mark_reconciled()
         return ok
 
+    async def _get_paginated(self, path: str) -> list:
+        """Fetch every page of a GitLab list endpoint (W8.2).
+
+        Without this a project with >100 claude branches/MRs would only count the
+        first page, undercount the quota, and wrongly ``allow`` further writes.
+        Follows the ``X-Next-Page`` header until it is empty.
+        """
+        items: list = []
+        page = 1
+        while page:
+            sep = "&" if "?" in path else "?"
+            resp = await self.upstream.get_json(
+                f"{path}{sep}per_page=100&page={page}", TokenKind.READ
+            )
+            resp.raise_for_status()
+            items.extend(resp.json())
+            nxt = resp.headers.get("x-next-page", "")
+            page = int(nxt) if nxt else 0
+        return items
+
     async def _list_claude_branches(self, pid: str) -> list[str]:
-        resp = await self.upstream.get_json(
-            f"projects/{pid}/repository/branches?per_page=100", TokenKind.READ
-        )
-        resp.raise_for_status()
+        branches = await self._get_paginated(f"projects/{pid}/repository/branches")
         return [
             b["name"]
-            for b in resp.json()
+            for b in branches
             if b.get("name", "").startswith(self.cfg.branch_prefix)
         ]
 
     async def _list_claude_mrs(self, pid: str, sa: Optional[int]) -> list[tuple[int, str]]:
-        query = "state=opened&per_page=100"
+        path = f"projects/{pid}/merge_requests?state=opened"
         if sa is not None:
-            query += f"&author_id={sa}"
-        resp = await self.upstream.get_json(
-            f"projects/{pid}/merge_requests?{query}", TokenKind.READ
-        )
-        resp.raise_for_status()
+            path += f"&author_id={sa}"
+        mrs = await self._get_paginated(path)
         return [
             (int(m["iid"]), m.get("state", "opened"))
-            for m in resp.json()
+            for m in mrs
             if (m.get("source_branch", "") or "").startswith(self.cfg.branch_prefix)
         ]

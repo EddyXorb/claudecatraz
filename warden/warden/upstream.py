@@ -11,6 +11,7 @@ from typing import AsyncIterator, Optional
 from urllib.parse import quote
 
 import httpx
+from starlette.responses import StreamingResponse
 
 from .config import Config
 from .policy import TokenKind
@@ -112,3 +113,24 @@ class Upstream:
     @staticmethod
     def response_headers(resp: httpx.Response) -> dict[str, str]:
         return {k: v for k, v in resp.headers.items() if k.lower() not in _DROP_RESPONSE_HEADERS}
+
+
+def stream_upstream(resp: httpx.Response) -> StreamingResponse:
+    """Relay a streamed upstream response to the client, closing it when done.
+
+    Shared by the REST and git proxies so the body is never buffered (W6/W7).
+    """
+
+    async def body_iter() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in resp.aiter_raw():
+                yield chunk
+        finally:
+            await resp.aclose()
+
+    return StreamingResponse(
+        body_iter(),
+        status_code=resp.status_code,
+        headers=Upstream.response_headers(resp),
+        media_type=resp.headers.get("content-type"),
+    )

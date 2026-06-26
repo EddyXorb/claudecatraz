@@ -23,11 +23,6 @@ class Config:
     max_writes_per_hour: int = 60
     allowed_projects: tuple[str, ...] = ()
     api_url: str = "https://gitlab.com/api/v4"
-
-    @property
-    def git_base(self) -> str:
-        return self.api_url.removesuffix("/api/v4")
-
     read_token: str = ""
     write_token: str = ""
     reconcile_interval_s: int = 300
@@ -35,6 +30,10 @@ class Config:
     audit_log_path: str = "/var/log/warden/audit.jsonl"
     agent_port: int = 8080
     admin_port: int = 9090
+
+    @property
+    def git_base(self) -> str:
+        return self.api_url.removesuffix("/api/v4")
 
     def project_allowed(self, project: str) -> bool:
         """Default-deny path-prefix match against ``ALLOWED_PROJECTS`` (Q9)."""
@@ -44,9 +43,6 @@ class Config:
             if project == allowed or project.startswith(allowed + "/"):
                 return True
         return False
-
-    def rest_token(self, kind: str) -> str:
-        return self.read_token if kind == "READ" else self.write_token
 
 
 def _split_csv(value: str) -> tuple[str, ...]:

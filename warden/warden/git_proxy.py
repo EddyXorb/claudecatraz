@@ -12,12 +12,13 @@ import time
 import uuid
 
 from starlette.requests import Request
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import Response
 
 from .context import AppContext
 from .errors import deny_json, git_reject_response
 from .pktline import capabilities, parse_commands, read_until_flush
 from .policy import ProxyRequest, TokenKind, check_ref, decide, project_gate
+from .upstream import stream_upstream
 
 
 def _project(request: Request) -> str:
@@ -26,24 +27,6 @@ def _project(request: Request) -> str:
 
 def _service_token(service: str) -> TokenKind:
     return TokenKind.WRITE if service == "git-receive-pack" else TokenKind.READ
-
-
-def _stream_upstream(ctx: AppContext, resp) -> StreamingResponse:
-    """Stream an upstream git response back to the client, closing it after (W7)."""
-
-    async def body_iter():
-        try:
-            async for chunk in resp.aiter_raw():
-                yield chunk
-        finally:
-            await resp.aclose()
-
-    return StreamingResponse(
-        body_iter(),
-        status_code=resp.status_code,
-        headers=ctx.upstream.response_headers(resp),
-        media_type=resp.headers.get("content-type"),
-    )
 
 
 async def advertise(request: Request) -> Response:
@@ -99,7 +82,7 @@ async def upload_pack(request: Request) -> Response:
         ),
         token=TokenKind.READ,
     )
-    return _stream_upstream(ctx, resp)
+    return stream_upstream(resp)
 
 
 async def receive_pack(request: Request) -> Response:
@@ -180,7 +163,7 @@ async def receive_pack(request: Request) -> Response:
         started,
         status=resp.status_code,
     )
-    return _stream_upstream(ctx, resp)
+    return stream_upstream(resp)
 
 
 def _forward_encoding(request: Request) -> dict[str, str]:
