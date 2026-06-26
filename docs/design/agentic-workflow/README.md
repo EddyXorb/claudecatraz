@@ -594,21 +594,23 @@ Supply-Chain-Risiko, nicht R1–R6 (siehe §3, „Internet ≠ GitLab-Macht").
 | Paket-Registries | `registry.npmjs.org`, `crates.io`, `static.crates.io`, `pypi.org`, `files.pythonhosted.org`, `center.conan.io` |
 | Toolchain        | `apt.llvm.org`, `sh.rustup.rs`, `static.rust-lang.org`, `deb.nodesource.com` |
 | Doku & Q&A       | `docs.gitlab.com`, `doc.rust-lang.org`, `docs.python.org`, `stackoverflow.com` |
-| Code (read)      | `github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com` |
+
+> **GitHub vorerst nicht im Scope.** Externe Code-Reads (github.com & Co.) sind bewusst
+> **nicht** allowlistet, solange GitHub aus dem Design herausgehalten wird. Bei Bedarf
+> später als eigene „Code (read)"-Kategorie ergänzen (reine Raw-/API-Read-Pfade).
 
 **Zusätzlich, unabhängig vom Proxy:** Claude Codes eingebaute **WebSearch** läuft
 serverseitig über Anthropic, nicht über den Agenten-Egress → kann immer aktiv sein, null
 Exfil-Risiko. Build-Egress (cargo/npm/pip/conan) ist Teil derselben Allowlist.
 
-**Restrisiko:** Allowlistete Hosts mit Schreib-/Echo-Eigenschaften (z. B. GitHub-Gists,
-Such-Endpunkte) bleiben theoretische Exfil-Kanäle. Liste eng halten, bei Bedarf
-GitHub auf reine Raw-/API-Read-Pfade einschränken, Proxy-Logs auditieren.
+**Restrisiko:** Allowlistete Hosts mit Schreib-/Echo-Eigenschaften (z. B. Paket-Upload-APIs,
+Such-Endpunkte) bleiben theoretische Exfil-Kanäle. Liste eng halten, Proxy-Logs auditieren.
 
 **Konfiguration (Env des forward-proxy bzw. Agenten):**
 
 ```
 # forward-proxy
-EGRESS_ALLOWLIST=registry.npmjs.org,crates.io,pypi.org,center.conan.io,docs.gitlab.com,github.com,...
+EGRESS_ALLOWLIST=registry.npmjs.org,crates.io,pypi.org,center.conan.io,docs.gitlab.com,...
 
 # Agent
 http_proxy=http://forward-proxy:3128
