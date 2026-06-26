@@ -13,11 +13,10 @@
 # (agent-net ist internal -> ohne diesen Eintrag erreicht der Agent das Modell nicht)
 .anthropic.com
 
-# --- GitLab (INTERIM) ---
-# Solange der Warden (02-warden.md) nicht existiert, laeuft der direkte git-Push/Pull
-# des Agenten ueber DIESEN Proxy (agent-net ist internal). gitlab.com muss daher
-# erreichbar sein. Im Zielbild uebernimmt der Warden den git-Pfad -> dann hier raus.
-gitlab.com
+# --- GitLab ---
+# Der git-Pfad laeuft ueber den Warden (eigener egress-net-Pfad, NICHT ueber diesen
+# Proxy). gitlab.com darf hier NICHT stehen — sonst kann ein Direkt-Push mit
+# getokerter Remote-URL den Warden umgehen (siehe Vorfall-Analyse, 02-warden.md W3.1).
 
 # --- Paket-Registries ---
 .npmjs.org
