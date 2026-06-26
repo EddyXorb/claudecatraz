@@ -1,0 +1,57 @@
+[project]
+name = "warden"
+version = "0.1.0"
+description = "GitLab policy-enforcement proxy (Warden) for the Claude agent sandbox"
+readme = "README.md"
+requires-python = ">=3.12"
+# Dependency discipline (§6.7): keep the trust boundary small and pinned.
+dependencies = [
+    "starlette>=0.40,<0.50",
+    "httpx>=0.27,<0.29",
+    "uvicorn>=0.30,<0.40",
+    "pytest-cov>=7.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<0.30",
+    "respx>=0.21,<0.23",
+    "ruff>=0.9,<0.12",
+    "mypy>=1.13,<2",
+]
+
+[project.scripts]
+warden = "warden.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["warden"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F = pyflakes+pycodestyle, I = import sort, ANN = require type annotations
+# (the trust boundary stays type-checked: every function carries a return type).
+select = ["E", "F", "I", "ANN"]
+ignore = ["ANN401"]  # allow `Any` where a typed shim would only add noise
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may omit annotations and run long with fixture URLs / assert lines.
+"tests/**" = ["ANN", "E501"]
+"serve_test.py" = ["ANN", "E501"]
+
+[tool.mypy]
+# Type-check the trust boundary strictly; the proxy package must stay fully typed.
+files = ["warden"]
+python_version = "3.12"
+strict = true

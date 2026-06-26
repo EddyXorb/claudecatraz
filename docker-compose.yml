@@ -1,24 +1,28 @@
 services:
-  # Stufe 01: inert — REMOTE_AUTHORIZATION erwartet den Token vom Client (Agent), der ihn
-  # ab jetzt nicht mehr hält (R6). Wird in Stufe 02 durch den Warden ersetzt
-  # (docs/design/agentic-workflow). Profil-gegated, bis dahin ohne Wirkung.
-  gitlab-mcp:
-    image: zereight050/gitlab-mcp:latest
-    container_name: gitlab-mcp
-    profiles: ["gitlab"]
+  gitlab-warden:
+    container_name: gitlab-warden
+    build:
+      context: ./warden
+      dockerfile: Dockerfile
+    profiles: ["warden"]
     environment:
-      - STREAMABLE_HTTP=true
-      - REMOTE_AUTHORIZATION=true
-      - HOST=0.0.0.0
-      - PORT=3002
-      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
-      - GITLAB_READ_ONLY_MODE=${GITLAB_READ_ONLY_MODE:-true}
-      - GITLAB_DENIED_TOOLS_REGEX=^delete_|update_default_branch|create_or_update_file|unprotect_branch|merge_merge_request
+      - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
+      - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
+      - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS}
+      - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-claude/}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+    volumes:
+      - warden-state:/var/lib/warden
+      - warden-logs:/var/log/warden
+      - ${WARDEN_CONFIG:-./config/warden.toml}:/etc/warden/warden.toml:ro
+    networks:
+      - agent-net
+      - egress-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
-      interval: 3s
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/healthz')"]
+      interval: 10s
       timeout: 3s
-      retries: 10
+      retries: 5
       start_period: 5s
     restart: unless-stopped
 
@@ -37,19 +41,34 @@ services:
         DEV_UID: ${DEV_UID:-1000}
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # R6 / Stufe 01 (Bootstrap-Härtung): KEIN GitLab-Token mehr im Agent-Container.
-      # Jedes Credential im Agenten gilt als kompromittiert (docs/design/agentic-workflow,
-      # §3/§4). GitLab-Zugriff kehrt in Stufe 02 über den Warden zurück
-      # (GITLAB_API_URL zeigt dann auf http://gitlab-warden:8080/api/v4).
+      # Stufe 02 (Warden): GITLAB_API_URL zeigt auf den Warden; git nutzt insteadOf-Rewrite
+      # (entrypoint.py configure_git_warden). Kein Token im Agent-Container (R6/W9.3).
+      - GITLAB_API_URL=http://gitlab-warden:8080/api/v4
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - no_proxy=gitlab-warden
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
+    # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
+    # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.
+    # Bis dahin: Default-Bridge (Internet-Zugriff für api.anthropic.com).
     command: ["python3", "/entrypoint.py"]
     working_dir: /workspace
     tty: true
     stdin_open: true
     restart: unless-stopped
     depends_on:
-      gitlab-mcp:
+      gitlab-warden:
         condition: service_healthy
         required: false
+    networks:
+      - agent-net
+
+networks:
+  agent-net:
+    internal: false
+  egress-net: {}
+
+volumes:
+  warden-state: {}
+  warden-logs: {}

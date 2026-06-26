@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +45,13 @@ def cmd_sync(claude_home: Path) -> None:
     shutil.copy2(src, dst)
     print(f"Credentials copied: {src} → {dst}")
 
+    # Sync ~/.claude.json — contains organizationUuid and passesEligibilityCache needed
+    # for Remote Control eligibility without a network call on startup.
+    host_claude_json = Path.home() / ".claude.json"
+    if host_claude_json.exists():
+        shutil.copy2(host_claude_json, claude_home / ".claude.json")
+        print(f"Claude config copied: {host_claude_json} → {claude_home / '.claude.json'}")
+
 
 # ── container startup ─────────────────────────────────────────────────────────
 
@@ -66,18 +74,8 @@ def ensure_claude_json(claude_home: Path) -> None:
         if not stored.exists():
             stored.parent.mkdir(parents=True, exist_ok=True)
             stored.write_text(
-                json.dumps(
-                    {
-                        "hasCompletedOnboarding": True,
-                        "lastOnboardingVersion": "1.0",
-                        "bypassPermissionsModeAccepted": True,
-                        "remoteDialogSeen": True,
-                        "projects": {
-                            "/workspace": {"hasTrustDialogAccepted": True},
-                        },
-                    },
-                    indent=2,
-                )
+                json.dumps({"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
+                           indent=2)
             )
         target.symlink_to(stored)
 
@@ -86,9 +84,10 @@ def ensure_claude_json(claude_home: Path) -> None:
     if actual.exists():
         data = read_json(actual)
         changed = False
-        if not data.get("bypassPermissionsModeAccepted"):
-            data["bypassPermissionsModeAccepted"] = True
-            changed = True
+        for key in ("bypassPermissionsModeAccepted", "remoteDialogSeen"):
+            if not data.get(key):
+                data[key] = True
+                changed = True
         projects = data.setdefault("projects", {})
         ws = projects.setdefault("/workspace", {})
         if not ws.get("hasTrustDialogAccepted"):
@@ -112,6 +111,19 @@ def ensure_settings(claude_home: Path) -> None:
             indent=2,
         )
     )
+
+
+def configure_git_warden() -> None:
+    """Set up global git insteadOf rewrite so canonical GitLab URLs are transparently
+    redirected to the Warden inside the container (W3.1). The repo's .git/config
+    stays untouched; the rewrite lives only in ~/.gitconfig."""
+    gitlab_base = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/"
+    warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
+    subprocess.run(
+        ["git", "config", "--global", f"url.{warden_git}.insteadOf", gitlab_base],
+        check=True,
+    )
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
 
 # NOTE (Stufe 01 — Bootstrap-Härtung, R6):
@@ -156,7 +168,8 @@ def cmd_start(claude_home: Path) -> None:
 
     ensure_claude_json(claude_home)
     ensure_settings(claude_home)
-    # GitLab-/GitHub-MCP-Konfiguration entfernt (R6 / GitHub out-of-scope, Stufe 01).
+    if os.environ.get("GITLAB_API_URL", "").startswith("http://gitlab-warden"):
+        configure_git_warden()
 
     os.execvp(
         "claude",
