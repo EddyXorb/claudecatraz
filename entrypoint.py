@@ -119,7 +119,7 @@ def configure_git_warden() -> None:
     """Set up global git insteadOf rewrite so canonical GitLab URLs are transparently
     redirected to the Warden inside the container (W3.1). The repo's .git/config
     stays untouched; the rewrite lives only in ~/.gitconfig."""
-    gitlab_base = os.environ.get("GITLAB_BASE_URL", "https://gitlab.com/").rstrip("/") + "/"
+    gitlab_base = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/"
     warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
     subprocess.run(
         ["git", "config", "--global", f"url.{warden_git}.insteadOf", gitlab_base],

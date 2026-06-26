@@ -25,7 +25,6 @@ def cfg() -> Config:
         max_writes_per_hour=60,
         allowed_projects=("group/proj",),
         api_url=f"{UPSTREAM}/api/v4",
-        git_base=UPSTREAM,
         read_token="READ-TOKEN",
         write_token="WRITE-TOKEN",
         state_db_path=":memory:",

@@ -23,6 +23,11 @@ class Config:
     max_writes_per_hour: int = 60
     allowed_projects: tuple[str, ...] = ()
     api_url: str = "https://gitlab.com/api/v4"
+
+    @property
+    def git_base(self) -> str:
+        return self.api_url.removesuffix("/api/v4")
+
     read_token: str = ""
     write_token: str = ""
     reconcile_interval_s: int = 300
@@ -71,7 +76,7 @@ def from_env(env: Optional[Mapping[str, str]] = None, *, strict: bool = True) ->
         max_open_branches=_int("MAX_OPEN_BRANCHES", 10),
         max_writes_per_hour=_int("MAX_WRITES_PER_HOUR", 60),
         allowed_projects=_split_csv(env.get("ALLOWED_PROJECTS", "")),
-        api_url=env.get("GITLAB_API_URL", "https://gitlab.com/api/v4").rstrip("/"),
+        api_url=env.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/api/v4",
         read_token=env.get("GITLAB_READ_TOKEN", ""),
         write_token=env.get("GITLAB_WRITE_TOKEN", ""),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),

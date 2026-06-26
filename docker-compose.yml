@@ -10,7 +10,7 @@ services:
       - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
       - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS}
       - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-claude/}
-      - GITLAB_API_URL=${GITLAB_UPSTREAM_URL:-https://gitlab.com/api/v4}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
     volumes:
       - warden-state:/var/lib/warden
       - warden-logs:/var/log/warden
@@ -44,7 +44,7 @@ services:
       # Stufe 02 (Warden): GITLAB_API_URL zeigt auf den Warden; git nutzt insteadOf-Rewrite
       # (entrypoint.py configure_git_warden). Kein Token im Agent-Container (R6/W9.3).
       - GITLAB_API_URL=http://gitlab-warden:8080/api/v4
-      - GITLAB_BASE_URL=${GITLAB_BASE_URL:-https://gitlab.com}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
       - no_proxy=gitlab-warden
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude

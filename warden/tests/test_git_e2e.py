@@ -147,7 +147,6 @@ def e2e(tmp_path):
         branch_prefix="claude/",
         allowed_projects=("repo",),
         api_url=f"http://127.0.0.1:{backend_port}/api/v4",
-        git_base=f"http://127.0.0.1:{backend_port}",
         read_token="r",
         write_token="w",
         state_db_path=str(tmp_path / "state.db"),
