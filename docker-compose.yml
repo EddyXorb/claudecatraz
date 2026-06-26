@@ -49,8 +49,9 @@ services:
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
-    networks:
-      - agent-net
+    # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
+    # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.
+    # Bis dahin: Default-Bridge (Internet-Zugriff für api.anthropic.com).
     command: ["python3", "/entrypoint.py"]
     working_dir: /workspace
     tty: true
@@ -60,10 +61,12 @@ services:
       gitlab-warden:
         condition: service_healthy
         required: false
+    networks:
+      - agent-net
 
 networks:
   agent-net:
-    internal: true
+    internal: false
   egress-net: {}
 
 volumes:

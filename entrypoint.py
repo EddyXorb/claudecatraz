@@ -45,6 +45,13 @@ def cmd_sync(claude_home: Path) -> None:
     shutil.copy2(src, dst)
     print(f"Credentials copied: {src} → {dst}")
 
+    # Sync ~/.claude.json — contains organizationUuid and passesEligibilityCache needed
+    # for Remote Control eligibility without a network call on startup.
+    host_claude_json = Path.home() / ".claude.json"
+    if host_claude_json.exists():
+        shutil.copy2(host_claude_json, claude_home / ".claude.json")
+        print(f"Claude config copied: {host_claude_json} → {claude_home / '.claude.json'}")
+
 
 # ── container startup ─────────────────────────────────────────────────────────
 
@@ -67,18 +74,8 @@ def ensure_claude_json(claude_home: Path) -> None:
         if not stored.exists():
             stored.parent.mkdir(parents=True, exist_ok=True)
             stored.write_text(
-                json.dumps(
-                    {
-                        "hasCompletedOnboarding": True,
-                        "lastOnboardingVersion": "1.0",
-                        "bypassPermissionsModeAccepted": True,
-                        "remoteDialogSeen": True,
-                        "projects": {
-                            "/workspace": {"hasTrustDialogAccepted": True},
-                        },
-                    },
-                    indent=2,
-                )
+                json.dumps({"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
+                           indent=2)
             )
         target.symlink_to(stored)
 
@@ -87,9 +84,10 @@ def ensure_claude_json(claude_home: Path) -> None:
     if actual.exists():
         data = read_json(actual)
         changed = False
-        if not data.get("bypassPermissionsModeAccepted"):
-            data["bypassPermissionsModeAccepted"] = True
-            changed = True
+        for key in ("bypassPermissionsModeAccepted", "remoteDialogSeen"):
+            if not data.get(key):
+                data[key] = True
+                changed = True
         projects = data.setdefault("projects", {})
         ws = projects.setdefault("/workspace", {})
         if not ws.get("hasTrustDialogAccepted"):
