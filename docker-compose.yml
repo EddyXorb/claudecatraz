@@ -1,27 +1,4 @@
 services:
-  # Stufe 01: inert — REMOTE_AUTHORIZATION erwartet den Token vom Client (Agent), der ihn
-  # ab jetzt nicht mehr hält (R6). Wird in Stufe 02 durch den Warden ersetzt
-  # (docs/design/agentic-workflow). Profil-gegated, bis dahin ohne Wirkung.
-  gitlab-mcp:
-    image: zereight050/gitlab-mcp:latest
-    container_name: gitlab-mcp
-    profiles: ["gitlab"]
-    environment:
-      - STREAMABLE_HTTP=true
-      - REMOTE_AUTHORIZATION=true
-      - HOST=0.0.0.0
-      - PORT=3002
-      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
-      - GITLAB_READ_ONLY_MODE=${GITLAB_READ_ONLY_MODE:-true}
-      - GITLAB_DENIED_TOOLS_REGEX=^delete_|update_default_branch|create_or_update_file|unprotect_branch|merge_merge_request
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    restart: unless-stopped
-
   gitlab-warden:
     container_name: gitlab-warden
     build:
@@ -80,9 +57,6 @@ services:
     stdin_open: true
     restart: unless-stopped
     depends_on:
-      gitlab-mcp:
-        condition: service_healthy
-        required: false
       gitlab-warden:
         condition: service_healthy
         required: false
