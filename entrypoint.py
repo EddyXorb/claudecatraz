@@ -97,6 +97,21 @@ def ensure_claude_json(claude_home: Path) -> None:
             actual.write_text(json.dumps(data, indent=2))
 
 
+def ensure_agent_memory(claude_home: Path) -> None:
+    """Inject the image-baked harness doc as user memory (~/.claude/CLAUDE.md).
+
+    The doc lives in the image (/opt/claude-dev-env/AGENT.md) so it is versioned with
+    the harness, not with any mounted project. /workspace and ~/.claude are both bind
+    mounts and would shadow image content, so we materialize the file at startup into
+    CLAUDE_HOME — the User-Memory tier, which applies across every mounted project and
+    can never leak into a project repo. Overwritten every start to track the image."""
+    src = Path("/opt/claude-dev-env/AGENT.md")
+    if not src.exists():
+        return
+    claude_home.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, claude_home / "CLAUDE.md")
+
+
 def ensure_settings(claude_home: Path) -> None:
     p = claude_home / "settings.json"
     if p.exists():
@@ -168,6 +183,7 @@ def cmd_start(claude_home: Path) -> None:
 
     ensure_claude_json(claude_home)
     ensure_settings(claude_home)
+    ensure_agent_memory(claude_home)
     configure_git_warden()
 
     os.execvp(
