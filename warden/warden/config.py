@@ -15,6 +15,16 @@ class ConfigError(RuntimeError):
     """Raised on invalid/missing configuration — the Warden refuses to start."""
 
 
+def normalize_project(project: str) -> str:
+    """Canonical project path: drop the git ``.git`` suffix and surrounding slashes.
+
+    The git Smart-HTTP path carries ``group/proj.git``; the allowlist and REST
+    forms use the bare ``group/proj``. Normalising in one place keeps allowlist
+    checks, REST project-ids, upstream URLs and state keys consistent (one
+    definition), so a pushed branch is not counted twice in ``claude_branches``."""
+    return project.removesuffix(".git").strip("/")
+
+
 @dataclass(frozen=True)
 class Config:
     branch_prefix: str = "claude/"
@@ -38,7 +48,7 @@ class Config:
 
     def project_allowed(self, project: str) -> bool:
         """Default-deny path-prefix match against ``ALLOWED_PROJECTS`` (Q9)."""
-        project = project.removesuffix(".git").strip("/")
+        project = normalize_project(project)
         for allowed in self.allowed_projects:
             allowed = allowed.strip("/")
             if project == allowed or project.startswith(allowed + "/"):

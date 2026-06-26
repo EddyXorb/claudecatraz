@@ -15,6 +15,7 @@ from typing import AsyncIterator, Optional
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .config import normalize_project
 from .context import AppContext
 from .errors import deny_json, git_reject_response
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
@@ -24,7 +25,12 @@ from .upstream import stream_upstream
 
 
 def _project(request: Request) -> str:
-    return str(request.path_params["project"])
+    """Canonical project path (no ``.git``) for state keys, gate and upstream.
+
+    git appends ``.git`` to the repo path while the reconcile/allowlist forms use
+    the bare path; normalising here keeps the ``claude_branches`` key consistent
+    so a branch is not counted twice and reconcile can prune push-recorded rows."""
+    return normalize_project(str(request.path_params["project"]))
 
 
 def _service_token(service: str) -> TokenKind:

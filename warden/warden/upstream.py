@@ -13,7 +13,7 @@ from urllib.parse import quote
 import httpx
 from starlette.responses import StreamingResponse
 
-from .config import Config
+from .config import Config, normalize_project
 from .model import TokenKind
 
 # Hop-by-hop headers that must not be forwarded verbatim.
@@ -23,7 +23,7 @@ _DROP_RESPONSE_HEADERS = {"content-encoding", "transfer-encoding", "connection",
 
 def project_id(project: str) -> str:
     """URL-encode ``group/sub/proj`` → ``group%2Fsub%2Fproj`` for the REST path."""
-    return quote(project.removesuffix(".git").strip("/"), safe="")
+    return quote(normalize_project(project), safe="")
 
 
 class Upstream:
@@ -77,7 +77,7 @@ class Upstream:
 
     # --- git Smart-HTTP --------------------------------------------------------
     def git_url(self, project: str, suffix: str) -> str:
-        project = project.removesuffix(".git").strip("/")
+        project = normalize_project(project)
         return f"{self._cfg.git_base}/{project}.git/{suffix.lstrip('/')}"
 
     async def git_get(
