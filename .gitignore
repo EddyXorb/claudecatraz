@@ -2,8 +2,9 @@
 claude-home/
 
 # Local project workspace
-workspace/
-
+workspace*
+.claude
+.env
 # Local env overrides
 .env.local
 
