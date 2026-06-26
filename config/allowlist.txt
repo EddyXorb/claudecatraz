@@ -1,0 +1,30 @@
+# Forward-proxy (Squid) — domain allowlist for research/build egress.
+# Host-editable, mounted read-only into the container. NO secrets.
+# .domain  = includes subdomains ;  exact host = no leading dot.
+# Applies in stage 02 (forward-proxy). Reload without restart: squid -k reconfigure.
+# Details: docs/design/agentic-workflow/02-forward-proxy/03-squid-config.md
+
+# ── Package registries ───────────────────────────────────────────
+.npmjs.org
+registry.npmjs.org
+.crates.io
+static.crates.io
+.pypi.org
+files.pythonhosted.org
+.conan.io
+center.conan.io
+
+# ── Toolchain ────────────────────────────────────────────────────
+apt.llvm.org
+sh.rustup.rs
+static.rust-lang.org
+deb.nodesource.com
+
+# ── Docs & Q&A ───────────────────────────────────────────────────
+docs.gitlab.com
+doc.rust-lang.org
+docs.python.org
+stackoverflow.com
+
+# Note: GitHub is out of scope for now and therefore not allowlisted.
+# Add a "Code (read)" category later if needed.

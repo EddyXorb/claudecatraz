@@ -2,9 +2,20 @@
 claude-home/
 
 # Local project workspace
-workspace/
+workspace*
+.claude
+claude
 
+# Secrets
+.env
 # Local env overrides
 .env.local
 
-claude
+# Runtime state & logs (Bind-Mounts neben dem Compose-File, §11.2/§11.6) —
+# Laufzeitdaten, nicht versionieren. config/ wird BEWUSST versioniert (Policy-Artefakt).
+state/
+logs/
+
+# Python
+__pycache__/
+*.pyc
