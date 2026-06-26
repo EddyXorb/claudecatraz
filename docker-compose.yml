@@ -3,6 +3,10 @@ services:
     image: zereight050/gitlab-mcp:latest
     container_name: gitlab-mcp
     profiles: ["gitlab"]
+    # agent-net: vom Agenten erreichbar; egress-net: eigener Upstream zu gitlab.com.
+    # (Bis der Warden existiert ist die MCP-Sidecar der GitLab-Pfad — sie laeuft am
+    #  Forward-Proxy vorbei, daher steht ihr Hostname im no_proxy des Agenten.)
+    networks: [agent-net, egress-net]
     environment:
       - STREAMABLE_HTTP=true
       - REMOTE_AUTHORIZATION=true
@@ -23,12 +27,43 @@ services:
     image: ghcr.io/github/github-mcp-server:latest
     container_name: github-mcp
     profiles: ["github"]
+    networks: [agent-net, egress-net]
     environment:
       - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
     command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "3003"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/health"]
       interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── Forward-Proxy (Research/Build-Egress, haelt KEINE Credentials) ──────────
+  # docs/design/agentic-workflow/02-forward-proxy/03-deployment.md
+  forward-proxy:
+    build:
+      context: ./forward-proxy                  # Squid mit OpenSSL/ssl_bump-Support
+      args:
+        DEV_UID: ${DEV_UID:-1000}               # Audit-Log host-lesbar (README §11.6)
+    container_name: forward-proxy
+    networks: [agent-net, egress-net]
+    volumes:
+      # host-editierbare Config, read-only (zentraler config/-Ordner, README §11):
+      - ./config/squid.conf:/etc/squid/squid.conf:ro
+      - ./config/allowlist.txt:/etc/squid/allowlist.txt:ro
+      - ./logs/squid:/var/log/squid             # Bind-Mount: Egress-Audit (access.log)
+    read_only: true
+    tmpfs:
+      - /var/spool/squid
+      - /var/run
+      - /tmp
+    healthcheck:
+      # TCP-Liveness von 3128 (dependency-arm, version-stabil). Die im Design
+      # genannte squidclient-mgr-Variante braeuchte eine manager-ACL — fuer reine
+      # Liveness genuegt der Port-Check.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/3128"]
+      interval: 5s
       timeout: 3s
       retries: 10
       start_period: 5s
@@ -47,10 +82,22 @@ services:
         NODE_VERSION: ${NODE_VERSION:-22}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
         DEV_UID: ${DEV_UID:-1000}
+    # NUR agent-net (internal) -> keine eigene Internet-/DNS-Route. Research/Build
+    # laeuft ausschliesslich ueber den Forward-Proxy (02-network-isolation.md).
+    networks: [agent-net]
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GITLAB_API_TOKEN=${GITLAB_API_TOKEN:-}
       - GITLAB_API_URL=${GITLAB_API_URL}
+      # Research/Build-Egress ueber den Forward-Proxy (§6.6):
+      - http_proxy=http://forward-proxy:3128
+      - https_proxy=http://forward-proxy:3128
+      - HTTP_PROXY=http://forward-proxy:3128
+      - HTTPS_PROXY=http://forward-proxy:3128
+      # Nicht ueber den Proxy: lokale MCP-Sidecars + loopback. (Im Zielbild ersetzt
+      # der Warden diese durch no_proxy=gitlab-warden — 03-deployment.md.)
+      - no_proxy=gitlab-mcp,github-mcp,localhost,127.0.0.1
+      - NO_PROXY=gitlab-mcp,github-mcp,localhost,127.0.0.1
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
@@ -60,9 +107,15 @@ services:
     stdin_open: true
     restart: unless-stopped
     depends_on:
+      forward-proxy:
+        condition: service_healthy
       gitlab-mcp:
         condition: service_healthy
         required: false
       github-mcp:
         condition: service_healthy
         required: false
+
+networks:
+  agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Proxy (+ MCP-Sidecars)
+  egress-net: {}                   # Internet — nur Forward-Proxy & MCP-Sidecars

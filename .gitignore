@@ -9,3 +9,7 @@ workspace*
 .env.local
 
 claude
+
+# Forward-Proxy runtime audit logs — keep the dir, ignore the contents
+/logs/squid/*
+!/logs/squid/.gitkeep

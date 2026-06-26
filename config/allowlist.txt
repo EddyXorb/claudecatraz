@@ -1,0 +1,45 @@
+# Forward-Proxy Allowlist — eine Domain je Zeile.
+#   .domain  -> inkl. der Domain UND aller Subdomains (.npmjs.org deckt registry.npmjs.org)
+#   domain   -> exakter Host (ohne fuehrenden Punkt)
+# Gelesen fuer HTTP (dstdomain) UND HTTPS-SNI (ssl::server_name) -> eine Wahrheit.
+# Aenderung wirkt per `docker compose exec forward-proxy squid -k reconfigure`.
+#
+# WICHTIG: Paketmanager folgen oft Redirects auf CDNs -> die transitiven Hosts
+# muessen mit drauf, sonst bricht der Build still (siehe 04-testing.md).
+# Hinweis: keine exakten Hosts eintragen, die schon von einem .domain-Eintrag
+# abgedeckt sind (Squid warnt sonst ueber Redundanz).
+
+# --- Agent-Laufzeit: Claude Code spricht ueber den Proxy mit Anthropic ---
+# (agent-net ist internal -> ohne diesen Eintrag erreicht der Agent das Modell nicht)
+.anthropic.com
+
+# --- GitLab (INTERIM) ---
+# Solange der Warden (02-warden.md) nicht existiert, laeuft der direkte git-Push/Pull
+# des Agenten ueber DIESEN Proxy (agent-net ist internal). gitlab.com muss daher
+# erreichbar sein. Im Zielbild uebernimmt der Warden den git-Pfad -> dann hier raus.
+gitlab.com
+
+# --- Paket-Registries ---
+.npmjs.org
+.crates.io
+.pypi.org
+files.pythonhosted.org
+.conan.io
+
+# --- Toolchain ---
+apt.llvm.org
+sh.rustup.rs
+static.rust-lang.org
+deb.nodesource.com
+
+# --- Doku & Q&A ---
+docs.gitlab.com
+doc.rust-lang.org
+docs.python.org
+stackoverflow.com
+
+# --- Code (read) — ggf. auf Raw-/API-Read einschraenken (Q4 in 01-scope-and-decisions.md) ---
+github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+codeload.github.com

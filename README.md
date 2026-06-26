@@ -50,6 +50,13 @@ Der Agent hat keinen direkten Zugriff auf GitHub-Tokens, aber leider schon auf g
 
 **Kein Root:** Claude Code läuft als unprivilegierter User `dev`. Der Entrypoint wechselt via `gosu` zu diesem User, sobald `/workspace`-Ownership gesetzt ist.
 
+**Egress-Isolation (Forward-Proxy):** Der Agent hängt nur am `agent-net` (`internal: true`) — also **keine eigene Internet- oder DNS-Route**. Sein einziger Research-/Build-Pfad nach außen ist der `forward-proxy` (Squid), der gegen eine **Domain-Allowlist** filtert (default-deny). HTTPS wird per **SNI-peek + splice** gefiltert, *nicht* entschlüsselt — kein CA im Agenten. Der Proxy hält **keine** Credentials; selbst kompromittiert kann der Agent nur zu allowlisteten Zielen sprechen. Jede Verbindung landet im Audit-Log `logs/squid/access.log`. Umsetzung des Plans [`docs/design/agentic-workflow/02-forward-proxy/`](docs/design/agentic-workflow/02-forward-proxy.md).
+
+- **Allowlist pflegen:** `config/allowlist.txt` (eine Domain je Zeile, `.domain` = inkl. Subdomains). Reload ohne Neustart: `docker compose exec forward-proxy squid -k reconfigure`.
+- **Squid-Config:** `config/squid.conf` (host-editierbar, read-only gemountet — **keine Secrets**).
+- **Egress prüfen:** `grep <ziel> logs/squid/access.log`.
+- **Interim:** Bis der Warden (`02-warden.md`) existiert, laufen die GitLab/GitHub-MCP-Sidecars über `egress-net` (im `no_proxy` des Agenten) und der direkte `git`-Push zu `gitlab.com` über den Proxy (daher in der Allowlist).
+
 ## Einrichtung
 
 ### 1. Compose-Profile wählen
@@ -107,13 +114,27 @@ GITLAB_GIT_TOKEN=...
 GITHUB_TOKEN=...
 ```
 
-### 5. Starten
+### 5. Log-Verzeichnis anlegen
+
+Der Forward-Proxy schreibt sein Audit-Log in den Bind-Mount `logs/squid/` — der Ordner muss vor dem Start existieren (ist im Repo via `.gitkeep` vorhanden):
+
+```bash
+mkdir -p logs/squid
+```
+
+### 6. Starten
 
 ```bash
 docker compose up -d
 ```
 
 Der Agent ist danach über Remote Control unter claude.ai erreichbar.
+
+**Egress testen** (Allowlist hält, Rest geblockt — Red-Team A11):
+
+```bash
+tests/redteam/test_egress.sh
+```
 
 ### Rebuild nach Toolchain-Änderungen
 
