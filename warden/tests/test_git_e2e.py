@@ -29,7 +29,7 @@ pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not ins
 # --- a minimal git Smart-HTTP upstream backed by `git http-backend` ------------
 def _make_backend_handler(project_root: str):
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):  # silence
+        def log_message(self, format, *args):  # silence
             pass
 
         def _read_body(self):
