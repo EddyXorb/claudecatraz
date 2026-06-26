@@ -95,7 +95,7 @@ def capabilities(head: bytes) -> set[str]:
     return {c.decode() for c in caps.split(b" ") if c}
 
 
-def _find_command_end(buf: bytes) -> Optional[int]:
+def _find_command_end(buf: bytes | bytearray) -> Optional[int]:
     """Index just past the flush-pkt that ends the command section, or None.
 
     Walks pkt-lines on the *raw* bytes. Returns None when more bytes are needed

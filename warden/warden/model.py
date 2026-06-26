@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .pktline import RefCommand
 
@@ -57,7 +57,7 @@ class ProxyRequest:
     method: str = ""
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
     endpoint: Optional[WriteEndpoint] = None  # matched write endpoint (api)
-    fields: dict = field(default_factory=dict)  # extracted body/query fields
+    fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
     ref_commands: list[RefCommand] = field(default_factory=list)  # git push
     # Resolved by api_proxy via an upstream lookup (W6.2); None ⇒ unverifiable.
     mr_owner_ok: Optional[bool] = None

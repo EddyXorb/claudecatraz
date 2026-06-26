@@ -18,6 +18,7 @@ dev = [
     "pytest-asyncio>=0.24,<0.30",
     "respx>=0.21,<0.23",
     "ruff>=0.9,<0.12",
+    "mypy>=1.13,<2",
 ]
 
 [project.scripts]
@@ -48,3 +49,9 @@ ignore = ["ANN401"]  # allow `Any` where a typed shim would only add noise
 # Tests may omit annotations and run long with fixture URLs / assert lines.
 "tests/**" = ["ANN", "E501"]
 "serve_test.py" = ["ANN", "E501"]
+
+[tool.mypy]
+# Type-check the trust boundary strictly; the proxy package must stay fully typed.
+files = ["warden"]
+python_version = "3.12"
+strict = true

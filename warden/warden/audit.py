@@ -48,8 +48,8 @@ class AuditLog:
         self._path = path
         if path not in ("-", "/dev/stderr"):
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self._queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
-        self._task: Optional[asyncio.Task] = None
+        self._queue: asyncio.Queue[Optional[dict[str, Any]]] = asyncio.Queue()
+        self._task: Optional[asyncio.Task[None]] = None
 
     def start(self) -> None:
         if self._task is None:

@@ -54,6 +54,8 @@ foundation of the test strategy and auditability (W2).
 uv sync --extra dev      # create .venv, install pinned deps
 uv run pytest            # full suite (git e2e auto-skips without `git`)
 uv run pytest -k policy  # just the pure policy units
+uv run ruff check .      # lint + import order + required annotations (ANN)
+uv run mypy              # strict type-check of the warden package
 ```
 
 ## Run

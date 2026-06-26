@@ -11,11 +11,11 @@ import json
 import re
 import time
 import uuid
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import parse_qsl, unquote
 
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import Response
 
 from .api_endpoints import match_endpoint, mr_owned_by_claude
 from .context import AppContext
@@ -55,9 +55,9 @@ def _iid_from_path(path: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-async def _extract_fields(request: Request, body: bytes) -> dict:
+async def _extract_fields(request: Request, body: bytes) -> dict[str, Any]:
     """Pull only the decision fields from body/query — no deep schema parsing (§6.9)."""
-    fields: dict = dict(request.query_params)
+    fields: dict[str, Any] = dict(request.query_params)
     if not body:
         return fields
     ctype = request.headers.get("content-type", "")
@@ -73,7 +73,7 @@ async def _extract_fields(request: Request, body: bytes) -> dict:
     return fields
 
 
-async def handle(request: Request) -> StreamingResponse:
+async def handle(request: Request) -> Response:
     ctx: AppContext = request.app.state.ctx
     correlation_id = str(uuid.uuid4())
     started = time.monotonic()

@@ -24,7 +24,7 @@ from .upstream import stream_upstream
 
 
 def _project(request: Request) -> str:
-    return request.path_params["project"]
+    return str(request.path_params["project"])
 
 
 def _service_token(service: str) -> TokenKind:

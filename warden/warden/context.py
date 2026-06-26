@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .audit import AuditLog
 from .config import Config
@@ -98,14 +98,14 @@ class AppContext:
             self.state.mark_reconciled()
         return ok
 
-    async def _get_paginated(self, path: str) -> list:
+    async def _get_paginated(self, path: str) -> list[Any]:
         """Fetch every page of a GitLab list endpoint (W8.2).
 
         Without this a project with >100 claude branches/MRs would only count the
         first page, undercount the quota, and wrongly ``allow`` further writes.
         Follows the ``X-Next-Page`` header until it is empty.
         """
-        items: list = []
+        items: list[Any] = []
         page = 1
         while page:
             sep = "&" if "?" in path else "?"
