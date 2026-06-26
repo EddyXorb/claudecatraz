@@ -10,6 +10,17 @@ from __future__ import annotations
 import functools
 import re
 from dataclasses import dataclass
+from enum import Enum
+
+
+class EndpointKind(str, Enum):
+    """What a write endpoint creates/touches — drives quota accounting (R5)."""
+
+    MERGE = "merge"
+    MR = "mr"
+    NOTE = "note"
+    MR_UPDATE = "mr_update"
+    PIPELINE = "pipeline"
 
 
 @dataclass(frozen=True)
@@ -18,7 +29,7 @@ class WriteEndpoint:
     template: str  # e.g. "/projects/{id}/merge_requests"
     checks: tuple[str, ...]  # pure check names evaluated in policy.decide
     rule: str  # R-id for the audit log
-    kind: str  # 'mr' | 'note' | 'pipeline' | 'merge' | ... — for quota accounting
+    kind: EndpointKind  # for quota accounting
 
     @functools.cached_property
     def regex(self) -> re.Pattern[str]:
@@ -41,11 +52,11 @@ class WriteEndpoint:
 WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
     # Merge — ALWAYS forbidden (R4). Listed first so it can never be shadowed.
     WriteEndpoint(
-        "PUT", "/projects/{id}/merge_requests/{iid}/merge", ("ALWAYS_DENY",), "R4", "merge"
+        "PUT", "/projects/{id}/merge_requests/{iid}/merge", ("ALWAYS_DENY",), "R4", EndpointKind.MERGE
     ),
     # Create MR — only if source_branch carries the prefix (R2/R3).
     WriteEndpoint(
-        "POST", "/projects/{id}/merge_requests", ("src_branch_prefix",), "R3", "mr"
+        "POST", "/projects/{id}/merge_requests", ("src_branch_prefix",), "R3", EndpointKind.MR
     ),
     # Note/comment — only on an MR owned by Claude.
     WriteEndpoint(
@@ -53,7 +64,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "/projects/{id}/merge_requests/{iid}/notes",
         ("mr_owned_by_claude",),
         "R3",
-        "note",
+        EndpointKind.NOTE,
     ),
     # Edit MR (incl. close) — same ownership, and never a merge intent.
     WriteEndpoint(
@@ -61,11 +72,11 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "/projects/{id}/merge_requests/{iid}",
         ("mr_owned_by_claude", "not_merge_intent"),
         "R3",
-        "mr_update",
+        EndpointKind.MR_UPDATE,
     ),
     # Trigger CI — pipeline on a claude/* ref.
     WriteEndpoint(
-        "POST", "/projects/{id}/pipeline", ("ref_prefix",), "R3", "pipeline"
+        "POST", "/projects/{id}/pipeline", ("ref_prefix",), "R3", EndpointKind.PIPELINE
     ),
 )
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Optional
 
-from .allowlist import WriteEndpoint, match_endpoint
+from .allowlist import EndpointKind, WriteEndpoint, match_endpoint
 from .config import Config
 from .pktline import RefCommand
 
@@ -21,6 +21,13 @@ class TokenKind(str, Enum):
     READ = "READ"
     WRITE = "WRITE"
     NONE = "NONE"
+
+
+class Channel(str, Enum):
+    """The proxy path a request arrived on."""
+
+    API = "api"  # REST reverse-proxy (api_proxy)
+    GIT = "git"  # git Smart-HTTP proxy (git_proxy)
 
 
 @dataclass(frozen=True)
@@ -45,7 +52,7 @@ class StateView:
 class ProxyRequest:
     """The parsed intent handed to :func:`decide` — no transport state."""
 
-    channel: str  # 'api' | 'git' TODO: make this enum
+    channel: Channel
     project: str
     method: str = ""
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
@@ -116,13 +123,13 @@ def project_gate(project: str, cfg: Config) -> Optional[Decision]:
 
 def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     """Default-deny. Every allow path is explicit (W5)."""
-    if req.channel == "git":
+    if req.channel == Channel.GIT:
         # git always targets a concrete project — it must be allowlisted (R6).
         denied = project_gate(req.project, cfg)
         if denied is not None:
             return denied
         return _decide_git(req, state, cfg)
-    if req.channel == "api":
+    if req.channel == Channel.API:
         # Project allowlist applies where a project id appears in the path (W6.4).
         denied = project_gate(req.project, cfg)
         if denied is not None:
@@ -204,6 +211,6 @@ def _quota_check(ep: WriteEndpoint, state: StateView, cfg: Config) -> Optional[D
         return Decision(False, "R5", "state locked (fail-safe) — reconcile pending")
     if state.writes_last_hour >= cfg.max_writes_per_hour:
         return Decision(False, "R5", f"rate limit reached ({cfg.max_writes_per_hour}/h)")
-    if ep.kind == "mr" and state.open_mrs >= cfg.max_open_mrs:
+    if ep.kind == EndpointKind.MR and state.open_mrs >= cfg.max_open_mrs:
         return Decision(False, "R5", f"max open MRs reached ({cfg.max_open_mrs})")
     return None

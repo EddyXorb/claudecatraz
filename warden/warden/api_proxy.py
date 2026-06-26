@@ -20,7 +20,7 @@ from starlette.responses import StreamingResponse
 from .allowlist import match_endpoint
 from .context import AppContext
 from .errors import deny_json
-from .policy import Decision, ProxyRequest, TokenKind, decide
+from .policy import Channel, Decision, ProxyRequest, TokenKind, decide
 from .upstream import stream_upstream
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
@@ -87,7 +87,7 @@ async def handle(request: Request) -> StreamingResponse:
     ep = None if method in ("GET", "HEAD", "OPTIONS") else match_endpoint(method, rest_path)
     iid = _iid_from_path(rest_path)
     req = ProxyRequest(
-        channel="api",
+        channel=Channel.API,
         project=project,
         method=method,
         path=rest_path,

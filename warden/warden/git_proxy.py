@@ -17,7 +17,7 @@ from starlette.responses import Response
 from .context import AppContext
 from .errors import deny_json, git_reject_response
 from .pktline import capabilities, parse_commands, read_until_flush
-from .policy import ProxyRequest, TokenKind, check_ref, decide, project_gate
+from .policy import Channel, ProxyRequest, TokenKind, check_ref, decide, project_gate
 from .upstream import stream_upstream
 
 
@@ -104,7 +104,7 @@ async def receive_pack(request: Request) -> Response:
     sideband = "side-band-64k" in caps or "side-band" in caps
 
     req = ProxyRequest(
-        channel="git", project=project, method="POST", ref_commands=commands
+        channel=Channel.GIT, project=project, method="POST", ref_commands=commands
     )
     state = ctx.state.view()
     decision = decide(req, state, ctx.cfg)
