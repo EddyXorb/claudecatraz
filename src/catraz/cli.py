@@ -37,12 +37,6 @@ from catraz.doctor import (
 )
 from catraz import auth, image
 
-COMPONENT_VARS = [
-    "UV_VERSION", "CLANG_VERSION", "RUST_VERSION",
-    "CONAN_VERSION", "NODE_VERSION", "CLAUDE_CODE_VERSION",
-]
-
-
 # ── styling ───────────────────────────────────────────────────────────────────
 
 class Out:
@@ -482,12 +476,6 @@ def cmd_prune(root, args, out):
 
 def cmd_version(root, out):
     print(f"catraz {__version__}")
-    env = load_env(root / ".catraz" / ".env") if root else {}
-    if env:
-        out.head("\nComponent versions (.env)")
-        for k in COMPONENT_VARS:
-            if env.get(k):
-                print(f"  {k:<20} {env[k]}")
 
 
 # ── argument parsing ────────────────────────────────────────────────────────────

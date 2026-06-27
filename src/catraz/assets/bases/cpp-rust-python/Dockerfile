@@ -10,16 +10,19 @@ RUN apt-get update && apt-get install -y \
     libssl-dev libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Python tools — system-wide so any user can call them
-ARG UV_VERSION
-ARG CONAN_VERSION
+# Python tools — system-wide so any user can call them.
+# Toolchain versions are an internal detail of THIS base image and live here, not in
+# .env: a swapped-in BASE_IMAGE/BASE_DOCKERFILE has its own, so they don't belong in
+# the user-facing secrets/infra file. Override per-build with --build-arg if needed.
+ARG UV_VERSION=0.10.11
+ARG CONAN_VERSION=2.23.0
 
 ENV CONAN_REVISIONS_ENABLED=1
 
 RUN pip install --break-system-packages uv==${UV_VERSION} conan==${CONAN_VERSION}
 
 # LLVM
-ARG CLANG_VERSION
+ARG CLANG_VERSION=20
 
 RUN apt-get update && \
     wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && ./llvm.sh ${CLANG_VERSION} all && \
@@ -30,7 +33,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Rust — install to global paths so the non-root dev user can use it
-ARG RUST_VERSION
+ARG RUST_VERSION=1.94.0
 
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
