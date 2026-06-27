@@ -65,6 +65,10 @@ services:
     restart: unless-stopped
 
   claude-dev-env:
+    # Agent daemon only starts under the `remote` profile: a profile-less `up`
+    # brings up warden+squid only. `docker compose run claude-dev-env` (catraz local)
+    # activates the service despite the profile.
+    profiles: ["remote"]
     build:
       context: ..
       dockerfile: claude-layer/Dockerfile

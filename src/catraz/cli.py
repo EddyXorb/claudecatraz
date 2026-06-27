@@ -286,7 +286,8 @@ def cmd_up(root, args, out):
         out.err(str(e))
         return EXIT_DOCTOR
 
-    up_args = ["up", "-d"]
+    # --profile is a top-level compose flag and must precede the `up` subcommand.
+    up_args = (["--profile", "remote"] if args.remote else []) + ["up", "-d"]
     if args.build:
         up_args.append("--build")
     if args.pull:
@@ -371,6 +372,9 @@ def _print_urls(out):
           + out.dim("  (the agent 'claude-dev-env' registers there)"))
     print("  Audit viewer:    " + out.cyan("catraz audit --web")
           + out.dim("   (host-only, ephemeral loopback port)"))
+    # Plain `up` runs infra only (warden+squid). The agent is opt-in:
+    print("  Agent daemon:    " + out.cyan("catraz up --remote")
+          + out.dim("   ·   interactive: ") + out.cyan("catraz local"))
 
 
 def cmd_logs(root, args, out):
@@ -506,6 +510,8 @@ def build_parser():
     pu = sub.add_parser("up", parents=[_g()], help="start the stack, wait for health, print URLs")
     pu.add_argument("--build", action="store_true", help="rebuild images first")
     pu.add_argument("--pull", action="store_true", help="pull base images first")
+    pu.add_argument("--remote", action="store_true",
+                    help="also start the agent daemon (remote-control)")
     pu.add_argument("--no-wait", action="store_true", help="don't wait for health")
     pu.add_argument("--timeout", type=int, default=120, help="health-wait limit (s)")
 
