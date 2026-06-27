@@ -56,76 +56,29 @@ def cmd_sync(claude_home: Path) -> None:
 # ── container startup ─────────────────────────────────────────────────────────
 
 
-def ensure_claude_json(claude_home: Path) -> None:
-    """
-    Claude Code stores onboarding/subscription state in ~/.claude.json (next to ~/.claude/).
-    Our bind mount only covers ~/.claude/ (the directory), so we store it as
-    ~/.claude/.claude.json and symlink it into place at startup.
-
-    Claude Code never persists `bypassPermissionsModeAccepted`, so spawned RC sessions
-    would hang waiting for a one-time accept prompt that never appears.  We force the
-    key to true every startup, before execvp.
-    """
-    home = Path.home()
-    stored = claude_home / ".claude.json"
-    target = home / ".claude.json"
-
-    if not (target.exists() or target.is_symlink()):
-        if not stored.exists():
-            stored.parent.mkdir(parents=True, exist_ok=True)
-            stored.write_text(
-                json.dumps({"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
-                           indent=2)
-            )
-        target.symlink_to(stored)
-
-    # The file exists – patch the two fields that Claude Code never writes back.
-    actual = stored if target.is_symlink() else target
-    if actual.exists():
-        data = read_json(actual)
-        changed = False
-        for key in ("bypassPermissionsModeAccepted", "remoteDialogSeen"):
-            if not data.get(key):
-                data[key] = True
-                changed = True
-        projects = data.setdefault("projects", {})
-        ws = projects.setdefault("/workspace", {})
-        if not ws.get("hasTrustDialogAccepted"):
-            ws["hasTrustDialogAccepted"] = True
-            changed = True
-        if changed:
-            actual.write_text(json.dumps(data, indent=2))
-
-
-def ensure_agent_memory(claude_home: Path) -> None:
-    """Inject the image-baked harness doc as user memory (~/.claude/CLAUDE.md).
-
-    The doc lives in the image (/opt/claude-dev-env/AGENT.md) so it is versioned with
-    the harness, not with any mounted project. /workspace and ~/.claude are both bind
-    mounts and would shadow image content, so we materialize the file at startup into
-    CLAUDE_HOME — the User-Memory tier, which applies across every mounted project and
-    can never leak into a project repo. Overwritten every start to track the image."""
-    src = Path("/opt/claude-dev-env/AGENT.md")
-    if not src.exists():
-        return
-    claude_home.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, claude_home / "CLAUDE.md")
-
-
-def ensure_settings(claude_home: Path) -> None:
-    p = claude_home / "settings.json"
-    if p.exists():
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        json.dumps(
-            {
-                "theme": "dark",
-                "hasCompletedOnboarding": True,
-            },
-            indent=2,
-        )
-    )
+def build_home(home: Path, mode: str) -> None:
+    """Build the tmpfs Claude-home each start. RO sources live under home/.ro/."""
+    home.mkdir(parents=True, exist_ok=True)
+    ro = home / ".ro"
+    if mode == "subscription":
+        src = ro / ".credentials.json"
+        if not src.exists():
+            sys.exit("error: subscription mode but no .credentials.json mounted (run `catraz sync`)")
+        shutil.copy2(src, home / ".credentials.json")
+    # .claude.json lives at the HOME ROOT (sibling of ~/.claude), NOT inside the tmpfs dir.
+    if mode == "subscription" and (ro / ".claude.json").exists():
+        data = read_json(ro / ".claude.json")
+    else:
+        data = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
+    data["bypassPermissionsModeAccepted"] = True
+    data["remoteDialogSeen"] = True
+    data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
+    (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
+    (home / "settings.json").write_text(
+        json.dumps({"theme": "dark", "hasCompletedOnboarding": True}, indent=2))
+    agent_md = Path("/opt/claude-dev-env/AGENT.md")
+    if agent_md.exists():
+        shutil.copy2(agent_md, home / "CLAUDE.md")
 
 
 def configure_git_warden() -> None:
@@ -173,32 +126,13 @@ def drop_to_dev() -> None:
 
 def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
-    creds = claude_home / ".credentials.json"
-    if not creds.exists():
-        sys.exit(
-            f"error: {creds} not found.\n"
-            f"Run on the host first:\n"
-            f"  python3 entrypoint.py sync"
-        )
-
-    ensure_claude_json(claude_home)
-    ensure_settings(claude_home)
-    ensure_agent_memory(claude_home)
+    mode = os.environ.get("AUTH_MODE", "subscription")
+    if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
+    build_home(claude_home, mode)
     configure_git_warden()
-
-    os.execvp(
-        "claude",
-        [
-            "claude",
-            "remote-control",
-            "--permission-mode",
-            "bypassPermissions",
-            "--spawn",
-            "same-dir",
-            "--debug-file",
-            str(claude_home / "rc-debug.log"),
-        ],
-    )
+    os.execvp("claude", ["claude", "remote-control", "--permission-mode", "bypassPermissions",
+                         "--spawn", "same-dir", "--debug-file", str(claude_home / "rc-debug.log")])
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
