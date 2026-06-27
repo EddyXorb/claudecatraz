@@ -7,7 +7,7 @@ eigenständig umsetzbar — man muss das Hauptdokument nicht lesen. Reihenfolge 
 | Doc | Liefert |
 | --- | ------- |
 | [`01-packaging.md`](./01-packaging.md) | Installierbares Paket (`uv tool install`), `src/catraz/`-Layout, Assets, Asset-Cache, Root-Shim |
-| [`02-catraz-home.md`](./02-catraz-home.md) | `.catraz/`-Heim, `find_root` aufwärts, Compose aus Asset, `init`/`migrate`, `.gitignore` |
+| [`02-catraz-home.md`](./02-catraz-home.md) | `.catraz/`-Heim, `find_root` aufwärts, Compose aus Asset, `init`/`migrate`, `.gitignore`, Admin/Audit über Unix-Socket (löst Parallel-Kollision) |
 | [`03-shadow-mount.md`](./03-shadow-mount.md) | tmpfs-Shadow `/workspace/.catraz`, Quellpfad-Symlink-Guard, Red-Team T1–T9 |
 | [`04-auth-entrypoint.md`](./04-auth-entrypoint.md) | `AUTH_MODE`-XOR, RO-Home-Topologie, Entrypoint-Umbau, `.claude.json`-Provisionierung |
 | [`05-image-layering.md`](./05-image-layering.md) | Claude-Layer `FROM ${BASE_IMAGE}`, Default-Base, `BASE_*`-Modi, `doctor base` |

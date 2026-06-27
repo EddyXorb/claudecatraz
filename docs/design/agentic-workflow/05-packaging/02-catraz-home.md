@@ -13,6 +13,7 @@ ohne Trailer.
 ├── config/{warden.toml,allowlist.txt,squid.conf}   # editierbare Kopien, ro gemountet
 ├── claude/              # Claude-Home-Quellen
 ├── state/warden/        # SQLite
+├── run/warden/          # Admin-Unix-Socket (admin.sock) — ersetzt admin-net (Commit 2.4)
 └── logs/{warden,squid}/ # Audit
 ```
 
@@ -47,6 +48,25 @@ ohne Trailer.
     - ${PROJECT_DIR}/.catraz/config/allowlist.txt:/etc/squid/allowlist.txt:ro
     - ${PROJECT_DIR}/.catraz/logs/squid:/var/log/squid
     ```
+  - **`admin-net` ersatzlos entfernen** (Block unter `networks:` **und** aus
+    `warden.networks`), ebenso die `warden`-Zeilen `ipv4_address: 172.31.0.2` und
+    `ADMIN_HOST=172.31.0.2`. Stattdessen am `warden`-Service:
+    ```yaml
+    networks: [agent-net, egress-net]
+    environment:
+      - ADMIN_UDS=/run/warden/admin.sock          # Admin/Viewer über Unix-Socket (Commit 2.4)
+    volumes:
+      - ${PROJECT_DIR}/.catraz/run/warden:/run/warden   # Socket-Verzeichnis (Datei entsteht zur Laufzeit)
+    healthcheck:
+      test: ["CMD","python3","-c","import socket;socket.socket(socket.AF_UNIX).connect('/run/warden/admin.sock')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    ```
+    Damit gibt es **kein** festes Subnetz/keine feste IP mehr → parallele Sandboxes
+    kollidieren nicht (jeder Socket liegt in seinem eigenen `.catraz/run/warden/`). Die
+    Warden-Code-Seite folgt in Commit 2.4.
   - `Dockerfile`-COPY-Pfade anpassen (Kontext ist jetzt `assets/`): `COPY container/entrypoint.py
     /entrypoint.py`, `COPY AGENT.md /opt/claude-dev-env/AGENT.md`.
   - **`src/catraz/assets/.dockerignore`** anlegen, das den Agent-Build verschlankt:
@@ -175,8 +195,8 @@ def test_nested_catraz_refused(tmp_path):
 
 **`cli.cmd_init`** umschreiben (Wizard-Prompts/Validierung aus Doc 01 behalten, nur Ziele
 ändern):
-1. `<root>/.catraz/` + Unterordner (`config state/warden logs/warden logs/squid claude`)
-   anlegen, `chown` `DEV_UID`.
+1. `<root>/.catraz/` + Unterordner (`config state/warden logs/warden logs/squid claude
+   run/warden`) anlegen, `chown` `DEV_UID`.
 2. `config/`-Vorlagen aus `asset_root()/assets/config/*` nach `.catraz/config/` kopieren
    (nur falls nicht vorhanden).
 3. `.catraz/.env` aus `asset_root()/assets/.env.example` seeden (falls fehlt).
@@ -225,10 +245,100 @@ def test_migrate_moves_and_gitignores(tmp_path):
 
 `commit: "feat(cli): init creates .catraz home; add migrate and gitignore handling"`
 
+## Commit 2.4 — Admin/Audit über Unix-Socket (löst die Parallel-Kollision)
+
+Der Admin-/Viewer-Server (Port 9090) wandert von TCP+`admin-net` auf einen **Unix-Socket in
+`.catraz/run/warden/`**. Kein Subnetz, keine IP, kein Port → parallele Sandboxes
+kollisionsfrei (jeder Socket ist eine Datei im eigenen `.catraz`). Der Agent mountet das
+Verzeichnis nie → keine Route dorthin (strikt sicherer als der bisherige Admin-TCP).
+
+**Warden `warden/warden/__main__.py`** — Admin-Server auf UDS binden, wenn `ADMIN_UDS` gesetzt
+ist (Proxy auf `:8080`/`agent-net` **unverändert**):
+```python
+import contextlib, os
+...
+    admin_uds = os.environ.get("ADMIN_UDS")
+    if admin_uds:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(admin_uds)                      # stale socket von Crash entfernen
+        admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
+    else:
+        admin_config = uvicorn.Config(create_admin_app(ctx),
+                                      host=cfg.admin_host, port=cfg.admin_port, log_level="warning")
+    admin = uvicorn.Server(admin_config)
+```
+**`warden/docker-entrypoint.sh`** — Socket-Verzeichnis dem Warden-User geben:
+```sh
+chown -R warden:warden /var/lib/warden /var/log/warden /run/warden 2>/dev/null || true
+```
+
+**`src/catraz/cli.py`** — `AUDIT_URL`-Konstante entfernen; neuer Befehl `catraz audit`
+(Imports oben in `cli.py` ergänzen: `contextlib, socket, socketserver, threading, webbrowser`):
+```python
+
+class _UdsProxy(socketserver.BaseRequestHandler):
+    sock_path = ""           # per-instance via type(...)
+    def handle(self):
+        with socket.socket(socket.AF_UNIX) as up:
+            up.connect(self.sock_path)
+            def fwd(a, b):
+                try:
+                    while (d := a.recv(65536)): b.sendall(d)
+                except OSError: pass
+                finally:
+                    with contextlib.suppress(OSError): b.shutdown(socket.SHUT_WR)
+            t = threading.Thread(target=fwd, args=(self.request, up), daemon=True); t.start()
+            fwd(up, self.request); t.join()
+
+def cmd_audit(root, args, out):
+    sock = root / ".catraz/run/warden/admin.sock"
+    if not args.web:
+        return _tail_audit(root, args, out)            # bestehender JSONL-Tail
+    if not sock.exists():
+        out.err("audit socket not found — run `catraz up` first"); return EXIT_GENERAL
+    handler = type("H", (_UdsProxy,), {"sock_path": str(sock)})
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)   # ephemerer Port
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    out.info(f"audit viewer: {url}  (Ctrl-C to stop)"); webbrowser.open(url)
+    try: srv.serve_forever()
+    except KeyboardInterrupt: srv.shutdown()
+    return EXIT_OK
+```
+Parser: `pa = sub.add_parser("audit", parents=[_g()]); pa.add_argument("--web", action="store_true");
+pa.add_argument("-f","--follow",action="store_true"); pa.add_argument("--tail",type=int,default=100)`.
+In `main` dispatchen. **`_print_urls`**: die alte `172.31.0.2:9090`-Zeile ersetzen durch
+`"Audit viewer:  catraz audit --web   (host-only, ephemeral loopback port)"`.
+**`_doctor_fix`**/Dir-Liste: `.catraz/run/warden` aufnehmen.
+
+**Tests `tests/cli/test_audit.py`** (kein Docker — echten UDS lokal mocken):
+```python
+import socket, threading, urllib.request
+from catraz import cli
+
+def test_audit_web_forwards_to_uds(tmp_path):
+    sockdir = tmp_path/".catraz/run/warden"; sockdir.mkdir(parents=True)
+    sp = sockdir/"admin.sock"
+    srv = socket.socket(socket.AF_UNIX); srv.bind(str(sp)); srv.listen()
+    def serve():
+        c,_ = srv.accept()
+        c.recv(1024); c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"); c.close()
+    threading.Thread(target=serve, daemon=True).start()
+    import socketserver
+    h = type("H",(cli._UdsProxy,),{"sock_path":str(sp)})
+    fwd = socketserver.ThreadingTCPServer(("127.0.0.1",0), h)
+    threading.Thread(target=fwd.serve_forever, daemon=True).start()
+    body = urllib.request.urlopen(f"http://127.0.0.1:{fwd.server_address[1]}/").read()
+    assert body == b"ok"; fwd.shutdown()
+```
+
+`commit: "feat(warden): serve admin over unix socket; catraz audit --web forwarder"`
+
 ## Akzeptanz Doc 02
 - Unit-Tests grün.
-- In leerem tmp-Repo: `catraz -C <dir> init` (mit `-y`/env) erzeugt vollständiges `.catraz/`.
+- In leerem tmp-Repo: `catraz -C <dir> init` (mit `-y`/env) erzeugt vollständiges `.catraz/`
+  inkl. `run/warden/`.
 - `catraz -C <dir> up --print` zeigt `docker compose -f …/assets/compose/docker-compose.yml
   --project-directory <dir> --env-file <dir>/.catraz/.env up -d`.
-- **Bekannte, später adressierte Grenze:** der hartkodierte `admin-net 172.31.0.2` kollidiert
-  bei *parallelen* Sandboxes — als Issue notieren, nicht hier lösen.
+- **Parallel-Kollision gelöst:** zwei `.catraz`-Projekte in verschiedenen Ordnern lassen sich
+  gleichzeitig hochfahren; jedes hat seinen eigenen `admin.sock`; `catraz audit --web` öffnet
+  je einen ephemeren Loopback-Port. Kein `admin-net`, keine feste IP mehr.
