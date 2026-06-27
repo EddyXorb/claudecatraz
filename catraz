@@ -229,33 +229,22 @@ def check_docker(f):
         f.ok("docker", "Compose v2 present")
 
 
-def active_profiles(root, env):
-    raw = os.environ.get("COMPOSE_PROFILES") or env.get("COMPOSE_PROFILES", "")
-    return [p.strip() for p in raw.split(",") if p.strip()]
-
-
 def check_compose(root, env, f):
-    """The platonic silent failure: stack 'up' with no warden (trust boundary gone).
-    claude-dev-env depends_on gitlab-warden is required:false, so compose won't warn."""
-    profiles = active_profiles(root, env)
-    if "warden" not in profiles:
-        f.bad(
-            "compose",
-            f"COMPOSE_PROFILES={profiles or '∅'} does not enable the warden",
-            "set COMPOSE_PROFILES=warden in .env — without it the stack starts "
-            "WITHOUT the GitLab trust boundary",
-        )
-        return
+    """Sanity check that the warden — the trust boundary — resolves in the compose
+    config. It's unconditional now (no profile gate), so its absence means someone
+    edited it out; agent depends_on gitlab-warden, so the stack would fail closed."""
     if not which("docker"):
         f.warn("compose", "cannot confirm services (docker missing)")
         return
     r = compose(root, ["config", "--services"], capture=True, check=False)
     services = r.stdout.split() if r and r.returncode == 0 else []
-    if services and "gitlab-warden" not in services:
-        f.bad("compose", "gitlab-warden not in the resolved compose config",
-              "check `profiles:` on the warden service")
+    if not services:
+        f.warn("compose", "could not resolve compose services")
+    elif "gitlab-warden" not in services:
+        f.bad("compose", "gitlab-warden missing from the compose config",
+              "the warden is the trust boundary — it must always be a service")
     else:
-        f.ok("compose", "warden is in the active profile")
+        f.ok("compose", "warden service present")
 
 
 def check_env(root, env, f):

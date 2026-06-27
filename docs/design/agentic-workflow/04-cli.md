@@ -81,7 +81,7 @@ Ein Review-Durchgang („roast") hat die erste Vereinfachung hart geprüft. Die
 | ------ | ---------- |
 | **`init → up` scheitert für jeden:** Der Wizard fragte 3 Secrets, aber **nicht** `allowed_projects` — und der Warden startet bei leerer Allowlist gar nicht (fail-closed). Der Vorzeige-Pfad brach also auf Befehl zwei. | `init` fragt jetzt zusätzlich die **erlaubten Projekt-Pfade** ab, validiert sie (kein Wildcard/Leaf/Group-Präfix) und schreibt sie als `WARDEN_ALLOWED_PROJECTS` nach `.env`. Damit ist der validierte Konstruktionsfall abgedeckt. |
 | **`sync` versteckt:** Credential-Ablauf ist wiederkehrende Wartung. | `sync` bleibt eigener Befehl (s. o.). |
-| **Stummster Fehler fehlte in `doctor`:** Ist `COMPOSE_PROFILES` leer/verbogen, startet der Stack **ohne Warden** (`depends_on … required: false`) — „läuft", aber ohne Vertrauensgrenze. | Neuer `doctor`-Check `compose`: prüft, dass der Warden im aktiven Profil ist. |
+| **Stummer Fehler in `doctor` abgefangen:** Fehlt der Warden in der Compose-Auflösung, startet der Stack ohne Vertrauensgrenze. | `doctor`-Check `compose`: prüft, dass der Warden-Service vorhanden ist. (Der Warden ist inzwischen **unbedingt** im Compose-File — das frühere `warden`-Profil wurde entfernt, da man ihn immer will.) |
 | **Token-Check war Theater** („gesetzt/nicht gesetzt" fängt den realen Fehler — vertauschte/abgelaufene/falsch-gescopte Tokens — nicht). | `doctor tokens` macht eine **Best-Effort-Online-Probe** vom Host (`/api/v4/user` + Scope-Read), erkennt ungültige/vertauschte Tokens; fällt offline sauber auf „gesetzt/nicht gesetzt" zurück. |
 | **Generischer Owner-Check** statt der *konkreten* Falle, die `entrypoint.py` schon kennt (von Docker als root angelegtes `CLAUDE_HOME`). | `doctor` portiert genau diesen Guard. |
 | **`catraz` ohne Argument startete einen mutierenden Wizard** (überraschend, fragt Secrets). | Ohne Argument → **Hilfe** (read-only, mutiert nie). |
@@ -178,7 +178,7 @@ Einzeiler-Begründung **und** Fix-Hinweis.
 | Sektion | Checks |
 | ------- | ------ |
 | `docker` | Docker-Daemon läuft, Compose v2 vorhanden. |
-| `compose` | `COMPOSE_PROFILES`/Compose-Auflösung enthält den **Warden** — sonst „läuft" der Stack ohne Vertrauensgrenze (`depends_on … required: false`). |
+| `compose` | Die Compose-Auflösung enthält den **Warden**-Service — sonst „läuft" der Stack ohne Vertrauensgrenze. (Der Warden ist unbedingt im Compose-File; der Agent hängt per `depends_on` an ihm.) |
 | `env` | `.env` existiert, `DEV_UID` == Owner der Bind-Mounts, Schreib-Dirs vorhanden. |
 | `tokens` | `ANTHROPIC_API_KEY` + beide GitLab-Tokens gesetzt (Wert wird nie ausgegeben). **Best-Effort-Online-Probe** vom Host gegen `GITLAB_URL`: Token gültig/nicht abgelaufen, Scopes plausibel (Read-Token nicht `api`-schreibend, Write-Token mit `api`), vertauschte Tokens erkannt. Offline → Rückfall auf „gesetzt/nicht gesetzt". |
 | `policy` | resolvierte `allowed_projects` (`.env`-Override *oder* `warden.toml`) ohne Wildcard/Leaf/Group-Präfix und nicht leer (sonst startet Warden nicht); Limits numerisch. Schneller Vor-Check — maßgeblich bleibt der Warden-Reconcile. |

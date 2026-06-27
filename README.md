@@ -94,7 +94,7 @@ There are **two** configuration homes, with one source of truth per setting — 
 
 | Where | Holds | Visibility |
 | ----- | ----- | ---------- |
-| **`.env`** (gitignored) | **Secrets** (Anthropic + GitLab tokens), infra (`GITLAB_URL`), and the compose profile | host only |
+| **`.env`** (gitignored) | **Secrets** (Anthropic + GitLab tokens) and infra (`GITLAB_URL`) | host only |
 | **`config/warden.toml`** (version-controlled) | **Non-secret policy** — branch prefix, R5 limits, allowed projects | mounted read-only into the Warden |
 
 ```dotenv
@@ -102,7 +102,6 @@ There are **two** configuration homes, with one source of truth per setting — 
 ANTHROPIC_API_KEY=                 # dedicated sandbox account, NEVER your primary one (§3.2)
 GITLAB_READ_TOKEN=                 # scopes: read_api, read_repository  — only the Warden (R6)
 GITLAB_WRITE_TOKEN=                # scopes: api (service account / Developer)
-COMPOSE_PROFILES=warden            # enables the warden container
 ```
 
 ```toml

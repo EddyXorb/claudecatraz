@@ -47,9 +47,9 @@ jobs:
           print("vars exported:", ", ".join(sorted(seen)), file=sys.stderr)
           EOF
 
-      - name: Validate compose syntax (all profiles)
+      - name: Validate compose syntax
         run: |
-          docker compose --env-file /tmp/ci.env --profile warden config --quiet
+          docker compose --env-file /tmp/ci.env config --quiet
           echo "docker compose config: OK"
 
   env-coverage:
