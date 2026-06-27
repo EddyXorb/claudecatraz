@@ -4,14 +4,14 @@ on:
   push:
     paths:
       - "forward-proxy/**"
-      - "config/squid.conf"
-      - "config/allowlist.txt"
+      - "src/catraz/assets/config/squid.conf"
+      - "src/catraz/assets/config/allowlist.txt"
       - ".github/workflows/squid-ci.yml"
   pull_request:
     paths:
       - "forward-proxy/**"
-      - "config/squid.conf"
-      - "config/allowlist.txt"
+      - "src/catraz/assets/config/squid.conf"
+      - "src/catraz/assets/config/allowlist.txt"
       - ".github/workflows/squid-ci.yml"
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
           python3 - <<'EOF'
           import re, sys
           errors = []
-          with open("config/allowlist.txt") as f:
+          with open("src/catraz/assets/config/allowlist.txt") as f:
               for lineno, raw in enumerate(f, 1):
                   line = raw.rstrip("\n")
                   if line.startswith("#") or not line.strip():
@@ -61,12 +61,12 @@ jobs:
       - name: squid.conf sanity checks
         run: |
           # Pflichtzeilen: Port, default-deny, kein Cache
-          grep -q '^http_port'             config/squid.conf || { echo "FAIL: http_port missing"; exit 1; }
-          grep -q '^http_access deny all'  config/squid.conf || { echo "FAIL: default-deny missing"; exit 1; }
-          grep -q '^cache deny all'        config/squid.conf || { echo "FAIL: cache deny all missing"; exit 1; }
+          grep -q '^http_port'             src/catraz/assets/config/squid.conf || { echo "FAIL: http_port missing"; exit 1; }
+          grep -q '^http_access deny all'  src/catraz/assets/config/squid.conf || { echo "FAIL: default-deny missing"; exit 1; }
+          grep -q '^cache deny all'        src/catraz/assets/config/squid.conf || { echo "FAIL: cache deny all missing"; exit 1; }
           # SNI-peek muss vor ssl_bump splice stehen
-          peek_line=$(grep -n '^ssl_bump peek'   config/squid.conf | head -1 | cut -d: -f1)
-          splice_line=$(grep -n '^ssl_bump splice' config/squid.conf | head -1 | cut -d: -f1)
+          peek_line=$(grep -n '^ssl_bump peek'   src/catraz/assets/config/squid.conf | head -1 | cut -d: -f1)
+          splice_line=$(grep -n '^ssl_bump splice' src/catraz/assets/config/squid.conf | head -1 | cut -d: -f1)
           [ -n "$peek_line" ] && [ -n "$splice_line" ] || { echo "FAIL: ssl_bump peek/splice missing"; exit 1; }
           [ "$peek_line" -lt "$splice_line" ] || { echo "FAIL: ssl_bump peek must come before splice"; exit 1; }
           echo "squid.conf: all checks passed"
@@ -91,8 +91,8 @@ jobs:
           mkdir -p /tmp/squid-logs
           docker run -d --name squid-ci \
             -p 3128:3128 \
-            -v "$PWD/config/squid.conf:/etc/squid/squid.conf:ro" \
-            -v "$PWD/config/allowlist.txt:/etc/squid/allowlist.txt:ro" \
+            -v "$PWD/src/catraz/assets/config/squid.conf:/etc/squid/squid.conf:ro" \
+            -v "$PWD/src/catraz/assets/config/allowlist.txt:/etc/squid/allowlist.txt:ro" \
             -v "/tmp/squid-logs:/var/log/squid" \
             --tmpfs /var/spool/squid \
             --tmpfs /var/run \

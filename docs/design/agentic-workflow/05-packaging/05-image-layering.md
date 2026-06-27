@@ -50,6 +50,13 @@ Commits ohne Trailer.
   `claude-layer/` **nicht** ausgeschlossen ist (es ist das Dockerfile-Verzeichnis, Kontext
   bleibt `..`).
 
+> **Korrektur B3:** Sobald der Claude-Layer ein `ENTRYPOINT` hat, **muss** die `command:`-Zeile
+> aus dem Compose-Service `claude-dev-env` entfernt werden. Bleibt sie stehen, hängt Docker
+> das `command` als Argumente an den ENTRYPOINT — `python3 /entrypoint.py python3
+> /entrypoint.py` — und argparse bricht ab. In der Umsetzung wurde `command:` entfernt;
+> diese Korrektur gehört in den Commit, der den `claude-layer/Dockerfile` mit `ENTRYPOINT`
+> einführt.
+
 **Tests `tests/cli/test_image_assets.py`:**
 ```python
 from catraz.paths import asset_root
@@ -128,8 +135,11 @@ def test_tag_is_content_addressed(tmp_path, monkeypatch):
     df = tmp_path / "Dockerfile"; df.write_text("FROM ubuntu:24.04\n")
     seen = {}
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
-    monkeypatch.setattr(image.subprocess, "run",
-        lambda cmd, **k: seen.setdefault("tag", cmd[cmd.index("-t")+1]) or type("R",(),{"returncode":0})())
+
+    def fake_run(cmd, **k):
+        seen.setdefault("tag", cmd[cmd.index("-t") + 1])
+        return type("R", (), {"returncode": 0})()
+    monkeypatch.setattr(image.subprocess, "run", fake_run)
     image._build_base(df)
     assert seen["tag"].startswith("catraz-base:") and len(seen["tag"].split(":")[1]) == 12
 
@@ -137,6 +147,12 @@ def test_resolve_prefers_base_image(tmp_path):
     (tmp_path/".catraz").mkdir(); (tmp_path/".catraz/.env").write_text("BASE_IMAGE=x/y:1\n")
     assert image.resolve_base(tmp_path) == "x/y:1"
 ```
+
+> **Korrektur B5:** Das ursprüngliche Lambda `seen.setdefault("tag", …) or type("R",…)()` ist
+> nicht lauffähig: `dict.setdefault` gibt den gespeicherten Wert zurück (truthy String) →
+> `or` schließt kurz und das Lambda liefert den String statt des Fake-Result-Objekts →
+> `AttributeError: 'str' object has no attribute 'returncode'`. Die obige Vorlage ersetzt das
+> Lambda durch eine benannte `fake_run`-Funktion mit identischem Capture-Ziel und Assertion.
 
 `commit: "feat(image): resolve/build base (BASE_IMAGE|BASE_DOCKERFILE|default), prune"`
 

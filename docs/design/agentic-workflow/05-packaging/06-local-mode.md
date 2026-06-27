@@ -158,6 +158,13 @@ def test_local_fails_closed_without_catraz(tmp_path, monkeypatch):
 
 `commit: "feat(cli): catraz local — sandboxed drop-in claude with always-on preflight"`
 
+> **Korrektur B8:** Commit 6.2 legt `tests/container/test_local.py` an, Commit 6.3
+> `tests/cli/test_local.py` — beide haben denselben Basename `test_local`. Pytests
+> Default-Import-Modus `prepend` bricht das Collecting mit „import file mismatch".
+> Die Lösung ist `addopts = "--import-mode=importlib"` in `pyproject.toml`
+> (z. B. unter `[tool.pytest.ini_options]`). Wer die Commits 1:1 abarbeitet, muss diese
+> Option spätestens nach Commit 6.2 ergänzen, bevor 6.3 collectet werden kann.
+
 ## Commit 6.4 — Doku & Alias
 
 - `assets/.env.example`: Kommentar „interaktiv: `catraz local`; Daemon: `catraz up --remote`".
