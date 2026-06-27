@@ -15,6 +15,7 @@ Security-Architektur-Referenz. Stufen 01 und 02 sind implementiert.
 | **03** | [`03-observability.md`](./03-observability.md)             | Log-Viewer + optional Grafana/Loki                      | ⏳      |
 | **03** | [`03-testing-redteam.md`](./03-testing-redteam.md)         | Red-Team-Suite, CI                                      | ⏳      |
 | **04** | [`04-cli.md`](./04-cli.md)                                 | `claudecatraz`-CLI: ein Vordereingang fürs Setup        | ⏳      |
+| **05** | [`05-repackaging.md`](./05-repackaging.md)                 | `catraz` als installierbares Werkzeug, `.catraz/`-Heim, Image-Schichtung, Auth-Modus | ⏳      |
 
 ---
 
