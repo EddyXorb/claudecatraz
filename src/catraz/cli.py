@@ -160,15 +160,28 @@ def cmd_init(root, args, out):
         set_env_values(env_path, updates)
         out.info(f"\n• wrote {len(updates)} value(s) to .env")
 
-    # 5. sync
+    # 5. sync — provision .claude.json no matter the auth mode (so the RO-bind target exists).
+    from catraz.paths import claude_home
+    mode = load_env(env_path).get("AUTH_MODE", "subscription")
     if args.skip_sync:
         out.info("• --skip-sync: skipping Claude credential import")
-    else:
+    elif mode == "subscription":
         out.info("\n• importing Claude credentials (sync)…")
         try:
             _run_sync(root, out)
         except CliError as e:
             out.warn(str(e) + " — run `catraz sync` once authenticated")
+    else:
+        # api_key mode: no subscription credential to sync, but the subscription
+        # RO-bind still targets .catraz/claude/.claude.json — always provision it.
+        ch = claude_home(root)
+        ch.mkdir(parents=True, exist_ok=True)
+        cj = ch / ".claude.json"
+        if not cj.exists():
+            import json
+            cj.write_text(json.dumps(
+                {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2))
+        out.info("• api_key mode: provisioned default .claude.json")
 
     # 6. .gitignore — keep the runtime/secrets home out of version control
     _ensure_gitignore(root)
@@ -223,10 +236,10 @@ def _run_sync(root, out, source=None, force=False):
     from catraz.paths import claude_home
     home = claude_home(root)
     cmd = [sys.executable, str(entry), "sync", "--claude-home", str(home)]
-    run_env = dict(os.environ)
-    if source:
-        run_env["HOME"] = str(Path(source).expanduser().parent)
-    r = subprocess.run(cmd, cwd=root, env=run_env)
+    src = source or env.get("CLAUDE_CREDENTIAL_SOURCE")
+    if src:
+        cmd += ["--from", str(Path(src).expanduser())]
+    r = subprocess.run(cmd, cwd=root, env=dict(os.environ))
     if r.returncode != 0:
         raise CliError("credential sync failed", EXIT_GENERAL)
 
@@ -242,6 +255,17 @@ def cmd_sync(root, args, out):
 
 def cmd_up(root, args, out):
     if not args.print_only:
+        # Auto-sync: in subscription mode, materialize the credential before preflight.
+        # If it stays missing, the "auth" security section fails closed below.
+        from catraz.paths import claude_home
+        mode = load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription")
+        if mode == "subscription" and not (claude_home(root) / ".credentials.json").exists():
+            out.info("• subscription credential missing — attempting sync…")
+            try:
+                _run_sync(root, out)
+            except CliError as e:
+                out.warn(str(e) + " — run `catraz sync` once authenticated")
+
         out.head("— preflight (security checks always run) —")
         f = run_doctor(root, only=SECURITY_SECTIONS)
         bad, _ = print_findings(f, out)

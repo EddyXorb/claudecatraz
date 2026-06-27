@@ -25,32 +25,22 @@ def read_json(p: Path) -> dict:
 # ── host-side sync ────────────────────────────────────────────────────────────
 
 
-def cmd_sync(claude_home: Path) -> None:
-    src = Path.home() / ".claude" / ".credentials.json"
-    dst = claude_home / ".credentials.json"
-
-    if not src.exists():
-        sys.exit(
-            f"error: {src} not found — authenticate with `claude` on the host first"
-        )
-    if claude_home.exists() and claude_home.stat().st_uid == 0:
-        sys.exit(
-            f"error: {claude_home} is owned by root (Docker created it automatically).\n"
-            f"Fix with:\n"
-            f"  sudo rm -rf {claude_home}\n"
-            f"  mkdir -p {claude_home}"
-        )
-
+def cmd_sync(claude_home: Path, source: str | None = None) -> None:
+    src_dir = Path(source or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
+                   or str(Path.home() / ".claude")).expanduser()
+    cred = src_dir / ".credentials.json"
+    if not cred.exists():
+        sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
     claude_home.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
-    print(f"Credentials copied: {src} → {dst}")
-
-    # Sync ~/.claude.json — contains organizationUuid and passesEligibilityCache needed
-    # for Remote Control eligibility without a network call on startup.
-    host_claude_json = Path.home() / ".claude.json"
-    if host_claude_json.exists():
-        shutil.copy2(host_claude_json, claude_home / ".claude.json")
-        print(f"Claude config copied: {host_claude_json} → {claude_home / '.claude.json'}")
+    shutil.copy2(cred, claude_home / ".credentials.json")
+    host_cj = src_dir.parent / ".claude.json"          # ~/.claude.json sits next to ~/.claude/
+    dst_cj = claude_home / ".claude.json"
+    if host_cj.exists():
+        shutil.copy2(host_cj, dst_cj)
+    elif not dst_cj.exists():
+        dst_cj.write_text(json.dumps(
+            {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2))
+    print(f"Credentials synced into {claude_home}")
 
 
 # ── container startup ─────────────────────────────────────────────────────────
@@ -157,11 +147,17 @@ def main() -> None:
         default=os.environ.get("CLAUDE_HOME", str(Path(__file__).parent / "claude")),
         help="Target directory [env: CLAUDE_HOME, default: ./claude next to this script]",
     )
+    sync.add_argument(
+        "--from",
+        dest="source",
+        default=None,
+        help="Source ~/.claude dir [env: CLAUDE_CREDENTIAL_SOURCE, default: ~/.claude]",
+    )
 
     args = parser.parse_args()
 
     if args.command == "sync":
-        cmd_sync(Path(args.claude_home).resolve())
+        cmd_sync(Path(args.claude_home).resolve(), source=args.source)
     else:
         cmd_start(Path(args.claude_home).resolve())
 
