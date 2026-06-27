@@ -35,3 +35,29 @@ den `.env`-Wert (Prozess-Env schlägt `--env-file`). Der Eintrag ist also wirkun
 irreführend: ein Einsteiger, der ihn als „so konfiguriere ich das Projektverzeichnis" liest,
 liegt komplett daneben. `CLAUDE_HOME` ist nach Doc 04 (tmpfs-Home + `CLAUDE_CREDENTIAL_SOURCE`)
 ganz tot. Beide Zeilen gehören gestrichen; das war bereits in Doc 02 fällig und wurde übersehen.
+
+### B2 — `_run_sync` findet den Entrypoint nur im Repo-Klon, nicht installiert (bricht Projektziel „von überall lauffähig")
+
+`cli._run_sync` löst die host-seitige Sync-Tool-Datei so auf:
+
+```python
+entry = root / "src" / "catraz" / "assets" / "container" / "entrypoint.py"
+```
+
+`root` ist das **gesandboxte Projekt** (per `find_root`/`.catraz`), nicht das installierte
+catraz. In einem beliebigen Projektordner existiert `<root>/src/catraz/...` nicht →
+`catraz sync`, der Sync-Schritt in `catraz init` und der Auto-Sync in `catraz up` scheitern mit
+„entrypoint.py not found".
+
+**Warum ein Problem (und warum es ein Plan-Loch ist):** Doc 01 §1.3 hat den Fix ausdrücklich
+vertagt — *„`cli._run_sync`: Entrypoint-Pfad auf `<repo>/src/catraz/assets/container/
+entrypoint.py` setzen (in Doc 04 ohnehin überarbeitet)."* Doc 04 hat `cmd_sync`/`_run_sync`
+zwar inhaltlich umgebaut (Quelle, `.claude.json`), aber den **`entry`-Pfad nie korrigiert**.
+Der Übergabepunkt zwischen Doc 01 und Doc 04 ist also durchgefallen. Das Tool funktioniert nur
+im dogfooding-Klon (wo `root` == catraz-Repo zufällig `src/catraz/` hat) und bricht in genau
+dem Szenario, das Doc 01 verspricht (`uv tool install` + Start in fremden Ordnern, TODO-Punkt
+5). Korrekt wäre `asset_root() / "assets" / "container" / "entrypoint.py"` (der Pfad, über den
+alle anderen Assets bereits aufgelöst werden). Die Unit-Tests fangen das nicht, weil sie
+`_run_sync` nicht über einen installierten Pfad ausüben. **Nicht hier behoben** (gehört in
+einen eigenen Fix-Commit / eine Doc-Korrektur), aber blockiert das Weiterbauen von Doc 05/06
+nicht.
