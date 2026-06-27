@@ -40,20 +40,44 @@ def which(cmd):
     return shutil.which(cmd) is not None
 
 
+MIN_ENGINE = (24, 0)
+MIN_COMPOSE = (2, 20)
+
+
+def _parse_version(text):
+    """Extract the first x.y.z tuple from a version string like 'Docker version 24.0.7, ...'."""
+    import re
+    m = re.search(r"(\d+)\.(\d+)", text)
+    if not m:
+        return None
+    return tuple(int(x) for x in m.groups())
+
+
 def check_docker(f):
     if not which("docker"):
         f.bad("docker", "docker not on PATH", "install Docker + Compose v2")
         return
-    r = subprocess.run(["docker", "info"], capture_output=True, text=True)
+    r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                       capture_output=True, text=True)
     if r.returncode != 0:
         f.bad("docker", "Docker daemon not reachable", "start Docker (`systemctl start docker`)")
     else:
-        f.ok("docker", "Docker daemon is up")
-    r = subprocess.run(["docker", "compose", "version"], capture_output=True, text=True)
+        ver = _parse_version(r.stdout.strip())
+        if ver is None or ver < MIN_ENGINE:
+            f.bad("docker", f"Docker Engine {r.stdout.strip()!r} < {MIN_ENGINE[0]}.{MIN_ENGINE[1]} required",
+                  f"upgrade Docker Engine to ≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]}")
+        else:
+            f.ok("docker", f"Docker Engine {r.stdout.strip()} (≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]} ✔)")
+    r = subprocess.run(["docker", "compose", "version", "--short"], capture_output=True, text=True)
     if r.returncode != 0:
         f.bad("docker", "Compose v2 missing", "install the `docker compose` plugin")
     else:
-        f.ok("docker", "Compose v2 present")
+        ver = _parse_version(r.stdout.strip())
+        if ver is None or ver < MIN_COMPOSE:
+            f.bad("docker", f"Compose {r.stdout.strip()!r} < {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} required",
+                  f"upgrade Docker Compose plugin to ≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]}")
+        else:
+            f.ok("docker", f"Compose {r.stdout.strip()} (≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} ✔)")
 
 
 def check_compose(root, env, f):
