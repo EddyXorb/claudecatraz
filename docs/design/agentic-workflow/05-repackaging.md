@@ -633,8 +633,12 @@ nicht-getestete Plattform vortäuschen.
 Der **setuid/setgid-Scan** (`find / -perm /6000`) und der **non-root-`USER`-Check** laufen
 dagegen gegen das **finale, zusammengesetzte Image** (Base **+** Claude-Layer), nicht gegen
 die Base allein (Roast-3 #7) — sonst entginge ein setuid-Binary, das erst ein vom
-Claude-Layer installiertes apt-Paket mitbringt. Das fängt die zwei Dinge ab, die der
-Claude-Layer *nicht* neutralisieren kann (s. §5.5). Befund → ⚠️/❌ mit Pfadliste.
+Claude-Layer installiertes apt-Paket mitbringt. Der `USER`-Befund bleibt ⚠️/❌ mit
+Pfadliste. Der **setuid-Befund ist dagegen nur noch informativ (grünes `ok`)**: die Bits
+werden von der `no-new-privileges`-`security_opt` des Agents bei `execve` inert gemacht, die
+`compose.assert_invariants` auf jedem `up`/`run` **nicht-umgehbar** erzwingt (fehlt sie,
+bricht `up`/`run` *laut* ab — nicht erst der Doctor). Der Doctor versteckt die Binaries also
+nicht, er ordnet sie als entschärft ein.
 
 ### 5.5 „Claude-Layer oben" schützt gegen *versehentliche* Fehlkonfiguration — nicht gegen eine *feindliche* Base (Roast-2 #4)
 
@@ -642,15 +646,18 @@ Die vorige Fassung verkaufte A („Claude-Layer `FROM ${BASE}`") als „secure-b
 egal was die Base tat". Das war **überzogen**. „Letzte Schicht gewinnt" gilt für `USER`,
 `ENTRYPOINT`, `WORKDIR`, `ENV` — **nicht** für eine feindliche Lieferkette:
 
-- **setuid-Binaries** aus der Base überleben; `USER dev` findet sie und eskaliert.
+- **setuid-Binaries** aus der Base überleben den Build; ihren *Eskalations*-Effekt nimmt
+  ihnen zur Laufzeit die nicht-umgehbare `no-new-privileges`-Invariante (§5.4) — sie liegen
+  dann zwar noch im Image, sind als Privilege-Escalation-Vektor aber tot.
 - Der Claude-Layer baut **mit den Binaries der Base** (`curl … | bash`, `apt`, `npm` laufen
   *auf* der Base) — eine kompromittierte Base-`curl`/`apt` unterwandert schon den Build.
 - Gepflanzte `~/.bashrc`, `/etc/ld.so.preload`, Base-`ENV` persistieren.
 
 **Ehrliche Einordnung:** Die Base ist in **A *und* B vertraut**. A schützt nur davor, dass
 der Nutzer das Härten *vergisst* (er kann `USER dev` nicht versehentlich aufheben); gegen
-eine *bösartige* Base schützt **keiner** von beiden — dort bleibt nur `doctor base`
-(setuid-/USER-Scan, §5.4) und schlicht: keine unvertrauten Bases verwenden.
+eine *bösartige* Base schützt **keiner** von beiden — dort bleiben die nicht-umgehbare
+`no-new-privileges`-Invariante (entschärft den setuid-Vektor), `doctor base`
+(USER-Scan, §5.4) und schlicht: keine unvertrauten Bases verwenden.
 
 | Ansatz | Builds | schützt vor *versehentlichem* Nicht-Härten? | schützt vor *feindlicher* Base? |
 | ------ | ------ | ------------------------------------------- | ------------------------------- |
@@ -836,7 +843,7 @@ Bestehende Installationen liegen flach im Repo-Root. Sanfter Pfad:
 | **mountinfo-Topologie** | Host-Pfade in `/proc/self/mountinfo` sichtbar. | Akzeptiert: Topologie ≠ Reichweite; T8 verlangt „kein *erreichbarer* Secret-Pfad". |
 | **Override löst Grenze auf** | `compose.override.yml` könnte R6 brechen. | `doctor` prüft *aufgelöstes JSON* nach Merge (§4.4), abgesichert per known-good/-bad in derselben CI. |
 | **Asset-Auflösung im Wheel** | `docker build` braucht reale Pfade; zip-Installs haben keine. | Deterministische Extraktion nach `~/.cache/catraz/<version>/`; `warden/`+`forward-proxy/` als Wheel-Includes (§3.1). |
-| **Image-Schichtung** | Zwei-Phasen-Build; „secure by construction" war überzogen. | content-adressierter Tag + Phasen-Fehlermeldung (§5.2); §5.5 ehrlich: A schützt vor *versehentlichem*, nicht *feindlichem* Base; `doctor base` scannt setuid/USER (§5.4). |
+| **Image-Schichtung** | Zwei-Phasen-Build; „secure by construction" war überzogen. | content-adressierter Tag + Phasen-Fehlermeldung (§5.2); §5.5 ehrlich: A schützt vor *versehentlichem*, nicht *feindlichem* Base; `doctor base` scannt USER (§5.4), der setuid-Vektor ist per nicht-umgehbarer `no-new-privileges`-Invariante entschärft. |
 | **Base-Vertrag** | Fremde Base ohne apt/python3. | Ehrlich verengt auf Debian/Ubuntu+glibc+python3; `doctor base` prüft laut (§5.4). |
 | **Geschachtelte `.catraz`** (nur Option I) | Falscher, größerer Mount-Root exponiert Geschwister. | `find_root` bricht fail-closed bei verschachteltem `.catraz` ab (§4.2). |
 | **Recreate vs. Warden-Schreiben** | WAL-Korruption, fail-open der Quota. | Graceful `SIGTERM`, WAL crash-konsistent, Warden fail-closed bei unlesbarem State (§7.2, T9). |

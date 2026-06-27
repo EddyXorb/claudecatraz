@@ -265,7 +265,11 @@ def check_base(root, env, f):
                              "-type", "f"], capture_output=True, text=True)
     extra = [ln for ln in setuid.stdout.split() if ln]
     if extra:
-        f.warn("base", f"{len(extra)} setuid/setgid binaries in base", "review: " + ", ".join(extra[:5]))
+        # These are distro-shipped setuid/setgid binaries (passwd, su, mount, …). They are
+        # rendered inert by the agent's `no-new-privileges` security_opt, which is enforced
+        # non-bypassably by compose.assert_invariants on every up/run — so this is informational,
+        # not a warning. If that invariant were dropped, up/run would fail loudly, not here.
+        f.ok("base", f"{len(extra)} setuid/setgid binaries in base — neutralized by no-new-privileges")
 
 
 def run_doctor(root, only=None, fix=False):

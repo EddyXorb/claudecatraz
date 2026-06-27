@@ -16,6 +16,7 @@ GOOD = {
     "services": {
         "claude-dev-env": {
             "environment": {},
+            "security_opt": ["no-new-privileges:true"],
             "volumes": [
                 {"type": "tmpfs", "target": "/workspace/.catraz"},
             ],
@@ -42,6 +43,7 @@ def test_invariants_pass(monkeypatch, tmp_path):
     lambda c: c["services"]["claude-dev-env"]["environment"].__setitem__("GITLAB_WRITE_TOKEN", "x"),
     lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
     lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
+    lambda c: c["services"]["claude-dev-env"].__setitem__("security_opt", []),
 ])
 def test_invariants_fail(monkeypatch, tmp_path, mut):
     bad = copy.deepcopy(GOOD)

@@ -33,6 +33,10 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    # Defense-in-depth: warden holds the GitLab tokens — block any setuid/setgid
+    # privilege escalation inside the container regardless of base-image contents.
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   # ── Forward-Proxy (Research/Build-Egress, haelt KEINE Credentials) ──────────
@@ -62,6 +66,9 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+    # Defense-in-depth: same setuid/setgid escalation block as the other services.
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   claude-dev-env:

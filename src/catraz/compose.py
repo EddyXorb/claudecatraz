@@ -123,6 +123,13 @@ def assert_invariants(root) -> None:
         raise CliError("invariant: agent carries a GITLAB_*_TOKEN", EXIT_CONFIG)
     if agent.get("privileged") or "SYS_ADMIN" in (agent.get("cap_add") or []):
         raise CliError("invariant: agent is privileged / CAP_SYS_ADMIN", EXIT_CONFIG)
+    # The base image inherits setuid/setgid binaries from Ubuntu (passwd, su, mount, …).
+    # no-new-privileges makes them inert at execve, so they cannot be used for privilege
+    # escalation. This must hold non-bypassably (it is also what lets `doctor base` stop
+    # warning about those binaries) — normalize `:`/`=` separators across compose versions.
+    sec = {o.replace("=", ":") for o in (agent.get("security_opt") or [])}
+    if "no-new-privileges:true" not in sec:
+        raise CliError("invariant: agent missing no-new-privileges (setuid escalation)", EXIT_CONFIG)
     vols = agent.get("volumes", [])
     if not any(v.get("type") == "tmpfs" and v.get("target") == "/workspace/.catraz" for v in vols):
         raise CliError("invariant: tmpfs shadow on /workspace/.catraz missing", EXIT_CONFIG)
