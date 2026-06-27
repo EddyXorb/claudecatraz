@@ -91,7 +91,12 @@ def cmd_up(root, args, out):
 
 
 def cmd_down(root, args, out):
-    down_args = ["down"]
+    # `--profile remote` brings the agent service (profiles: ["remote"]) into scope so a
+    # plain `down` actually tears it down. Without it the agent container survives, pinned
+    # to the now-deleted agent-net → "network <id> not found" on the next `up --remote`.
+    # (--remove-orphans alone is unreliable here: a profile-disabled service is not always
+    # treated as an orphan.) --remove-orphans additionally clears any truly-stale leftovers.
+    down_args = ["--profile", "remote", "down", "--remove-orphans"]
     if args.volumes:
         down_args.append("--volumes")
     if args.print_only:
