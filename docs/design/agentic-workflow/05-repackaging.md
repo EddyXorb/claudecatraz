@@ -186,46 +186,55 @@ Build-Kontexte zeigen auf die ausgepackten Asset-Verzeichnisse (reale Pfade im v
 
 ## 4. `.catraz/` — das Laufzeit-Heim und der Schutz davor (TODO 6, 7)
 
-### 4.0 Topologie-Grundsatzentscheidung: zwei gleichwertige Architekturen (Roast-2 #2)
+### 4.0 Topologie-Entscheidung: `.catraz/` im Baum (Roast-2 #2, in Roast-3 entschieden)
 
-Roast-2 deckt die größte ungeprüfte Annahme auf: dass `.catraz/` *physisch im
-bind-gemounteten Baum* liegen muss. Tut es das, **muss** man die Secrets dort wieder vor
-dem Agenten verstecken (Shadow-Mount + dessen Verifikation). Liegt der echte State
-*außerhalb* des Baums, entfällt das ganze Versteck. Das sind zwei kohärente Architekturen;
-**keine ist auf allen vier Kernwerten überlegen** — darum stehen beide gleichberechtigt da,
-mit klarer Default-Empfehlung.
+Die größte Designfrage: muss `.catraz/` *physisch im bind-gemounteten Baum* liegen? Tut es
+das, muss man es dort vor dem Agenten verstecken (Shadow-Mount). Liegt der echte State
+*außerhalb*, entfällt das Versteck — aber dann liegen Claude-Ordner und Logs **nicht mehr in
+`.catraz`**. Roast-2 stellte zwei Optionen gegenüber; Roast-3 verlangte zu Recht eine
+**Entscheidung** statt eines „beide gleichwertig"-Ausweichens. Hier ist sie.
 
-| | **Option I — `.catraz/` im Baum** (self-contained) | **Option II — Marker im Baum, State außerhalb** |
-| - | -------------------------------------------------- | ----------------------------------------------- |
-| Im Projekt liegt | `.catraz/` mit *allem* (config, claude, state, logs) | nur ein (fast leeres) `.catraz/` mit `project-id` + `.gitignore` |
-| Echter State liegt | im Projekt (`.catraz/…`) | außerhalb: `~/.local/state/catraz/<project-id>/…` |
-| `/workspace`-Bind enthält Secrets? | **ja** → Shadow-Mount nötig | **nein** → nichts zu verstecken |
-| **Sicherheit** (1) | gut, aber hängt an Mount-Ordering (tmpfs-Overdeck) | etwas besser: *keine* Ordering-Abhängigkeit, kein Overdeck zu verteidigen |
-| **Einfachheit** (2) | – Shadow-Mount, T1–T4/T8, geschachtelte-`.catraz`-Guard, eine Override-Invariante mehr | + all das entfällt |
-| **Transparenz** (3) | gleich | gleich |
-| **Anwenderfreundlichkeit** (4) | + alles in *einem* lokalen Ordner; `rm -rf .catraz` = saubere Deinstallation; Projekt verschieben nimmt State mit | – State an zweitem Ort; verwaist bei `rm -rf` Projekt; Verschieben/Umbenennen löst die `project-id`-Bindung → braucht `catraz gc`/`relink` |
+| | **Option I — `.catraz/` im Baum** (GEWÄHLT) | **Option II — Marker im Baum, State außerhalb** |
+| - | -------------------------------------------- | ----------------------------------------------- |
+| Claude-Ordner & Logs in `.catraz`? | **ja** (= TODO 6/7 wörtlich) | **nein** — in `~/.local/state/catraz/<id>/` |
+| `/workspace`-Bind enthält Secrets? | ja → Shadow-Mount nötig | nein → nichts zu verstecken |
+| Zusatz-Komplexität | Shadow-Mount + T1–T4/T7/T8 + geschachtelt-Guard | externer State-Lifecycle: `project-id`, `gc`, `relink`-bei-Umzug |
+| Verwaisung / Umzug | `rm -rf .catraz` = sauber; Umzug nimmt State mit | verwaister externer State; Umzug bricht die Bindung |
 
-**Wertungs-Ehrlichkeit:** Eine *reine* Optimierung auf Sicherheit+Einfachheit (Prioritäten
-1+2) wählt **Option II** — sie löscht den halben §4.5-Testkatalog, den Shadow-Mechanismus,
-die geschachtelte-`.catraz`-Logik und die Ordering-Sorge auf einen Schlag. **Aber** TODO 6/7
-verlangen *ausdrücklich* „nur ein `.catraz`-Ordner … und darin liegen dann **alle**
-Einstellungen und Hilfsdateien wie der Claude-Ordner und die Logs" — das *ist* Option I.
-Die Anwenderfreundlichkeit, die Option I gewinnt (Selbst-Enthaltung, Portabilität, ein
-`ls`), ist hier nicht beliebige Politur, sondern die **formulierte Anforderung**.
+**Warum Option I — und *nicht* das von Roast-3 vorgeschlagene Umkippen auf II:**
 
-**Default: Option I**, weil sie die explizite Nutzeranforderung trifft und ihre
-Zusatz-Maschinerie nach dem Streichen der Gold-Plating (Versionsmatrix → eine gepinnte
-Version, §4.5; stale `compose.resolved.yml` → Live-Befehl, §7.1) auf ein vertretbares Maß
-schrumpft: tmpfs-Overdeck + ein gepinnter Test-Satz + eine Compose-Invariante. **Option II
-bleibt dokumentiert und gewählt-bar** (`catraz init --external-state`) für Nutzer/Betreiber,
-die Sicherheit+Einfachheit über Selbst-Enthaltung stellen — sie ist auf den Top-Prioritäten
-nicht *schlechter*, nur auf Priorität 4. Genau die Konstellation, in der zwei Lösungen
-koexistieren dürfen.
+1. **Option II verletzt eine *explizite, zweifach genannte* Anforderung.** TODO 6: „darin
+   liegen dann **alle** Einstellungen und Hilfsdateien wie der **Claude-Ordner und die
+   Logs**." TODO 7: „alles im `.catraz`-Ordner einnistet." II schiebt genau diese Dateien
+   *aus* `.catraz` heraus. Das ist keine Priorität-4-Politur, die man wegoptimieren darf —
+   es ist die formulierte Funktion. Roast-3s lexikografisches Argument („Sicherheit > … >
+   Anwenderfreundlichkeit, also II") fußt auf einer **strikten** Wertordnung, die *ich* in
+   die Roast-Prompts gesetzt hatte — der Auftraggeber nannte die vier Werte
+   *gleichrangig* (Einfachheit, Transparenz, Sicherheit, Anwenderfreundlichkeit). Ohne
+   strikte Lexikografie gewinnt nicht, was auf Achse 1+2 minimal vorn liegt, sondern was
+   alle vier *zusammen* am besten bedient — und das tut die Lösung, die die explizite
+   Anforderung erfüllt.
+2. **II ist nicht *netto* einfacher.** Es tauscht die Shadow-Mount-Maschinerie gegen einen
+   **externen State-Lifecycle** (`project-id`-Erzeugung, `gc` für verwaiste Projekte,
+   `relink` nach Umzug) — den Roast-3 selbst als „deferred/unscoped" rügt. Komplexität wird
+   *verschoben*, nicht beseitigt.
+3. **TODO 7 fragt nach genau dem, was der Shadow-Mount liefert.** „der Agent darf diesen
+   Ordner nicht lesen aber alle anderen … geht das irgendwie?" — der Nutzer ist *unsicher*
+   beim Bind-Mount und bittet um eine sichere Mechanik, **nicht** darum, die Dateien
+   auszulagern. Der Shadow-Mount *ist* das „überleg dir was".
+4. **Die Mechanik ist ein Standard-Idiom, kein Glücksspiel.** tmpfs-über-Unterpfad zum
+   Maskieren eines Unterordners (so wie man `node_modules`/`.git` maskiert) ist gängige,
+   dokumentierte Docker-Praxis; §4.5 T2 verifiziert sie auf der gepinnten Version, §4.5 nennt
+   den Pre-Start-Mount-Fallback für den Rand-Fall.
 
-> Die §§4.1–4.5 unten beschreiben **Option I** (den Default). Was unter Option II *entfällt*,
-> ist je Abschnitt markiert. Option II nutzt dieselbe Claude-Home-Härtung (§4.3 „Claude-Home"),
-> dieselbe Auth-Logik (§6) und denselben Asset-/Compose-Aufbau (§3, §4.4) — nur ohne
-> Shadow-Mount und ohne die daran hängenden Tests/Guards.
+**Entscheidung: Option I ist der *einzige* Default und der einzige voll gepflegte Pfad.**
+Option II ist **keine** koexistierende, gleichwertig getestete Architektur mehr (das wäre
+die von Roast-3 zu Recht gerügte doppelte Pflege-Last), sondern eine **dokumentierte
+Notluke** in einem Absatz (§4.7) für Nutzer, die den In-Tree-Ansatz bewusst ablehnen — ohne
+eigenen Test-/Lifecycle-Apparat im Plan. Damit ist *eine* Topologie gewählt, die explizite
+Anforderung erfüllt, und die Zwei-Pfad-Komplexität vom Tisch.
+
+> Die §§4.1–4.6 beschreiben **Option I**. §4.7 skizziert die Notluke II als Abweichung.
 
 ### 4.1 On-Disk-Layout im Zielordner (Option I)
 
@@ -235,14 +244,20 @@ koexistieren dürfen.
 ├── compose.override.yml     # optional, host-editierbar (§4.4)
 ├── config/                  # editierbare Kopien der Vorlagen (read-only gemountet)
 │   ├── warden.toml  ·  allowlist.txt  ·  squid.conf
-├── claude/                  # Claude-Home (Sandbox-Credential ODER leer bei api_key)
+├── claude/                  # Claude-Home-Quellen (s. u.)
+│   ├── .credentials.json    #   subscription: vom Host gesynct (RO in den Container)
+│   └── .claude.json         #   subscription/api_key: IMMER von init/sync materialisiert
 ├── state/warden/            # SQLite-Quoten-State
 └── logs/{warden,squid}/     # Audit-Logs
 ```
 
 Das ist 1:1 das alte „On-Disk-Layout" aus README §5 — nur **eine Ebene tiefer**, unter
-`.catraz/` statt im Repo-Root. Der entscheidende Unterschied: Es liegt jetzt **im
-Projektordner des Nutzers**, nicht im geklonten catraz-Repo.
+`.catraz/` statt im Repo-Root. **Wichtig (Roast-3 #4/#5):** `claude/` muss host-seitig
+**beide** Dateien enthalten, weil der Container sie als RO-Einzeldateien bindet (§4.3) — eine
+fehlende Bind-Quelle lässt `docker compose up` scheitern. `.credentials.json` kommt im
+Subscription-Modus vom `sync`; `.claude.json` wird von `init`/`sync` **immer** angelegt
+(Host-Kopie falls vorhanden, sonst der Onboarding-Default, §6.4). Im `api_key`-Modus enthält
+`claude/` nur `.claude.json`.
 
 ### 4.2 Wie catraz `.catraz/` findet (git-Mental-Model)
 
@@ -412,7 +427,10 @@ Container-Namen zu klauen — Projektname = Ordnername). `--env-file` zieht Secr
 Die heutigen festen `container_name:` (`claude-dev-env` etc.) müssen **weg** oder
 projektpräfix-fähig werden, damit zwei Sandboxes parallel laufen können. Stattdessen
 Compose-Default-Namen (`<projekt>-<service>-1`); die semantischen Aliasse aus dem CLI
-(`agent`/`warden`/`proxy`) bleiben die Nutzer-Schnittstelle.
+(`agent`/`warden`/`proxy`) bleiben die Nutzer-Schnittstelle. **Folgeänderung (Roast-3 #11):**
+Die heutige Alias-Auflösung (04-cli §5.6) zeigt auf *feste* Container-Namen — sie muss auf
+**Compose-Projekt + Service-Label** umgestellt werden (`docker compose ... logs <service>`),
+sonst finden `logs`/`status` die Container nach dem Wegfall der festen Namen nicht mehr.
 
 #### `compose.override.yml` ist erlaubt, aber `doctor` prüft die Grenze *nach* dem Merge (Roast-1 #12)
 
@@ -478,6 +496,23 @@ dokumentierter Fallback, nicht als Default.
 `init` trägt `.catraz/` in die `.gitignore` des Zielordners ein (oder, wenn keine da ist
 bzw. nicht gewünscht, in `.git/info/exclude`). So nistet sich catraz ein, ohne das
 Projekt-Repo zu verschmutzen — wie ein gut erzogenes Tool.
+
+### 4.7 Notluke: externer State (`--external-state`) — dokumentiert, nicht voll gepflegt
+
+Wer den In-Tree-Ansatz bewusst ablehnt (z. B. weil das Projekt auf einem Dateisystem liegt,
+auf dem der tmpfs-Overdeck-Test T2 rot ist, oder aus reiner Vorliebe für „keine Secrets im
+Projektbaum"), kann `catraz init --external-state` wählen. Dann liegt im Projekt nur ein
+fast leerer `.catraz/`-Marker (`project-id` + `.gitignore`), und der echte State unter
+`~/.local/state/catraz/<project-id>/`. Der `/workspace`-Bind enthält dann **keine** Secrets
+→ **kein Shadow-Mount, keine T1–T4/T7/T8, keine geschachtelt-Guard** nötig; die
+Claude-Home-Härtung (§4.3 „Claude-Home"), Auth (§6) und Compose-Invarianten (§4.4) gelten
+unverändert.
+
+**Bewusst als Notluke, nicht als zweiter Default:** Der externe State-Lifecycle (stabile
+`project-id`, `catraz gc` für verwaiste Projekte, `relink` nach Projekt-Umzug) ist hier
+**nicht** voll ausspezifiziert — er wäre erst zu schließen, wenn jemand die Notluke wirklich
+braucht. Das hält die Pflege-Last bei *einer* getragenen Topologie (Option I) und verschiebt
+TODO 6/7s „alles in `.catraz`" nicht still nach außen, sondern nur auf ausdrücklichen Wunsch.
 
 ---
 
@@ -579,11 +614,12 @@ Claude-Layer **einfach** (apt-nodesource wie heute, `userdel ubuntu`-Guard porti
 statisches `gosu`). Kein erfundenes `install-node.sh`, keine `||`-Fallbacks, die eine
 nicht-getestete Plattform vortäuschen.
 
-`doctor base` prüft den Vertrag *laut* nach dem Base-Build: `command -v apt-get` +
-`python3 --version` — **und zusätzlich (Roast-2 #4)** scannt es das *aufgelöste* Image auf
-**setuid/setgid-Binaries** (`find / -perm /6000`) und auf einen **non-root finalen `USER`**.
-Das fängt die zwei Dinge ab, die die Claude-Layer-Schicht *nicht* neutralisieren kann
-(s. §5.5). Befund → ⚠️/❌ mit Pfadliste.
+`doctor base` prüft den Base-Vertrag *laut* (`command -v apt-get` + `python3 --version`).
+Der **setuid/setgid-Scan** (`find / -perm /6000`) und der **non-root-`USER`-Check** laufen
+dagegen gegen das **finale, zusammengesetzte Image** (Base **+** Claude-Layer), nicht gegen
+die Base allein (Roast-3 #7) — sonst entginge ein setuid-Binary, das erst ein vom
+Claude-Layer installiertes apt-Paket mitbringt. Das fängt die zwei Dinge ab, die der
+Claude-Layer *nicht* neutralisieren kann (s. §5.5). Befund → ⚠️/❌ mit Pfadliste.
 
 ### 5.5 „Claude-Layer oben" schützt gegen *versehentliche* Fehlkonfiguration — nicht gegen eine *feindliche* Base (Roast-2 #4)
 
@@ -666,6 +702,39 @@ genau die Ambiguität, die der Modus beseitigen soll), und ebenso, wenn
   Quell-Parameter geben, nicht nur umbenennen. `up`/`init` rufen `sync` im Subscription-Modus
   automatisch, wenn die Credential fehlt.
 
+### 6.4 Entrypoint-Umbau & `.claude.json`-Provisionierung (Roast-3 #3/#4/#6)
+
+Die §4.3-Home-Topologie (RO-Einzeldateien + tmpfs-Home) ist mit dem **heutigen**
+`entrypoint.py` *nicht* ohne Umbau vereinbar — Roast-3 hat die drei Stellen präzise benannt.
+Der Plan macht den Umbau explizit, damit er nicht als „rewrite by implication" untergeht:
+
+1. **`.claude.json`-Zielpfad ist das Home-*Root*, nicht das `.claude`-Verzeichnis.** Claude
+   Code erwartet die Datei als `~/.claude.json` (Geschwister von `~/.claude/`, so der
+   heutige Docstring entrypoint.py:59–66). Da `~/.claude` jetzt **tmpfs** ist, **entfällt der
+   Symlink-Trick** (entrypoint.py:73–80): der entrypoint **kopiert** `…/.claude/.ro/.claude.json`
+   nach `/home/dev/.claude.json` (Home-Root, image-Layer, beschreibbar) und patcht *dort* die
+   Felder (`bypassPermissionsModeAccepted`, `remoteDialogSeen`, `hasTrustDialogAccepted`).
+   `.credentials.json` dagegen kopiert er nach `~/.claude/.credentials.json` (im tmpfs).
+   Beide Quellen sind RO unter `…/.ro/` → **kopieren, dann patchen**, nie in-place (das war
+   der `EROFS`-Bug an entrypoint.py:97).
+2. **„falls fehlend"-Guards fallen.** `ensure_settings` (entrypoint.py:116–117, `return if
+   exists`) und die analoge Logik werden auf **unbedingtes Überschreiben** umgestellt —
+   `settings.json` und `CLAUDE.md` sind image-baked und je Start frisch (auf tmpfs sind sie
+   ohnehin jedes Mal weg; die Guard-Entfernung macht die Absicht *explizit*).
+3. **`.claude.json` wird *immer* provisioniert — der lückenschließende Punkt.** Die RO-Bind-
+   Quelle `…/.catraz/claude/.claude.json` **muss** vor `up` existieren, sonst scheitert der
+   Mount. Heute kopiert `cmd_sync` `.claude.json` nur *falls auf dem Host vorhanden*
+   (entrypoint.py:50–53) — auf einer frischen Maschine fehlt sie. Darum: **`init`/`sync`
+   materialisieren `.catraz/claude/.claude.json` immer** — Host-Kopie falls vorhanden, sonst
+   der Onboarding-Default (`{"hasCompletedOnboarding": true, …}`, den `ensure_claude_json`
+   heute schon inline kennt, entrypoint.py:76–78). Im `api_key`-Modus gibt es **keinen**
+   image-gebackenen `.claude.json` (das wäre ein erfundenes Asset wie das frühere
+   `install-node.sh`) — der entrypoint **synthetisiert** ihn inline aus genau diesem Default.
+
+Damit ist der Subscription-Pfad auf einer sauberen Maschine baubar, der `api_key`-Pfad hat
+keine dangling-Asset-Abhängigkeit, und alle vier Home-Beschreibungen (§4.1, §4.3, §6.3, §9)
+meinen dieselbe Topologie.
+
 ---
 
 ## 7. Auswirkungen auf die CLI
@@ -745,7 +814,8 @@ Bestehende Installationen liegen flach im Repo-Root. Sanfter Pfad:
 
 | Thema | Risiko / Frage | Entschärfung |
 | ----- | -------------- | ------------ |
-| **Topologie-Wahl (I vs. II)** | In-Tree-`.catraz` zieht Shadow-Maschinerie nach; extern wäre einfacher. | Beide dokumentiert (§4.0); Default I (= TODO-Anforderung), II als `--external-state`. Keine ist auf allen 4 Werten überlegen. |
+| **Topologie-Wahl** | In-Tree-`.catraz` zieht Shadow-Maschinerie nach; extern wäre auf den ersten Blick einfacher. | **Entschieden (§4.0): Option I**, weil II die explizite TODO-6/7-Anforderung („Claude-Ordner & Logs *in* `.catraz`") verletzt und eigenen externen-State-Lifecycle nach sich zöge. II nur als Notluke `--external-state` (§4.7), nicht co-gepflegt. |
+| **Provisionierung `.claude.json`** | RO-Bind-Quelle muss vor `up` existieren; `cmd_sync` legt sie heute nur optional an. | `init`/`sync` materialisieren sie **immer** (Host-Kopie oder Onboarding-Default); api_key synthetisiert inline (§6.4). |
 | **Shadow-Mount-Robustheit** (nur Option I) | Garantie ruht auf non-privileged + non-root + Mount-Ordering. | Als **Spec** festgeschrieben (§4.5 T1–T9), nicht behauptet; Langform-tmpfs (§4.3); **eine gepinnte** Docker-Version statt Matrix. |
 | **Claude-Home-Topologie** | drei Abschnitte beschrieben drei Mounts (Roast-2 #1). | **Eine** Topologie festgezurrt: 2× RO-Einzeldatei + tmpfs-Rest, entrypoint *kopiert dann patcht* (kein `EROFS`); §4.3/§6.3 synchron. |
 | **mountinfo-Topologie** | Host-Pfade in `/proc/self/mountinfo` sichtbar. | Akzeptiert: Topologie ≠ Reichweite; T8 verlangt „kein *erreichbarer* Secret-Pfad". |
@@ -761,13 +831,14 @@ Bestehende Installationen liegen flach im Repo-Root. Sanfter Pfad:
 
 ### Offen / bewusst dem Implementierungs-Spike überlassen
 
-- **Topologie-Default endgültig:** Sollte der Implementierungs-Spike zeigen, dass die
-  gepinnte Docker-Version T2 (Langform-Ordering) *nicht* zuverlässig liefert, kippt die
-  Empfehlung pragmatisch auf **Option II** (extern) — dann verschwindet der Pre-Start-Mount-
-  Fallback ganz und der halbe §4.5-Katalog mit ihm.
-- **`catraz gc`/`relink` für Option II:** externer State (`~/.local/state/catraz/<id>`)
-  braucht einen GC für verwaiste Projekte und ein `relink` nach Projekt-Umzug — Umfang erst
-  bei Wahl von II festzurren.
+- **T2-Spike vor dem Bau:** Die einzige verbliebene tragende, *noch nicht ausgeführte*
+  Annahme ist die deterministische tmpfs-über-Unterpfad-Ordnung auf der gepinnten
+  Docker-Version (§4.5 T2). Sie wird **zuerst** verifiziert; ist sie rot, greift der
+  Pre-Start-Mount-Fallback (§4.5) — die Topologie-Entscheidung (Option I) kippt deshalb
+  *nicht*, nur die Mount-Mechanik wechselt. (Die Notluke II bleibt davon unberührt.)
+- **Notluke-II-Lifecycle:** `project-id`/`gc`/`relink` (§4.7) werden erst spezifiziert, wenn
+  `--external-state` real nachgefragt wird — bewusst nicht jetzt, um die Pflege-Last bei
+  *einer* Topologie zu halten.
 
 ---
 
@@ -778,9 +849,9 @@ Jeder Schritt ist für sich nützlich und unabhängig testbar.
 | Schritt | Liefert | TODO |
 | ------- | ------- | ---- |
 | **1. Paketierung** | `pyproject.toml`, `src/catraz/`-Layout, `entrypoint.py`+`AGENT.md` als Assets, Root-Shim. `uv tool install` funktioniert, Verhalten unverändert. | 3, 4, 5 |
-| **2. `.catraz/`-Heim** | `init`/`doctor`/Pfade auf `.catraz/` umstellen; `--project-directory`/`--env-file`; `.gitignore`-Eintrag; `migrate`. Topologie-Wahl I/II (§4.0) hier festlegen. | 6 |
-| **3. Shadow-Mount** (Option I) | tmpfs-Overlay auf `/workspace/.catraz`, RO-Credential + tmpfs-Home, Quellpfad-Symlink-Guard; **Red-Team T1–T9 zuerst** (§4.5). Bei Option II entfällt dieser Schritt weitgehend. | 7 |
-| **4. Auth-Modus** | `AUTH_MODE`-XOR in `doctor`/`entrypoint`/compose; `CLAUDE_CREDENTIAL_SOURCE`; Auto-`sync`. | 1 |
+| **2. `.catraz/`-Heim** | `init`/`doctor`/Pfade auf `.catraz/` (Option I, §4.0); `--project-directory`/`--env-file`; `.gitignore`-Eintrag; `migrate`. | 6 |
+| **3. Shadow-Mount** | **T2-Spike zuerst** (§4.5), dann tmpfs-Overlay auf `/workspace/.catraz`, Quellpfad-Symlink-Guard; **Red-Team T1–T9** als Spec. | 7 |
+| **4. Auth + Entrypoint-Umbau** | `AUTH_MODE`-XOR (`doctor`/compose); RO-Home-Topologie + Entrypoint-Umbau & `.claude.json`-Provisionierung (§6.4); `CLAUDE_CREDENTIAL_SOURCE`; Auto-`sync`. | 1 |
 | **5. Image-Schichtung** | Claude-Layer-Dockerfile `FROM ${BASE_IMAGE}`; Default-Base unter `assets/bases/`; `BASE_IMAGE`/`BASE_DOCKERFILE`-Modi; `doctor base`. | 2 |
 
 Reihenfolge-Logik: Erst die **Hülle** (Paket + `.catraz/`), weil sie die Pfade definiert,
