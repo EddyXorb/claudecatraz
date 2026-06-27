@@ -20,6 +20,9 @@ packages = ["src/catraz"]
 "forward-proxy" = "catraz/assets/forward-proxy"
 
 [tool.pytest.ini_options]
+# importlib mode lets same-basename test files coexist across dirs
+# (e.g. tests/cli/test_local.py and tests/container/test_local.py).
+addopts = "--import-mode=importlib"
 markers = [
     "slow: marks tests as slow (require Docker + running stack)",
 ]

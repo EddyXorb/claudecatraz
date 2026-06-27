@@ -253,19 +253,22 @@ def cmd_sync(root, args, out):
     return EXIT_OK
 
 
+def _auto_sync_if_needed(root, out):
+    """Subscription mode: materialize the credential if it's missing (best-effort).
+    If it stays missing, the 'auth' security section fails closed downstream."""
+    mode = load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription")
+    from catraz.paths import claude_home
+    if mode == "subscription" and not (claude_home(root) / ".credentials.json").exists():
+        out.info("• subscription credential missing — attempting sync…")
+        try:
+            _run_sync(root, out)
+        except CliError as e:
+            out.warn(str(e) + " — run `catraz sync` once authenticated")
+
+
 def cmd_up(root, args, out):
     if not args.print_only:
-        # Auto-sync: in subscription mode, materialize the credential before preflight.
-        # If it stays missing, the "auth" security section fails closed below.
-        from catraz.paths import claude_home
-        mode = load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription")
-        if mode == "subscription" and not (claude_home(root) / ".credentials.json").exists():
-            out.info("• subscription credential missing — attempting sync…")
-            try:
-                _run_sync(root, out)
-            except CliError as e:
-                out.warn(str(e) + " — run `catraz sync` once authenticated")
-
+        _auto_sync_if_needed(root, out)
         out.head("— preflight (security checks always run) —")
         f = run_doctor(root, only=SECURITY_SECTIONS)
         bad, _ = print_findings(f, out)
@@ -375,6 +378,49 @@ def _print_urls(out):
     # Plain `up` runs infra only (warden+squid). The agent is opt-in:
     print("  Agent daemon:    " + out.cyan("catraz up --remote")
           + out.dim("   ·   interactive: ") + out.cyan("catraz local"))
+
+
+def _local_run_args(relpath: str, tty: bool, claude_args: list[str]) -> list[str]:
+    args = ["run", "--rm", "--no-deps"]
+    if not tty:
+        args.append("-T")
+    args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
+             "claude-dev-env", "local", "--", *claude_args]
+    return args
+
+
+def _ensure_infra(root, out):
+    """Lazy infra: if warden+squid are already healthy, return fast; otherwise run the
+    security preflight + auto-sync, warn about the trust boundary, and start infra only."""
+    rows = compose_ps(root)
+    healthy = {r.get("Service") for r in rows if _row_ready(r)}
+    if {"gitlab-warden", "forward-proxy"} <= healthy:
+        return
+    f = run_doctor(root, only=SECURITY_SECTIONS)
+    if print_findings(f, out)[0]:
+        raise CliError("preflight failed — fix the ✘ above", EXIT_DOCTOR)
+    _auto_sync_if_needed(root, out)
+    out.warn("catraz: sandbox active (warden+squid) — protects network/git, NOT your files")
+    compose_run(root, ["up", "-d"], check=False)
+
+
+def cmd_local(root, args, out):
+    assert_real_dirs(root)
+    auth.write_auth_fragment(root)
+    assert_invariants(root)                       # ALWAYS, uncached
+    _ensure_infra(root, out)                       # lazy: preflight+up only when cold
+    relpath = str(Path.cwd().resolve().relative_to(root))
+    if relpath == ".":
+        relpath = ""
+    tty = sys.stdin.isatty()
+    # Strip a leading `--` so `catraz local -- -p x` and `catraz local -p x` behave
+    # identically; _local_run_args adds its own `--` separator.
+    claude_args = (args.claude_args[1:]
+                   if args.claude_args and args.claude_args[0] == "--"
+                   else args.claude_args)
+    run_args = _local_run_args(relpath, tty, claude_args)
+    r = compose_run(root, run_args, check=False)
+    return r.returncode if r else EXIT_GENERAL
 
 
 def cmd_logs(root, args, out):
@@ -520,6 +566,11 @@ def build_parser():
 
     sub.add_parser("prune", parents=[_g()], help="remove built catraz-base images")
 
+    pl_local = sub.add_parser(
+        "local",
+        help="run claude inside the sandbox (drop-in: alias claude='catraz local')")
+    pl_local.add_argument("claude_args", nargs=argparse.REMAINDER)
+
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
     pl = sub.add_parser("logs", parents=[_g()], help="tail logs (agent|warden|proxy, or --audit)")
@@ -591,6 +642,8 @@ def main(argv=None):
             return cmd_doctor(root, args, out)
         if args.command == "up":
             return cmd_up(root, args, out)
+        if args.command == "local":
+            return cmd_local(root, args, out)
         if args.command == "down":
             return cmd_down(root, args, out)
         if args.command == "prune":
