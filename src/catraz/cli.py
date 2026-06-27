@@ -488,16 +488,11 @@ def _g():
 
 
 def add_global(parser):
-    """Global flags, repeated on every subparser so they work before *or* after the
-    subcommand. SUPPRESS defaults keep a value given before the subcommand from being
-    clobbered by the subparser's own default (the classic argparse gotcha)."""
+    """Truly global flags — repeated on top parser and every subparser so they work
+    before *or* after the subcommand. Command-specific flags (--dry-run, --yes) live
+    on their own subparser instead, so they appear only where they actually act."""
     parser.add_argument("-C", "--dir", default=argparse.SUPPRESS,
                         help="project root (default: dir with .catraz/)")
-    parser.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
-                        default=argparse.SUPPRESS,
-                        help="show the compose command without running it (up/down)")
-    parser.add_argument("-y", "--yes", action="store_true", default=argparse.SUPPRESS,
-                        help="non-interactive; accept defaults")
     parser.add_argument("--no-color", action="store_true", default=argparse.SUPPRESS,
                         help="disable ANSI colors")
 
@@ -509,12 +504,14 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_global(p)
-    p.add_argument("-V", "--version", action="store_true", help="show versions and exit")
+    p.add_argument("-V", "--version", action="store_true", help="show version and exit")
     sub = p.add_subparsers(dest="command")
 
     pi = sub.add_parser("init", parents=[_g()], help="interactive setup session (the wizard)")
     pi.add_argument("--force", action="store_true", help="re-prompt even for set values")
     pi.add_argument("--skip-sync", action="store_true", help="skip the Claude credential import")
+    pi.add_argument("-y", "--yes", action="store_true",
+                    help="non-interactive; keep existing .env values, skip prompts")
 
     pd = sub.add_parser("doctor", parents=[_g()], help="preflight: turn silent setup failures loud")
     pd.add_argument("--fix", action="store_true", help="repair safe findings (dirs, chown)")
@@ -528,9 +525,13 @@ def build_parser():
                     help="also start the agent daemon (remote-control)")
     pu.add_argument("--no-wait", action="store_true", help="don't wait for health")
     pu.add_argument("--timeout", type=int, default=120, help="health-wait limit (s)")
+    pu.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
+                    help="show the compose command without running it")
 
     pdn = sub.add_parser("down", parents=[_g()], help="stop the stack")
     pdn.add_argument("-v", "--volumes", action="store_true", help="also remove volumes")
+    pdn.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
+                     help="show the compose command without running it")
 
     sub.add_parser("prune", parents=[_g()], help="remove built catraz-base images")
 
@@ -556,7 +557,7 @@ def build_parser():
     pa.add_argument("-f", "--follow", action="store_true", help="follow")
     pa.add_argument("--tail", type=int, default=100, help="last N lines (default 100)")
 
-    sub.add_parser("version", parents=[_g()], help="show CLI + component versions")
+    sub.add_parser("version", parents=[_g()], help="show CLI version")
     return p
 
 
