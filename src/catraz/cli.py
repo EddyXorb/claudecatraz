@@ -229,9 +229,10 @@ def cmd_migrate(root, args, out):
 
 
 def _run_sync(root, out, source=None, force=False):
-    entry = root / "src" / "catraz" / "assets" / "container" / "entrypoint.py"
+    from catraz.paths import asset_root
+    entry = asset_root() / "assets" / "container" / "entrypoint.py"
     if not entry.exists():
-        raise CliError("entrypoint.py not found", EXIT_GENERAL)
+        raise CliError("entrypoint.py asset not found (corrupt cache? remove ~/.cache/catraz)", EXIT_GENERAL)
     env = load_env(root / ".catraz" / ".env")
     from catraz.paths import claude_home
     home = claude_home(root)
