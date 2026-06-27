@@ -21,6 +21,9 @@ Security-Architektur-Referenz. Stufen 01 und 02 sind implementiert.
 > [`roastiteration-1.md`](./roastiteration-1.md) · [`roastiteration-2.md`](./roastiteration-2.md) ·
 > [`roastiteration-3.md`](./roastiteration-3.md) (Sicherheits-Löcher → Einfachheit zurückgewinnen → Topologie-Entscheidung)
 > und [`roastiteration-4.md`](./roastiteration-4.md) (lokaler Modus §11: `catraz local` als drop-in `claude`).
+>
+> **Umsetzung:** schrittweiser, selbsttragender Implementierungsplan (Commit-Grenzen +
+> Unittests, ein LLM-umsetzbar) in [`05-packaging/`](./05-packaging/00-overview.md) (Docs 00–06).
 
 ---
 
