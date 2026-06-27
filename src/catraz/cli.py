@@ -35,7 +35,7 @@ from catraz.doctor import (
     run_doctor, print_findings, _doctor_fix, DOCTOR_SECTIONS, SECURITY_SECTIONS,
     SECRETS,
 )
-from catraz import auth
+from catraz import auth, image
 
 COMPONENT_VARS = [
     "UV_VERSION", "CLANG_VERSION", "RUST_VERSION",
@@ -295,8 +295,13 @@ def cmd_up(root, args, out):
         compose_run(root, up_args, print_only=True)
         return EXIT_OK
 
+    extra_env = None
+    if args.build:
+        base = image.resolve_base(root)
+        extra_env = {"BASE_IMAGE": base}
+
     out.info("• starting the stack…")
-    r = compose_run(root, up_args, check=False)
+    r = compose_run(root, up_args, check=False, extra_env=extra_env)
     if r.returncode != 0:
         return EXIT_GENERAL
 
@@ -436,6 +441,12 @@ def cmd_audit(root, args, out):
     return EXIT_OK
 
 
+def cmd_prune(root, args, out):
+    image.prune()
+    out.info(out.green("• removed built catraz-base images"))
+    return EXIT_OK
+
+
 def cmd_version(root, out):
     print(f"catraz {__version__}")
     env = load_env(root / ".catraz" / ".env") if root else {}
@@ -500,6 +511,8 @@ def build_parser():
 
     pdn = sub.add_parser("down", parents=[_g()], help="stop the stack")
     pdn.add_argument("-v", "--volumes", action="store_true", help="also remove volumes")
+
+    sub.add_parser("prune", parents=[_g()], help="remove built catraz-base images")
 
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
@@ -574,6 +587,8 @@ def main(argv=None):
             return cmd_up(root, args, out)
         if args.command == "down":
             return cmd_down(root, args, out)
+        if args.command == "prune":
+            return cmd_prune(root, args, out)
         if args.command == "status":
             return cmd_status(root, args, out)
         if args.command == "logs":

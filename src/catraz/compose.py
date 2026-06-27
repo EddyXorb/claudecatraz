@@ -31,13 +31,15 @@ def base_cmd(root: Path) -> list[str]:
     return cmd
 
 
-def run(root: Path, args, capture=False, check=True, print_only=False):
+def run(root: Path, args, capture=False, check=True, print_only=False, extra_env=None):
     from catraz.errors import CliError, EXIT_DOCKER
     cmd = [*base_cmd(root), *args]
     if print_only:
         print(" ".join(cmd))
         return None
     env = dict(os.environ, PROJECT_DIR=str(root))
+    if extra_env:
+        env.update(extra_env)
     try:
         return subprocess.run(cmd, env=env, check=check, capture_output=capture, text=True)
     except FileNotFoundError:
