@@ -8,11 +8,12 @@ def _image_exists(tag: str) -> bool:
     return subprocess.run(["docker", "image", "inspect", tag],
                           capture_output=True).returncode == 0
 
-def _build_base(dockerfile: Path) -> str:
+def _build_base(dockerfile: Path, context: Path | None = None) -> str:
+    ctx = context or dockerfile.parent
     tag = f"catraz-base:{hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]}"
     if not _image_exists(tag):
         r = subprocess.run(["docker", "build", "-t", tag,
-                            "-f", str(dockerfile), str(dockerfile.parent)])
+                            "-f", str(dockerfile), str(ctx)])
         if r.returncode:
             raise CliError(f"base build failed (Dockerfile {dockerfile})", EXIT_DOCKER)
     return tag
@@ -25,7 +26,12 @@ def resolve_base(root: Path) -> str:
         df = (root / env["BASE_DOCKERFILE"]).resolve()
         if not df.exists():
             raise CliError(f"BASE_DOCKERFILE not found: {df}", EXIT_DOCKER)
-        return _build_base(df)
+        ctx = None
+        if env.get("BASE_CONTEXT"):
+            ctx = (root / env["BASE_CONTEXT"]).resolve()
+            if not ctx.is_dir():
+                raise CliError(f"BASE_CONTEXT not a directory: {ctx}", EXIT_DOCKER)
+        return _build_base(df, ctx)
     return _build_base(asset_root() / "assets/bases/cpp-rust-python/Dockerfile")
 
 def prune() -> None:
