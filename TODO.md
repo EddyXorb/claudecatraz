@@ -96,3 +96,42 @@ Release), aber für den im Plan ausdrücklich gewollten Zero-Install-/Entwicklun
 und bekommt weiter das alte Verhalten — ohne jede Fehlermeldung. Sinnvoll wäre ein
 Cache-Schlüssel, der im Zero-Install-Fall den Quell-Mtime/Hash einbezieht (oder im
 `_repo_root()`-Zweig den Marker ignoriert und immer frisch kopiert). **Nicht behoben.**
+
+### B5 — Doc-Test `test_tag_is_content_addressed` (Doc 05 §5.2) ist nicht lauffähig
+
+Der wörtlich vorgegebene Mock in Doc 05 §5.2 ist:
+
+```python
+monkeypatch.setattr(image.subprocess, "run",
+    lambda cmd, **k: seen.setdefault("tag", cmd[cmd.index("-t")+1]) or type("R",(),{"returncode":0})())
+```
+
+`dict.setdefault` **gibt den gerade gespeicherten Tag-String zurück** (truthy) → das `or`
+schließt kurz und das Lambda liefert den **String** statt des Fake-Result-Objekts. Das
+verbatim kopierte `image._build_base` macht danach `if r.returncode:` →
+`AttributeError: 'str' object has no attribute 'returncode'`. Der Test kann gegen den
+verbatim-`image.py`-Code also **nie** grün werden.
+
+**Warum ein Problem:** Doc 00 erhebt „grün-testbar abgeschlossen, bevor committet wird" zur
+Bedingung; ein Doc-Schritt, der einen nicht lauffähigen Test mitliefert, verletzt die eigene
+Akzeptanzregel. Bei der Umsetzung wurde das Lambda durch eine äquivalente benannte `fake_run`
+ersetzt (Tag merken, dann Result-Objekt zurückgeben) — Capture-Ziel und Assertion
+unverändert. Reiner Doc-Fehler, in der Implementierung umgangen; die Doc-Vorlage sollte
+korrigiert werden.
+
+### B6 — `BASE_DOCKERFILE`-Build-Kontext = Dockerfile-Verzeichnis: stille `COPY`-Falle (Projektziel „beliebige Dockerfiles")
+
+`image._build_base` baut mit `docker build -f <dockerfile> <dockerfile.parent>`, d. h. der
+Build-**Kontext** ist immer das Verzeichnis der Dockerfile-Datei. Für die mitgelieferte
+Default-Base ist das unkritisch (kein `COPY`, alles wird per apt/curl/pip geholt). Für ein
+**benutzereigenes** `BASE_DOCKERFILE` ist es eine Falle: zeigt jemand auf
+`BASE_DOCKERFILE=./docker/Dockerfile.dev` und dessen Dockerfile macht `COPY ./scripts /opt`
+in Erwartung von Repo-Root-relativen Pfaden, ist der Kontext `./docker/` — `COPY` kopiert das
+Falsche oder bricht ab. Es gibt keine Möglichkeit, Kontext und Dockerfile getrennt anzugeben.
+
+**Warum ein Problem:** Genau TODO-Punkt 2 („es sollte möglich sein, beliebige Dockerfiles
+laufen zu haben") wird hier nur eingeschränkt erfüllt — nämlich nur für Dockerfiles ohne
+kontextrelative `COPY`/`ADD` oder solche, die ihren Kontext zufällig im selben Ordner haben.
+Ein echtes „beliebiges Dockerfile" mit Build-Kontext = Projekt-Root ist nicht abbildbar.
+Sinnvoll wäre ein zusätzliches `BASE_CONTEXT` (Default = Dockerfile-Verzeichnis, überschreibbar
+auf z. B. `.`). **Nicht behoben** — Design-/Plan-Einschränkung, festgehalten zur Entscheidung.
