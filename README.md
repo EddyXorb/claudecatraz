@@ -88,6 +88,32 @@ docker compose up -d
 
 The agent is then reachable over Remote Control on claude.ai. GitLab decisions can be watched live in the audit viewer (see below).
 
+## Local mode
+
+Besides the Remote Control daemon you can run Claude Code **interactively** inside the same
+sandbox — a drop-in replacement for the `claude` binary:
+
+```bash
+alias claude='catraz local'
+catraz local -p "fix the failing test"      # one-shot; exit code is passed through
+```
+
+`catraz local` runs the agent one-off in the hardened container (Warden + Squid stay up as
+daemons, so the second call is fast), with the project mounted at `/workspace`. Everything
+after `local` is handed verbatim to `claude` (including `--dangerously-skip-permissions`).
+
+> ### ⚠️ What the sandbox protects — and what it does **not**
+>
+> The sandbox protects your **network and git egress**: the Warden is the sole holder of the
+> GitLab tokens and enforces R1–R6, and Squid restricts the agent to an allowlist. It does
+> **NOT** protect your **files** — `/workspace` is bind-mounted **read-write**, so the agent
+> can read and modify any file in the project. Only `.catraz/` is hidden (a tmpfs shadow).
+> Run it on code you're willing to let the agent change.
+
+A plain `catraz up` starts **infra only** (Warden + Squid); the agent daemon is opt-in via
+`catraz up --remote`. Outside a `.catraz` project, `catraz local` fails closed — it never
+falls back to a host `claude`.
+
 ## Configuration
 
 There are **two** configuration homes, with one source of truth per setting — no value lives in both at once:
