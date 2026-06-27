@@ -111,7 +111,6 @@ with `catraz audit --web`.
 | `catraz audit --web` | Open the read-only GitLab decision viewer (ephemeral loopback port) |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
 | `catraz down` | Stop the stack |
-| `catraz migrate` | Move a legacy root layout (`./config`, `./state`, `./.env`) into `.catraz/` |
 
 Run `catraz <command> --help` for the details of any command. Full CLI design:
 [`docs/design/agentic-workflow/04-cli.md`](docs/design/agentic-workflow/04-cli.md).

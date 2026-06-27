@@ -210,24 +210,6 @@ def _ensure_gitignore(root):
         fh.write(".catraz/\n")
 
 
-def cmd_migrate(root, args, out):
-    cat = root / ".catraz"; cat.mkdir(exist_ok=True)
-    moves = {"config": "config", "state": "state", "logs": "logs",
-             "claude": "claude", ".env": ".env"}
-    for src_name, dst_name in moves.items():
-        src = root / src_name; dst = cat / dst_name
-        if src.exists() and not dst.exists():
-            src.rename(dst)               # atomic move, same filesystem
-    # fail-closed: kein Alt-Layout-Secret darf unter root verbleiben
-    leftovers = [n for n in ("claude", "state", ".env") if (root / n).exists()]
-    if leftovers:
-        raise CliError(
-            f"migration incomplete, still under project root: {leftovers}", EXIT_CONFIG)
-    _ensure_gitignore(root)
-    out.info(out.green("migrated to .catraz/"))
-    return EXIT_OK
-
-
 def _run_sync(root, out, source=None, force=False):
     from catraz.paths import asset_root
     entry = asset_root() / "assets" / "container" / "entrypoint.py"
@@ -546,9 +528,6 @@ def build_parser():
     pi.add_argument("--force", action="store_true", help="re-prompt even for set values")
     pi.add_argument("--skip-sync", action="store_true", help="skip the Claude credential import")
 
-    sub.add_parser("migrate", parents=[_g()],
-                   help="move a legacy layout (./config, ./state, ./.env, …) into .catraz/")
-
     pd = sub.add_parser("doctor", parents=[_g()], help="preflight: turn silent setup failures loud")
     pd.add_argument("--fix", action="store_true", help="repair safe findings (dirs, chown)")
     pd.add_argument("--strict", action="store_true", help="warnings count as failures (exit 3)")
@@ -617,14 +596,12 @@ def main(argv=None):
         parser.print_help()
         return EXIT_OK
 
-    # init/migrate run BEFORE a .catraz exists → they take the explicit dir (or CWD)
+    # init runs BEFORE a .catraz exists → it takes the explicit dir (or CWD)
     # as root rather than walking up for an existing .catraz.
-    if args.command in ("init", "migrate"):
+    if args.command == "init":
         root = Path(args.dir).resolve() if args.dir else Path.cwd().resolve()
         try:
-            if args.command == "init":
-                return cmd_init(root, args, out)
-            return cmd_migrate(root, args, out)
+            return cmd_init(root, args, out)
         except CliError as e:
             out.err(str(e))
             return e.code

@@ -72,26 +72,13 @@ def find_root(explicit: str | None = None) -> Path:
         if not (root / ".catraz").is_dir():
             raise CliError(f"no .catraz in {root}", EXIT_CONFIG)
         _assert_no_nested(root)
-        _assert_no_legacy(root)
         return root
     here = Path.cwd().resolve()
     for d in (here, *here.parents):
         if (d / ".catraz").is_dir():
             _assert_no_nested(d)
-            _assert_no_legacy(d)
             return d
     raise CliError("no .catraz found (run `catraz init`)", EXIT_CONFIG)
-
-
-def _assert_no_legacy(root: Path) -> None:
-    """Refuse to run when a pre-.catraz layout sits next to the new home: an old
-    `./claude`, `./state`, or `./.env` could shadow the migrated copies."""
-    legacy = [n for n in ("claude", "state", ".env") if (root / n).exists()]
-    if legacy:
-        raise CliError(
-            "legacy layout next to .catraz — remove it or run `catraz migrate`",
-            EXIT_CONFIG,
-        )
 
 
 def _assert_no_nested(root: Path) -> None:
