@@ -1,6 +1,8 @@
 """docker-compose call + invariants."""
+import hashlib
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -16,11 +18,26 @@ SERVICES = {
 }
 
 
+def project_name(root: Path) -> str:
+    """Stable, globally-unique Compose project name for a sandbox.
+
+    Compose otherwise defaults the project name to the basename of --project-directory,
+    which is NOT unique: two sandboxes in same-named dirs (~/work/api and ~/scratch/api)
+    would both be project `api`, and their containers/networks/volumes would collide. We
+    anchor it to a short hash of the ABSOLUTE root path (unique per location) while keeping
+    the basename for readability. Must match Compose's name rule: [a-z0-9][a-z0-9_-]*.
+    """
+    base = re.sub(r"[^a-z0-9_-]", "-", root.name.lower()).strip("-_") or "proj"
+    digest = hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:8]
+    return f"catraz-{base}-{digest}"
+
+
 def base_cmd(root: Path) -> list[str]:
     ar = asset_root()
     cmd = ["docker", "compose",
            "-f", str(ar / "assets/compose/docker-compose.yml"),
            "--project-directory", str(root),
+           "--project-name", project_name(root),
            "--env-file", str(root / ".catraz/.env")]
     frag = root / ".catraz/.auth.compose.yml"
     if frag.exists():
