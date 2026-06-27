@@ -12,11 +12,16 @@ secrets and only ever *writes* `.env` (never config/, never TOML).
 """
 
 import argparse
+import contextlib
 import getpass
 import os
 import shutil
+import socket
+import socketserver
 import subprocess
 import sys
+import threading
+import webbrowser
 from pathlib import Path
 
 from catraz import __version__
@@ -35,8 +40,6 @@ COMPONENT_VARS = [
     "UV_VERSION", "CLANG_VERSION", "RUST_VERSION",
     "CONAN_VERSION", "NODE_VERSION", "CLAUDE_CODE_VERSION",
 ]
-
-AUDIT_URL = "http://172.31.0.2:9090/"
 
 
 # ── styling ───────────────────────────────────────────────────────────────────
@@ -324,8 +327,8 @@ def _print_urls(out):
     out.head("URLs")
     print("  Remote Control:  " + out.cyan("https://claude.ai")
           + out.dim("  (the agent 'claude-dev-env' registers there)"))
-    print("  Audit viewer:    " + out.cyan(AUDIT_URL)
-          + out.dim("  (host only — see README for the socat tunnel)"))
+    print("  Audit viewer:    " + out.cyan("catraz audit --web")
+          + out.dim("   (host-only, ephemeral loopback port)"))
 
 
 def cmd_logs(root, args, out):
@@ -342,7 +345,7 @@ def cmd_logs(root, args, out):
 
 
 def _tail_audit(root, args, out):
-    d = root / "logs" / "warden"
+    d = root / ".catraz" / "logs" / "warden"
     files = sorted(d.glob("*.jsonl")) if d.exists() else []
     if not files:
         out.warn(f"no audit logs in {d}")
@@ -352,6 +355,47 @@ def _tail_audit(root, args, out):
         cmd.append("-f")
     cmd += ["-n", str(args.tail), *map(str, files)]
     subprocess.run(cmd)
+    return EXIT_OK
+
+
+class _UdsProxy(socketserver.BaseRequestHandler):
+    sock_path = ""           # per-instance via type(...)
+
+    def handle(self):
+        with socket.socket(socket.AF_UNIX) as up:
+            up.connect(self.sock_path)
+
+            def fwd(a, b):
+                try:
+                    while (d := a.recv(65536)):
+                        b.sendall(d)
+                except OSError:
+                    pass
+                finally:
+                    with contextlib.suppress(OSError):
+                        b.shutdown(socket.SHUT_WR)
+            t = threading.Thread(target=fwd, args=(self.request, up), daemon=True)
+            t.start()
+            fwd(up, self.request)
+            t.join()
+
+
+def cmd_audit(root, args, out):
+    sock = root / ".catraz/run/warden/admin.sock"
+    if not args.web:
+        return _tail_audit(root, args, out)            # bestehender JSONL-Tail
+    if not sock.exists():
+        out.err("audit socket not found — run `catraz up` first")
+        return EXIT_GENERAL
+    handler = type("H", (_UdsProxy,), {"sock_path": str(sock)})
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)   # ephemerer Port
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    out.info(f"audit viewer: {url}  (Ctrl-C to stop)")
+    webbrowser.open(url)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        srv.shutdown()
     return EXIT_OK
 
 
@@ -432,6 +476,11 @@ def build_parser():
     ps.add_argument("--from", dest="source", help="source ~/.claude path")
     ps.add_argument("--force", action="store_true", help="overwrite existing credential")
 
+    pa = sub.add_parser("audit", parents=[_g()], help="warden decision log (JSONL tail or --web viewer)")
+    pa.add_argument("--web", action="store_true", help="open the live viewer over the admin socket")
+    pa.add_argument("-f", "--follow", action="store_true", help="follow")
+    pa.add_argument("--tail", type=int, default=100, help="last N lines (default 100)")
+
     sub.add_parser("version", parents=[_g()], help="show CLI + component versions")
     return p
 
@@ -494,6 +543,8 @@ def main(argv=None):
             return cmd_logs(root, args, out)
         if args.command == "sync":
             return cmd_sync(root, args, out)
+        if args.command == "audit":
+            return cmd_audit(root, args, out)
         if args.command == "version":
             cmd_version(root, out)
             return EXIT_OK

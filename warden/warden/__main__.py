@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import sys
 
 import uvicorn
@@ -41,11 +43,16 @@ async def _serve() -> None:
     agent = uvicorn.Server(
         uvicorn.Config(create_app(ctx), host="0.0.0.0", port=cfg.agent_port, log_level="info")
     )
-    admin = uvicorn.Server(
-        uvicorn.Config(
+    admin_uds = os.environ.get("ADMIN_UDS")
+    if admin_uds:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(admin_uds)                      # stale socket von Crash entfernen
+        admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
+    else:
+        admin_config = uvicorn.Config(
             create_admin_app(ctx), host=cfg.admin_host, port=cfg.admin_port, log_level="warning"
         )
-    )
+    admin = uvicorn.Server(admin_config)
     reconcile_task = asyncio.create_task(_periodic_reconcile(ctx))
     try:
         await asyncio.gather(agent.serve(), admin.serve())
