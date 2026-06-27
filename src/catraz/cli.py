@@ -360,15 +360,15 @@ def _print_urls(out):
           + out.dim("   (host-only, ephemeral loopback port)"))
     # Plain `up` runs infra only (warden+squid). The agent is opt-in:
     print("  Agent daemon:    " + out.cyan("catraz up --remote")
-          + out.dim("   ·   interactive: ") + out.cyan("catraz local"))
+          + out.dim("   ·   interactive: ") + out.cyan("catraz run"))
 
 
-def _local_run_args(relpath: str, tty: bool, claude_args: list[str]) -> list[str]:
+def _oneoff_args(relpath: str, tty: bool, claude_args: list[str]) -> list[str]:
     args = ["run", "--rm", "--no-deps"]
     if not tty:
         args.append("-T")
     args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
-             "claude-dev-env", "local", "--", *claude_args]
+             "claude-dev-env", "run", "--", *claude_args]
     return args
 
 
@@ -387,7 +387,7 @@ def _ensure_infra(root, out):
     compose_run(root, ["up", "-d"], check=False)
 
 
-def cmd_local(root, args, out):
+def cmd_run(root, args, out):
     assert_real_dirs(root)
     auth.write_auth_fragment(root)
     assert_invariants(root)                       # ALWAYS, uncached
@@ -396,12 +396,12 @@ def cmd_local(root, args, out):
     if relpath == ".":
         relpath = ""
     tty = sys.stdin.isatty()
-    # Strip a leading `--` so `catraz local -- -p x` and `catraz local -p x` behave
-    # identically; _local_run_args adds its own `--` separator.
+    # Strip a leading `--` so `catraz run -- -p x` and `catraz run -p x` behave
+    # identically; _oneoff_args adds its own `--` separator.
     claude_args = (args.claude_args[1:]
                    if args.claude_args and args.claude_args[0] == "--"
                    else args.claude_args)
-    run_args = _local_run_args(relpath, tty, claude_args)
+    run_args = _oneoff_args(relpath, tty, claude_args)
     r = compose_run(root, run_args, check=False)
     return r.returncode if r else EXIT_GENERAL
 
@@ -546,10 +546,10 @@ def build_parser():
 
     sub.add_parser("prune", parents=[_g()], help="remove built catraz-base images")
 
-    pl_local = sub.add_parser(
-        "local",
-        help="run claude inside the sandbox (drop-in: alias claude='catraz local')")
-    pl_local.add_argument("claude_args", nargs=argparse.REMAINDER)
+    p_run = sub.add_parser(
+        "run",
+        help="run claude one-off inside the sandbox (drop-in: alias claude='catraz run')")
+    p_run.add_argument("claude_args", nargs=argparse.REMAINDER)
 
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
@@ -620,8 +620,8 @@ def main(argv=None):
             return cmd_doctor(root, args, out)
         if args.command == "up":
             return cmd_up(root, args, out)
-        if args.command == "local":
-            return cmd_local(root, args, out)
+        if args.command == "run":
+            return cmd_run(root, args, out)
         if args.command == "down":
             return cmd_down(root, args, out)
         if args.command == "prune":
