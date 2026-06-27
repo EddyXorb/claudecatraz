@@ -99,14 +99,29 @@ jobs:
             --tmpfs /tmp \
             forward-proxy:ci
 
-      - name: Wait for port 3128
+      - name: Wait for proxy readiness
         run: |
+          # 1) TCP-Port offen
+          up=0
           for i in $(seq 1 30); do
-            bash -c 'echo > /dev/tcp/127.0.0.1/3128' 2>/dev/null \
-              && echo "Ready after ${i}s" && exit 0
+            if bash -c 'echo > /dev/tcp/127.0.0.1/3128' 2>/dev/null; then
+              up=1; echo "Port up after ${i}s"; break
+            fi
             sleep 1
           done
-          echo "Proxy did not become ready in 30 s"
+          [ "$up" = 1 ] || { echo "Proxy-Port nicht offen in 30 s"; docker logs squid-ci; exit 1; }
+          # 2) ssl-bump/certgen-Warmup: der erste CONNECT+Peek direkt nach dem Start wird
+          #    resettet, solange die certgen-Helper noch hochfahren (cold start). Daher
+          #    auf eine echte, allowlistete Splice-Verbindung warten, statt nur auf den Port
+          #    — sonst rennt der erste ALLOW-Test ins Warmup-Fenster (curl 56).
+          for i in $(seq 1 30); do
+            if code=$(curl -sS --proxy http://127.0.0.1:3128 -m 15 -o /dev/null -w '%{http_code}' https://pypi.org/ 2>/dev/null) \
+               && [ "$code" = "200" ]; then
+              echo "Splice-ready nach ${i} Probe(s) (pypi=$code)"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Proxy wurde nicht splice-ready in 30 Proben"
           docker logs squid-ci
           exit 1
 
@@ -114,26 +129,39 @@ jobs:
 
       - name: "ALLOW — pypi.org"
         run: |
-          code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
-                   https://pypi.org/ 2>/dev/null); rc=$?
-          echo "rc=$rc code=$code"
-          [ "$rc" -eq 0 ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ] \
-            || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
+          # rc separat per `|| rc=$?` einfangen: unter `bash -e` würde `code=$(curl …)`
+          # bei curl-Fehler sofort mit dessen Exitcode abbrechen (statt FAIL zu melden).
+          # Kleiner Retry gegen transiente Egress-Blips (recv-failure == curl 56).
+          ok=0
+          for i in 1 2 3; do
+            rc=0; code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
+                     https://pypi.org/ 2>/dev/null) || rc=$?
+            echo "try$i rc=$rc code=$code"
+            [ "$rc" -eq 0 ] && [ -n "$code" ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ] && { ok=1; break; }
+            sleep 2
+          done
+          [ "$ok" = 1 ] || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
 
       - name: "ALLOW — registry.npmjs.org"
         run: |
-          code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
-                   https://registry.npmjs.org/ 2>/dev/null); rc=$?
-          echo "rc=$rc code=$code"
-          [ "$rc" -eq 0 ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ] \
-            || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
+          ok=0
+          for i in 1 2 3; do
+            rc=0; code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
+                     https://registry.npmjs.org/ 2>/dev/null) || rc=$?
+            echo "try$i rc=$rc code=$code"
+            [ "$rc" -eq 0 ] && [ -n "$code" ] && [ "$code" -ge 200 ] && [ "$code" -lt 500 ] && { ok=1; break; }
+            sleep 2
+          done
+          [ "$ok" = 1 ] || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
 
       # ── Geblockte Ziele (default-deny + SNI-terminate) ───────────────────────
 
       - name: "DENY — example.com (nicht allowlisted)"
         run: |
-          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
-                   https://example.com/ 2>/dev/null); rc=$?
+          # `|| rc=$?`: ein geblocktes Ziel lässt curl scheitern (terminate→reset, curl 56) —
+          # unter `bash -e` würde das den Schritt abbrechen, bevor die PASS-Prüfung läuft.
+          rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   https://example.com/ 2>/dev/null) || rc=$?
           echo "rc=$rc code=$code"
           { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
             && echo "PASS" \
@@ -141,8 +169,8 @@ jobs:
 
       - name: "DENY — IP-Literal (kein dstdomain-Treffer)"
         run: |
-          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
-                   https://1.1.1.1/ 2>/dev/null); rc=$?
+          rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   https://1.1.1.1/ 2>/dev/null) || rc=$?
           echo "rc=$rc code=$code"
           { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
             && echo "PASS" \
@@ -150,8 +178,8 @@ jobs:
 
       - name: "DENY — non-safe port (:8443)"
         run: |
-          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
-                   https://pypi.org:8443/ 2>/dev/null); rc=$?
+          rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   https://pypi.org:8443/ 2>/dev/null) || rc=$?
           echo "rc=$rc code=$code"
           { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
             && echo "PASS" \
@@ -159,8 +187,8 @@ jobs:
 
       - name: "DENY — plain HTTP nicht-allowlisted"
         run: |
-          code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
-                   http://evil.example.net/ 2>/dev/null); rc=$?
+          rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
+                   http://evil.example.net/ 2>/dev/null) || rc=$?
           echo "rc=$rc code=$code"
           { [ "$rc" -ne 0 ] || [ "$code" = "403" ] || [ "$code" = "503" ]; } \
             && echo "PASS" \
