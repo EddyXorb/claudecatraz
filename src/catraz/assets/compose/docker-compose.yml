@@ -1,7 +1,10 @@
 services:
   gitlab-warden:
     build:
-      context: ../warden
+      # Absolute, anchored at the extracted asset cache. A relative `../warden` would be
+      # resolved by compose against --project-directory (the user's repo), not this file's
+      # dir — CATRAZ_ASSETS (set in compose.run) makes it independent of project-directory.
+      context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/warden
       dockerfile: Dockerfile
       args:
         DEV_UID: ${DEV_UID:-1000}
@@ -43,7 +46,7 @@ services:
   # docs/design/agentic-workflow/02-forward-proxy/03-deployment.md
   forward-proxy:
     build:
-      context: ../forward-proxy                 # Squid mit OpenSSL/ssl_bump-Support
+      context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/forward-proxy   # Squid mit OpenSSL/ssl_bump-Support
       args:
         DEV_UID: ${DEV_UID:-1000}               # Audit-Log host-lesbar (README §11.6)
     networks: [agent-net, egress-net]
@@ -77,7 +80,7 @@ services:
     # activates the service despite the profile.
     profiles: ["remote"]
     build:
-      context: ..
+      context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}
       dockerfile: claude-layer/Dockerfile
       args:
         BASE_IMAGE: ${BASE_IMAGE}

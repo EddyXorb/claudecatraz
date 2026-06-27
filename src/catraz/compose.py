@@ -54,7 +54,10 @@ def run(root: Path, args, capture=False, check=True, print_only=False, extra_env
     if print_only:
         print(" ".join(cmd))
         return None
-    env = dict(os.environ, PROJECT_DIR=str(root))
+    # CATRAZ_ASSETS anchors the compose build contexts at the extracted asset cache.
+    # Compose resolves relative `context:` paths against --project-directory (the user's
+    # repo), so the contexts are absolute via this var instead — see docker-compose.yml.
+    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
     if extra_env:
         env.update(extra_env)
     try:
