@@ -190,17 +190,14 @@ def check_claude(root, env, f):
         f.ok("claude", "Claude sandbox credential present")
 
 
-def check_net(f):
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(0.3)
-    try:
-        if s.connect_ex(("172.31.0.2", 9090)) == 0:
-            f.ok("net", "audit-viewer port 9090 reachable (stack already up?)")
-        else:
-            f.ok("net", "audit-viewer port 9090 free")
-    finally:
-        s.close()
+def check_net(root, f):
+    # Admin/audit moved from TCP (172.31.0.2:9090) to a per-project unix socket
+    # under .catraz/run/warden/. The socket file only exists while the stack runs.
+    sock = root / ".catraz" / "run" / "warden" / "admin.sock"
+    if sock.exists():
+        f.ok("net", "admin socket present (stack up)")
+    else:
+        f.ok("net", "admin socket absent (stack down — start with `catraz up`)")
 
 
 def run_doctor(root, only=None, fix=False):
@@ -215,7 +212,7 @@ def run_doctor(root, only=None, fix=False):
     if "tokens" in sections: check_tokens(env, f)
     if "policy" in sections: check_policy(root, env, f)
     if "claude" in sections: check_claude(root, env, f)
-    if "net" in sections: check_net(f)
+    if "net" in sections: check_net(root, f)
     return f
 
 
