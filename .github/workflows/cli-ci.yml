@@ -8,6 +8,7 @@ on:
       - "src/catraz/**"
       - "pyproject.toml"
       - "tests/cli/**"
+      - "tests/container/**"
       - ".github/workflows/cli-ci.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "src/catraz/**"
       - "pyproject.toml"
       - "tests/cli/**"
+      - "tests/container/**"
       - ".github/workflows/cli-ci.yml"
 
 jobs:
@@ -32,4 +34,4 @@ jobs:
           ./catraz --version
 
       - name: Unit tests
-        run: uv run --with pytest python -m pytest tests/cli/ -q
+        run: uv run --with pytest python -m pytest tests/cli/ tests/container/ -q
