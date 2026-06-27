@@ -6,10 +6,14 @@ SUBSCRIPTION_FRAGMENT = """\
 services:
   claude-dev-env:
     volumes:
-      - { type: bind, source: ${PROJECT_DIR}/.catraz/claude/.credentials.json,
-          target: /home/dev/.claude/.ro/.credentials.json, read_only: true }
-      - { type: bind, source: ${PROJECT_DIR}/.catraz/claude/.claude.json,
-          target: /home/dev/.claude/.ro/.claude.json, read_only: true }
+      - type: bind
+        source: ${PROJECT_DIR}/.catraz/claude/.credentials.json
+        target: /home/dev/.claude/.ro/.credentials.json
+        read_only: true
+      - type: bind
+        source: ${PROJECT_DIR}/.catraz/claude/.claude.json
+        target: /home/dev/.claude/.ro/.claude.json
+        read_only: true
 """
 API_KEY_FRAGMENT = """\
 services:

@@ -85,7 +85,8 @@ def _env_keys(agent) -> set:
 
 
 def assert_invariants(root) -> None:
-    r = run(root, ["config", "--format", "json"], capture=True, check=False)
+    # Include the remote profile so claude-dev-env (profiles: ["remote"]) is expanded.
+    r = run(root, ["--profile", "remote", "config", "--format", "json"], capture=True, check=False)
     if r is None or r.returncode != 0:
         raise CliError("docker compose config failed (cannot verify trust boundary)", EXIT_CONFIG)
     cfg = json.loads(r.stdout)
