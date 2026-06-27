@@ -75,14 +75,14 @@ def check_compose(root, env, f):
 
 
 def check_env(root, env, f):
-    envf = root / ".env"
+    envf = root / ".catraz" / ".env"
     if not envf.exists():
         f.bad("env", ".env missing", "run `catraz init`")
         return
     f.ok("env", ".env present")
 
     dev_uid = env.get("DEV_UID", "")
-    write_dirs = [root / "state", root / "logs"]
+    write_dirs = [root / ".catraz" / "state", root / ".catraz" / "logs"]
     for d in write_dirs:
         if not d.exists():
             f.bad("env", f"{d.name}/ missing", "run `catraz init` or `catraz doctor --fix`")
@@ -176,8 +176,8 @@ def check_policy(root, env, f):
 
 
 def check_claude(root, env, f):
-    from catraz.paths import _claude_home
-    home = _claude_home(root, env)
+    from catraz.paths import claude_home
+    home = claude_home(root)
     creds = home / ".credentials.json"
     # The specific trap entrypoint.py hard-codes: Docker auto-created it as root.
     if home.exists() and home.stat().st_uid == 0 and os.getuid() != 0:
@@ -204,7 +204,7 @@ def check_net(f):
 
 
 def run_doctor(root, only=None, fix=False):
-    env = load_env(root / ".env")
+    env = load_env(root / ".catraz" / ".env")
     f = Findings()
     sections = only or DOCTOR_SECTIONS
     if fix:
@@ -222,12 +222,13 @@ def run_doctor(root, only=None, fix=False):
 def _doctor_fix(root, env):
     """Repair only the safe things: missing dirs + chown. Never secrets/policy."""
     dev_uid = env.get("DEV_UID", "")
-    for d in ["config", "state/warden", "logs/warden", "logs/squid", "workspace", "claude"]:
-        (root / d).mkdir(parents=True, exist_ok=True)
+    cat = root / ".catraz"
+    for d in ["config", "state/warden", "logs/warden", "logs/squid", "claude", "run/warden"]:
+        (cat / d).mkdir(parents=True, exist_ok=True)
     if dev_uid.isdigit():
-        for d in ["state", "logs"]:
+        for d in ["state", "logs", "run"]:
             try:
-                _chown_r(root / d, int(dev_uid))
+                _chown_r(cat / d, int(dev_uid))
             except PermissionError:
                 pass  # surfaced as a finding by check_env; --fix is best-effort
 

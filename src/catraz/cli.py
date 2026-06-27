@@ -20,6 +20,9 @@ import sys
 from pathlib import Path
 
 from catraz import __version__
+from catraz.errors import (
+    CliError, EXIT_OK, EXIT_GENERAL, EXIT_CONFIG, EXIT_DOCTOR, EXIT_DOCKER,
+)
 from catraz.envfile import load_env, set_env_values, mask
 from catraz.policy import validate_project, _resolve_allowed_projects
 from catraz.compose import run as compose_run, compose_ps, resolve_service, SERVICES
@@ -60,19 +63,8 @@ class Out:
     def err(self, s): print(self.red(f"error: {s}"), file=sys.stderr)
 
 
-# ── exit codes (see 04-cli.md §4) ───────────────────────────────────────────────
-
-EXIT_OK = 0
-EXIT_GENERAL = 1
-EXIT_CONFIG = 2
-EXIT_DOCTOR = 3
-EXIT_DOCKER = 4
-
-
-class CliError(Exception):
-    def __init__(self, msg, code=EXIT_GENERAL):
-        super().__init__(msg)
-        self.code = code
+# Exit codes + CliError live in catraz.errors (imported above) to avoid an
+# import cycle with paths.py/compose.py/doctor.py.
 
 
 # ── commands ────────────────────────────────────────────────────────────────────
@@ -177,10 +169,10 @@ def _run_sync(root, out, source=None, force=False):
     entry = root / "src" / "catraz" / "assets" / "container" / "entrypoint.py"
     if not entry.exists():
         raise CliError("entrypoint.py not found", EXIT_GENERAL)
-    env = load_env(root / ".env")
-    from catraz.paths import _claude_home
-    claude_home = _claude_home(root, env)
-    cmd = [sys.executable, str(entry), "sync", "--claude-home", str(claude_home)]
+    env = load_env(root / ".catraz" / ".env")
+    from catraz.paths import claude_home
+    home = claude_home(root)
+    cmd = [sys.executable, str(entry), "sync", "--claude-home", str(home)]
     run_env = dict(os.environ)
     if source:
         run_env["HOME"] = str(Path(source).expanduser().parent)
@@ -262,7 +254,7 @@ def cmd_down(root, args, out):
 
 
 def cmd_status(root, args, out):
-    if not (root / ".env").exists():
+    if not (root / ".catraz" / ".env").exists():
         out.info("Not set up yet. Run " + out.bold("catraz init") + ".")
         return EXIT_OK
     rows = compose_ps(root)
@@ -319,7 +311,7 @@ def _tail_audit(root, args, out):
 
 def cmd_version(root, out):
     print(f"catraz {__version__}")
-    env = load_env(root / ".env") if root else {}
+    env = load_env(root / ".catraz" / ".env") if root else {}
     if env:
         out.head("\nComponent versions (.env)")
         for k in COMPONENT_VARS:
@@ -341,7 +333,7 @@ def add_global(parser):
     subcommand. SUPPRESS defaults keep a value given before the subcommand from being
     clobbered by the subparser's own default (the classic argparse gotcha)."""
     parser.add_argument("-C", "--dir", default=argparse.SUPPRESS,
-                        help="project root (default: dir with docker-compose.yml)")
+                        help="project root (default: dir with .catraz/)")
     parser.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
                         default=argparse.SUPPRESS,
                         help="show the compose command without running it (up/down)")

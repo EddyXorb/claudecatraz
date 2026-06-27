@@ -25,7 +25,7 @@ def _resolve_allowed_projects(root, env):
     ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
     if ov.strip():
         return [p.strip() for p in ov.split(",") if p.strip()], ".env override"
-    toml = root / "config" / "warden.toml"
+    toml = root / ".catraz" / "config" / "warden.toml"
     if not toml.exists():
         return [], "no warden.toml"
     return _read_toml_allowed_projects(toml), "warden.toml"

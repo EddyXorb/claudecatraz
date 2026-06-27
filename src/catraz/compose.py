@@ -28,7 +28,7 @@ def base_cmd(root: Path) -> list[str]:
 
 
 def run(root: Path, args, capture=False, check=True, print_only=False):
-    from catraz.cli import CliError, EXIT_DOCKER
+    from catraz.errors import CliError, EXIT_DOCKER
     cmd = [*base_cmd(root), *args]
     if print_only:
         print(" ".join(cmd))
@@ -55,7 +55,7 @@ def compose_ps(root):
 
 
 def resolve_service(name):
-    from catraz.cli import CliError, EXIT_CONFIG
+    from catraz.errors import CliError, EXIT_CONFIG
     if name in SERVICES:
         return SERVICES[name]
     if name in SERVICES.values():

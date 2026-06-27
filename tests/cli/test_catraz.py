@@ -87,15 +87,16 @@ def test_set_env_values_appends_absent_key(tmp_path):
 # ── allowed_projects precedence (.env override wins over warden.toml) ────────────
 
 def _project(tmp_path, env_override=None, toml_projects=None):
-    (tmp_path / "config").mkdir(exist_ok=True)
-    env = tmp_path / ".env"
+    (tmp_path / ".catraz" / "config").mkdir(parents=True, exist_ok=True)
+    env = tmp_path / ".catraz" / ".env"
     lines = ["DEV_UID=1000"]
     if env_override is not None:
         lines.append(f"WARDEN_ALLOWED_PROJECTS={env_override}")
     env.write_text("\n".join(lines) + "\n")
     if toml_projects is not None:
         arr = ", ".join(f'"{x}"' for x in toml_projects)
-        (tmp_path / "config" / "warden.toml").write_text(f"allowed_projects = [{arr}]\n")
+        (tmp_path / ".catraz" / "config" / "warden.toml").write_text(
+            f"allowed_projects = [{arr}]\n")
     return envfile.load_env(env)
 
 

@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from catraz import __version__
+from catraz.errors import CliError, EXIT_CONFIG
 
 
 def _repo_root() -> Path | None:
@@ -36,26 +37,30 @@ def asset_root() -> Path:
     return dst
 
 
-def find_root(explicit):
-    """Project root = the dir containing docker-compose.yml (searched upward)."""
-    from catraz.cli import CliError, EXIT_CONFIG
+def find_root(explicit: str | None = None) -> Path:
+    """Project root = the dir containing a `.catraz/` (searched upward, like git)."""
     if explicit:
         root = Path(explicit).resolve()
-        if not (root / "docker-compose.yml").exists():
-            raise CliError(f"no docker-compose.yml in {root}", EXIT_CONFIG)
+        if not (root / ".catraz").is_dir():
+            raise CliError(f"no .catraz in {root}", EXIT_CONFIG)
+        _assert_no_nested(root)
         return root
     here = Path.cwd().resolve()
     for d in (here, *here.parents):
-        if (d / "docker-compose.yml").exists():
+        if (d / ".catraz").is_dir():
+            _assert_no_nested(d)
             return d
-    # Fall back to the script's own directory (zero-install ./catraz case).
-    here = Path(__file__).resolve().parent
-    if (here / "docker-compose.yml").exists():
-        return here
-    raise CliError("no docker-compose.yml found (use -C/--dir)", EXIT_CONFIG)
+    raise CliError("no .catraz found (run `catraz init`)", EXIT_CONFIG)
 
 
-def _claude_home(root, env):
-    raw = env.get("CLAUDE_HOME", "./claude")
-    p = Path(os.path.expanduser(raw))
-    return p if p.is_absolute() else (root / p).resolve()
+def _assert_no_nested(root: Path) -> None:
+    top = root / ".catraz"
+    for dirpath, dirnames, _ in os.walk(root):
+        if ".catraz" in dirnames and Path(dirpath) / ".catraz" != top:
+            raise CliError(f"nested .catraz at {Path(dirpath)/'.catraz'} — refuse", EXIT_CONFIG)
+        dirnames[:] = [d for d in dirnames
+                       if Path(dirpath) / d not in (top, root / ".git")]
+
+
+def claude_home(root: Path) -> Path:
+    return root / ".catraz" / "claude"
