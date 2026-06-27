@@ -9,7 +9,9 @@ from pathlib import Path
 
 from catraz.envfile import load_env
 from catraz.compose import run as compose_run
+from catraz.errors import CliError
 from catraz import paths
+from catraz import image
 
 # Secrets the wizard collects (env key → human prompt). Order matters.
 SECRETS = [
@@ -20,7 +22,7 @@ SECRETS = [
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "claude", "net", "auth"]
+DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "claude", "net", "auth", "base"]
 # Sections that gate the trust boundary — `up` always runs these, no opt-out.
 SECURITY_SECTIONS = ["docker", "compose", "env", "policy", "auth"]
 
@@ -242,6 +244,27 @@ def check_auth(root, env, f):
         if has_key and not cred.exists(): f.ok("auth", "api_key set")
 
 
+def check_base(root, env, f):
+    if not which("docker"):
+        f.warn("base", "docker missing — base not checked"); return
+    try:
+        base = image.resolve_base(root)
+    except CliError as e:
+        f.bad("base", str(e)); return
+    contract = subprocess.run(
+        ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get && python3 --version"],
+        capture_output=True, text=True)
+    if contract.returncode != 0:
+        f.bad("base", "base lacks apt-get or python3", "base contract: Debian/Ubuntu + python3")
+    else:
+        f.ok("base", f"base contract ok ({base})")
+    setuid = subprocess.run(["docker", "run", "--rm", base, "find", "/", "-perm", "/6000",
+                             "-type", "f"], capture_output=True, text=True)
+    extra = [ln for ln in setuid.stdout.split() if ln]
+    if extra:
+        f.warn("base", f"{len(extra)} setuid/setgid binaries in base", "review: " + ", ".join(extra[:5]))
+
+
 def run_doctor(root, only=None, fix=False):
     env = load_env(root / ".catraz" / ".env")
     f = Findings()
@@ -256,6 +279,7 @@ def run_doctor(root, only=None, fix=False):
     if "claude" in sections: check_claude(root, env, f)
     if "net" in sections: check_net(root, f)
     if "auth" in sections: check_auth(root, env, f)
+    if "base" in sections: check_base(root, env, f)
     return f
 
 
