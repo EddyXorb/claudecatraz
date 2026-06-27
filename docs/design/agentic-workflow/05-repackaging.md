@@ -248,6 +248,7 @@ Anforderung erfüllt, und die Zwei-Pfad-Komplexität vom Tisch.
 │   ├── .credentials.json    #   subscription: vom Host gesynct (RO in den Container)
 │   └── .claude.json         #   subscription/api_key: IMMER von init/sync materialisiert
 ├── state/warden/            # SQLite-Quoten-State
+├── run/warden/              # Admin-Unix-Socket (admin.sock) — Audit-Viewer, kein admin-net
 └── logs/{warden,squid}/     # Audit-Logs
 ```
 
@@ -290,7 +291,7 @@ ohnehin:
 | Container | mountet aus `.catraz/` | Modus | warum unbedenklich |
 | --------- | ---------------------- | ----- | ------------------ |
 | **Agent** | `claude/` → `/home/dev/.claude` | RW (s. u.) | als kompromittiert angenommen → max. eingeschränkt |
-| **Warden** | `config/warden.toml` · `state/warden` · `logs/warden` | RO · RW · RW | Trust-Boundary, hält Tokens ohnehin |
+| **Warden** | `config/warden.toml` · `state/warden` · `logs/warden` · `run/warden` | RO · RW · RW · RW | Trust-Boundary, hält Tokens ohnehin; `run/warden` = Admin-Unix-Socket (§4.4) |
 | **Proxy** | `config/squid.conf` · `config/allowlist.txt` · `logs/squid` | RO · RO · RW | hält keine Credentials |
 
 Die Invariante, die `doctor` erzwingt (§4.4): **kein** `.catraz`-Pfad, den der Warden/Proxy
@@ -431,6 +432,20 @@ Compose-Default-Namen (`<projekt>-<service>-1`); die semantischen Aliasse aus de
 Die heutige Alias-Auflösung (04-cli §5.6) zeigt auf *feste* Container-Namen — sie muss auf
 **Compose-Projekt + Service-Label** umgestellt werden (`docker compose ... logs <service>`),
 sonst finden `logs`/`status` die Container nach dem Wegfall der festen Namen nicht mehr.
+
+#### Audit-Viewer ohne `admin-net`: Unix-Socket statt fester IP
+
+Damit parallele Sandboxes wirklich kollisionsfrei sind, reicht das Container-Namens-Namespacing
+**nicht** — das frühere `admin-net` (festes Subnetz `172.31.0.0/24` + statische IP
+`172.31.0.2` für den Audit-Viewer auf `:9090`) ist eine **daemon-globale** Ressource und würde
+beim zweiten `up` kollidieren. Lösung: der Admin-/Viewer-Server bindet auf einen **Unix-Socket
+pro Projekt** unter `.catraz/run/warden/admin.sock` (`admin-net` entfällt ganz). Kein Subnetz,
+keine IP, kein Port → kollisionsfrei *by construction* (jeder Socket ist eine Datei im eigenen
+`.catraz`, Container-Pfade sind per-Namespace). Der Agent mountet das Verzeichnis nie → keine
+Route dorthin (strikt sicherer als der bisherige Admin-TCP). Host-Zugang über
+**`catraz audit --web`**, das einen *ephemeren* `127.0.0.1`-Port auf den Socket forwarded und
+den Browser öffnet (ersetzt den früheren `socat`-Tunnel). Umsetzung & Tests:
+[`05-packaging/02-catraz-home.md`](./05-packaging/02-catraz-home.md) Commit 2.4.
 
 #### `compose.override.yml` ist erlaubt, aber `doctor` prüft die Grenze *nach* dem Merge (Roast-1 #12)
 
