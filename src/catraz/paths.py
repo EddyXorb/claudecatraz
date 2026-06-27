@@ -23,7 +23,7 @@ def asset_root() -> Path:
         return dst
     (dst / "assets").mkdir(parents=True, exist_ok=True)
     pkg_assets = ir.files("catraz") / "assets"
-    if pkg_assets.is_dir():  # installed wheel
+    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():  # installed wheel
         with ir.as_file(pkg_assets) as src:
             shutil.copytree(src, dst / "assets", dirs_exist_ok=True)
     else:  # zero-install source tree: assets under src/, contexts at repo root

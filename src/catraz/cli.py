@@ -174,7 +174,7 @@ def cmd_init(root, args, out):
 
 
 def _run_sync(root, out, source=None, force=False):
-    entry = root / "entrypoint.py"
+    entry = root / "src" / "catraz" / "assets" / "container" / "entrypoint.py"
     if not entry.exists():
         raise CliError("entrypoint.py not found", EXIT_GENERAL)
     env = load_env(root / ".env")

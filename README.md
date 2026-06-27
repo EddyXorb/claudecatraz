@@ -76,7 +76,7 @@ a preflight catches the silent traps before they bite:
 ./scripts/setup-dirs.sh
 
 # 2. Import the sandbox account's Claude credentials from the host
-python3 entrypoint.py sync
+python3 src/catraz/assets/container/entrypoint.py sync
 
 # 3. Create and fill the configuration (see below)
 cp .env.example .env && $EDITOR .env
@@ -186,7 +186,7 @@ sqlite3 state/warden/state.db              # quota state
 | Path | Purpose |
 | ---- | ------- |
 | `docker-compose.yml` | All services, networks, mounts |
-| `Dockerfile` · `entrypoint.py` | Agent image (Ubuntu 24.04 + toolchain) and start logic |
+| `Dockerfile` · `src/catraz/assets/container/entrypoint.py` | Agent image (Ubuntu 24.04 + toolchain) and start logic |
 | `warden/` | Policy proxy (Python/Starlette) — the trust boundary, holds all tokens |
 | `forward-proxy/` | Squid image with SNI-peek allowlist egress |
 | `config/` | Host-editable policy: `warden.toml`, `squid.conf`, `allowlist.txt` (mounted read-only) |
