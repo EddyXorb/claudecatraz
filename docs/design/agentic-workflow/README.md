@@ -14,6 +14,7 @@ Security-Architektur-Referenz. Stufen 01 und 02 sind implementiert.
 | **02** | [`02-forward-proxy.md`](./02-forward-proxy.md)             | Squid-Allowlist, Netz-Isolation                         | ✅      |
 | **03** | [`03-observability.md`](./03-observability.md)             | Log-Viewer + optional Grafana/Loki                      | ⏳      |
 | **03** | [`03-testing-redteam.md`](./03-testing-redteam.md)         | Red-Team-Suite, CI                                      | ⏳      |
+| **04** | [`04-cli.md`](./04-cli.md)                                 | `claudecatraz`-CLI: ein Vordereingang fürs Setup        | ⏳      |
 
 ---
 

@@ -1,11 +1,13 @@
-# Agent Sandbox
+# Claudecatraz
 
 **An autonomous Claude Code agent that may work on GitLab — under hard, non-bypassable rules.**
 
-[![warden CI](https://github.com/EddyXorb/agent-sandbox/actions/workflows/warden-ci.yml/badge.svg)](https://github.com/EddyXorb/agent-sandbox/actions/workflows/warden-ci.yml)
-[![squid CI](https://github.com/EddyXorb/agent-sandbox/actions/workflows/squid-ci.yml/badge.svg)](https://github.com/EddyXorb/agent-sandbox/actions/workflows/squid-ci.yml)
-[![compose validate](https://github.com/EddyXorb/agent-sandbox/actions/workflows/compose-validate.yml/badge.svg)](https://github.com/EddyXorb/agent-sandbox/actions/workflows/compose-validate.yml)
-[![dockerfile lint](https://github.com/EddyXorb/agent-sandbox/actions/workflows/dockerfile-lint.yml/badge.svg)](https://github.com/EddyXorb/agent-sandbox/actions/workflows/dockerfile-lint.yml)
+*No agent escapes the Warden.*
+
+[![warden CI](https://github.com/EddyXorb/claudecatraz/actions/workflows/warden-ci.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/warden-ci.yml)
+[![squid CI](https://github.com/EddyXorb/claudecatraz/actions/workflows/squid-ci.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/squid-ci.yml)
+[![compose validate](https://github.com/EddyXorb/claudecatraz/actions/workflows/compose-validate.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/compose-validate.yml)
+[![dockerfile lint](https://github.com/EddyXorb/claudecatraz/actions/workflows/dockerfile-lint.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/dockerfile-lint.yml)
 
 ---
 
