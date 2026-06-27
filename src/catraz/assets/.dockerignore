@@ -2,5 +2,4 @@ compose/
 config/
 warden/
 forward-proxy/
-claude-layer/
 bases/

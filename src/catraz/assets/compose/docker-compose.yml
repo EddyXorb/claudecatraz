@@ -67,12 +67,9 @@ services:
   claude-dev-env:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: claude-layer/Dockerfile
       args:
-        UV_VERSION: ${UV_VERSION}
-        CLANG_VERSION: ${CLANG_VERSION}
-        RUST_VERSION: ${RUST_VERSION}
-        CONAN_VERSION: ${CONAN_VERSION}
+        BASE_IMAGE: ${BASE_IMAGE}
         NODE_VERSION: ${NODE_VERSION:-22}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
         DEV_UID: ${DEV_UID:-1000}
@@ -104,7 +101,7 @@ services:
     # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
     # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.
     # Bis dahin: Default-Bridge (Internet-Zugriff für api.anthropic.com).
-    command: ["python3", "/entrypoint.py"]
+    # Kein `command:` — der claude-layer setzt ENTRYPOINT ["python3","/entrypoint.py"].
     working_dir: /workspace
     tty: true
     stdin_open: true

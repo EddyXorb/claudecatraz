@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
     cmake gcc-multilib g++-multilib gcovr \
     lsb-release software-properties-common gnupg \
     libssl-dev libclang-dev \
-    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Python tools — system-wide so any user can call them
@@ -44,30 +43,3 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
         https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
     cargo binstall --no-confirm cargo-llvm-cov cargo-nextest cargo-deny && \
     chmod -R a+rX /usr/local/rustup /usr/local/cargo
-
-# Node.js + Claude Code — global install
-ARG NODE_VERSION=22
-ARG CLAUDE_CODE_VERSION
-
-RUN apt-get update && \
-    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
-
-# Non-root user — Claude Code refuses --dangerously-skip-permissions as root.
-# DEV_UID should match the host user who owns the bind-mounted claude-home dir.
-ARG DEV_UID=1000
-RUN userdel -r ubuntu 2>/dev/null || true && \
-    useradd -m -u ${DEV_UID} -s /bin/bash dev
-
-COPY container/entrypoint.py /entrypoint.py
-
-# Harness-Doku (Sandbox-Kontext für den Agenten). Single source of truth im Image;
-# entrypoint.py injiziert sie beim Start nach ~/.claude/CLAUDE.md (User-Memory), damit
-# sie unabhängig vom gemounteten /workspace-Projekt gilt.
-COPY AGENT.md /opt/claude-dev-env/AGENT.md
-
-ENV HOME=/home/dev
-WORKDIR /workspace
