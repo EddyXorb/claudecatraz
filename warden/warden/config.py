@@ -7,6 +7,7 @@ empty ⇒ nothing is allowed (fail-closed), not "everything".
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
@@ -71,29 +72,87 @@ def _split_csv(value: str) -> tuple[str, ...]:
     return tuple(p.strip() for p in value.split(",") if p.strip())
 
 
-def from_env(env: Optional[Mapping[str, str]] = None, *, strict: bool = True) -> Config:
-    """Build a :class:`Config` from environment variables.
+DEFAULT_TOML_PATH = "/etc/warden/warden.toml"
+
+
+def _load_toml(path: str) -> dict[str, object]:
+    """Load non-secret tunables from warden.toml.
+
+    Missing file ⇒ empty dict (env/defaults take over). Malformed file aborts —
+    a silently-misparsed policy on the trust boundary is worse than a hard stop.
+    """
+    try:
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+    except FileNotFoundError:
+        return {}
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
+
+
+def from_env(
+    env: Optional[Mapping[str, str]] = None,
+    *,
+    strict: bool = True,
+    toml_path: Optional[str] = None,
+) -> Config:
+    """Build a :class:`Config`.
+
+    **One source of truth per setting.** Non-secret policy tunables
+    (``branch_prefix``, the ``max_*`` limits, ``allowed_projects``) live in
+    ``warden.toml``; a matching env var **overrides** the file value when set
+    (non-empty), else the file value applies, else a built-in default. Secrets
+    (tokens) and infra (URL, host, ports, paths) come from env only.
 
     With ``strict`` (the production path) missing secrets or an empty project
     allowlist abort startup. Tests pass ``strict=False`` to build partial configs.
     """
     env = env if env is not None else os.environ
+    file = _load_toml(toml_path or env.get("WARDEN_CONFIG_PATH", DEFAULT_TOML_PATH))
 
     def _int(key: str, default: int) -> int:
         raw = env.get(key)
-        if raw is None or raw == "":
+        if not raw:
             return default
         try:
             return int(raw)
         except ValueError as exc:
             raise ConfigError(f"{key} must be an integer, got {raw!r}") from exc
 
+    # --- tunables: env (if set, non-empty) overrides warden.toml, else default ---
+    def _tunable_str(env_key: str, toml_key: str, default: str) -> str:
+        raw = env.get(env_key)
+        if raw:
+            return raw
+        return str(file.get(toml_key, default))
+
+    def _tunable_int(env_key: str, toml_key: str, default: int) -> int:
+        raw = env.get(env_key)
+        if raw:
+            try:
+                return int(raw)
+            except ValueError as exc:
+                raise ConfigError(f"{env_key} must be an integer, got {raw!r}") from exc
+        val = file.get(toml_key, default)
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise ConfigError(f"{toml_key} in warden.toml must be an integer, got {val!r}")
+        return val
+
+    def _tunable_projects(env_key: str, toml_key: str) -> tuple[str, ...]:
+        raw = env.get(env_key)
+        if raw:
+            return _split_csv(raw)
+        val = file.get(toml_key, [])
+        if not isinstance(val, list) or not all(isinstance(p, str) for p in val):
+            raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
+        return tuple(p.strip() for p in val if p.strip())
+
     cfg = Config(
-        branch_prefix=env.get("BRANCH_PREFIX", "claude/"),
-        max_open_mrs=_int("MAX_OPEN_MRS", 5),
-        max_open_branches=_int("MAX_OPEN_BRANCHES", 10),
-        max_writes_per_hour=_int("MAX_WRITES_PER_HOUR", 60),
-        allowed_projects=_split_csv(env.get("ALLOWED_PROJECTS", "")),
+        branch_prefix=_tunable_str("BRANCH_PREFIX", "branch_prefix", "claude/"),
+        max_open_mrs=_tunable_int("MAX_OPEN_MRS", "max_open_mrs", 5),
+        max_open_branches=_tunable_int("MAX_OPEN_BRANCHES", "max_open_branches", 10),
+        max_writes_per_hour=_tunable_int("MAX_WRITES_PER_HOUR", "max_writes_per_hour", 60),
+        allowed_projects=_tunable_projects("ALLOWED_PROJECTS", "allowed_projects"),
         api_url=env.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/api/v4",
         read_token=env.get("GITLAB_READ_TOKEN", ""),
         write_token=env.get("GITLAB_WRITE_TOKEN", ""),
