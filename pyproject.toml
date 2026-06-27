@@ -1,0 +1,20 @@
+[project]
+name = "claudecatraz"
+version = "0.2.0"
+requires-python = ">=3.11"
+description = "Sandbox front door for an autonomous Claude Code agent."
+dependencies = []
+
+[project.scripts]
+catraz = "catraz.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/catraz"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"warden" = "catraz/assets/warden"
+"forward-proxy" = "catraz/assets/forward-proxy"
