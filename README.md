@@ -14,7 +14,7 @@
 
 ## What it does
 
-A dockerized, hardened environment in which an **autonomous Claude Code agent** (C++/Rust/Python toolchain) can work on GitLab projects — interactively (`catraz local`) or driven over Remote Control from claude.ai (`catraz up --remote`).
+A dockerized, hardened environment in which an **autonomous Claude Code agent** (C++/Rust/Python toolchain) can work on GitLab projects — interactively (`catraz run`) or driven over Remote Control from claude.ai (`catraz up --remote`).
 
 The point is the security model: the agent is treated as **potentially malicious**. It therefore holds **no GitLab credential whatsoever** and has **no internet route of its own**. Two purpose-built proxies sit in front of it instead:
 
@@ -104,7 +104,7 @@ with `catraz audit --web`.
 | `catraz init` | Wizard: create `.catraz/`, collect secrets + allowed projects, sync credentials |
 | `catraz up` | Start **infra only** (Warden + Squid) |
 | `catraz up --remote` | Also start the **agent daemon** (Remote Control from claude.ai) |
-| `catraz local -- …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`) |
+| `catraz run -- …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`) |
 | `catraz doctor` | Re-run the preflight; `--fix` repairs dirs/ownership |
 | `catraz status` | Health per service, URLs, quota snapshot |
 | `catraz logs` | Tail logs (`agent`\|`warden`\|`proxy`, or `--audit`) |
@@ -115,20 +115,22 @@ with `catraz audit --web`.
 Run `catraz <command> --help` for the details of any command. Full CLI design:
 [`docs/design/agentic-workflow/04-cli.md`](docs/design/agentic-workflow/04-cli.md).
 
-## Local mode
+## Interactive mode (`catraz run`)
 
 Besides the Remote Control daemon you can run Claude Code **interactively** inside the same
 sandbox — a drop-in replacement for the `claude` binary:
 
 ```bash
-alias claude='catraz local'
-catraz local -p "fix the failing test"      # one-shot; exit code is passed through
+alias claude='catraz run'
+catraz run -p "fix the failing test"        # one-shot; exit code is passed through
 ```
 
-`catraz local` runs the agent one-off in the hardened container (Warden + Squid stay up as
-daemons, so the second call is fast), with the project mounted at `/workspace`. Everything
-after `local` is handed verbatim to `claude` (including `--dangerously-skip-permissions`).
-Outside a `.catraz` project it fails closed — it never falls back to a host `claude`.
+`catraz run` starts a fresh **one-off** container (`docker compose run --rm`) with the project
+mounted at `/workspace`; Warden + Squid stay up as daemons, so the second call is fast. Each
+invocation owns its own container and lifecycle — independent of any `up --remote` daemon, so
+nothing you run here can be killed by another session tearing its stack down. Everything after
+`run` is handed verbatim to `claude` (including `--dangerously-skip-permissions`). Outside a
+`.catraz` project it fails closed — it never falls back to a host `claude`.
 
 > ### ⚠️ What the sandbox protects — and what it does **not**
 >

@@ -61,7 +61,7 @@ def build_home(home: Path, mode: str, remote: bool = True) -> None:
     else:
         data = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
     # Remote-Control-only: the daemon would hang on a one-time accept prompt otherwise.
-    # In local (drop-in claude) mode we keep normal permissions, so skip these.
+    # In one-off `run` (drop-in claude) mode we keep normal permissions, so skip these.
     if remote:
         data["bypassPermissionsModeAccepted"] = True
         data["remoteDialogSeen"] = True
@@ -128,7 +128,7 @@ def cmd_start(claude_home: Path) -> None:
                          "--spawn", "same-dir", "--debug-file", str(claude_home / "rc-debug.log")])
 
 
-def cmd_local(claude_home: Path, claude_args: list[str]) -> None:
+def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     drop_to_dev()
     mode = os.environ.get("AUTH_MODE", "subscription")
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
@@ -167,17 +167,17 @@ def main() -> None:
         help="Source ~/.claude dir [env: CLAUDE_CREDENTIAL_SOURCE, default: ~/.claude]",
     )
 
-    loc = sub.add_parser("local")
-    loc.add_argument("rest", nargs=argparse.REMAINDER)   # ["--", "<args>"...]
+    rn = sub.add_parser("run")
+    rn.add_argument("rest", nargs=argparse.REMAINDER)   # ["--", "<args>"...]
 
     args = parser.parse_args()
 
     if args.command == "sync":
         cmd_sync(Path(args.claude_home).resolve(), source=args.source)
         return
-    if args.command == "local":
+    if args.command == "run":
         rest = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
-        cmd_local(Path(args.claude_home).resolve(), rest)
+        cmd_run(Path(args.claude_home).resolve(), rest)
         return
     cmd_start(Path(args.claude_home).resolve())
 
