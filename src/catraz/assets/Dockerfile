@@ -62,12 +62,12 @@ ARG DEV_UID=1000
 RUN userdel -r ubuntu 2>/dev/null || true && \
     useradd -m -u ${DEV_UID} -s /bin/bash dev
 
-COPY src/catraz/assets/container/entrypoint.py /entrypoint.py
+COPY container/entrypoint.py /entrypoint.py
 
 # Harness-Doku (Sandbox-Kontext für den Agenten). Single source of truth im Image;
 # entrypoint.py injiziert sie beim Start nach ~/.claude/CLAUDE.md (User-Memory), damit
 # sie unabhängig vom gemounteten /workspace-Projekt gilt.
-COPY src/catraz/assets/AGENT.md /opt/claude-dev-env/AGENT.md
+COPY AGENT.md /opt/claude-dev-env/AGENT.md
 
 ENV HOME=/home/dev
 WORKDIR /workspace

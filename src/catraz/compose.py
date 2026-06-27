@@ -1,7 +1,10 @@
 """docker-compose call + invariants."""
 import json
+import os
 import subprocess
 from pathlib import Path
+
+from catraz.paths import asset_root
 
 
 # Semantic service aliases → compose service names (P1: no raw container names).
@@ -12,24 +15,34 @@ SERVICES = {
 }
 
 
-def compose(root, args, print_only=False, capture=False, check=True):
+def base_cmd(root: Path) -> list[str]:
+    ar = asset_root()
+    cmd = ["docker", "compose",
+           "-f", str(ar / "assets/compose/docker-compose.yml"),
+           "--project-directory", str(root),
+           "--env-file", str(root / ".catraz/.env")]
+    override = root / ".catraz/compose.override.yml"
+    if override.exists():
+        cmd += ["-f", str(override)]
+    return cmd
+
+
+def run(root: Path, args, capture=False, check=True, print_only=False):
     from catraz.cli import CliError, EXIT_DOCKER
-    cmd = ["docker", "compose", *args]
+    cmd = [*base_cmd(root), *args]
     if print_only:
         print(" ".join(cmd))
         return None
+    env = dict(os.environ, PROJECT_DIR=str(root))
     try:
-        return subprocess.run(
-            cmd, cwd=root, check=check,
-            capture_output=capture, text=True,
-        )
+        return subprocess.run(cmd, env=env, check=check, capture_output=capture, text=True)
     except FileNotFoundError:
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
 
 
 def compose_ps(root):
     """Return [{Service, State, Health}, …] from `docker compose ps`."""
-    r = compose(root, ["ps", "--format", "json"], capture=True, check=False)
+    r = run(root, ["ps", "--format", "json"], capture=True, check=False)
     if r is None or r.returncode != 0 or not r.stdout.strip():
         return []
     text = r.stdout.strip()

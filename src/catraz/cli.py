@@ -22,7 +22,7 @@ from pathlib import Path
 from catraz import __version__
 from catraz.envfile import load_env, set_env_values, mask
 from catraz.policy import validate_project, _resolve_allowed_projects
-from catraz.compose import compose, compose_ps, resolve_service, SERVICES
+from catraz.compose import run as compose_run, compose_ps, resolve_service, SERVICES
 from catraz.doctor import (
     run_doctor, print_findings, _doctor_fix, DOCTOR_SECTIONS, SECURITY_SECTIONS,
     SECRETS,
@@ -214,11 +214,11 @@ def cmd_up(root, args, out):
     if args.pull:
         up_args.append("--pull=always")
     if args.print_only:
-        compose(root, up_args, print_only=True)
+        compose_run(root, up_args, print_only=True)
         return EXIT_OK
 
     out.info("• starting the stack…")
-    r = compose(root, up_args, check=False)
+    r = compose_run(root, up_args, check=False)
     if r.returncode != 0:
         return EXIT_GENERAL
 
@@ -254,10 +254,10 @@ def cmd_down(root, args, out):
     if args.volumes:
         down_args.append("--volumes")
     if args.print_only:
-        compose(root, down_args, print_only=True)
+        compose_run(root, down_args, print_only=True)
         return EXIT_OK
     out.info("• stopping the stack…")
-    r = compose(root, down_args, check=False)
+    r = compose_run(root, down_args, check=False)
     return EXIT_OK if r.returncode == 0 else EXIT_GENERAL
 
 
@@ -299,7 +299,7 @@ def cmd_logs(root, args, out):
     log_args += ["--tail", str(args.tail)]
     if args.service:
         log_args.append(resolve_service(args.service))
-    r = compose(root, log_args, check=False)
+    r = compose_run(root, log_args, check=False)
     return EXIT_OK if r and r.returncode == 0 else EXIT_GENERAL
 
 

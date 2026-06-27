@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 from catraz.envfile import load_env
-from catraz.compose import compose
+from catraz.compose import run as compose_run
 
 # Secrets the wizard collects (env key → human prompt). Order matters.
 SECRETS = [
@@ -63,7 +63,7 @@ def check_compose(root, env, f):
     if not which("docker"):
         f.warn("compose", "cannot confirm services (docker missing)")
         return
-    r = compose(root, ["config", "--services"], capture=True, check=False)
+    r = compose_run(root, ["config", "--services"], capture=True, check=False)
     services = r.stdout.split() if r and r.returncode == 0 else []
     if not services:
         f.warn("compose", "could not resolve compose services")
