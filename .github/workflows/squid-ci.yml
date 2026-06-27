@@ -199,9 +199,13 @@ jobs:
       - name: Audit log — blocked requests sichtbar
         run: |
           sleep 2
+          # Die Log-Datei gehört dem Container-User `proxy` (uid aus DEV_UID, Mode 0640) und
+          # ist auf dem Host mit fremder Runner-uid nicht lesbar. Daher aus dem Container
+          # heraus lesen (kein USER im Image → docker exec läuft als root).
+          docker exec squid-ci cat /var/log/squid/access.log > /tmp/access.log
           echo "=== access.log ==="
-          cat /tmp/squid-logs/access.log
-          grep -Eq 'example\.(com|net)|1\.1\.1\.1' /tmp/squid-logs/access.log \
+          cat /tmp/access.log
+          grep -Eq 'example\.(com|net)|1\.1\.1\.1' /tmp/access.log \
             && echo "PASS: denied requests in audit log" \
             || { echo "FAIL: denied requests missing from access.log"; exit 1; }
 
