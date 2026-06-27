@@ -27,5 +27,16 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
+      # The stack-free primitives all `docker run alpine`. Pre-pull it (with retries) so the
+      # first test doesn't race a cold Docker Hub pull — that surfaced as a transient
+      # "Client.Timeout exceeded while awaiting headers" (docker run exit 125), not a real bug.
+      - name: Pre-pull alpine (tolerate transient registry timeouts)
+        run: |
+          for i in 1 2 3; do
+            if docker pull alpine:latest; then exit 0; fi
+            echo "alpine pull attempt $i failed; retrying in 5s…"; sleep 5
+          done
+          echo "could not pull alpine after 3 attempts"; exit 1
+
       - name: Red-team tests (Docker available, stack-free primitives only)
         run: uv run --with pytest python -m pytest tests/redteam/ -m "not slow" -q
