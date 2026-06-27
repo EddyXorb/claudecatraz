@@ -135,3 +135,26 @@ kontextrelative `COPY`/`ADD` oder solche, die ihren Kontext zufällig im selben 
 Ein echtes „beliebiges Dockerfile" mit Build-Kontext = Projekt-Root ist nicht abbildbar.
 Sinnvoll wäre ein zusätzliches `BASE_CONTEXT` (Default = Dockerfile-Verzeichnis, überschreibbar
 auf z. B. `.`). **Nicht behoben** — Design-/Plan-Einschränkung, festgehalten zur Entscheidung.
+
+### B7 — Token-Refresh im Subscription-Modus überlebt keinen Container-Neustart (RO-Quelle + tmpfs-Kopie)
+
+Im Subscription-Modus mountet `auth.py` (`SUBSCRIPTION_FRAGMENT`) die Host-Datei
+`.catraz/claude/.credentials.json` **read-only** nach `/home/dev/.claude/.ro/.credentials.json`.
+Der Entrypoint (`build_home`) **kopiert** sie beim Start nach `/home/dev/.claude/.credentials.json`
+— und `/home/dev/.claude` ist ein **tmpfs** (Doc 04). Claude liest/schreibt also die
+beschreibbare tmpfs-Kopie, nie den RO-Mount. In-Session-Schreiben (OAuth-Token-Refresh)
+funktioniert deshalb — aber die Aktualisierung bleibt im tmpfs und **propagiert nie zum Host
+zurück**; sie ist beim Container-Stop verloren. Beim nächsten Start wird wieder die
+ursprüngliche Host-`.credentials.json` einkopiert.
+
+**Warum ein Problem:** Refresht Claude während der Session das Access-Token und **rotiert
+Anthropic dabei das Refresh-Token** (Refresh-Token wird bei Benutzung invalidiert/ersetzt — bei
+OAuth verbreitet), dann verbraucht der In-Container-Refresh das Token, der Host behält das
+inzwischen tote. Ein späterer `catraz up`/`local` startet dann mit einem ungültigen
+Refresh-Token → Auth-Bruch, der nur durch erneutes `catraz sync` zu beheben ist. Ohne
+Rotation läuft alles unbegrenzt. Das Verhalten hängt also an einer **unverifizierten Annahme
+über Anthropics Token-Lebenszyklus**. Bewusster Trade-off des RO-Designs (der Agent soll die
+Host-Credential nicht überschreiben können), aber die Persistenz-Lücke gehört dokumentiert und
+ggf. durch einen kontrollierten Rück-Sync (Container→Host, nur `.credentials.json`, nur im
+Subscription-Modus) entschärft. **Nicht behoben** — vom Nutzer beim Lesen von `auth.py`
+aufgeworfen, hier festgehalten.
