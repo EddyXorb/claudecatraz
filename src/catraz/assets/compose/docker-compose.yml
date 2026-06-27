@@ -93,8 +93,15 @@ services:
       # Kein Token im Agent-Container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
     volumes:
-      - ${PROJECT_DIR}:/workspace
-      - ${PROJECT_DIR}/.catraz/claude:/home/dev/.claude
+      - type: bind
+        source: ${PROJECT_DIR}
+        target: /workspace
+      - type: tmpfs
+        target: /workspace/.catraz
+        tmpfs: { size: 1048576, mode: 0700 }
+      - type: bind                       # Claude-Home (RO-Topologie folgt in Doc 04)
+        source: ${PROJECT_DIR}/.catraz/claude
+        target: /home/dev/.claude
     # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
     # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.
     # Bis dahin: Default-Bridge (Internet-Zugriff für api.anthropic.com).

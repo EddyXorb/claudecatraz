@@ -249,6 +249,9 @@ def cmd_up(root, args, out):
             return EXIT_DOCTOR
         print()
 
+    # Ensure .catraz/ exists (init creates it; defensive mkdir in case it's missing).
+    (root / ".catraz").mkdir(exist_ok=True)
+
     up_args = ["up", "-d"]
     if args.build:
         up_args.append("--build")
