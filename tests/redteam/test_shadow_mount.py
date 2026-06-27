@@ -3,9 +3,19 @@
 T1–T4, T7, T8 require Docker; T7b (host-side symlink guard) is a pure unit
 test that lives in tests/cli/test_invariants.py.
 
-Run with Docker available:
+Marker classification:
+  - T2, T7a, T8: only use `docker run alpine` (no catraz stack needed).
+    These run in CI via `-m "not slow"`.
+  - T1, T3, T4: require a live catraz stack (live_stack fixture, @slow).
+    These need a Docker runner with a real ANTHROPIC_API_KEY and are NOT CI-gated.
+
+Run fast (CI-equivalent):
+    uv run --with pytest python -m pytest tests/redteam/ -m "not slow" -q
+
+Run all (local, with real key + Docker):
     uv run --with pytest python -m pytest tests/redteam/ -q
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -40,19 +50,40 @@ def test_t2_tmpfs_overdeck_ordering(tmp_path):
     assert r.stdout.strip() == "0"          # .catraz appears EMPTY to the container
 
 
-# ── Fixture: running stack via catraz init -y + up ────────────────────────────
+# ── Fixture: running stack via catraz init -y + up --remote ──────────────────
 
 @pytest.fixture(scope="module")
 def live_stack(tmp_path_factory):
-    """Start a catraz stack in a temporary project dir; tear down after module."""
-    import os
+    """Start a catraz stack in a temporary project dir; tear down after module.
+
+    Requires Docker + a real ANTHROPIC_API_KEY in the environment.
+    Used only by @slow tests (T1/T3/T4) — not CI-gated.
+
+    Notes:
+    - init runs with check=False: the closing doctor may exit 3 (preflight warnings
+      such as missing GitLab tokens), but the .catraz scaffold is created regardless.
+    - .catraz/.env is written AFTER init so it is not overwritten by init's seed.
+    - up --remote starts the agent daemon (profiles: ["remote"] in compose).
+    - DEV_UID is set so bind-mount ownership matches the runner's uid.
+    """
     root = tmp_path_factory.mktemp("catraz-proj")
     env = dict(os.environ, HOME=str(root))
     catraz = [sys.executable, "-m", "catraz"]
 
     subprocess.run([*catraz, "-C", str(root), "init", "-y", "--skip-sync"],
-                   env=env, check=True)
-    subprocess.run([*catraz, "-C", str(root), "up"], env=env, check=True)
+                   env=env, check=False)   # exit 3 from doctor tolerated; scaffold created
+
+    # Write a complete .env after init (so it is not overwritten)
+    (root / ".catraz" / ".env").write_text(
+        "AUTH_MODE=api_key\n"
+        "ANTHROPIC_API_KEY=" + os.environ.get("ANTHROPIC_API_KEY", "sk-ci-dummy") + "\n"
+        "GITLAB_READ_TOKEN=ci-dummy\n"
+        "GITLAB_WRITE_TOKEN=ci-dummy\n"
+        "WARDEN_ALLOWED_PROJECTS=acme/demo\n"
+        f"DEV_UID={os.getuid()}\n"
+    )
+
+    subprocess.run([*catraz, "-C", str(root), "up", "--remote"], env=env, check=True)
     yield root
     subprocess.run([*catraz, "-C", str(root), "down"], env=env, check=False)
 
@@ -98,8 +129,8 @@ def test_t4_umount_eperm(live_stack):
 
 
 # ── T7a — in-container symlink stays in container namespace ──────────────────
+# No @slow: uses only `docker run alpine`, no catraz stack.
 
-@pytest.mark.slow
 def test_t7a_container_symlink_no_host_escape(tmp_path):
     """A symlink created inside the container resolves within the container namespace
     and must not reveal the host path to the host-side .catraz secret."""
@@ -117,8 +148,8 @@ def test_t7a_container_symlink_no_host_escape(tmp_path):
 
 
 # ── T8 — /proc/self/mountinfo shows no reachable secret path ─────────────────
+# No @slow: uses only `docker run alpine`, no catraz stack.
 
-@pytest.mark.slow
 def test_t8_mountinfo_no_secret_path(tmp_path):
     """/proc/self/mountinfo inside the container must not expose a device path
     that references the host .catraz directory directly."""

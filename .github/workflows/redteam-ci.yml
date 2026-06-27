@@ -1,6 +1,9 @@
 name: redteam CI
 
 # Shadow-mount and trust-boundary negative tests (require Docker).
+# CI gates T2, T7a, T8 — docker-primitive tests that use only `docker run alpine`
+# (no catraz stack, no API key needed). The @slow tests T1/T3/T4 require a live
+# catraz stack + real ANTHROPIC_API_KEY and must be run manually/locally.
 on:
   push:
     paths:
@@ -24,5 +27,5 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
-      - name: Red-team tests (Docker available)
-        run: uv run --with pytest python -m pytest tests/redteam/ -q
+      - name: Red-team tests (Docker available, stack-free primitives only)
+        run: uv run --with pytest python -m pytest tests/redteam/ -m "not slow" -q
