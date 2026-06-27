@@ -236,7 +236,10 @@ def check_auth(root, env, f):
     if mode == "subscription":
         if has_key: f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
         if not cred.exists(): f.bad("auth", "no .credentials.json", "run `catraz sync`")
-        else: f.ok("auth", "subscription credential present")
+        else:
+            f.ok("auth", "subscription credential present")
+            f.warn("auth", "subscription token refreshes are not persisted across restarts "
+                   "— re-run `catraz sync` if auth breaks")
     else:
         if not has_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty", "set it")
         if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",

@@ -26,3 +26,14 @@ def test_doctor_auth_xor(tmp_path):
     (root/".catraz/claude/.credentials.json").write_text("{}")
     f2 = doctor.Findings(); doctor.check_auth(root, {"AUTH_MODE":"api_key","ANTHROPIC_API_KEY":"x"}, f2)
     assert any(i[0]==doctor.BAD for i in f2.items)   # cred present in api_key → bad
+
+
+def test_doctor_auth_warns_about_refresh_persistence(tmp_path):
+    from catraz import doctor
+    (tmp_path/".catraz/claude").mkdir(parents=True)
+    (tmp_path/".catraz/claude/.credentials.json").write_text("{}")
+    f = doctor.Findings()
+    doctor.check_auth(tmp_path, {"AUTH_MODE": "subscription"}, f)
+    # tie the assertion to the auth SECTION so a misplaced warn elsewhere can't pass it
+    assert any(i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower()
+               for i in f.items)

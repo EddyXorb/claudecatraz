@@ -114,6 +114,12 @@ A plain `catraz up` starts **infra only** (Warden + Squid); the agent daemon is 
 `catraz up --remote`. Outside a `.catraz` project, `catraz local` fails closed — it never
 falls back to a host `claude`.
 
+## Auth / Subscription
+
+In `subscription` mode the host `~/.claude/.credentials.json` is imported read-only into the container via `catraz sync`. The host credential is **never overwritten by the agent** — this is intentional: the agent runs in an untrusted context and must not be able to modify the host's long-lived token.
+
+> **Token-refresh persistence:** Claude may refresh the OAuth access token during a long session. Because the in-container Claude home is a tmpfs, refreshed tokens are **not written back** to the host. If auth breaks after a long pause (Anthropic rotated the refresh token), re-run `catraz sync` to re-import the current credential from your host `~/.claude`.
+
 ## Configuration
 
 There are **two** configuration homes, with one source of truth per setting — no value lives in both at once:
