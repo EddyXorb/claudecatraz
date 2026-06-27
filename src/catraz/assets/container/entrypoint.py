@@ -46,7 +46,7 @@ def cmd_sync(claude_home: Path, source: str | None = None) -> None:
 # ── container startup ─────────────────────────────────────────────────────────
 
 
-def build_home(home: Path, mode: str) -> None:
+def build_home(home: Path, mode: str, remote: bool = True) -> None:
     """Build the tmpfs Claude-home each start. RO sources live under home/.ro/."""
     home.mkdir(parents=True, exist_ok=True)
     ro = home / ".ro"
@@ -60,8 +60,11 @@ def build_home(home: Path, mode: str) -> None:
         data = read_json(ro / ".claude.json")
     else:
         data = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
-    data["bypassPermissionsModeAccepted"] = True
-    data["remoteDialogSeen"] = True
+    # Remote-Control-only: the daemon would hang on a one-time accept prompt otherwise.
+    # In local (drop-in claude) mode we keep normal permissions, so skip these.
+    if remote:
+        data["bypassPermissionsModeAccepted"] = True
+        data["remoteDialogSeen"] = True
     data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
     (home / "settings.json").write_text(
@@ -125,6 +128,16 @@ def cmd_start(claude_home: Path) -> None:
                          "--spawn", "same-dir", "--debug-file", str(claude_home / "rc-debug.log")])
 
 
+def cmd_local(claude_home: Path, claude_args: list[str]) -> None:
+    drop_to_dev()
+    mode = os.environ.get("AUTH_MODE", "subscription")
+    if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
+    build_home(claude_home, mode, remote=False)
+    configure_git_warden()
+    os.execvp("claude", ["claude", *claude_args])
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
@@ -154,12 +167,19 @@ def main() -> None:
         help="Source ~/.claude dir [env: CLAUDE_CREDENTIAL_SOURCE, default: ~/.claude]",
     )
 
+    loc = sub.add_parser("local")
+    loc.add_argument("rest", nargs=argparse.REMAINDER)   # ["--", "<args>"...]
+
     args = parser.parse_args()
 
     if args.command == "sync":
         cmd_sync(Path(args.claude_home).resolve(), source=args.source)
-    else:
-        cmd_start(Path(args.claude_home).resolve())
+        return
+    if args.command == "local":
+        rest = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
+        cmd_local(Path(args.claude_home).resolve(), rest)
+        return
+    cmd_start(Path(args.claude_home).resolve())
 
 
 if __name__ == "__main__":
