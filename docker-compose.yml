@@ -6,7 +6,6 @@ services:
       dockerfile: Dockerfile
       args:
         DEV_UID: ${DEV_UID:-1000}
-    profiles: ["warden"]
     environment:
       # Secrets + infra — env only, never the agent (R6):
       - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
@@ -116,7 +115,6 @@ services:
         condition: service_healthy
       gitlab-warden:
         condition: service_healthy
-        required: false
 
 networks:
   agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Proxy (+ MCP-Sidecars)

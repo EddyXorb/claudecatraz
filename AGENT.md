@@ -41,7 +41,7 @@ Du hältst **kein** GitLab-Token. Das ist absichtlich (Sicherheitsarchitektur §
 GitLab-Operationen laufen ausschließlich über den **Warden** (`gitlab-warden:8080`), der
 alle Tokens hält und die Policy erzwingt.
 
-### Warden aktiv (COMPOSE_PROFILES=warden)
+### GitLab läuft über den Warden
 
 `git` ist automatisch umgeleitet — kein Unterschied in der Benutzung:
 

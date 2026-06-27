@@ -1,0 +1,31 @@
+name: cli CI
+
+# The catraz CLI: smoke-check it imports/runs and its unit tests pass.
+on:
+  push:
+    paths:
+      - "catraz"
+      - "tests/cli/**"
+      - ".github/workflows/cli-ci.yml"
+  pull_request:
+    paths:
+      - "catraz"
+      - "tests/cli/**"
+      - ".github/workflows/cli-ci.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Smoke (help + version)
+        run: |
+          ./catraz --help
+          ./catraz --version
+
+      - name: Unit tests
+        run: uv run --with pytest python -m pytest tests/cli/ -q

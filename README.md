@@ -58,6 +58,19 @@ Full design, threat model and rule set: **[`docs/design/agentic-workflow/`](docs
 
 **Prerequisites:** Docker + Compose, a **dedicated** Claude sandbox account (not your primary one), and for GitLab access a service account with two tokens (see [GitLab-native setup](docs/design/agentic-workflow/01-gitlab-native.md)).
 
+The `catraz` CLI is the front door — one interactive session sets everything up,
+a preflight catches the silent traps before they bite:
+
+```bash
+./catraz init     # wizard: dirs + chown, 3 secrets, allowed projects, credential sync
+./catraz up       # preflight (doctor), start, wait for health, print the URLs
+```
+
+`catraz doctor` re-runs the preflight any time; `catraz status` / `catraz logs` /
+`catraz down` cover the rest. Full design: [`docs/design/agentic-workflow/04-cli.md`](docs/design/agentic-workflow/04-cli.md).
+
+<details><summary>Prefer the manual steps?</summary>
+
 ```bash
 # 1. Create the bind-mount dirs (state/, logs/, …) with correct ownership
 ./scripts/setup-dirs.sh
@@ -71,6 +84,7 @@ cp .env.example .env && $EDITOR .env
 # 4. Start the stack
 docker compose up -d
 ```
+</details>
 
 The agent is then reachable over Remote Control on claude.ai. GitLab decisions can be watched live in the audit viewer (see below).
 
@@ -80,7 +94,7 @@ There are **two** configuration homes, with one source of truth per setting — 
 
 | Where | Holds | Visibility |
 | ----- | ----- | ---------- |
-| **`.env`** (gitignored) | **Secrets** (Anthropic + GitLab tokens), infra (`GITLAB_URL`), and the compose profile | host only |
+| **`.env`** (gitignored) | **Secrets** (Anthropic + GitLab tokens) and infra (`GITLAB_URL`) | host only |
 | **`config/warden.toml`** (version-controlled) | **Non-secret policy** — branch prefix, R5 limits, allowed projects | mounted read-only into the Warden |
 
 ```dotenv
@@ -88,7 +102,6 @@ There are **two** configuration homes, with one source of truth per setting — 
 ANTHROPIC_API_KEY=                 # dedicated sandbox account, NEVER your primary one (§3.2)
 GITLAB_READ_TOKEN=                 # scopes: read_api, read_repository  — only the Warden (R6)
 GITLAB_WRITE_TOKEN=                # scopes: api (service account / Developer)
-COMPOSE_PROFILES=warden            # enables the warden container
 ```
 
 ```toml
