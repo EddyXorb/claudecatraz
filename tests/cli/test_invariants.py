@@ -1,0 +1,59 @@
+"""Unit tests for compose.assert_invariants and compose.assert_real_dirs.
+
+No Docker required — compose.run is monkeypatched to return a fake JSON response.
+"""
+import copy
+import json
+import types
+import pytest
+
+from catraz import compose
+from catraz.errors import CliError
+
+
+GOOD = {
+    "networks": {"agent-net": {"internal": True}},
+    "services": {
+        "claude-dev-env": {
+            "environment": {},
+            "volumes": [
+                {"type": "tmpfs", "target": "/workspace/.catraz"},
+            ],
+        }
+    },
+}
+
+
+def _patch(monkeypatch, cfg):
+    monkeypatch.setattr(
+        compose,
+        "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps(cfg)),
+    )
+
+
+def test_invariants_pass(monkeypatch, tmp_path):
+    _patch(monkeypatch, GOOD)
+    compose.assert_invariants(tmp_path)   # no raise
+
+
+@pytest.mark.parametrize("mut", [
+    lambda c: c["networks"]["agent-net"].__setitem__("internal", False),
+    lambda c: c["services"]["claude-dev-env"]["environment"].__setitem__("GITLAB_WRITE_TOKEN", "x"),
+    lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
+    lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
+])
+def test_invariants_fail(monkeypatch, tmp_path, mut):
+    bad = copy.deepcopy(GOOD)
+    mut(bad)
+    _patch(monkeypatch, bad)
+    with pytest.raises(CliError):
+        compose.assert_invariants(tmp_path)
+
+
+def test_symlink_guard(tmp_path):
+    (tmp_path / ".catraz").mkdir()
+    link = tmp_path / "l"
+    link.symlink_to(tmp_path)
+    with pytest.raises(CliError):
+        compose.assert_real_dirs(link)

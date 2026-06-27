@@ -30,7 +30,7 @@ from catraz.errors import (
 )
 from catraz.envfile import load_env, set_env_values, mask
 from catraz.policy import validate_project, _resolve_allowed_projects
-from catraz.compose import run as compose_run, compose_ps, resolve_service, SERVICES
+from catraz.compose import run as compose_run, compose_ps, resolve_service, SERVICES, assert_real_dirs, assert_invariants
 from catraz.doctor import (
     run_doctor, print_findings, _doctor_fix, DOCTOR_SECTIONS, SECURITY_SECTIONS,
     SECRETS,
@@ -251,6 +251,13 @@ def cmd_up(root, args, out):
 
     # Ensure .catraz/ exists (init creates it; defensive mkdir in case it's missing).
     (root / ".catraz").mkdir(exist_ok=True)
+
+    try:
+        assert_real_dirs(root)
+        assert_invariants(root)
+    except CliError as e:
+        out.err(str(e))
+        return EXIT_DOCTOR
 
     up_args = ["up", "-d"]
     if args.build:
