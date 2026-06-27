@@ -1,3 +1,9 @@
 # Shell-Scripts und Dockerfiles immer mit LF – CRLF bricht den Shebang unter Linux
 *.sh        text eol=lf
 Dockerfile* text eol=lf
+# Der extensionslose Root-Shim ist ein Python-Skript — CRLF bricht den Shebang.
+catraz   text eol=lf
+*.py     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.toml   text eol=lf
