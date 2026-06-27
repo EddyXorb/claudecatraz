@@ -853,8 +853,156 @@ Jeder Schritt ist für sich nützlich und unabhängig testbar.
 | **3. Shadow-Mount** | **T2-Spike zuerst** (§4.5), dann tmpfs-Overlay auf `/workspace/.catraz`, Quellpfad-Symlink-Guard; **Red-Team T1–T9** als Spec. | 7 |
 | **4. Auth + Entrypoint-Umbau** | `AUTH_MODE`-XOR (`doctor`/compose); RO-Home-Topologie + Entrypoint-Umbau & `.claude.json`-Provisionierung (§6.4); `CLAUDE_CREDENTIAL_SOURCE`; Auto-`sync`. | 1 |
 | **5. Image-Schichtung** | Claude-Layer-Dockerfile `FROM ${BASE_IMAGE}`; Default-Base unter `assets/bases/`; `BASE_IMAGE`/`BASE_DOCKERFILE`-Modi; `doctor base`. | 2 |
+| **6. Lokaler Modus** (§11) | `up` auf Infra-only + `remote`-Profil; entrypoint-`local`-Exec; `catraz local` (immer-Invariantencheck, fail-closed, `run --rm --no-deps`, Workdir/TTY/Exit-Pass); ehrliche `--help`-Grenze. | — (neu) |
 
 Reihenfolge-Logik: Erst die **Hülle** (Paket + `.catraz/`), weil sie die Pfade definiert,
 auf denen alles andere aufsitzt. Dann der **Sicherheits-Kern** (Shadow-Mount), weil er den
 im TODO benannten Hauptzweifel auflöst. Dann **Auth** und **Image-Schichtung** als
 unabhängige Komfort-/Flexibilitäts-Schichten obendrauf.
+
+---
+
+## 11. Lokaler Modus — `catraz` als drop-in `claude` mit Sicherheitsnetz
+
+> Stand: Erstkonzept, danach in **Roast-4** gehärtet (s. [`roastiteration-4.md`](./roastiteration-4.md)).
+
+### 11.1 Motivation: zwei Wege, denselben Käfig zu fahren
+
+Bisher fährt man den eingesperrten Agenten **nur** über Remote Control (Daemon, von
+claude.ai getrieben). Das ist stark für „autonom im Hintergrund", aber schwer für „ich sitze
+am Terminal und will *jetzt* kurz mit Claude im Sandbox-Kontext arbeiten".
+
+**Lokaler Modus** schließt die Lücke: man ruft Claude **direkt aus der Shell**, der Container
+ist ein transparenter Sandbox-Mantel. So transparent, dass
+
+```bash
+alias claude='catraz local'
+```
+
+das normale `claude` ersetzt — und man **dasselbe Sicherheitsnetz** (Warden, Squid,
+Netz-Isolation, kein GitLab-Token im Agenten) auch bei lokaler Arbeit immer anhat. Der
+Käfig ist nicht mehr nur etwas für den autonomen Agenten, sondern für *jede* Claude-Sitzung.
+
+### 11.2 Modell: persistente Infra, ephemerer Agent
+
+Der Trick für „schnell" liegt in der Lebensdauer-Trennung:
+
+| Dienst | Lebensdauer | warum |
+| ------ | ----------- | ----- |
+| **Warden + Squid** | **langlebig** — einmal hoch, bleiben (bis `catraz down`) | sie sind die zustandsbehaftete, langsam bootende Vertrauensgrenze (SQLite, Squid-Config, Healthchecks) |
+| **Agent** | **pro Aufruf** — `docker compose run --rm` | „Container nur bei Aufruf (neu) starten"; ein frischer Container je Aufruf ist sogar *sicherer* (kein Zustand zwischen Aufrufen im als bösartig angenommenen Container) |
+
+Die Geschwindigkeit kommt daher, dass Warden/Squid **nicht** je Aufruf neu booten — nur der
+dünne Agent-Container wird gestartet.
+
+### 11.3 Der Befehl
+
+```
+catraz local [--] <claude-argumente…>
+```
+
+Die Claude-Argumente werden **unverändert durchgereicht** (`argparse.REMAINDER`). Damit das
+sauber funktioniert (Roast-4 #4): `local` **erbt die globalen catraz-Flags *nicht*** (sonst
+fräße `catraz`s `-C`/`--no-color` Argumente, die für `claude` gedacht sind). Alles nach
+`local` gehört `claude`; catraz-eigene Optionen stehen **vor** `local`
+(`catraz -C <dir> local …`). So trägt der Alias jede `claude`-Aufrufform
+(`catraz local -p "fix the bug"`, interaktiv, `echo … | catraz local -p …`). Ablauf:
+
+1. **`find_root`** (`.catraz` aufwärts) → Projektwurzel; Relativpfad CWD→Wurzel berechnen.
+   **Fail-closed (Roast-4 #1):** Kein `.catraz` gefunden → **Fehler** (Hinweis auf
+   `catraz init`), **niemals** stilles `exec` des Host-`claude`. Ein Alias, der unbemerkt
+   *un*sandboxed durchfällt, wäre das schlechtest­mögliche Ergebnis.
+2. **Sicherheits-Preflight läuft *immer* (Roast-4 #1):** Lokaler Modus ist ein *neuer
+   Agent-Start-Pfad* und unterliegt darum demselben „security-Checks laufen immer"-Prinzip
+   wie `up` (04-cli §5.3). Konkret vor **jedem** Aufruf: der **aufgelöste-Compose-
+   Invariantencheck** (§4.4 — `agent-net internal`, kein Token-Env, nicht privileged,
+   tmpfs-Shadow vorhanden) — er ist billig (ein `docker compose config`-Parse) und fängt
+   einen nachträglich manipulierten `compose.override.yml` ab. **Nicht** gecacht.
+3. **Infra sicherstellen:** sind Warden+Squid gesund, weiter. Sonst Infra hochfahren (die
+   teuren `doctor`-Online-Proben — Token etc. — laufen nur auf diesem **kalten** Pfad,
+   nicht bei jedem warmen Aufruf). `AUTH_MODE`-Check (§6.2): fehlt die Subscription-Credential
+   → Auto-`sync` oder klarer Fehler.
+4. **Agent one-off starten** — catraz hat die Infra-Gesundheit bereits sichergestellt, darum
+   `--no-deps` (deterministisch, kein dep-Restart-Race durch `run`; Roast-4 #6):
+   ```bash
+   docker compose -f <asset> --project-directory <ziel> --env-file <ziel>/.catraz/.env \
+     run --rm --no-deps --workdir /workspace/<relpath> agent  local -- <claude-argumente…>
+   ```
+   `run` instanziiert **dieselbe** Service-Definition wie `up` (Netze, Shadow-Mount,
+   RO-Home, kein Token) — `local` kann **keine** boundary-relevante Service-Config
+   überschreiben; catraz exponiert auf `local` weder `--network`/`--privileged`/`--volume`
+   noch `--entrypoint`. Der entrypoint läuft im **`local`-Modus** (11.5).
+5. **Exit-Code & Signale durchreichen** (`run` leitet SIGINT/SIGTERM an den Container-Prozess;
+   `--rm` räumt auf).
+
+### 11.4 Compose: Profil-Split Infra ↔ Agent-Daemon
+
+Damit `catraz up` *nicht* den Agent-Daemon mitstartet (lokaler Modus will den Agenten nur
+on-demand), wandert der Remote-Control-Daemon hinter ein Compose-**Profil**:
+
+- **Infra** (Warden, Squid): kein Profil → `catraz up` startet sie (beide Modi teilen sie).
+- **Agent-Daemon** (`claude remote-control`): Profil `remote` → nur `catraz up --remote`.
+- **Lokaler Modus**: `catraz local` stellt die Infra selbst sicher (11.3 Schritt 3) und ruft
+  dann `run --rm --no-deps agent`.
+
+> **Bedeutet eine Re-Definition von `catraz up` (Roast-4 #5):** Bisher (04-cli §5.3, §10)
+> startete `up` *alle drei* Dienste. Neu: `catraz up` = **nur Infra**; der Agent-Daemon
+> kommt über `up --remote`. Das ist eine bewusste, hier dokumentierte Änderung der
+> `up`-Semantik (kein stilles Abweichen) und zieht in den Rollout (§10) ein.
+
+### 11.5 Entrypoint: ein lokaler Exec-Pfad (kohärent mit §6.4)
+
+Es ist **derselbe** entrypoint und **dasselbe** Setup wie §6.4 (RO-Home kopieren-dann-patchen,
+git-insteadOf-Warden, drop-to-dev) — nur der **finale Exec** verzweigt:
+
+- Default: `claude remote-control …` (Daemon).
+- `local`-Modus: `claude <durchgereichte Argumente>` — interaktiv mit TTY.
+
+Ausgewählt über das `run`-Kommando (`… run … agent local -- <args>`). **Modus-abhängig
+(Roast-4 #8):** Die RC-spezifischen JSON-Patches (`remoteDialogSeen`,
+`bypassPermissionsModeAccepted`) gehören in den **Daemon**-Pfad; im `local`-Modus werden sie
+*nicht* gesetzt (s. 11.6).
+
+### 11.6 Der native Feel — und die ehrliche Permission-Wahrheit (Roast-4 #2/#3)
+
+- **Workdir-Mapping**: CWD-Relativpfad → `--workdir /workspace/<relpath>`.
+- **TTY**: interaktiv → TTY (Default von `run`); Pipe (`!isatty`) → `-T`.
+- **Exit-Code & Signale** 1:1 durchgereicht.
+- **Permission-Modus**: lokal sitzt ein Mensch am TTY → **normale Permission-Prompts**
+  (nicht `bypassPermissions` wie der Daemon). `--yolo` für Daemon-Parität.
+
+> **Wichtig — Prompts sind UX, *kein* Sicherheits-Mechanismus.** Die erste Skizze rahmte
+> „normale Prompts" so, als schützten sie die gebundenen Dateien. Das ist im *eigenen*
+> Threat-Model falsch: Permission-Prompts sind **Client-UI**; ein als bösartig angenommener
+> (oder prompt-injizierter) Claude ignoriert sie und ruft Tools direkt. Prompts sind hier
+> reine **Verhaltens-Parität** zum echten `claude` (fragt vor Edits) für den *ehrlichen*
+> Fall — sie sind nicht das, was die Sicherheit trägt. Was die Sicherheit trägt, steht in
+> 11.8.
+
+### 11.7 Latenz & Nebenläufigkeit
+
+- **Latenz** je Aufruf ≈ Container-Create + entrypoint-Setup + Node-Start (~1–3 s). Für eine
+  **interaktive** Sitzung (einmal starten, dann unterhalten) vernachlässigbar; für viele
+  **skript-Einzelschüsse** (`claude -p` in Schleife) spürbar. Ein warmgehaltener
+  `exec`-Pfad (`--warm`) ist **bewusst aufgeschoben** (Roast-4 #5: kein zweites
+  Ausführungsmodell auf Verdacht — erst wenn Latenz real stört).
+- **Nebenläufigkeit**: mehrere `local`-Sitzungen (und der Daemon) teilen `/workspace` und den
+  **globalen** Warden-Quoten-Pool (R5) — korrekt, denn es ist *ein* Operator mit *einem*
+  Budget. Gleichzeitige Schreiber auf `/workspace` sind wie zwei parallele `claude` Sache des
+  Nutzers.
+
+### 11.8 Was der lokale Modus schützt — und was nicht (Anti-Theater, Roast-4 #2/#3)
+
+Der Alias darf kein falsches Sicherheitsgefühl erzeugen. Klartext:
+
+| schützt (Warden/Squid, *identisch* zum Remote-Modus) | schützt **nicht** (in **keinem** Modus) |
+| ---------------------------------------------------- | --------------------------------------- |
+| Kein GitLab-Token im Agenten (R6); git nur über Warden | Den gebundenen Working-Tree `/workspace` — der Agent darf ihn editieren (das *ist* der Zweck) |
+| Egress nur über Squid-Allowlist; keine eigene Netz-Route | Exfiltration über *erlaubte* Domains (npm/github …) — begrenzt, nicht eliminiert (README §2) |
+| Push nur auf `claude/*`, kein Merge, Quoten (R1–R5) | Die Claude-Credentials selbst (irreduzibel, README §2.1) |
+| `.catraz` für den Agenten unlesbar (Shadow-Mount §4.3) | — |
+
+Kurz: Lokaler Modus gibt der *lokalen* Claude-Nutzung **exakt** das Netz-/Git-Sicherheitsnetz
+des Remote-Modus — nicht mehr, nicht weniger. Er macht Claude **nicht** ungefährlich für
+deine Dateien und ersetzt **kein** Code-Review. `catraz local --help` sagt genau das, damit
+der Alias ehrlich bleibt.
