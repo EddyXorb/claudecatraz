@@ -17,4 +17,4 @@ max_writes_per_hour = 60                  # R5: max write actions per hour
 
 # Full paths of concrete projects only — NO wildcards/globs, NO partial/leaf names,
 # NO group prefixes. Empty = fail-closed (nothing allowed).
-allowed_projects    = ["untis-org/optimization-team/opt/opt-ci"]
+allowed_projects    = ["my_group/my_project"]

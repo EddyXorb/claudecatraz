@@ -18,7 +18,7 @@ from catraz.cli import CliError
 @pytest.mark.parametrize("path", [
     "group/project",
     "group/sub/project",
-    "untis-org/optimization-team/opt/opt-ci",
+    "my_group/my_project",
 ])
 def test_validate_project_accepts_full_paths(path):
     assert policy.validate_project(path) is None
