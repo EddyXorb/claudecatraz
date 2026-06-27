@@ -80,6 +80,12 @@ services:
     # NUR agent-net (internal) -> keine eigene Internet-/DNS-Route. Research/Build
     # laeuft ausschliesslich ueber den Forward-Proxy (02-network-isolation.md).
     networks: [agent-net]
+    # The agent is treated as potentially malicious. The base image inherits setuid/
+    # setgid binaries from Ubuntu (passwd, su, mount, ...) as a latent privilege-
+    # escalation vector. no-new-privileges tells the kernel to grant NO privileges via
+    # setuid/setgid on execve -> the bits may be set but become inert in this container.
+    security_opt:
+      - no-new-privileges:true
     environment:
       - AUTH_MODE=${AUTH_MODE}
       # Research/Build-Egress ueber den Forward-Proxy (§6.6):

@@ -88,6 +88,15 @@ def resolve_service(name):
     )
 
 
+def _rc(r):
+    """Return EXIT_OK if r succeeded, EXIT_GENERAL otherwise.
+
+    Used by cmd_down and cmd_logs only. cmd_run propagates claude's own exit
+    code directly (2, 130, 137, …) — do NOT route cmd_run through _rc."""
+    from catraz.errors import EXIT_OK, EXIT_GENERAL
+    return EXIT_OK if r and r.returncode == 0 else EXIT_GENERAL
+
+
 def assert_real_dirs(root) -> None:
     for p in (root, root / ".catraz"):
         if p.is_symlink():
