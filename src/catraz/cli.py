@@ -82,20 +82,33 @@ def cmd_doctor(root, args, out):
 
 
 def cmd_init(root, args, out):
+    from catraz.paths import asset_root
     out.head("catraz init — let's get the stack ready\n")
-    env_path = root / ".env"
-    example = root / ".env.example"
+    cat = root / ".catraz"
+    env_path = cat / ".env"
+    assets = asset_root() / "assets"
 
-    # 1. dirs
-    out.info("• creating bind-mount directories…")
-    _doctor_fix(root, load_env(env_path))  # mkdir + best-effort chown
+    # 1. dirs (.catraz/ + subdirs, chown DEV_UID)
+    out.info("• creating .catraz/ directories…")
+    _doctor_fix(root, load_env(env_path))  # mkdir under .catraz/ + best-effort chown
 
-    # 2. .env
+    # 2. config templates → .catraz/config/ (only if not already present)
+    cfg_dst = cat / "config"
+    cfg_src = assets / "config"
+    for name in ("warden.toml", "allowlist.txt", "squid.conf"):
+        src = cfg_src / name
+        dst = cfg_dst / name
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+            out.info(f"• copied {name} to .catraz/config/")
+
+    # 3. .catraz/.env seeded from the packaged .env.example
     if not env_path.exists():
+        example = assets / ".env.example"
         if not example.exists():
             raise CliError(".env.example missing — cannot seed .env", EXIT_CONFIG)
         shutil.copy2(example, env_path)
-        out.info("• created .env from .env.example")
+        out.info("• created .catraz/.env from .env.example")
     env = load_env(env_path)
 
     updates = {}
@@ -153,7 +166,10 @@ def cmd_init(root, args, out):
         except CliError as e:
             out.warn(str(e) + " — run `catraz sync` once authenticated")
 
-    # 6. doctor
+    # 6. .gitignore — keep the runtime/secrets home out of version control
+    _ensure_gitignore(root)
+
+    # 7. doctor
     out.head("\n— preflight —")
     f = run_doctor(root)
     bad, _ = print_findings(f, out)
@@ -162,6 +178,36 @@ def cmd_init(root, args, out):
         out.info(out.yellow("Some checks failed above. Fix them, then:") + "  catraz doctor")
         return EXIT_DOCTOR
     out.info(out.green("Ready.") + " Next:  " + out.bold("catraz up"))
+    return EXIT_OK
+
+
+def _ensure_gitignore(root):
+    """Append a `.catraz/` line to <root>/.gitignore (create if missing), once."""
+    gi = root / ".gitignore"
+    lines = gi.read_text().splitlines() if gi.exists() else []
+    if any(ln.strip() == ".catraz/" for ln in lines):
+        return
+    with gi.open("a") as fh:
+        if lines and lines[-1].strip():
+            fh.write("\n")
+        fh.write(".catraz/\n")
+
+
+def cmd_migrate(root, args, out):
+    cat = root / ".catraz"; cat.mkdir(exist_ok=True)
+    moves = {"config": "config", "state": "state", "logs": "logs",
+             "claude": "claude", ".env": ".env"}
+    for src_name, dst_name in moves.items():
+        src = root / src_name; dst = cat / dst_name
+        if src.exists() and not dst.exists():
+            src.rename(dst)               # atomic move, same filesystem
+    # fail-closed: kein Alt-Layout-Secret darf unter root verbleiben
+    leftovers = [n for n in ("claude", "state", ".env") if (root / n).exists()]
+    if leftovers:
+        raise CliError(
+            f"migration incomplete, still under project root: {leftovers}", EXIT_CONFIG)
+    _ensure_gitignore(root)
+    out.info(out.green("migrated to .catraz/"))
     return EXIT_OK
 
 
@@ -357,6 +403,9 @@ def build_parser():
     pi.add_argument("--force", action="store_true", help="re-prompt even for set values")
     pi.add_argument("--skip-sync", action="store_true", help="skip the Claude credential import")
 
+    sub.add_parser("migrate", parents=[_g()],
+                   help="move a legacy layout (./config, ./state, ./.env, …) into .catraz/")
+
     pd = sub.add_parser("doctor", parents=[_g()], help="preflight: turn silent setup failures loud")
     pd.add_argument("--fix", action="store_true", help="repair safe findings (dirs, chown)")
     pd.add_argument("--strict", action="store_true", help="warnings count as failures (exit 3)")
@@ -411,6 +460,21 @@ def main(argv=None):
         parser.print_help()
         return EXIT_OK
 
+    # init/migrate run BEFORE a .catraz exists → they take the explicit dir (or CWD)
+    # as root rather than walking up for an existing .catraz.
+    if args.command in ("init", "migrate"):
+        root = Path(args.dir).resolve() if args.dir else Path.cwd().resolve()
+        try:
+            if args.command == "init":
+                return cmd_init(root, args, out)
+            return cmd_migrate(root, args, out)
+        except CliError as e:
+            out.err(str(e))
+            return e.code
+        except KeyboardInterrupt:
+            print()
+            return EXIT_GENERAL
+
     try:
         root = find_root(args.dir)
     except CliError as e:
@@ -418,8 +482,6 @@ def main(argv=None):
         return e.code
 
     try:
-        if args.command == "init":
-            return cmd_init(root, args, out)
         if args.command == "doctor":
             return cmd_doctor(root, args, out)
         if args.command == "up":
