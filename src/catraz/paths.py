@@ -1,5 +1,6 @@
 """Asset + project-root resolution."""
 import importlib.resources as ir
+import os
 import shutil
 from pathlib import Path
 
@@ -33,3 +34,28 @@ def asset_root() -> Path:
             shutil.copytree(repo / ctx, dst / "assets" / ctx, dirs_exist_ok=True)
     marker.write_text("")
     return dst
+
+
+def find_root(explicit):
+    """Project root = the dir containing docker-compose.yml (searched upward)."""
+    from catraz.cli import CliError, EXIT_CONFIG
+    if explicit:
+        root = Path(explicit).resolve()
+        if not (root / "docker-compose.yml").exists():
+            raise CliError(f"no docker-compose.yml in {root}", EXIT_CONFIG)
+        return root
+    here = Path.cwd().resolve()
+    for d in (here, *here.parents):
+        if (d / "docker-compose.yml").exists():
+            return d
+    # Fall back to the script's own directory (zero-install ./catraz case).
+    here = Path(__file__).resolve().parent
+    if (here / "docker-compose.yml").exists():
+        return here
+    raise CliError("no docker-compose.yml found (use -C/--dir)", EXIT_CONFIG)
+
+
+def _claude_home(root, env):
+    raw = env.get("CLAUDE_HOME", "./claude")
+    p = Path(os.path.expanduser(raw))
+    return p if p.is_absolute() else (root / p).resolve()

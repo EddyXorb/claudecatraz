@@ -5,11 +5,15 @@ on:
   push:
     paths:
       - "catraz"
+      - "src/catraz/**"
+      - "pyproject.toml"
       - "tests/cli/**"
       - ".github/workflows/cli-ci.yml"
   pull_request:
     paths:
       - "catraz"
+      - "src/catraz/**"
+      - "pyproject.toml"
       - "tests/cli/**"
       - ".github/workflows/cli-ci.yml"
 
