@@ -176,3 +176,25 @@ plötzlich rote Collection-Fehler, deren Ursache nicht im jeweiligen Commit lieg
 gewesen: eine der Dateien umbenennen (z. B. `test_local_cli.py`) oder `__init__.py` in
 `tests/cli`/`tests/container` legen. Reiner Doc-Nit mit globaler Nebenwirkung — festgehalten,
 damit die Modus-Entscheidung bewusst getroffen ist, nicht als stille Notlösung.
+
+### B9 — `.gitattributes` pinnt den `catraz`-Shim nicht auf LF → `core.autocrlf=true` zerbricht den Shebang
+
+`.gitattributes` erzwingt LF nur für `*.sh` und `Dockerfile*` — mit dem Kommentar „CRLF bricht
+den Shebang unter Linux". Genau der schützenswerteste Kandidat ist aber **nicht** abgedeckt:
+der extensionslose Root-Shim `catraz` (`#!/usr/bin/env python3`). Auf dieser Maschine ist
+`core.autocrlf=true`; beim Checkout wird der Shim zu CRLF und `./catraz` bricht:
+
+```
+/usr/bin/env: »python3\r«: Datei oder Verzeichnis nicht gefunden  (EXIT 127)
+```
+
+Der **committete** Blob ist korrekt LF (`git show HEAD:catraz` → LF), nur der Arbeitsbaum ist
+betroffen; CI (Linux-Runner, `autocrlf` standardmäßig aus) läuft sauber. Auch die `.py`-Assets
+(`entrypoint.py`) und `*.yml`/`*.toml` sind nicht gepinnt und tragen denselben latenten
+CRLF-Konflikt (daher die „LF will be replaced by CRLF"-Warnungen bei jedem Commit).
+
+**Warum ein Problem:** Wer dieses Repo auf einer Maschine mit `autocrlf=true` auscheckt (häufig
+unter Windows/WSL-Setups), bekommt ein **nicht startbares `./catraz`** — und damit bricht das
+zentrale Werkzeug genau im „von überall lauffähig"-Versprechen (TODO-Punkt 5). Einzeiler-Fix:
+`catraz text eol=lf` (plus ggf. `*.py text eol=lf`) in `.gitattributes`. **Nicht behoben** —
+Repo-Hygiene-Bug, außerhalb des reinen 05-packaging-Umfangs; bewusst nur festgehalten.
