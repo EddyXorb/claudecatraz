@@ -61,3 +61,38 @@ alle anderen Assets bereits aufgelöst werden). Die Unit-Tests fangen das nicht,
 `_run_sync` nicht über einen installierten Pfad ausüben. **Nicht hier behoben** (gehört in
 einen eigenen Fix-Commit / eine Doc-Korrektur), aber blockiert das Weiterbauen von Doc 05/06
 nicht.
+
+### B3 — Doc 05 führt `ENTRYPOINT` ein, sagt aber nicht, dass `command:` aus dem Compose muss (Doppelinvokation)
+
+Bis Doc 04 hat das Agent-Image **kein** `ENTRYPOINT`; der Start kommt über die Compose-Zeile
+`command: ["python3", "/entrypoint.py"]`. Doc 05 §5.1 lässt den `claude-layer`-Dockerfile mit
+`ENTRYPOINT ["python3", "/entrypoint.py"]` enden, beschreibt aber nur den `build:`-Block-Umbau
+und **erwähnt das `command:` mit keinem Wort**. Bliebe es stehen, hängt Docker das `command`
+als Argumente an den ENTRYPOINT → `python3 /entrypoint.py python3 /entrypoint.py`; argparse im
+Entrypoint sähe `python3` als Subcommand und bräche ab.
+
+**Warum ein Problem:** Die Doc ist an dieser Stelle nicht in sich geschlossen — wer sie 1:1
+befolgt, baut einen Container, der beim Start sofort kaputtgeht. Bei der Umsetzung **habe ich
+die `command:`-Zeile entfernt** (zwingend, damit der argumentlose ENTRYPOINT-Aufruf =
+Daemon-Start funktioniert und Doc 06 später `… local -- <args>` als ENTRYPOINT-Argumente
+durchreichen kann). Das ist der einzige Punkt in diesem Review, an dem ich vom reinen
+Doc-Wortlaut abgewichen bin — bewusst, weil der Doc-Text hier lückenhaft ist. Die Doc 05 §5.1
+sollte den `command:`-Wegfall explizit aufnehmen.
+
+### B4 — Asset-Cache invalidiert nie bei gleicher Version trotz geänderter Assets (Zero-Install-Footgun)
+
+`paths.asset_root()` extrahiert Assets nach `~/.cache/catraz/<__version__>/` und setzt einen
+`.extracted`-Marker; existiert der Marker, wird **nie neu kopiert**. Der Cache-Key ist
+**ausschließlich** `__version__`. Im Zero-Install-/Dev-Betrieb (Quelle = Repo, Version bleibt
+`0.2.0`) bedeutet das: jede Änderung an einem Asset (Compose, Dockerfile, config) propagiert
+**nicht**, bis man `~/.cache/catraz` von Hand löscht oder die Version hochzieht. Konkret in
+diesem Review aufgeschlagen: der neue `test_image_assets.py` liest die echten (nicht
+gemockten) Cache-Assets und sieht das alte Layout, bis der Cache geleert wird — der Testlauf
+braucht ein vorgeschaltetes `rm -rf ~/.cache/catraz`.
+
+**Warum ein Problem:** Für veröffentlichte Wheels ist es harmlos (Version steigt mit jedem
+Release), aber für den im Plan ausdrücklich gewollten Zero-Install-/Entwicklungsmodus
+(TODO-Punkt 5, Doc 01) ist es ein stiller Footgun: man editiert ein Asset, startet `catraz`,
+und bekommt weiter das alte Verhalten — ohne jede Fehlermeldung. Sinnvoll wäre ein
+Cache-Schlüssel, der im Zero-Install-Fall den Quell-Mtime/Hash einbezieht (oder im
+`_repo_root()`-Zweig den Marker ignoriert und immer frisch kopiert). **Nicht behoben.**
