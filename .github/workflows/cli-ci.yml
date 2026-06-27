@@ -32,7 +32,7 @@ jobs:
         run: |
           ./catraz --help
           ./catraz --version
-          ./catraz local --help
+          ./catraz run --help
 
       - name: Unit tests
         run: uv run --with pytest python -m pytest tests/cli/ tests/container/ -q
