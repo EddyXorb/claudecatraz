@@ -186,7 +186,48 @@ Build-Kontexte zeigen auf die ausgepackten Asset-Verzeichnisse (reale Pfade im v
 
 ## 4. `.catraz/` — das Laufzeit-Heim und der Schutz davor (TODO 6, 7)
 
-### 4.1 On-Disk-Layout im Zielordner
+### 4.0 Topologie-Grundsatzentscheidung: zwei gleichwertige Architekturen (Roast-2 #2)
+
+Roast-2 deckt die größte ungeprüfte Annahme auf: dass `.catraz/` *physisch im
+bind-gemounteten Baum* liegen muss. Tut es das, **muss** man die Secrets dort wieder vor
+dem Agenten verstecken (Shadow-Mount + dessen Verifikation). Liegt der echte State
+*außerhalb* des Baums, entfällt das ganze Versteck. Das sind zwei kohärente Architekturen;
+**keine ist auf allen vier Kernwerten überlegen** — darum stehen beide gleichberechtigt da,
+mit klarer Default-Empfehlung.
+
+| | **Option I — `.catraz/` im Baum** (self-contained) | **Option II — Marker im Baum, State außerhalb** |
+| - | -------------------------------------------------- | ----------------------------------------------- |
+| Im Projekt liegt | `.catraz/` mit *allem* (config, claude, state, logs) | nur ein (fast leeres) `.catraz/` mit `project-id` + `.gitignore` |
+| Echter State liegt | im Projekt (`.catraz/…`) | außerhalb: `~/.local/state/catraz/<project-id>/…` |
+| `/workspace`-Bind enthält Secrets? | **ja** → Shadow-Mount nötig | **nein** → nichts zu verstecken |
+| **Sicherheit** (1) | gut, aber hängt an Mount-Ordering (tmpfs-Overdeck) | etwas besser: *keine* Ordering-Abhängigkeit, kein Overdeck zu verteidigen |
+| **Einfachheit** (2) | – Shadow-Mount, T1–T4/T8, geschachtelte-`.catraz`-Guard, eine Override-Invariante mehr | + all das entfällt |
+| **Transparenz** (3) | gleich | gleich |
+| **Anwenderfreundlichkeit** (4) | + alles in *einem* lokalen Ordner; `rm -rf .catraz` = saubere Deinstallation; Projekt verschieben nimmt State mit | – State an zweitem Ort; verwaist bei `rm -rf` Projekt; Verschieben/Umbenennen löst die `project-id`-Bindung → braucht `catraz gc`/`relink` |
+
+**Wertungs-Ehrlichkeit:** Eine *reine* Optimierung auf Sicherheit+Einfachheit (Prioritäten
+1+2) wählt **Option II** — sie löscht den halben §4.5-Testkatalog, den Shadow-Mechanismus,
+die geschachtelte-`.catraz`-Logik und die Ordering-Sorge auf einen Schlag. **Aber** TODO 6/7
+verlangen *ausdrücklich* „nur ein `.catraz`-Ordner … und darin liegen dann **alle**
+Einstellungen und Hilfsdateien wie der Claude-Ordner und die Logs" — das *ist* Option I.
+Die Anwenderfreundlichkeit, die Option I gewinnt (Selbst-Enthaltung, Portabilität, ein
+`ls`), ist hier nicht beliebige Politur, sondern die **formulierte Anforderung**.
+
+**Default: Option I**, weil sie die explizite Nutzeranforderung trifft und ihre
+Zusatz-Maschinerie nach dem Streichen der Gold-Plating (Versionsmatrix → eine gepinnte
+Version, §4.5; stale `compose.resolved.yml` → Live-Befehl, §7.1) auf ein vertretbares Maß
+schrumpft: tmpfs-Overdeck + ein gepinnter Test-Satz + eine Compose-Invariante. **Option II
+bleibt dokumentiert und gewählt-bar** (`catraz init --external-state`) für Nutzer/Betreiber,
+die Sicherheit+Einfachheit über Selbst-Enthaltung stellen — sie ist auf den Top-Prioritäten
+nicht *schlechter*, nur auf Priorität 4. Genau die Konstellation, in der zwei Lösungen
+koexistieren dürfen.
+
+> Die §§4.1–4.5 unten beschreiben **Option I** (den Default). Was unter Option II *entfällt*,
+> ist je Abschnitt markiert. Option II nutzt dieselbe Claude-Home-Härtung (§4.3 „Claude-Home"),
+> dieselbe Auth-Logik (§6) und denselben Asset-/Compose-Aufbau (§3, §4.4) — nur ohne
+> Shadow-Mount und ohne die daran hängenden Tests/Guards.
+
+### 4.1 On-Disk-Layout im Zielordner (Option I)
 
 ```
 <zielordner>/.catraz/
@@ -266,38 +307,49 @@ services:
 existiert (es legt es ja in `init` an) — damit gibt es den in Roast-1 #4 genannten
 „Mountpoint fehlt"-Fall nicht.
 
-#### Das Claude-Home ist die **eine** schreibbare Ausnahme — und sie wird gehärtet (Roast-1 #2, #5)
+#### Das Claude-Home — *eine* kohärente Mount-Topologie (Roast-2 #1, BLOCKER behoben)
 
-Das Claude-Home kommt über einen **separaten, gezielten** Mount herein, nicht über
-`/workspace`. Es ist die einzige Stelle, an der der Agent host-persistent schreiben kann —
-das muss er auch (entrypoint legt `settings.json`, `CLAUDE.md`, `.claude.json`,
-`rc-debug.log` an). Die frühere Behauptung „der Agent schreibt **nie** ins Host-`.catraz`"
-war damit **falsch**; korrekt ist:
+Roast-2 hat zu Recht einen Widerspruch gefunden: §4.3 sagte „Rest tmpfs, aus
+*image-gebackenen* Quellen befüllt", aber `.claude.json` ist **pro Nutzer** (es trägt
+`organizationUuid`/`passesEligibilityCache` vom Host-`sync`, entrypoint.py:48–53) und
+*nicht* im Image; §6.3 sagte zugleich „Verzeichnis bleibt in beiden Modi gemountet". Drei
+Abschnitte beschrieben drei Topologien. Hier die **eine** verbindliche — gilt für §4.1,
+§4.3, §6.3, §9 gleichermaßen:
 
 ```yaml
     volumes:
-      # Credential read-only — der Agent kann sie LESEN (braucht er), aber nicht
-      # überschreiben/vergiften (Roast-1 #2):
-      - type: bind
-        source: ${PROJECT_DIR}/.catraz/claude/.credentials.json
-        target: /home/dev/.claude/.credentials.json
-        read_only: true
-      # Beschreibbarer Rest des Homes — aber NICHT host-persistent: tmpfs, vom
-      # entrypoint bei JEDEM Start aus image-gebackenen Quellen neu befüllt.
-      - type: tmpfs
-        target: /home/dev/.claude
+      # Die ZWEI per-User-Dateien einzeln read-only (lesbar, nicht überschreibbar):
+      - { type: bind, source: ${PROJECT_DIR}/.catraz/claude/.credentials.json,
+          target: /home/dev/.claude/.ro/.credentials.json, read_only: true }
+      - { type: bind, source: ${PROJECT_DIR}/.catraz/claude/.claude.json,
+          target: /home/dev/.claude/.ro/.claude.json,      read_only: true }
+      # Der GESAMTE Rest des Homes ist tmpfs (flüchtig, kein Host-Bind):
+      - { type: tmpfs, target: /home/dev/.claude }
 ```
 
-Folge: Was der Agent ins Home schreibt (inkl. eines bösartig manipulierten
-`settings.json` mit Hooks), lebt im **flüchtigen** tmpfs und ist beim nächsten Start weg.
-Der entrypoint **überschreibt** die sicherheitsrelevanten Dateien (`CLAUDE.md`,
-`settings.json`) ohnehin bei jedem Start (heute nur „falls fehlend" — wird auf „immer"
-geändert). Damit gibt es **keinen Persistenz-Pfad** mehr, über den ein kompromittierter
-Lauf den nächsten vergiftet.
+Der **entrypoint** baut das Home bei jedem Start im tmpfs auf — die einzige korrekte Stelle,
+weil tmpfs leer startet (Roast-2: `ensure_settings`' „return if exists" greift hier nie):
 
-> **Subscription-Modus vs. tmpfs-Home:** Die Credential wird RO einzeln gemountet (oben),
-> der entrypoint kopiert `.claude.json`/Onboarding-State beim Start aus einer RO-Quelle ins
-> tmpfs-Home. Im `api_key`-Modus entfällt der Credential-Mount ganz (§6).
+1. `.credentials.json` und `.claude.json` aus `…/.ro/` ins tmpfs-Home **kopieren** (nicht
+   patchen-in-place — die RO-Mounts wären `EROFS`, das war der von Roast-2 entdeckte latente
+   Bug an entrypoint.py:97). Erst die *Kopie* wird ge-`write_text`-patcht
+   (`bypassPermissionsModeAccepted` etc.).
+2. `CLAUDE.md` und `settings.json` aus image-gebackenen Quellen **immer überschreiben**
+   (image-baked, per-User-neutral — anders als `.claude.json`).
+3. `rc-debug.log` landet im tmpfs. **Bewusste Entscheidung (Roast-2):** der RC-Debug-Log ist
+   pro Lauf flüchtig; wer ihn host-persistent braucht, setzt `--debug-file` auf einen
+   Warden-/Logs-Pfad. (Heute lag er versehentlich im Bind — die Flüchtigkeit ist jetzt
+   *gewählt*, nicht stilles Regress.)
+
+**Sicherheits-Folge:** Was der Agent ins Home schreibt (bösartiges `settings.json` mit
+Hooks, ein Symlink, was auch immer) lebt im flüchtigen tmpfs und ist beim nächsten Start
+weg; die zwei per-User-Dateien sind RO und nicht vergiftbar. **Kein Persistenz-Pfad** von
+Lauf zu Lauf, und der Agent schreibt **nie** ins Host-`.catraz` (auch nicht via Home).
+
+> **`api_key`-Modus:** beide RO-Credential-Mounts entfallen; das tmpfs-Home wird nur mit
+> `.claude.json`-Onboarding-State (image-baked Default) + `settings.json` befüllt. Der
+> Schlüssel kommt als Env (§6). Damit ist `.catraz/claude/` in diesem Modus auf dem Host
+> **leer** — `doctor auth` erzwingt das (§6.2).
 
 #### Symlinks lösen sich im Container-Namespace auf — kein Host-Escape (Roast-1 #5, Teil-Rebuttal)
 
@@ -308,6 +360,15 @@ Agenten also keinen Host-Pfad erschließen, den er nicht ohnehin gemountet hat. 
 reale Effekt — ein Symlink aus `/workspace` auf `/home/dev/.claude/.credentials.json` —
 gibt ihm Lesezugriff auf *seine eigene*, ohnehin in-process gehaltene Credential. Das
 red-team-Spec (§4.5) schreibt genau diese Fälle als Negativtests fest.
+
+**Aber: der Mount-*Quellpfad* wird host-seitig aufgelöst (Roast-2 #3).** Symlinks *im
+Inhalt* sind harmlos (s. o.); ein Symlink **im Quellpfad** eines Binds löst Docker dagegen
+**auf dem Host** auf — ist `${PROJECT_DIR}` oder `${PROJECT_DIR}/.catraz` selbst ein
+Symlink, bindet man unbeabsichtigt ein anderes Host-Ziel. Darum prüft `catraz up`
+**host-seitig vor dem Compose-Aufruf**: `${PROJECT_DIR}` und `${PROJECT_DIR}/.catraz` müssen
+*reale* Verzeichnisse sein (`Path.is_symlink()`/`realpath`-Vergleich), sonst Abbruch
+fail-closed. Damit gilt die Symlink-Garantie sauber abgegrenzt: *in-container*-Auflösung ist
+sicher, *host-seitige* Quellpfad-Auflösung wird vor dem Start verifiziert.
 
 #### Threat-Model-Tabelle (korrigiert)
 
@@ -371,29 +432,46 @@ Invarianten — und `up` bricht ab, wenn eine verletzt ist:
 | Agent mountet keinen Warden/Proxy-`.catraz`-Pfad | §4.3 Reichweite |
 
 Das macht die Grenze **prüfbar statt angenommen** — und ist zugleich die Antwort auf den
-Transparenz-Verlust (§7): die Invarianten sind explizit und maschinell verifiziert.
+Transparenz-Verlust (§7.1): die Invarianten sind explizit und maschinell verifiziert.
+**Schema-Robustheit (Roast-2 #7):** Der Parser prüft gegen das **aufgelöste JSON**
+(`docker compose config --format json`), nicht gegen YAML-Text, und wird über *dieselbe*
+CI wie die T-Tests (unten) mit je einem known-good- und known-bad-Override abgesichert —
+kein zweiter Versionszweig.
 
-### 4.5 Verifikations-Spec: der Shadow-Mount ist *definiert* durch seine Negativtests (Roast-1, Kernforderung)
+### 4.5 Verifikations-Spec: der Shadow-Mount ist *definiert* durch seine Negativtests (Option I)
+
+> Gehört zu **Option I** (§4.0). Unter Option II entfallen T1–T4, T7, T8 — es gibt keinen
+> Overdeck zu verteidigen; T5/T6 (Claude-Home) und T9 (Warden-State) bleiben in beiden.
 
 Die §4.3-Garantie ist zu tragend, um sie zu *behaupten*. Sie wird als ausführbare
 red-team-Suite (`tests/redteam/test_shadow_mount.py`) geschrieben — **bevor** der
-Mount-Code steht — und gilt nur als „funktionierend", wenn alle Fälle grün sind, über
-**jede** unterstützte Docker-/Compose-Version (CI-Matrix):
+Mount-Code steht — und gilt nur als „funktionierend", wenn alle Fälle grün sind:
 
-| # | Negativtest (im Agent-Container ausgeführt) | erwartetes Ergebnis |
+| # | Negativtest (im Agent-Container, sofern nicht anders vermerkt) | erwartetes Ergebnis |
 | - | -------------------------------------------- | ------------------- |
 | T1 | `ls -A /workspace/.catraz` | leer |
 | T2 | Mount-Typ von `/workspace/.catraz` (`findmnt -no FSTYPE`) | `tmpfs`, nicht der Bind |
 | T3 | Agent schreibt `/workspace/.catraz/x`; danach Host-`.catraz` prüfen | Host unverändert, kein `x` |
 | T4 | `umount /workspace/.catraz` als `dev` | scheitert (`EPERM`) |
-| T5 | `cat /home/dev/.claude/.credentials.json > …` (überschreiben) | scheitert (RO) |
+| T5 | `cat … > /home/dev/.claude/.ro/.credentials.json` (überschreiben) | scheitert (RO) |
 | T6 | Agent schreibt `~/.claude/settings.json`; Container neu starten; Datei prüfen | vom entrypoint überschrieben, keine Agent-Hooks überleben |
-| T7 | Symlink `/workspace/link -> /` bzw. `-> /home/dev/.claude`; auflösen | bleibt im Container-Namespace, kein Host-Pfad |
-| T8 | `grep` in `/proc/self/mountinfo` nach einem *erreichbaren* Host-Secret-Pfad | keiner erreichbar (Topologie sichtbar, Inhalt/Reichweite nicht) |
-| T9 | nach `down`+`up --build` während Warden-Schreibvorgang: Quota-DB lesbar | konsistent oder fail-closed, nie fail-open (§7 Recreate) |
+| T7a | Symlink `/workspace/link -> /` bzw. `-> /home/dev/.claude`; auflösen | bleibt im Container-Namespace, kein Host-Pfad |
+| T7b | **host-seitig:** `${PROJECT_DIR}`/`.catraz` als Symlink → `catraz up` | bricht fail-closed ab (§4.3 Quellpfad-Guard) |
+| T8 | `grep` in `/proc/self/mountinfo` nach einem *erreichbaren* Host-Secret-Pfad | keiner erreichbar (Topologie sichtbar, Reichweite nicht) |
+| T9 | nach `down`+`up --build` während Warden-Schreibvorgang: Quota-DB lesbar | konsistent oder fail-closed, nie fail-open (§7.2) |
 
 Diese Tabelle *ist* die Spezifikation. Findet ein Test eine Lücke, ist der Shadow-Mount
 nicht fertig — nicht das Dokument wird angepasst, sondern der Mount.
+
+**Eine gepinnte Version statt einer Matrix (Roast-2 #8).** catraz ist ein
+Einzel-Operator-Werkzeug auf *einer* Docker-Installation — eine Versions-*Matrix* für 9
+Tests wäre Gold-Plating. Stattdessen: `doctor docker` erzwingt eine **Mindest-Docker-/
+Compose-Version** (gegen die die T-Tests laufen) und **verweigert den Start darunter**.
+„Wir haben Version X getestet und starten unter X nicht" ist ehrlicher und billiger als ein
+getestetes Kreuzprodukt. Falls die gepinnte Version die Langform-tmpfs-Ordnung *nicht*
+deterministisch liefert (T2 rot), fällt die Entscheidung auf einen expliziten
+Pre-Start-Mount (catraz mountet das tmpfs via `docker run`-Flags statt Compose) — als
+dokumentierter Fallback, nicht als Default.
 
 ### 4.6 `.gitignore`-Hygiene
 
@@ -501,28 +579,37 @@ Claude-Layer **einfach** (apt-nodesource wie heute, `userdel ubuntu`-Guard porti
 statisches `gosu`). Kein erfundenes `install-node.sh`, keine `||`-Fallbacks, die eine
 nicht-getestete Plattform vortäuschen.
 
-`doctor base` prüft den Vertrag *laut* nach dem Base-Build, statt ihn still beim Start zu
-verlieren: `docker run --rm $BASE sh -c 'command -v apt-get && python3 --version'`. Schlägt
-das fehl → ❌ mit klarer Meldung „Base braucht apt + python3".
+`doctor base` prüft den Vertrag *laut* nach dem Base-Build: `command -v apt-get` +
+`python3 --version` — **und zusätzlich (Roast-2 #4)** scannt es das *aufgelöste* Image auf
+**setuid/setgid-Binaries** (`find / -perm /6000`) und auf einen **non-root finalen `USER`**.
+Das fängt die zwei Dinge ab, die die Claude-Layer-Schicht *nicht* neutralisieren kann
+(s. §5.5). Befund → ⚠️/❌ mit Pfadliste.
 
-### 5.5 Geprüfte Alternative: publizierte Base statt Zwei-Phasen-Build (Roast-1 #8)
+### 5.5 „Claude-Layer oben" schützt gegen *versehentliche* Fehlkonfiguration — nicht gegen eine *feindliche* Base (Roast-2 #4)
 
-Der Roast fragt zu Recht, ob die Zwei-Phasen-Orchestrierung ihren Preis wert ist, wo eine
-publizierte `claudecatraz/claude-base`, die der Nutzer selbst `FROM`t, mit *einem* Build
-auskäme. Die Abwägung:
+Die vorige Fassung verkaufte A („Claude-Layer `FROM ${BASE}`") als „secure-by-construction,
+egal was die Base tat". Das war **überzogen**. „Letzte Schicht gewinnt" gilt für `USER`,
+`ENTRYPOINT`, `WORKDIR`, `ENV` — **nicht** für eine feindliche Lieferkette:
 
-| Ansatz | Builds | „richtig garantiert"? | Bewertung |
-| ------ | ------ | --------------------- | --------- |
-| **A. Claude-Layer OBEN, `FROM ${BASE}`** (gewählt) | zwei | **ja** — catraz besitzt die *letzte* Schicht (`USER dev`, `ENTRYPOINT`); die Base kann sie nicht versehentlich aufheben | mehr Build-Maschinerie, aber Sicherheit secure-by-construction |
-| **B. publizierte `claude-base`, Nutzer `FROM`t sie** | einer | **nein** — die Nutzer-Schicht ist *letzte*; ein vergessenes `USER root` am Ende hebt die Härtung auf | einfacher, aber „done right" liegt beim Nutzer |
+- **setuid-Binaries** aus der Base überleben; `USER dev` findet sie und eskaliert.
+- Der Claude-Layer baut **mit den Binaries der Base** (`curl … | bash`, `apt`, `npm` laufen
+  *auf* der Base) — eine kompromittierte Base-`curl`/`apt` unterwandert schon den Build.
+- Gepflanzte `~/.bashrc`, `/etc/ld.so.preload`, Base-`ENV` persistieren.
 
-Weil **Sicherheit vor Einfachheit** rangiert (und TODO 2 ausdrücklich „die Sicherheit, dass
-das richtig gemacht wird" verlangt), bleibt **A primär**. B wird als dokumentierter,
-gleichwertig *einfacher* Pfad für Nutzer angeboten, die bewusst Ein-Phasen wollen und die
-Verantwortung für die Reihenfolge übernehmen — aber `doctor` prüft auch dort die
-aufgelösten Compose-Invarianten (§4.4), sodass ein gebrochenes B nicht still hochfährt.
-Damit steht A nicht *allein*, ist aber auf der Kern-Achse (Sicherheit) klar besser — genau
-die Bedingung, unter der ein zweiter Pfad koexistieren darf.
+**Ehrliche Einordnung:** Die Base ist in **A *und* B vertraut**. A schützt nur davor, dass
+der Nutzer das Härten *vergisst* (er kann `USER dev` nicht versehentlich aufheben); gegen
+eine *bösartige* Base schützt **keiner** von beiden — dort bleibt nur `doctor base`
+(setuid-/USER-Scan, §5.4) und schlicht: keine unvertrauten Bases verwenden.
+
+| Ansatz | Builds | schützt vor *versehentlichem* Nicht-Härten? | schützt vor *feindlicher* Base? |
+| ------ | ------ | ------------------------------------------- | ------------------------------- |
+| **A. Claude-Layer oben, `FROM ${BASE}`** (Default) | zwei | **ja** — catraz besitzt die letzte Schicht | **nein** (Base vertraut) |
+| **B. publizierte `claude-base`, Nutzer `FROM`t** | einer | **nein** — Nutzer-Schicht ist letzte | **nein** (Base vertraut) |
+
+Damit bleibt **A Default** — auf der *einen* Achse, auf der sie sich unterscheiden
+(versehentliche Fehlkonfiguration), ist A besser, und TODO 2 verlangt „die Sicherheit, dass
+das richtig gemacht wird". B koexistiert als einfacherer Ein-Phasen-Pfad; in **beiden** Fällen
+prüft `doctor` die aufgelösten Compose-Invarianten (§4.4) und scannt die Base (§5.4).
 
 ---
 
@@ -569,12 +656,15 @@ genau die Ambiguität, die der Modus beseitigen soll), und ebenso, wenn
   `AUTH_MODE=api_key` keine `.credentials.json`-Prüfung; bei `subscription` kein
   Verlass auf `ANTHROPIC_API_KEY`.
 - **compose**: `ANTHROPIC_API_KEY` nur im `api_key`-Modus durchreichen (z. B. über ein
-  Compose-Profil oder eine von catraz gesetzte leere/gefüllte Variable). Der Mount von
-  `.catraz/claude` bleibt in beiden Modi (im api_key-Modus leer — für `settings.json`,
-  `.claude.json`-Onboarding-State etc.).
-- **`sync`**: liest die Quelle aus `CLAUDE_CREDENTIAL_SOURCE` statt fest aus `~/.claude`
-  (das `entrypoint.py cmd_sync` heute hart kodiert), und `up`/`init` rufen ihn im
-  Subscription-Modus automatisch, wenn die Credential fehlt.
+  Compose-Profil oder eine von catraz gesetzte leere/gefüllte Variable). Die Home-Mounts
+  folgen **genau** der einen Topologie aus §4.3 (zwei RO-Einzeldateien + tmpfs-Rest im
+  Subscription-Modus; nur tmpfs-Home im `api_key`-Modus) — kein RW-Verzeichnis-Mount mehr.
+- **`sync`**: liest die Quelle aus `CLAUDE_CREDENTIAL_SOURCE` statt fest aus `~/.claude`.
+  **Achtung (Roast-2 #10):** `entrypoint.py cmd_sync` (entrypoint.py:29) kodiert die Quelle
+  heute **hart** als `Path.home()/".claude"` und ignoriert ein Quell-Argument — der
+  04-cli-`--from`-Flag läuft derzeit ins Leere. Die Umsetzung muss `cmd_sync` einen echten
+  Quell-Parameter geben, nicht nur umbenennen. `up`/`init` rufen `sync` im Subscription-Modus
+  automatisch, wenn die Credential fehlt.
 
 ---
 
@@ -595,18 +685,24 @@ Die Befehlsoberfläche (04-cli §4) bleibt — `init`/`doctor`/`up`/`down`/`stat
 `--print` (P4) zeigt weiterhin das exakte Compose-Kommando — jetzt inklusive der
 Paket-Pfade und `--project-directory`, damit die Vertrauensgrenze sichtbar bleibt.
 
-### 7.1 Transparenz trotz versteckter Assets (Roast-1 #10)
+### 7.1 Transparenz trotz versteckter Assets (Roast-1 #10, verschlankt in Roast-2 #5/#6)
 
 `--print` zeigt die *Invocation*, nicht den *Inhalt* der nun im Cache liegenden
 Compose-/Dockerfiles. Für ein Werkzeug, dessen Seele die *nachvollziehbare* Isolation ist
-(04-cli §7), ist das zu wenig. Zwei Ergänzungen:
+(04-cli §7), ist das zu wenig. **Ein** Befehl deckt das ab — keine N-fache Taxonomie, keine
+stale Datei:
 
-- **`catraz show <compose|claude-layer|dockerfile|warden>`** druckt den **tatsächlichen
-  Asset-Inhalt** (aus dem Cache), damit man „ist `agent-net` wirklich `internal`, hält der
-  Agent wirklich kein Token" ohne venv-Spelunking prüfen kann.
-- `init` legt eine **read-only Referenzkopie** der aufgelösten Compose-Konfiguration
-  (`docker compose config`) als `.catraz/compose.resolved.yml` ab — der eine Ort, an dem
-  die *effektive* Topologie (nach Override-Merge) inspizierbar ist.
+- **`catraz show compose`** druckt das Compose-Asset (statisch, aus dem Cache).
+- **`catraz show resolved`** läuft `docker compose config` **live** und druckt die
+  *effektive* Topologie nach `.env`- und Override-Merge — **derselbe Code-Pfad** wie der
+  `doctor`-Invariantencheck (§4.4), nicht eine zweite Materialisierung.
+
+Roast-2 #5 zu Recht: eine bei `init` geschriebene `.catraz/compose.resolved.yml` **lügt**,
+sobald `.env`/Override sich ändern — darum **gestrichen**; die aufgelöste Sicht ist immer
+live. Roast-2 #6: die `show`-Ziele bleiben auf `compose`/`resolved` beschränkt; den Rest
+(`claude-layer`, Dockerfiles, Warden-Quelle) erreicht man über den **dokumentierten
+Cache-Pfad** (`catraz cache-dir` druckt ihn, dann `cat`/`ls`) — keine zu pflegende
+Schlüsselwortliste.
 
 ### 7.2 Recreate-/Update-Semantik gegen den laufenden Stack (Roast-1 #6)
 
@@ -649,27 +745,29 @@ Bestehende Installationen liegen flach im Repo-Root. Sanfter Pfad:
 
 | Thema | Risiko / Frage | Entschärfung |
 | ----- | -------------- | ------------ |
-| **Shadow-Mount-Robustheit** | Garantie ruht auf non-privileged + non-root + Mount-Ordering. | Als **Spec** festgeschrieben (§4.5 T1–T9), nicht behauptet; Langform-tmpfs (§4.3); CI-Matrix über Docker-Versionen. |
-| **Claude-Home-Persistenz** | Agent könnte Host-Credential/Hooks vergiften. | Credential RO einzeln gemountet, Rest tmpfs (flüchtig), entrypoint überschreibt Sicherheits-Dateien je Start (§4.3, T5/T6). |
+| **Topologie-Wahl (I vs. II)** | In-Tree-`.catraz` zieht Shadow-Maschinerie nach; extern wäre einfacher. | Beide dokumentiert (§4.0); Default I (= TODO-Anforderung), II als `--external-state`. Keine ist auf allen 4 Werten überlegen. |
+| **Shadow-Mount-Robustheit** (nur Option I) | Garantie ruht auf non-privileged + non-root + Mount-Ordering. | Als **Spec** festgeschrieben (§4.5 T1–T9), nicht behauptet; Langform-tmpfs (§4.3); **eine gepinnte** Docker-Version statt Matrix. |
+| **Claude-Home-Topologie** | drei Abschnitte beschrieben drei Mounts (Roast-2 #1). | **Eine** Topologie festgezurrt: 2× RO-Einzeldatei + tmpfs-Rest, entrypoint *kopiert dann patcht* (kein `EROFS`); §4.3/§6.3 synchron. |
 | **mountinfo-Topologie** | Host-Pfade in `/proc/self/mountinfo` sichtbar. | Akzeptiert: Topologie ≠ Reichweite; T8 verlangt „kein *erreichbarer* Secret-Pfad". |
-| **Override löst Grenze auf** | `compose.override.yml` könnte R6 brechen. | `doctor` prüft *aufgelöste* Compose-Invarianten nach Merge (§4.4). |
+| **Override löst Grenze auf** | `compose.override.yml` könnte R6 brechen. | `doctor` prüft *aufgelöstes JSON* nach Merge (§4.4), abgesichert per known-good/-bad in derselben CI. |
 | **Asset-Auflösung im Wheel** | `docker build` braucht reale Pfade; zip-Installs haben keine. | Deterministische Extraktion nach `~/.cache/catraz/<version>/`; `warden/`+`forward-proxy/` als Wheel-Includes (§3.1). |
-| **Image-Schichtung-Komplexität** | Zwei-Phasen-Build, Cache, Fehlerpfade. | content-adressierter `catraz-base:<hash>`-Tag, Phasen-getrennte Fehlermeldung (§5.2); Ein-Phasen-Alternative B dokumentiert (§5.5). |
+| **Image-Schichtung** | Zwei-Phasen-Build; „secure by construction" war überzogen. | content-adressierter Tag + Phasen-Fehlermeldung (§5.2); §5.5 ehrlich: A schützt vor *versehentlichem*, nicht *feindlichem* Base; `doctor base` scannt setuid/USER (§5.4). |
 | **Base-Vertrag** | Fremde Base ohne apt/python3. | Ehrlich verengt auf Debian/Ubuntu+glibc+python3; `doctor base` prüft laut (§5.4). |
-| **Geschachtelte `.catraz`** | Falscher, größerer Mount-Root exponiert Geschwister. | `find_root` bricht fail-closed bei verschachteltem `.catraz` ab (§4.2). |
+| **Geschachtelte `.catraz`** (nur Option I) | Falscher, größerer Mount-Root exponiert Geschwister. | `find_root` bricht fail-closed bei verschachteltem `.catraz` ab (§4.2). |
 | **Recreate vs. Warden-Schreiben** | WAL-Korruption, fail-open der Quota. | Graceful `SIGTERM`, WAL crash-konsistent, Warden fail-closed bei unlesbarem State (§7.2, T9). |
 | **Migration halb fertig** | Alt-`./claude` unüberdeckt im Mount. | `up` verweigert bei Alt-Layout-Resten; atomic rename; Präzedenz `.catraz` (§8). |
-| **Transparenz versteckter Assets** | Compose/Dockerfile nicht mehr im Klon sichtbar. | `catraz show <asset>` + read-only `.catraz/compose.resolved.yml` (§7.1). |
-| **`CLAUDE_CREDENTIAL_SOURCE` mit `~`** | Tilde-Expansion außerhalb der Shell. | catraz expandiert `~`/Env selbst (wie heute `_claude_home`). |
+| **Transparenz versteckter Assets** | Compose/Dockerfile nicht mehr im Klon sichtbar. | `catraz show compose`/`show resolved` (live, geteilter Pfad mit §4.4); **keine** stale Datei (§7.1). |
+| **`CLAUDE_CREDENTIAL_SOURCE` / `cmd_sync`-Quelle** | Tilde-Expansion; `cmd_sync` hat heute keine Quell-Param. | catraz expandiert selbst; `cmd_sync` bekommt echten Quell-Parameter (§6.3, Roast-2 #10). |
 
 ### Offen / bewusst dem Implementierungs-Spike überlassen
 
-- **Mount-Ordering über *alle* Compose-Versionen:** §4.5 T2 ist der Gate — falls eine
-  Ziel-Version die Langform nicht deterministisch ordnet, fällt die Entscheidung auf einen
-  expliziten Pre-Start-Mount (catraz mountet das tmpfs per `docker run`-Flags statt Compose).
-- **`docker compose config`-Invariantenparser (§4.4):** Umfang der geprüften Felder final
-  beim Bau festzurren; Risiko, dass Compose-Schema-Änderungen den Parser brechen → gegen
-  das *aufgelöste* JSON prüfen, nicht gegen YAML-Text.
+- **Topologie-Default endgültig:** Sollte der Implementierungs-Spike zeigen, dass die
+  gepinnte Docker-Version T2 (Langform-Ordering) *nicht* zuverlässig liefert, kippt die
+  Empfehlung pragmatisch auf **Option II** (extern) — dann verschwindet der Pre-Start-Mount-
+  Fallback ganz und der halbe §4.5-Katalog mit ihm.
+- **`catraz gc`/`relink` für Option II:** externer State (`~/.local/state/catraz/<id>`)
+  braucht einen GC für verwaiste Projekte und ein `relink` nach Projekt-Umzug — Umfang erst
+  bei Wahl von II festzurren.
 
 ---
 
@@ -680,8 +778,8 @@ Jeder Schritt ist für sich nützlich und unabhängig testbar.
 | Schritt | Liefert | TODO |
 | ------- | ------- | ---- |
 | **1. Paketierung** | `pyproject.toml`, `src/catraz/`-Layout, `entrypoint.py`+`AGENT.md` als Assets, Root-Shim. `uv tool install` funktioniert, Verhalten unverändert. | 3, 4, 5 |
-| **2. `.catraz/`-Heim** | `init`/`doctor`/Pfade auf `.catraz/` umstellen; `--project-directory`/`--env-file`; `.gitignore`-Eintrag; `migrate`. | 6 |
-| **3. Shadow-Mount** | tmpfs-Overlay auf `/workspace/.catraz`, gezielter Claude-Home-Mount; Red-Team-Negativtest. | 7 |
+| **2. `.catraz/`-Heim** | `init`/`doctor`/Pfade auf `.catraz/` umstellen; `--project-directory`/`--env-file`; `.gitignore`-Eintrag; `migrate`. Topologie-Wahl I/II (§4.0) hier festlegen. | 6 |
+| **3. Shadow-Mount** (Option I) | tmpfs-Overlay auf `/workspace/.catraz`, RO-Credential + tmpfs-Home, Quellpfad-Symlink-Guard; **Red-Team T1–T9 zuerst** (§4.5). Bei Option II entfällt dieser Schritt weitgehend. | 7 |
 | **4. Auth-Modus** | `AUTH_MODE`-XOR in `doctor`/`entrypoint`/compose; `CLAUDE_CREDENTIAL_SOURCE`; Auto-`sync`. | 1 |
 | **5. Image-Schichtung** | Claude-Layer-Dockerfile `FROM ${BASE_IMAGE}`; Default-Base unter `assets/bases/`; `BASE_IMAGE`/`BASE_DOCKERFILE`-Modi; `doctor base`. | 2 |
 
