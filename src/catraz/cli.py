@@ -35,6 +35,7 @@ from catraz.doctor import (
     run_doctor, print_findings, _doctor_fix, DOCTOR_SECTIONS, SECURITY_SECTIONS,
     SECRETS,
 )
+from catraz import auth
 
 COMPONENT_VARS = [
     "UV_VERSION", "CLANG_VERSION", "RUST_VERSION",
@@ -251,6 +252,8 @@ def cmd_up(root, args, out):
 
     # Ensure .catraz/ exists (init creates it; defensive mkdir in case it's missing).
     (root / ".catraz").mkdir(exist_ok=True)
+
+    auth.write_auth_fragment(root)
 
     try:
         assert_real_dirs(root)

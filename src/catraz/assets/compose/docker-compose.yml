@@ -80,7 +80,7 @@ services:
     # laeuft ausschliesslich ueber den Forward-Proxy (02-network-isolation.md).
     networks: [agent-net]
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AUTH_MODE=${AUTH_MODE}
       # Research/Build-Egress ueber den Forward-Proxy (§6.6):
       - http_proxy=http://forward-proxy:3128
       - https_proxy=http://forward-proxy:3128
@@ -99,8 +99,7 @@ services:
       - type: tmpfs
         target: /workspace/.catraz
         tmpfs: { size: 1048576, mode: 0700 }
-      - type: bind                       # Claude-Home (RO-Topologie folgt in Doc 04)
-        source: ${PROJECT_DIR}/.catraz/claude
+      - type: tmpfs
         target: /home/dev/.claude
     # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
     # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.

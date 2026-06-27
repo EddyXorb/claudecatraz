@@ -9,6 +9,7 @@ from pathlib import Path
 
 from catraz.envfile import load_env
 from catraz.compose import run as compose_run
+from catraz import paths
 
 # Secrets the wizard collects (env key → human prompt). Order matters.
 SECRETS = [
@@ -19,9 +20,9 @@ SECRETS = [
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "claude", "net"]
+DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "claude", "net", "auth"]
 # Sections that gate the trust boundary — `up` always runs these, no opt-out.
-SECURITY_SECTIONS = ["docker", "compose", "env", "policy"]
+SECURITY_SECTIONS = ["docker", "compose", "env", "policy", "auth"]
 
 
 class Findings:
@@ -224,6 +225,23 @@ def check_net(root, f):
         f.ok("net", "admin socket absent (stack down — start with `catraz up`)")
 
 
+def check_auth(root, env, f):
+    mode = env.get("AUTH_MODE", "")
+    if mode not in ("subscription", "api_key"):
+        f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"); return
+    cred = paths.claude_home(root) / ".credentials.json"
+    has_key = bool(env.get("ANTHROPIC_API_KEY"))
+    if mode == "subscription":
+        if has_key: f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
+        if not cred.exists(): f.bad("auth", "no .credentials.json", "run `catraz sync`")
+        else: f.ok("auth", "subscription credential present")
+    else:
+        if not has_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty", "set it")
+        if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",
+                                "remove .catraz/claude/.credentials.json")
+        if has_key and not cred.exists(): f.ok("auth", "api_key set")
+
+
 def run_doctor(root, only=None, fix=False):
     env = load_env(root / ".catraz" / ".env")
     f = Findings()
@@ -237,6 +255,7 @@ def run_doctor(root, only=None, fix=False):
     if "policy" in sections: check_policy(root, env, f)
     if "claude" in sections: check_claude(root, env, f)
     if "net" in sections: check_net(root, f)
+    if "auth" in sections: check_auth(root, env, f)
     return f
 
 

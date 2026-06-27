@@ -22,6 +22,9 @@ def base_cmd(root: Path) -> list[str]:
            "-f", str(ar / "assets/compose/docker-compose.yml"),
            "--project-directory", str(root),
            "--env-file", str(root / ".catraz/.env")]
+    frag = root / ".catraz/.auth.compose.yml"
+    if frag.exists():
+        cmd += ["-f", str(frag)]
     override = root / ".catraz/compose.override.yml"
     if override.exists():
         cmd += ["-f", str(override)]
