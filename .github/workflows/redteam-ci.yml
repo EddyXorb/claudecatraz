@@ -1,0 +1,28 @@
+name: redteam CI
+
+# Shadow-mount and trust-boundary negative tests (require Docker).
+on:
+  push:
+    paths:
+      - "src/catraz/**"
+      - "pyproject.toml"
+      - "tests/redteam/**"
+      - ".github/workflows/redteam-ci.yml"
+  pull_request:
+    paths:
+      - "src/catraz/**"
+      - "pyproject.toml"
+      - "tests/redteam/**"
+      - ".github/workflows/redteam-ci.yml"
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Red-team tests (Docker available)
+        run: uv run --with pytest python -m pytest tests/redteam/ -q

@@ -95,3 +95,39 @@ def test_t4_umount_eperm(live_stack):
               "exec", "-T", "--user", "dev", "claude-dev-env",
               "sh", "-c", "umount /workspace/.catraz 2>&1; echo rc=$?"])
     assert "rc=0" not in r.stdout  # must fail (EPERM or EACCES)
+
+
+# ── T7a — in-container symlink stays in container namespace ──────────────────
+
+@pytest.mark.slow
+def test_t7a_container_symlink_no_host_escape(tmp_path):
+    """A symlink created inside the container resolves within the container namespace
+    and must not reveal the host path to the host-side .catraz secret."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/secret").write_text("HOST-SECRET")
+    # Create a symlink INSIDE the tmpfs shadow pointing to parent — should resolve
+    # to the container-local empty tmpfs, not the host bind mount parent.
+    r = _run(["docker", "run", "--rm",
+              "-v", f"{tmp_path}:/workspace",
+              "--tmpfs", "/workspace/.catraz",
+              "alpine", "sh", "-c",
+              "ln -s /workspace/.catraz /tmp/link && ls -A /tmp/link | wc -l"])
+    assert r.returncode == 0
+    assert r.stdout.strip() == "0"  # symlink in container sees empty tmpfs
+
+
+# ── T8 — /proc/self/mountinfo shows no reachable secret path ─────────────────
+
+@pytest.mark.slow
+def test_t8_mountinfo_no_secret_path(tmp_path):
+    """/proc/self/mountinfo inside the container must not expose a device path
+    that references the host .catraz directory directly."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/secret").write_text("HOST-SECRET")
+    r = _run(["docker", "run", "--rm",
+              "-v", f"{tmp_path}:/workspace",
+              "--tmpfs", "/workspace/.catraz",
+              "alpine", "sh", "-c",
+              "grep '/workspace/.catraz' /proc/self/mountinfo | grep -v 'tmpfs' | wc -l"])
+    assert r.returncode == 0
+    assert r.stdout.strip() == "0"  # no non-tmpfs entry for /workspace/.catraz

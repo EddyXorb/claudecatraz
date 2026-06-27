@@ -57,3 +57,14 @@ def test_symlink_guard(tmp_path):
     link.symlink_to(tmp_path)
     with pytest.raises(CliError):
         compose.assert_real_dirs(link)
+
+
+def test_t7b_host_symlink_on_project_dir(tmp_path):
+    """T7b: if PROJECT_DIR itself is a symlink catraz up must abort (assert_real_dirs)."""
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    (real_dir / ".catraz").mkdir()
+    link = tmp_path / "link-to-real"
+    link.symlink_to(real_dir)
+    with pytest.raises(CliError):
+        compose.assert_real_dirs(link)
