@@ -15,25 +15,53 @@ def _repo_root() -> Path | None:
     return cand if (cand / "pyproject.toml").exists() else None
 
 
+_IGNORE = shutil.ignore_patterns(".venv", "__pycache__", "*.pyc", ".git", "*.egg-info")
+
+
+def _source_signature(*roots: Path) -> str:
+    newest = 0.0
+    for r in roots:
+        if not r.exists():
+            continue
+        for dirpath, dirnames, filenames in os.walk(r):
+            dirnames[:] = [d for d in dirnames if d not in (".venv", "__pycache__", ".git")]
+            for name in filenames:
+                if name.endswith(".pyc"):
+                    continue
+                try:
+                    newest = max(newest, (Path(dirpath) / name).stat().st_mtime)
+                except OSError:
+                    pass
+    return repr(newest)
+
+
 def asset_root() -> Path:
     """Deterministically extract packaged assets to a versioned cache and return it.
     Build contexts and compose files are read from here, never from the venv/CWD."""
     dst = Path.home() / ".cache" / "catraz" / __version__
     marker = dst / ".extracted"
+    repo = _repo_root()
+    sig = _source_signature(repo / "src/catraz/assets", repo / "warden",
+                            repo / "forward-proxy") if repo else ""
     if marker.exists():
-        return dst
+        if repo is None:                       # installed wheel: version-keyed, trust marker
+            return dst
+        if marker.read_text() == sig:          # zero-install: source unchanged
+            return dst
+        shutil.rmtree(dst / "assets", ignore_errors=True)   # stale dev cache → rebuild clean
     (dst / "assets").mkdir(parents=True, exist_ok=True)
     pkg_assets = ir.files("catraz") / "assets"
-    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():  # installed wheel
+    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():   # installed wheel
         with ir.as_file(pkg_assets) as src:
             shutil.copytree(src, dst / "assets", dirs_exist_ok=True)
-    else:  # zero-install source tree: assets under src/, contexts at repo root
-        repo = _repo_root()
+    else:                                       # zero-install source tree
         assert repo, "cannot locate assets"
-        shutil.copytree(repo / "src" / "catraz" / "assets", dst / "assets", dirs_exist_ok=True)
+        shutil.copytree(repo / "src/catraz/assets", dst / "assets",
+                        dirs_exist_ok=True, ignore=_IGNORE)
         for ctx in ("warden", "forward-proxy"):
-            shutil.copytree(repo / ctx, dst / "assets" / ctx, dirs_exist_ok=True)
-    marker.write_text("")
+            shutil.copytree(repo / ctx, dst / "assets" / ctx,
+                            dirs_exist_ok=True, ignore=_IGNORE)
+    marker.write_text(sig)                      # store the signature we just extracted
     return dst
 
 
