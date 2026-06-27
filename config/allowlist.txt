@@ -1,30 +1,44 @@
-# Forward-proxy (Squid) — domain allowlist for research/build egress.
-# Host-editable, mounted read-only into the container. NO secrets.
-# .domain  = includes subdomains ;  exact host = no leading dot.
-# Applies in stage 02 (forward-proxy). Reload without restart: squid -k reconfigure.
-# Details: docs/design/agentic-workflow/02-forward-proxy/03-squid-config.md
+# Forward-Proxy Allowlist — eine Domain je Zeile.
+#   .domain  -> inkl. der Domain UND aller Subdomains (.npmjs.org deckt registry.npmjs.org)
+#   domain   -> exakter Host (ohne fuehrenden Punkt)
+# Gelesen fuer HTTP (dstdomain) UND HTTPS-SNI (ssl::server_name) -> eine Wahrheit.
+# Aenderung wirkt per `docker compose exec forward-proxy squid -k reconfigure`.
+#
+# WICHTIG: Paketmanager folgen oft Redirects auf CDNs -> die transitiven Hosts
+# muessen mit drauf, sonst bricht der Build still (siehe 04-testing.md).
+# Hinweis: keine exakten Hosts eintragen, die schon von einem .domain-Eintrag
+# abgedeckt sind (Squid warnt sonst ueber Redundanz).
 
-# ── Package registries ───────────────────────────────────────────
+# --- Agent-Laufzeit: Claude Code spricht ueber den Proxy mit Anthropic ---
+# (agent-net ist internal -> ohne diesen Eintrag erreicht der Agent das Modell nicht)
+.anthropic.com
+
+# --- GitLab ---
+# Der git-Pfad laeuft ueber den Warden (eigener egress-net-Pfad, NICHT ueber diesen
+# Proxy). gitlab.com darf hier NICHT stehen — sonst kann ein Direkt-Push mit
+# getokerter Remote-URL den Warden umgehen (siehe Vorfall-Analyse, 02-warden.md W3.1).
+
+# --- Paket-Registries ---
 .npmjs.org
-registry.npmjs.org
 .crates.io
-static.crates.io
 .pypi.org
 files.pythonhosted.org
 .conan.io
-center.conan.io
 
-# ── Toolchain ────────────────────────────────────────────────────
+# --- Toolchain ---
 apt.llvm.org
 sh.rustup.rs
 static.rust-lang.org
 deb.nodesource.com
 
-# ── Docs & Q&A ───────────────────────────────────────────────────
+# --- Doku & Q&A ---
 docs.gitlab.com
 doc.rust-lang.org
 docs.python.org
 stackoverflow.com
 
-# Note: GitHub is out of scope for now and therefore not allowlisted.
-# Add a "Code (read)" category later if needed.
+# --- Code (read) — ggf. auf Raw-/API-Read einschraenken (Q4 in 01-scope-and-decisions.md) ---
+github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+codeload.github.com

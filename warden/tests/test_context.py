@@ -76,6 +76,9 @@ async def test_reconcile_populates_counters_and_unlocks(cfg, respx_router):
     ctx = _ctx(cfg)
     assert ctx.state.view().locked is True  # locked until first successful reconcile
 
+    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
+        return_value=httpx.Response(200, json={"id": 12345})
+    )
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
         return_value=httpx.Response(200, json=[{"name": "claude/a"}, {"name": "claude/b"}])
     )
@@ -92,6 +95,9 @@ async def test_reconcile_populates_counters_and_unlocks(cfg, respx_router):
     assert view.locked is False
     assert view.open_branches == 2
     assert view.open_mrs == 1
+    # The numeric-id alias was resolved and added to the allowlist (R6 by id form).
+    assert ctx.cfg.allowed_project_ids == ("12345",)
+    assert ctx.cfg.project_allowed("12345")
     await ctx.upstream.aclose()
 
 
@@ -99,6 +105,9 @@ async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
     # Fail-safe (§6.11): a partial/failed reconcile must NOT unlock the quota —
     # "empty = all free" is exactly the failure we refuse.
     ctx = _ctx(cfg)
+    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
+        return_value=httpx.Response(200, json={"id": 12345})
+    )
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
         return_value=httpx.Response(500)
     )

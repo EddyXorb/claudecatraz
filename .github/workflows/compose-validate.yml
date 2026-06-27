@@ -1,0 +1,89 @@
+name: compose validate
+
+on:
+  push:
+    paths:
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/compose-validate.yml"
+  pull_request:
+    paths:
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/compose-validate.yml"
+
+jobs:
+  syntax:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Generate CI env file from .env.example
+        run: |
+          # Uncomment all "# VAR=..." lines so docker compose config has no
+          # missing-variable warnings for stage-02 vars.
+          python3 - <<'EOF'
+          import re, sys
+          seen = set()
+          lines = []
+          with open(".env.example") as f:
+              for line in f:
+                  line = line.rstrip("\n")
+                  # Uncomment "# VAR=value" → "VAR=value"
+                  m = re.match(r'^#\s*([A-Z_][A-Z0-9_]*)=(.*)', line)
+                  if m:
+                      var = m.group(1)
+                      if var not in seen:
+                          lines.append(f"{var}={m.group(2)}")
+                          seen.add(var)
+                  elif re.match(r'^[A-Z_][A-Z0-9_]*=', line):
+                      var = line.split("=")[0]
+                      if var not in seen:
+                          lines.append(line)
+                          seen.add(var)
+          with open("/tmp/ci.env", "w") as out:
+              out.write("\n".join(lines) + "\n")
+          print("vars exported:", ", ".join(sorted(seen)), file=sys.stderr)
+          EOF
+
+      - name: Validate compose syntax (all profiles)
+        run: |
+          docker compose --env-file /tmp/ci.env --profile warden config --quiet
+          echo "docker compose config: OK"
+
+  env-coverage:
+    name: .env.example coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: All compose variables documented in .env.example
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+
+          with open("docker-compose.yml") as f:
+              compose = f.read()
+
+          # ${VAR} and ${VAR:-default}
+          compose_vars = set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)(?::-[^}]*)?\}', compose))
+
+          # All vars in .env.example, including commented-out stage-02 entries
+          example_vars = set()
+          with open(".env.example") as f:
+              for line in f:
+                  m = re.match(r'^#?\s*([A-Z_][A-Z0-9_]*)=', line)
+                  if m:
+                      example_vars.add(m.group(1))
+
+          missing = compose_vars - example_vars
+          if missing:
+              print("ERROR: compose variables not documented in .env.example:")
+              for v in sorted(missing):
+                  print(f"  {v}")
+              sys.exit(1)
+
+          print("OK: all compose variables are documented in .env.example")
+          print("Checked:", ", ".join(sorted(compose_vars)))
+          EOF

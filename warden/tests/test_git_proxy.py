@@ -70,6 +70,12 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     # The create was recorded for the branch quota.
     assert ctx.state.open_branches() == 1
     assert ctx.state.writes_last_hour() == 1
+    # Regression: the project key is normalised (no ``.git`` suffix) so it matches
+    # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
+    # reconcile row (``proj``) coexist → the branch is counted twice and the push
+    # row is never pruned (R5 ``max_open_branches`` drift).
+    keys = [r["project"] for r in ctx.state._db.execute("SELECT project FROM claude_branches")]
+    assert keys == ["group/proj"]
 
 
 async def test_push_delete_rejected(client, respx_router):

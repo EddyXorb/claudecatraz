@@ -4,25 +4,70 @@ services:
     build:
       context: ./warden
       dockerfile: Dockerfile
+      args:
+        DEV_UID: ${DEV_UID:-1000}
     profiles: ["warden"]
     environment:
+      # Secrets + infra — env only, never the agent (R6):
       - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
       - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
-      - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS}
-      - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-claude/}
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      # Admin-Port nur auf admin-net (W3): statische IP des admin-net-Interface.
+      - ADMIN_HOST=172.31.0.2
+      # Non-secret policy — SOURCE OF TRUTH is config/warden.toml. The vars below
+      # OVERRIDE the toml only when set (non-empty); leave empty to use warden.toml.
+      - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS:-}
+      - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-}
+      - MAX_OPEN_MRS=${WARDEN_MAX_OPEN_MRS:-}
+      - MAX_OPEN_BRANCHES=${WARDEN_MAX_OPEN_BRANCHES:-}
+      - MAX_WRITES_PER_HOUR=${WARDEN_MAX_WRITES_PER_HOUR:-}
     volumes:
-      - warden-state:/var/lib/warden
-      - warden-logs:/var/log/warden
+      # Bind-Mounts statt Named Volumes → SQLite-State + Audit-JSONL ohne Docker-Tools
+      # auditierbar (W12). DEV_UID steuert Owner, damit Host-User lesen kann.
+      - ./state/warden:/var/lib/warden
+      - ./logs/warden:/var/log/warden
       - ${WARDEN_CONFIG:-./config/warden.toml}:/etc/warden/warden.toml:ro
     networks:
-      - agent-net
-      - egress-net
+      agent-net: {}
+      egress-net: {}
+      admin-net:
+        ipv4_address: 172.31.0.2
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/healthz')"]
+      # Healthcheck läuft im Container; admin-net-IP (172.31.0.2) ist lokal erreichbar.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://172.31.0.2:9090/healthz')"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── Forward-Proxy (Research/Build-Egress, haelt KEINE Credentials) ──────────
+  # docs/design/agentic-workflow/02-forward-proxy/03-deployment.md
+  forward-proxy:
+    build:
+      context: ./forward-proxy                  # Squid mit OpenSSL/ssl_bump-Support
+      args:
+        DEV_UID: ${DEV_UID:-1000}               # Audit-Log host-lesbar (README §11.6)
+    container_name: forward-proxy
+    networks: [agent-net, egress-net]
+    volumes:
+      # host-editierbare Config, read-only (zentraler config/-Ordner, README §11):
+      - ./config/squid.conf:/etc/squid/squid.conf:ro
+      - ./config/allowlist.txt:/etc/squid/allowlist.txt:ro
+      - ./logs/squid:/var/log/squid             # Bind-Mount: Egress-Audit (access.log)
+    read_only: true
+    tmpfs:
+      - /var/spool/squid
+      - /var/run
+      - /tmp
+    healthcheck:
+      # TCP-Liveness von 3128 (dependency-arm, version-stabil). Die im Design
+      # genannte squidclient-mgr-Variante braeuchte eine manager-ACL — fuer reine
+      # Liveness genuegt der Port-Check.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/3128"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
       start_period: 5s
     restart: unless-stopped
 
@@ -39,13 +84,22 @@ services:
         NODE_VERSION: ${NODE_VERSION:-22}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
         DEV_UID: ${DEV_UID:-1000}
+    # NUR agent-net (internal) -> keine eigene Internet-/DNS-Route. Research/Build
+    # laeuft ausschliesslich ueber den Forward-Proxy (02-network-isolation.md).
+    networks: [agent-net]
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # Stufe 02 (Warden): GITLAB_API_URL zeigt auf den Warden; git nutzt insteadOf-Rewrite
-      # (entrypoint.py configure_git_warden). Kein Token im Agent-Container (R6/W9.3).
-      - GITLAB_API_URL=http://gitlab-warden:8080/api/v4
+      # Research/Build-Egress ueber den Forward-Proxy (§6.6):
+      - http_proxy=http://forward-proxy:3128
+      - https_proxy=http://forward-proxy:3128
+      - HTTP_PROXY=http://forward-proxy:3128
+      - HTTPS_PROXY=http://forward-proxy:3128
+      # gitlab-warden direkt (kein Proxy); loopback ebenfalls.
+      - no_proxy=gitlab-warden,localhost,127.0.0.1
+      - NO_PROXY=gitlab-warden,localhost,127.0.0.1
+      # Kanonische GitLab-URL fuer den insteadOf-Rewrite auf gitlab-warden (entrypoint.py).
+      # Kein Token im Agent-Container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
-      - no_proxy=gitlab-warden
     volumes:
       - ${CLAUDE_HOME:-~/.claude}:/home/dev/.claude
       - ${PROJECT_DIR:-./workspace}:/workspace
@@ -58,17 +112,18 @@ services:
     stdin_open: true
     restart: unless-stopped
     depends_on:
+      forward-proxy:
+        condition: service_healthy
       gitlab-warden:
         condition: service_healthy
         required: false
-    networks:
-      - agent-net
 
 networks:
-  agent-net:
-    internal: false
-  egress-net: {}
-
-volumes:
-  warden-state: {}
-  warden-logs: {}
+  agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Proxy (+ MCP-Sidecars)
+  egress-net: {}                   # Internet — nur Forward-Proxy & MCP-Sidecars
+  # admin-net: nur für Host/Betreiber → Port 9090 (Log-Viewer, Healthz). Kein Agent. (W3)
+  admin-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
