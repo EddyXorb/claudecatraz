@@ -1,0 +1,10 @@
+# TODOs
+
+folgendes muss noch adressiert werden:  
+- der sync und api key sollten sich gegenseitig ausschließen. wenn catrazt gestartet wird sollte entweder das eine oder das andere aktiv sein (und dann auch automatisch laufen, aber das claude home verzeichnis sollte im .env angegeben werden könne nvon wo kopiert wird)
+- das dockerfile ist zu stark teil des ganzen, es sollte im prinzip möglich sein beliebige dockerfiles hier laufen zu haben, einen mechanismus finden wie das geht ohne den komfort des claude-layers zu verlieren (und die sicherheit, dass das richtig gemacht wird)
+- der entrypoint.py sollte nicht im root stehen, zu dominant und verwirrend für einsteiger
+- die AGENT.md sollte auch irgendwie als "asset" inrgendwoe verschwinden, hat keine relevanz für enduser
+- es wäre cool, wenn das tool von überall her funktioniert, also man nicht extra ein repo klonen muss an den ort wo es laufen soll, sondern man es z.b. nur einmal klont und mit uv irgendwie installiert., so dass es dann in beliebigen ordnern gestartet werden kann
+- damit verbunden: statt alles im root zu haben wäre es nett es in einem .catraz ordner zu verstecken, so wie es üblich ist, d.h. wenn man ein neues repo sandboxed mit catraz soll nur ein .catraz ordner erstellt werden und darin liegen dann alle einstellungen und hilfsdateien wie der claude ordner und die logs; klarere trennung zwischen programm und laufzeitdateien erreichen. 
+- ganz toll wäre es, wenn man catraz einem bestehenden ordner hinzufügen kann, so dass sich alles im .catraz ordner einnistet und dann aber der agent im container diesen ordner nicht lesen darf aber alle anderen datein/ordner im ordner, geht das irgendwie?`wäre toll es so lokal wie git zu haben, aber ein bind mount auf den aktuellen ordner der dann selber den .catraz-ordner enthält erscheint mir gleichzeitig gewagt. überlege dir was.

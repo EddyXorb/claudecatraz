@@ -35,7 +35,7 @@ SERVICES = {
 
 # Secrets the wizard collects (env key → human prompt). Order matters.
 SECRETS = [
-    ("ANTHROPIC_API_KEY", "Anthropic API key (dedicated sandbox account, not your primary)"),
+   # ("ANTHROPIC_API_KEY", "Anthropic API key (dedicated sandbox account, not your primary)"),
     ("GITLAB_READ_TOKEN", "GitLab READ token (scopes: read_api, read_repository)"),
     ("GITLAB_WRITE_TOKEN", "GitLab WRITE token (scopes: api — service account / Developer)"),
 ]
