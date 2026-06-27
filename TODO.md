@@ -158,3 +158,21 @@ Host-Credential nicht überschreiben können), aber die Persistenz-Lücke gehör
 ggf. durch einen kontrollierten Rück-Sync (Container→Host, nur `.credentials.json`, nur im
 Subscription-Modus) entschärft. **Nicht behoben** — vom Nutzer beim Lesen von `auth.py`
 aufgeworfen, hier festgehalten.
+
+### B8 — Doc 06 schreibt zwei gleichnamige Testdateien vor → erzwingt globalen pytest-Import-Modus-Wechsel
+
+Doc 06 legt in Commit 6.2 `tests/container/test_local.py` und in Commit 6.3
+`tests/cli/test_local.py` an — **identischer Basename in zwei Verzeichnissen ohne
+`__init__.py`**. Unter pytests Default-Import-Modus (`prepend`) bricht das Collecting mit
+„import file mismatch", weil beide Module unter demselben Top-Level-Namen `test_local`
+importiert würden. Bei der Umsetzung wurde das mit `addopts = "--import-mode=importlib"` in
+`pyproject.toml` gelöst (pytests kanonischer Fix für Basename-Kollisionen).
+
+**Warum ein Problem:** Die Doc verlangt eine global wirksame Test-Konfigurationsänderung,
+ohne sie zu erwähnen — wer die beiden Commits 1:1 abarbeitet, bekommt zwischen 6.2 und 6.3
+plötzlich rote Collection-Fehler, deren Ursache nicht im jeweiligen Commit liegt. Der
+`importlib`-Modus ist vertretbar (ganzer Baum, inkl. `tests/redteam`, kollektiert weiter sauber:
+57 Tests), aber er ändert das Importverhalten für **alle** künftigen Tests. Alternativen wären
+gewesen: eine der Dateien umbenennen (z. B. `test_local_cli.py`) oder `__init__.py` in
+`tests/cli`/`tests/container` legen. Reiner Doc-Nit mit globaler Nebenwirkung — festgehalten,
+damit die Modus-Entscheidung bewusst getroffen ist, nicht als stille Notlösung.
