@@ -1,4 +1,5 @@
 """One-off agent run command."""
+import datetime
 import sys
 from pathlib import Path
 
@@ -20,6 +21,15 @@ def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list
     args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
              "claude-dev-env", sub, "--", *sub_args]
     return args
+
+
+def _prune_agent_logs(log_dir: Path, keep: int = 50) -> None:
+    """Keep only the newest `keep` transcripts. Fixed-width timestamp names sort
+    chronologically, so sorting by name == sorting by time. missing_ok makes this
+    safe under concurrent runs racing to prune the same files."""
+    logs = sorted(log_dir.glob("*.log"))
+    for p in logs[:-keep] if keep else logs:
+        p.unlink(missing_ok=True)
 
 
 def _ensure_infra(root, out, prefix=None):
@@ -52,7 +62,19 @@ def cmd_run(root, args, out):
                    if args.claude_args and args.claude_args[0] == "--"
                    else args.claude_args)
     run_args = _oneoff_args(relpath, tty, "run", claude_args)
-    r = compose_run(root, run_args, prefix=prefix, check=False)
+    if tty:
+        # Interactive runs allocate a real pty; teeing would fight it and capture
+        # escape-code noise — leave them unchanged (out of scope).
+        r = compose_run(root, run_args, prefix=prefix, check=False)
+        return r.returncode if r else EXIT_GENERAL
+    # Non-TTY one-off: stdout is lost when the --rm container is removed, so tee the
+    # combined output to a durable per-run transcript. %f microseconds so two runs in
+    # the same second don't clobber each other.
+    log_dir = root / ".catraz/logs/agent"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / (datetime.datetime.now().strftime("%Y%m%dT%H%M%S_%f") + ".log")
+    _prune_agent_logs(log_dir)
+    r = compose_run(root, run_args, prefix=prefix, check=False, tee=log_path)
     return r.returncode if r else EXIT_GENERAL
 
 

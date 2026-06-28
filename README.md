@@ -133,6 +133,12 @@ nothing you run here can be killed by another session tearing its stack down. Ev
 `run` is handed verbatim to `claude` (including `--dangerously-skip-permissions`). Outside a
 `.catraz` project it fails closed — it never falls back to a host `claude`.
 
+A **non-interactive** `catraz run` (e.g. `-p "…"` or piped — anything without a TTY) tees its
+output to a durable per-run transcript at `.catraz/logs/agent/<timestamp>.log` (the newest 50
+are kept; older ones are pruned). Because the one-off always runs with `--build` and stderr is
+merged into stdout, the file also contains `docker compose` build/orchestration noise — it is a
+raw session record, not a clean agent-only log. Interactive TTY runs get no transcript.
+
 > ### ⚠️ What the sandbox protects — and what it does **not**
 >
 > The sandbox protects your **network and git egress**: the Warden is the sole holder of the

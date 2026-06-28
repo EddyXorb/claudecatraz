@@ -119,7 +119,7 @@ def prepare(root: Path, *, render: bool, extra_env=None) -> list[str]:
 
 
 def run(root: Path, args, *, prefix=None, capture=False, check=True, print_only=False,
-        extra_env=None):
+        extra_env=None, tee: Path | None = None):
     from catraz.errors import CliError, EXIT_DOCKER
     _prefix = prefix if prefix is not None else _source_cmd(root)
     cmd = [*_prefix, *args]
@@ -132,6 +132,26 @@ def run(root: Path, args, *, prefix=None, capture=False, check=True, print_only=
     env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
     if extra_env:
         env.update(extra_env)
+    if tee is not None:
+        # Stream the child's combined output to both our stdout and a durable file.
+        # The tee branch cannot honor check= (it never raises on non-zero) — fail loud
+        # if a future caller forgets. Today's only caller passes check=False.
+        assert not check, "tee path does not support check="
+        tee.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(tee, "wb") as f:
+                p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+                # read1 (not read) returns as soon as data is available, preserving live
+                # output — read(n) would block until n bytes or EOF.
+                for chunk in iter(lambda: p.stdout.read1(65536), b""):
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+                    f.write(chunk)
+                p.wait()
+        except FileNotFoundError:
+            raise CliError("`docker` not found on PATH", EXIT_DOCKER)
+        return subprocess.CompletedProcess(cmd, p.returncode)
     try:
         return subprocess.run(cmd, env=env, check=check, capture_output=capture, text=True)
     except FileNotFoundError:
