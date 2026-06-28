@@ -62,21 +62,38 @@ def cmd_init(root, args, out):
     if env.get("DEV_UID") != str(os.getuid()):
         updates["DEV_UID"] = str(os.getuid())
 
-    # 3. secrets
+    # 3. secrets — always create dir + files (empty allowed); compose mount fails opaquely otherwise
+    secrets_dir = cat / "secrets"
+    secrets_dir.mkdir(mode=0o700, exist_ok=True)
+
     if args.yes:
         out.info("• --yes: keeping existing .env values, skipping prompts")
+        for filename, _, _desc in SECRETS:
+            p = secrets_dir / filename
+            if not p.exists():
+                p.write_text("")
+                p.chmod(0o600)
     else:
         print()
-        for key, prompt in SECRETS:
-            cur = env.get(key, "")
+        for filename, prompt, desc in SECRETS:
+            p = secrets_dir / filename
+            cur = ""
+            if p.exists():
+                try:
+                    cur = p.read_text(encoding="utf-8").strip()
+                except OSError:
+                    pass
             if cur and not args.force:
-                out.info(f"  {key} already set ({mask(cur)}) — keeping. Use --force to change.")
+                out.info(f"  {desc} already set ({mask(cur)}) — keeping. Use --force to change.")
+                if not p.exists():
+                    p.write_text(cur)
+                    p.chmod(0o600)
                 continue
-            val = getpass.getpass(f"  {prompt}\n  {key}: ").strip()
-            if val:
-                updates[key] = val
-            elif not cur:
-                out.warn(f"{key} left empty — doctor will flag it")
+            val = getpass.getpass(f"  {prompt}\n  {filename}: ").strip()
+            p.write_text(val)
+            p.chmod(0o600)
+            if not val:
+                out.warn(f"{filename} left empty — doctor will flag it")
 
         # 4. GitLab base URL (non-secret, use input() not getpass)
         cur_url = env.get("GITLAB_URL", "")

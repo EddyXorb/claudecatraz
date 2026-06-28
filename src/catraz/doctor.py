@@ -13,11 +13,12 @@ from catraz.errors import CliError
 from catraz import paths
 from catraz import image
 
-# Secrets the wizard collects (env key → human prompt). Order matters.
+# Secrets the wizard collects (filename, human prompt, description). Order matters.
+# Secrets live in .catraz/secrets/<filename> (mode 0600), mounted into the warden
+# via compose secrets: at /run/secrets/<filename>. Never stored in .env.
 SECRETS = [
-   # ("ANTHROPIC_API_KEY", "Anthropic API key (dedicated sandbox account, not your primary)"),
-    ("GITLAB_READ_TOKEN", "GitLab READ token (scopes: read_api, read_repository)"),
-    ("GITLAB_WRITE_TOKEN", "GitLab WRITE token (scopes: api — service account / Developer)"),
+    ("gitlab_read_token", "GitLab READ token (scopes: read_api, read_repository)", "GitLab READ token"),
+    ("gitlab_write_token", "GitLab WRITE token (scopes: api — service account / Developer)", "GitLab WRITE token"),
 ]
 
 OK, WARN, BAD = "ok", "warn", "bad"
@@ -135,14 +136,24 @@ def check_gitlab(env, f):
         f.ok("tokens", f"GitLab endpoint: {url}")
 
 
-def check_tokens(env, f):
-    for key, _ in SECRETS:
-        if not env.get(key):
-            f.bad("tokens", f"{key} is empty", "run `catraz init`")
-    if any(not env.get(k) for k, _ in SECRETS):
+def check_tokens(root, env, f):
+    secrets_dir = root / ".catraz" / "secrets"
+    missing = []
+    for filename, _, desc in SECRETS:
+        p = secrets_dir / filename
+        val = ""
+        if p.exists():
+            try:
+                val = p.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+        if not val:
+            f.bad("tokens", f"{filename} is empty", "run `catraz init`")
+            missing.append(filename)
+    if missing:
         return
     f.ok("tokens", "both GitLab tokens are set")
-    _probe_gitlab_tokens(env, f)
+    _probe_gitlab_tokens(root, env, f)
 
 
 def _gitlab_get(base, path, token, timeout=5):
@@ -152,12 +163,21 @@ def _gitlab_get(base, path, token, timeout=5):
         return json.loads(resp.read().decode())
 
 
-def _probe_gitlab_tokens(env, f):
+def _probe_gitlab_tokens(root, env, f):
     """Best-effort online probe (P1 roast fix): catch expired/swapped/wrong-scope
     tokens. Degrades silently to 'set/not set' when the host can't reach GitLab."""
     base = env.get("GITLAB_URL", "https://gitlab.com")
-    read_t = env.get("GITLAB_READ_TOKEN", "")
-    write_t = env.get("GITLAB_WRITE_TOKEN", "")
+    secrets_dir = root / ".catraz" / "secrets"
+
+    def _read_secret(filename):
+        p = secrets_dir / filename
+        try:
+            return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+        except OSError:
+            return ""
+
+    read_t = _read_secret("gitlab_read_token")
+    write_t = _read_secret("gitlab_write_token")
 
     if read_t and write_t and read_t == write_t:
         f.warn("tokens", "READ and WRITE token are identical — likely a paste mistake")
@@ -293,7 +313,7 @@ def run_doctor(root, only=None, fix=False):
     if "compose" in sections: check_compose(root, env, f)
     if "env" in sections: check_env(root, env, f)
     if "tokens" in sections: check_gitlab(env, f)
-    if "tokens" in sections: check_tokens(env, f)
+    if "tokens" in sections: check_tokens(root, env, f)
     if "policy" in sections: check_policy(root, env, f)
     if "claude" in sections: check_claude(root, env, f)
     if "net" in sections: check_net(root, f)
@@ -308,6 +328,14 @@ def _doctor_fix(root, env):
     cat = root / ".catraz"
     for d in ["config", "state/warden", "logs/warden", "logs/squid", "claude", "run/warden"]:
         (cat / d).mkdir(parents=True, exist_ok=True)
+    # Always ensure secrets/ dir + empty token files exist (compose mount fails opaquely if missing).
+    secrets_dir = cat / "secrets"
+    secrets_dir.mkdir(mode=0o700, exist_ok=True)
+    for filename, _, _desc in SECRETS:
+        p = secrets_dir / filename
+        if not p.exists():
+            p.write_text("")
+            p.chmod(0o600)
     if dev_uid.isdigit():
         for d in ["state", "logs", "run"]:
             try:

@@ -1,3 +1,9 @@
+secrets:
+  gitlab_read_token:
+    file: ${PROJECT_DIR}/.catraz/secrets/gitlab_read_token
+  gitlab_write_token:
+    file: ${PROJECT_DIR}/.catraz/secrets/gitlab_write_token
+
 services:
   gitlab-warden:
     build:
@@ -8,10 +14,12 @@ services:
       dockerfile: Dockerfile
       args:
         DEV_UID: ${DEV_UID:-1000}
+    secrets: [gitlab_read_token, gitlab_write_token]
     environment:
-      # Secrets + infra — env only, never the agent (R6):
-      - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
-      - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
+      # Tokens arrive via compose secrets (file-based, /run/secrets/…) — not env vars.
+      # The warden reads GITLAB_*_TOKEN_FILE first, then falls back to the bare var (11.1).
+      - GITLAB_READ_TOKEN_FILE=/run/secrets/gitlab_read_token
+      - GITLAB_WRITE_TOKEN_FILE=/run/secrets/gitlab_write_token
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
       # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
       # ADMIN_UDS is the authoritative source of the admin socket path.
