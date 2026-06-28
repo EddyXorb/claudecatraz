@@ -10,7 +10,11 @@ from catraz.commands.setup import _auto_sync_if_needed
 
 
 def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list[str]:
-    args = ["run", "--rm", "--no-deps"]
+    # --build rebuilds the agent image when its build context changed (e.g. a new
+    # entrypoint subcommand like `exec`). Docker's layer cache makes this a near-instant
+    # no-op when nothing changed, so every one-off self-heals against CLI/image skew —
+    # otherwise a stale image's entrypoint rejects subcommands the CLI now emits.
+    args = ["run", "--rm", "--no-deps", "--build"]
     if not tty:
         args.append("-T")
     args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
