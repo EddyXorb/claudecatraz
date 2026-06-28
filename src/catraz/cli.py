@@ -115,6 +115,8 @@ def build_parser():
 
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
+    sub.add_parser("ps", parents=[_g()], help="list active agent containers for this repo")
+
     pr = sub.add_parser("reload", parents=[_g()],
                         help="restart services whose .catraz config changed")
     pr.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
@@ -145,6 +147,7 @@ HANDLERS = {
     "up":      stack.cmd_up,
     "down":    stack.cmd_down,
     "status":  stack.cmd_status,
+    "ps":      observe.cmd_ps,
     "reload":  reload_cmd.cmd_reload,
     "run":     run_cmd.cmd_run,
     "shell":   run_cmd.cmd_shell,

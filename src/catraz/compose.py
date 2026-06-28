@@ -158,9 +158,14 @@ def run(root: Path, args, *, prefix=None, capture=False, check=True, print_only=
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
 
 
-def compose_ps(root, *, prefix=None):
-    """Return [{Service, State, Health}, …] from `docker compose ps`."""
-    r = run(root, ["ps", "--format", "json"], prefix=prefix, capture=True, check=False)
+def compose_ps(root, *, prefix=None, all=False):
+    """Return [{Service, State, Health}, …] from `docker compose ps`.
+
+    all=True passes `-a` so stopped containers *and* `run --rm` one-offs (hidden by
+    default) are visible. Keep the default False: cmd_status/_wait_healthy/_ensure_infra
+    rely on seeing only live service containers."""
+    args = ["ps"] + (["-a"] if all else []) + ["--format", "json"]
+    r = run(root, args, prefix=prefix, capture=True, check=False)
     if r is None or r.returncode != 0 or not r.stdout.strip():
         return []
     text = r.stdout.strip()

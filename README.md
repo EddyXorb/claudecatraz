@@ -107,6 +107,7 @@ with `catraz audit --web`.
 | `catraz run -- …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`) |
 | `catraz doctor` | Re-run the preflight; `--fix` repairs dirs/ownership |
 | `catraz status` | Health per service, URLs, quota snapshot |
+| `catraz ps` | List active agent containers for this repo |
 | `catraz reload` | Restart Warden/Squid after editing `.catraz` config |
 | `catraz logs` | Tail logs (`agent`\|`warden`\|`proxy`, or `--audit`) |
 | `catraz audit --web` | Open the read-only GitLab decision viewer (ephemeral loopback port) |

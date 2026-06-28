@@ -61,6 +61,27 @@ def cmd_logs(root, args, out):
     return _rc(r)
 
 
+def cmd_ps(root, args, out):
+    # all=True so in-flight `run --rm` one-offs (hidden from a plain `ps`) are visible,
+    # not just the `up -d` daemon. Always EXIT_OK — this is a query, not a health gate.
+    prefix = compose.prepare(root, render=False)
+    rows = compose.compose_ps(root, prefix=prefix, all=True)
+    agents = [r for r in rows if r.get("Service") == compose.SERVICES["agent"]]
+    if not agents:
+        out.info("No active agent containers.")
+        return EXIT_OK
+    out.head("Agent containers")
+    for r in agents:
+        name = r.get("Name", "?")
+        state = r.get("State", "?")
+        # Color by state directly — no health gate: the one-off agent has no
+        # healthcheck, so _row_ready would wrongly down-rank it.
+        badge = out.green(state) if state == "running" else out.yellow(state)
+        extra = f"  {r.get('Status', '')}"
+        print(f"  {name}  {badge}{extra}")
+    return EXIT_OK
+
+
 def cmd_audit(root, args, out):
     sock = root / ".catraz/run/warden/admin.sock"
     if not args.web:
