@@ -47,7 +47,7 @@ def cmd_sync(claude_home: Path, source: str | None = None) -> None:
 # ── container startup ─────────────────────────────────────────────────────────
 
 
-def build_home(home: Path, mode: str, remote: bool = True) -> None:
+def build_claude_home(home: Path, mode: str, remote: bool = True) -> None:
     """Build the tmpfs Claude-home each start. RO sources live under home/.ro/."""
     home.mkdir(parents=True, exist_ok=True)
     ro = home / ".ro"
@@ -129,7 +129,7 @@ def cmd_start(claude_home: Path) -> None:
     mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
-    build_home(claude_home, mode)
+    build_claude_home(claude_home, mode)
     configure_git_warden()
     spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
     debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
@@ -144,7 +144,7 @@ def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
-    build_home(claude_home, mode, remote=False)
+    build_claude_home(claude_home, mode, remote=False)
     configure_git_warden()
     os.execvp("claude", ["claude", *claude_args])
 

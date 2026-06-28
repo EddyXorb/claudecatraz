@@ -5,7 +5,7 @@ def test_rc_args_defaults(ep, tmp_path, monkeypatch):
     """No env set → argv equals today's literal list (regression guard)."""
     calls = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
-    monkeypatch.setattr(ep, "build_home", lambda *a, **kw: None)
+    monkeypatch.setattr(ep, "build_claude_home", lambda *a, **kw: None)
     monkeypatch.setattr(ep, "configure_git_warden", lambda: None)
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
     monkeypatch.delenv("CLAUDE_RC_SPAWN", raising=False)
@@ -26,7 +26,7 @@ def test_rc_args_env_driven(ep, tmp_path, monkeypatch):
     """CLAUDE_RC_SPAWN and CLAUDE_RC_EXTRA_ARGS override the defaults."""
     calls = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
-    monkeypatch.setattr(ep, "build_home", lambda *a, **kw: None)
+    monkeypatch.setattr(ep, "build_claude_home", lambda *a, **kw: None)
     monkeypatch.setattr(ep, "configure_git_warden", lambda: None)
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
     monkeypatch.setenv("CLAUDE_RC_SPAWN", "project-dir")
@@ -43,7 +43,7 @@ def test_permission_mode_always_hardcoded(ep, tmp_path, monkeypatch):
     """--permission-mode bypassPermissions is always present and never env-driven."""
     calls = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
-    monkeypatch.setattr(ep, "build_home", lambda *a, **kw: None)
+    monkeypatch.setattr(ep, "build_claude_home", lambda *a, **kw: None)
     monkeypatch.setattr(ep, "configure_git_warden", lambda: None)
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
     monkeypatch.delenv("CLAUDE_RC_SPAWN", raising=False)
