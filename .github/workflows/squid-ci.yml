@@ -60,11 +60,11 @@ jobs:
 
       - name: squid.conf sanity checks
         run: |
-          # Pflichtzeilen: Port, default-deny, kein Cache
+          # Required lines: port, default-deny, no cache
           grep -q '^http_port'             src/catraz/assets/config/squid.conf || { echo "FAIL: http_port missing"; exit 1; }
           grep -q '^http_access deny all'  src/catraz/assets/config/squid.conf || { echo "FAIL: default-deny missing"; exit 1; }
           grep -q '^cache deny all'        src/catraz/assets/config/squid.conf || { echo "FAIL: cache deny all missing"; exit 1; }
-          # SNI-peek muss vor ssl_bump splice stehen
+          # SNI-peek must come before ssl_bump splice
           peek_line=$(grep -n '^ssl_bump peek'   src/catraz/assets/config/squid.conf | head -1 | cut -d: -f1)
           splice_line=$(grep -n '^ssl_bump splice' src/catraz/assets/config/squid.conf | head -1 | cut -d: -f1)
           [ -n "$peek_line" ] && [ -n "$splice_line" ] || { echo "FAIL: ssl_bump peek/splice missing"; exit 1; }
@@ -101,7 +101,7 @@ jobs:
 
       - name: Wait for proxy readiness
         run: |
-          # 1) TCP-Port offen
+          # 1) TCP port open
           up=0
           for i in $(seq 1 30); do
             if bash -c 'echo > /dev/tcp/127.0.0.1/3128' 2>/dev/null; then
@@ -109,11 +109,11 @@ jobs:
             fi
             sleep 1
           done
-          [ "$up" = 1 ] || { echo "Proxy-Port nicht offen in 30 s"; docker logs squid-ci; exit 1; }
-          # 2) ssl-bump/certgen-Warmup: der erste CONNECT+Peek direkt nach dem Start wird
-          #    resettet, solange die certgen-Helper noch hochfahren (cold start). Daher
-          #    auf eine echte, allowlistete Splice-Verbindung warten, statt nur auf den Port
-          #    — sonst rennt der erste ALLOW-Test ins Warmup-Fenster (curl 56).
+          [ "$up" = 1 ] || { echo "Proxy port not open after 30 s"; docker logs squid-ci; exit 1; }
+          # 2) ssl-bump/certgen warm-up: the first CONNECT+Peek right after startup is
+          #    reset while the certgen helpers are still starting (cold start). Therefore
+          #    wait for a real, allowlisted splice connection rather than just the port —
+          #    otherwise the first ALLOW test hits the warm-up window (curl 56).
           for i in $(seq 1 30); do
             if code=$(curl -sS --proxy http://127.0.0.1:3128 -m 15 -o /dev/null -w '%{http_code}' https://pypi.org/ 2>/dev/null) \
                && [ "$code" = "200" ]; then
@@ -121,17 +121,17 @@ jobs:
             fi
             sleep 1
           done
-          echo "Proxy wurde nicht splice-ready in 30 Proben"
+          echo "Proxy did not become splice-ready within 30 attempts"
           docker logs squid-ci
           exit 1
 
-      # ── Erlaubte Ziele (Allowlist) ───────────────────────────────────────────
+      # ── Allowed targets (Allowlist) ─────────────────────────────────────────
 
       - name: "ALLOW — pypi.org"
         run: |
-          # rc separat per `|| rc=$?` einfangen: unter `bash -e` würde `code=$(curl …)`
-          # bei curl-Fehler sofort mit dessen Exitcode abbrechen (statt FAIL zu melden).
-          # Kleiner Retry gegen transiente Egress-Blips (recv-failure == curl 56).
+          # Capture rc separately via `|| rc=$?`: under `bash -e`, `code=$(curl …)`
+          # would abort immediately with curl's exit code on failure (instead of reporting FAIL).
+          # Small retry to handle transient egress blips (recv-failure == curl 56).
           ok=0
           for i in 1 2 3; do
             rc=0; code=$(curl -sS --proxy http://127.0.0.1:3128 -m 20 -o /dev/null -w '%{http_code}' \
@@ -154,12 +154,12 @@ jobs:
           done
           [ "$ok" = 1 ] || { echo "FAIL: expected allowed, got rc=$rc code=$code"; exit 1; }
 
-      # ── Geblockte Ziele (default-deny + SNI-terminate) ───────────────────────
+      # ── Blocked targets (default-deny + SNI-terminate) ──────────────────────
 
-      - name: "DENY — example.com (nicht allowlisted)"
+      - name: "DENY — example.com (not allowlisted)"
         run: |
-          # `|| rc=$?`: ein geblocktes Ziel lässt curl scheitern (terminate→reset, curl 56) —
-          # unter `bash -e` würde das den Schritt abbrechen, bevor die PASS-Prüfung läuft.
+          # `|| rc=$?`: a blocked target causes curl to fail (terminate→reset, curl 56) —
+          # under `bash -e` this would abort the step before the PASS check runs.
           rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
                    https://example.com/ 2>/dev/null) || rc=$?
           echo "rc=$rc code=$code"
@@ -167,7 +167,7 @@ jobs:
             && echo "PASS" \
             || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
 
-      - name: "DENY — IP-Literal (kein dstdomain-Treffer)"
+      - name: "DENY — IP-Literal (no dstdomain match)"
         run: |
           rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
                    https://1.1.1.1/ 2>/dev/null) || rc=$?
@@ -185,7 +185,7 @@ jobs:
             && echo "PASS" \
             || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
 
-      - name: "DENY — plain HTTP nicht-allowlisted"
+      - name: "DENY — plain HTTP non-allowlisted"
         run: |
           rc=0; code=$(curl --proxy http://127.0.0.1:3128 -m 10 -sS -o /dev/null -w '%{http_code}' \
                    http://evil.example.net/ 2>/dev/null) || rc=$?
@@ -194,14 +194,14 @@ jobs:
             && echo "PASS" \
             || { echo "FAIL: expected block, got rc=$rc code=$code"; exit 1; }
 
-      # ── Audit-Log: Blocks müssen sichtbar sein ───────────────────────────────
+      # ── Audit log: blocks must be visible ───────────────────────────────────
 
-      - name: Audit log — blocked requests sichtbar
+      - name: Audit log — blocked requests visible
         run: |
           sleep 2
-          # Die Log-Datei gehört dem Container-User `proxy` (uid aus DEV_UID, Mode 0640) und
-          # ist auf dem Host mit fremder Runner-uid nicht lesbar. Daher aus dem Container
-          # heraus lesen (kein USER im Image → docker exec läuft als root).
+          # The log file is owned by the container user `proxy` (uid from DEV_UID, mode 0640)
+          # and is not readable on the host with a different runner uid. Therefore read it from
+          # inside the container (no USER in image → docker exec runs as root).
           docker exec squid-ci cat /var/log/squid/access.log > /tmp/access.log
           echo "=== access.log ==="
           cat /tmp/access.log

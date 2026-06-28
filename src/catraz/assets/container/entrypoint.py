@@ -87,16 +87,16 @@ def configure_git_warden() -> None:
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
 
-# NOTE (Stufe 01 — Bootstrap-Härtung, R6):
-# Die früheren Funktionen configure_git() und configure_gitlab() wurden bewusst entfernt.
-# Sie injizierten GitLab-Credentials in den Agent-Container:
-#   - configure_git()    schrieb GITLAB_GIT_TOKEN (write_repository) in ~/.netrc
-#   - configure_gitlab() registrierte das MCP mit Authorization: Bearer GITLAB_API_TOKEN
-# Beide Tokens lagen damit im Prozessraum des Agenten und galten als kompromittiert
-# (docs/design/agentic-workflow, §3/§4). Der Agent hält ab jetzt KEIN GitLab-Token.
-# GitLab-Zugriff kehrt in Stufe 02 über den Warden zurück (git Smart-HTTP-Proxy + REST-
-# Filter); der git-Remote zeigt dann auf den Warden, nicht auf gitlab.com.
-# GitHub ist vorerst nicht im Scope (configure_github wurde entfernt).
+# NOTE (Stage 01 — Bootstrap hardening, R6):
+# The former configure_git() and configure_gitlab() functions were deliberately removed.
+# They injected GitLab credentials into the agent container:
+#   - configure_git()    wrote GITLAB_GIT_TOKEN (write_repository) into ~/.netrc
+#   - configure_gitlab() registered the MCP with Authorization: Bearer GITLAB_API_TOKEN
+# Both tokens were therefore in the agent's process space and considered compromised
+# (docs/design/agentic-workflow, §3/§4). The agent no longer holds any GitLab token.
+# GitLab access returns in stage 02 via the Warden (git Smart-HTTP proxy + REST
+# filter); the git remote will then point to the Warden, not gitlab.com.
+# GitHub is out of scope for now (configure_github was removed).
 
 
 def drop_to_dev() -> None:

@@ -1,11 +1,11 @@
-# Projekt-CLAUDE.md (Platzhalter)
+# Project CLAUDE.md (placeholder)
 
-Diese Datei ist **projektspezifisch** und gehört dem Repo, das nach `/workspace`
-gemountet wird (Build-Befehle, Code-Style, Test-Kommandos dieses Projekts). Im echten
-Betrieb mountet `PROJECT_DIR` den jeweiligen GitLab-Clone hierher und diese Vorlage wird
-von der CLAUDE.md des Projekts ersetzt.
+This file is **project-specific** and belongs to the repo mounted at `/workspace`
+(build commands, code style, test commands for this project). In real use,
+`PROJECT_DIR` mounts the respective GitLab clone here and this template is
+replaced by the project's own CLAUDE.md.
 
-**Sandbox-/Harness-Wissen** (Netz, Egress, Forward-Proxy, Warden, GitLab-API) steht
-NICHT hier, sondern wird vom Container aus dem Image als User-Memory injiziert
-(`~/.claude/CLAUDE.md`, Quelle: `AGENT.md` im Repo-Root). So bleibt es projekt­unabhängig
-und kann nicht versehentlich in ein Projekt-Repo committet werden.
+**Sandbox/harness knowledge** (network, egress, forward proxy, Warden, GitLab API)
+does NOT live here — it is injected by the container from the image as user memory
+(`~/.claude/CLAUDE.md`, source: `AGENT.md` in the repo root). This keeps it
+project-independent and prevents it from being accidentally committed to a project repo.

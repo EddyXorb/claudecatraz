@@ -1,120 +1,120 @@
-# Sandbox — Kontext & Regeln für den Agenten
+# Sandbox — Context & Rules for the Agent
 
-> Diese Datei ist die **Harness-Doku** der `claude-dev-env`-Sandbox. Sie ist im Image
-> versioniert (`/opt/claude-dev-env/AGENT.md`) und wird beim Container-Start von
-> `entrypoint.py` nach `~/.claude/CLAUDE.md` (User-Memory) injiziert — gilt also für
-> **jedes** gemountete Projekt. Sie gehört NICHT ins Projekt-Repo; projekt­spezifische
-> Hinweise stehen in der CLAUDE.md des jeweiligen `/workspace`-Projekts.
+> This file is the **harness documentation** of the `claude-dev-env` sandbox. It is
+> versioned in the image (`/opt/claude-dev-env/AGENT.md`) and injected by
+> `entrypoint.py` at container start into `~/.claude/CLAUDE.md` (user memory) — so it
+> applies to **every** mounted project. It does NOT belong in the project repo;
+> project-specific notes go in the CLAUDE.md of the respective `/workspace` project.
 
-Du läufst als Benutzer `dev` im Container `claude-dev-env`. Der Ordner `/workspace` ist
-ein **bind-mount** — Host (VSCode) und Agent teilen denselben Working-Clone. Jede
-Änderung ist sofort auf dem Host sichtbar und umgekehrt.
+You are running as user `dev` in the container `claude-dev-env`. The `/workspace`
+folder is a **bind-mount** — the host (VSCode) and the agent share the same
+working clone. Every change is immediately visible on the host and vice versa.
 
 ---
 
-## Netz & Egress
+## Network & Egress
 
-`agent-net` ist `internal: true` — du hast **keine direkte Internetroute**. Jeder
-ausgehende Request muss über einen der zwei Egress-Punkte:
+`agent-net` is `internal: true` — you have **no direct internet route**. Every
+outbound request must go through one of the two egress points:
 
-| Ziel                       | Weg                   | Konfiguration                                |
-| -------------------------- | --------------------- | -------------------------------------------- |
-| Internet (Research, Build) | Forward-Proxy (Squid) | `http_proxy` / `https_proxy` bereits gesetzt |
-| GitLab                     | Warden (wenn aktiv)   | `git insteadOf` + `GITLAB_API_URL`           |
+| Destination                  | Route                 | Configuration                                |
+| ---------------------------- | --------------------- | -------------------------------------------- |
+| Internet (Research, Build)   | Forward-Proxy (Squid) | `http_proxy` / `https_proxy` already set     |
+| GitLab                       | Warden (when active)  | `git insteadOf` + `GITLAB_API_URL`           |
 
-**Erlaubte Domains** (Kurzliste — vollständige Liste: `config/allowlist.txt`):
+**Allowed domains** (short list — full list: `config/allowlist.txt`):
 `.anthropic.com`, `.npmjs.org`, `.pypi.org`, `.crates.io`, `files.pythonhosted.org`,
 `.conan.io`, `apt.llvm.org`, `sh.rustup.rs`, `static.rust-lang.org`,
 `deb.nodesource.com`, `docs.gitlab.com`, `doc.rust-lang.org`, `docs.python.org`,
 `stackoverflow.com`, `github.com`, `raw.githubusercontent.com`, `gitlab.com` (interim).
 
-Domains außerhalb der Allowlist werden vom Proxy **stillschweigend geblockt** (kein DNS,
-kein TCP). Überprüfe `logs/squid/access.log` auf dem Host, wenn ein Request scheitert.
+Domains outside the allowlist are **silently blocked** by the proxy (no DNS,
+no TCP). Check `logs/squid/access.log` on the host if a request fails.
 
 ---
 
-## GitLab — was geht, was nicht
+## GitLab — what works, what doesn't
 
-### Kein Token im Container (by design)
+### No token in the container (by design)
 
-Du hältst **kein** GitLab-Token. Das ist absichtlich (Sicherheitsarchitektur §R6). Alle
-GitLab-Operationen laufen ausschließlich über den **Warden** (`gitlab-warden:8080`), der
-alle Tokens hält und die Policy erzwingt.
+You hold **no** GitLab token. This is intentional (security architecture §R6). All
+GitLab operations run exclusively through the **Warden** (`gitlab-warden:8080`), which
+holds all tokens and enforces the policy.
 
-### GitLab läuft über den Warden
+### GitLab runs through the Warden
 
-`git` ist automatisch umgeleitet — kein Unterschied in der Benutzung:
+`git` is automatically redirected — no difference in usage:
 
 ```bash
-git clone https://gitlab.com/group/project.git   # geht transparent durch den Warden
-git fetch && git push origin claude/mein-branch   # ebenso
+git clone https://gitlab.com/group/project.git   # transparently routed through the Warden
+git fetch && git push origin claude/my-branch     # likewise
 ```
 
-REST-Calls (MR erstellen, CI triggern etc.) direkt gegen den Warden (`gitlab-warden:8080`):
+REST calls (create MR, trigger CI, etc.) directly against the Warden (`gitlab-warden:8080`):
 
 ```bash
-# MR erstellen
+# Create MR
 curl -sS "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests" \
   -H "Content-Type: application/json" \
-  -d '{"source_branch":"claude/mein-branch","target_branch":"main","title":"..."}'
+  -d '{"source_branch":"claude/my-branch","target_branch":"main","title":"..."}'
 
-# CI-Pipeline triggern
+# Trigger CI pipeline
 curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
   -H "Content-Type: application/json" \
-  -d '{"ref":"claude/mein-branch"}'
+  -d '{"ref":"claude/my-branch"}'
 ```
 
-Der Warden erwartet **keine Auth** vom Agenten — Token-Injektion passiert intern.
+The Warden expects **no auth** from the agent — token injection happens internally.
 
-**Immer `--compressed` bei curl gegen die GitLab-API.** Die Antwort kommt
-gzip-komprimiert zurück (`Content-Encoding: gzip`, Magic-Bytes `\x1f\x8b`). curl packt
-nur mit `--compressed` automatisch aus — ohne das Flag bekommst du rohes Binär, auch wenn
-du `Accept-Encoding: gzip` manuell setzt. `Accept: application/json` hilft hier **nicht**:
-das verhandelt den Content-Type, nicht die Kompression. Also nicht durch `gunzip` pipen,
-sondern:
+**Always use `--compressed` with curl against the GitLab API.** The response comes
+back gzip-compressed (`Content-Encoding: gzip`, magic bytes `\x1f\x8b`). curl only
+decompresses automatically with `--compressed` — without the flag you get raw binary,
+even if you manually set `Accept-Encoding: gzip`. `Accept: application/json` does
+**not** help here: that negotiates the content type, not the compression. So don't
+pipe through `gunzip`, instead use:
 
 ```bash
 curl -sS --compressed "http://gitlab-warden:8080/api/v4/groups/<id>/projects"
 ```
 
-### Warden nicht aktiv (Stufe 01 / kein Warden-Profil)
+### Warden not active (stage 01 / no Warden profile)
 
-Kein Token, kein Warden → **kein Schreib-Zugriff auf GitLab**. Öffentliche Repos über
-den Forward-Proxy lesbar (`git clone` / `git fetch`). Push schlägt fehl.
+No token, no Warden → **no write access to GitLab**. Public repos are readable
+via the forward proxy (`git clone` / `git fetch`). Push will fail.
 
-### Harte Grenzen (Warden erzwingt, lassen sich nicht umgehen)
+### Hard limits (Warden enforces, cannot be bypassed)
 
-| Erlaubt                                  | Verboten                                                       |
-| ---------------------------------------- | -------------------------------------------------------------- |
-| Push auf `claude/*`-Branches             | Push auf `main`, `develop` oder Branches ohne `claude/`-Präfix |
-| MRs erstellen, kommentieren, CI triggern | MRs mergen (→ 403, immer)                                      |
-| Lesen (API-GETs, git fetch/clone)        | Token aus der Umgebung lesen (keiner vorhanden)                |
-| Bis zu 5 offene MRs gleichzeitig         | Mehr als 60 schreibende Aktionen/Stunde                        |
+| Allowed                                      | Forbidden                                                          |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| Push to `claude/*` branches                  | Push to `main`, `develop`, or branches without the `claude/` prefix |
+| Create MRs, comment, trigger CI              | Merge MRs (→ 403, always)                                          |
+| Read (API GETs, git fetch/clone)             | Read tokens from the environment (none present)                    |
+| Up to 5 open MRs at a time                   | More than 60 write actions/hour                                    |
 
 ---
 
 ## Toolchain
 
-Alle Tools sind global im `PATH`:
+All tools are globally available on `PATH`:
 
-| Tool        | Version (aus `.env`)  | Befehl                                  |
-| ----------- | --------------------- | --------------------------------------- |
-| Clang/LLVM  | `CLANG_VERSION`       | `clang++`, `clang-tidy`, `clang-format` |
-| Rust        | `RUST_VERSION`        | `cargo`, `rustc`, `rustfmt`, `clippy`   |
-| Python / uv | `UV_VERSION`          | `python3`, `uv`, `uv run`, `uv sync`    |
-| Conan       | `CONAN_VERSION`       | `conan`                                 |
-| Node        | `NODE_VERSION`        | `node`, `npm`                           |
-| Claude Code | `CLAUDE_CODE_VERSION` | `claude`                                |
+| Tool        | Version (from `.env`)  | Command                                  |
+| ----------- | ---------------------- | ---------------------------------------- |
+| Clang/LLVM  | `CLANG_VERSION`        | `clang++`, `clang-tidy`, `clang-format`  |
+| Rust        | `RUST_VERSION`         | `cargo`, `rustc`, `rustfmt`, `clippy`    |
+| Python / uv | `UV_VERSION`           | `python3`, `uv`, `uv run`, `uv sync`     |
+| Conan       | `CONAN_VERSION`        | `conan`                                  |
+| Node        | `NODE_VERSION`         | `node`, `npm`                            |
+| Claude Code | `CLAUDE_CODE_VERSION`  | `claude`                                 |
 
-Build-Traffic (cargo, pip, npm, conan) läuft **automatisch** über den Forward-Proxy —
-kein manuelles `--proxy`-Flag nötig.
+Build traffic (cargo, pip, npm, conan) routes **automatically** through the forward
+proxy — no manual `--proxy` flag needed.
 
-### Branch-Präfix
+### Branch prefix
 
-Alle eigenen Branches mit dem in WARDEN_BRANCH_PREFIX gesetzten Wert beginnen:
+All your own branches must start with the value set in WARDEN_BRANCH_PREFIX:
 
 ```bash
-git checkout -b WARDEN_BRANCH_PREFIX/mein-feature
+git checkout -b WARDEN_BRANCH_PREFIX/my-feature
 ```
 
-Pushes auf andere Branch-Namen werden vom Warden abgewiesen.
+Pushes to other branch names will be rejected by the Warden.

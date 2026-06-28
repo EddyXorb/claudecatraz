@@ -1,10 +1,10 @@
 #!/bin/sh
-# Warden entrypoint — läuft als root, fixiert Bind-Mount-Ownership, droppt zu warden.
-# Dasselbe Muster wie forward-proxy/docker-entrypoint.sh (README §11.6).
+# Warden entrypoint — runs as root, fixes bind-mount ownership, drops to warden.
+# Same pattern as forward-proxy/docker-entrypoint.sh (README §11.6).
 set -e
 
-# Bind-gemountete State- und Log-Verzeichnisse dem Warden-User geben, damit der
-# non-root Service mit read-only Root-FS hineinschreiben kann.
+# Give bind-mounted state and log directories to the warden user so that the
+# non-root service can write to them with a read-only root filesystem.
 chown -R warden:warden /var/lib/warden /var/log/warden /run/warden 2>/dev/null || true
 
 exec gosu warden python -m warden "$@"
