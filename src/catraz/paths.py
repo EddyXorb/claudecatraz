@@ -8,6 +8,13 @@ from catraz import __version__
 from catraz.errors import CliError, EXIT_CONFIG
 
 
+def _cache_root() -> Path:
+    base = (os.environ.get("CATRAZ_CACHE_DIR")
+            or os.environ.get("XDG_CACHE_HOME")
+            or str(Path.home() / ".cache"))
+    return Path(base).expanduser() / "catraz" / __version__
+
+
 def _repo_root() -> Path | None:
     # Zero-install: this file lives at <repo>/src/catraz/paths.py
     here = Path(__file__).resolve()
@@ -38,7 +45,7 @@ def _source_signature(*roots: Path) -> str:
 def asset_root() -> Path:
     """Deterministically extract packaged assets to a versioned cache and return it.
     Build contexts and compose files are read from here, never from the venv/CWD."""
-    dst = Path.home() / ".cache" / "catraz" / __version__
+    dst = _cache_root()
     marker = dst / ".extracted"
     repo = _repo_root()
     sig = _source_signature(repo / "src/catraz/assets", repo / "warden",
