@@ -18,7 +18,8 @@ GOOD = {
             "environment": {},
             "security_opt": ["no-new-privileges:true"],
             "volumes": [
-                {"type": "tmpfs", "target": "/workspace/.catraz"},
+                {"type": "tmpfs", "target": "/workspace/.catraz",
+                 "tmpfs": {"mode": 448, "size": 1048576}},
             ],
         }
     },
@@ -44,6 +45,10 @@ def test_invariants_pass(monkeypatch, tmp_path):
     lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
     lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
     lambda c: c["services"]["claude-dev-env"].__setitem__("security_opt", []),
+    # tmpfs mode wrong (0o755 == 493, not 0o700 == 448)
+    lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].__setitem__("mode", 493),
+    # tmpfs size missing
+    lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].pop("size"),
 ])
 def test_invariants_fail(monkeypatch, tmp_path, mut):
     bad = copy.deepcopy(GOOD)

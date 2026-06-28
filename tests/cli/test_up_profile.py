@@ -17,11 +17,13 @@ def _mock_cmd_up(monkeypatch, tmp_path):
 
     calls = []
     monkeypatch.setattr(stack, "run_doctor", lambda *a, **k: doctor.Findings())
-    monkeypatch.setattr(stack, "assert_real_dirs", lambda root: None)
-    monkeypatch.setattr(stack, "assert_invariants", lambda root: None)
+    monkeypatch.setattr(stack, "assert_real_dirs", lambda *a, **k: None)
+    monkeypatch.setattr(stack, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(stack.auth, "write_auth_fragment", lambda root: None)
     monkeypatch.setattr(stack, "_wait_healthy", lambda *a, **k: None)
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
+    import catraz.compose as compose_mod
+    monkeypatch.setattr(compose_mod, "generate_resolved", lambda *a, **k: False)
 
     def fake_compose_run(root, args, **k):
         calls.append(list(args))
@@ -75,7 +77,7 @@ def test_dry_run_calls_compose_run_with_print_only(monkeypatch, tmp_path):
     monkeypatch.setattr(stack.auth, "write_auth_fragment", lambda root: None)
     monkeypatch.setattr(stack, "assert_real_dirs", lambda root: None)
     monkeypatch.setattr(stack, "assert_invariants",
-                        lambda root: invariants_calls.append(1))
+                        lambda *a, **k: invariants_calls.append(1))
     monkeypatch.setattr(stack, "run_doctor",
                         lambda *a, **k: doctor_calls.append(1) or doctor.Findings())
 
@@ -107,8 +109,8 @@ def test_dry_run_writes_fragment_for_fidelity(monkeypatch, tmp_path):
         frag_path.write_text("# auth fragment\n")
 
     monkeypatch.setattr(stack.auth, "write_auth_fragment", real_write_frag)
-    monkeypatch.setattr(stack, "assert_real_dirs", lambda root: None)
-    monkeypatch.setattr(stack, "assert_invariants", lambda root: None)
+    monkeypatch.setattr(stack, "assert_real_dirs", lambda *a, **k: None)
+    monkeypatch.setattr(stack, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(stack, "compose_run", lambda *a, **k: None)
 
     cli.cmd_up(tmp_path, _args(remote=False, print_only=True), cli.Out(color=False))
@@ -124,9 +126,9 @@ def test_dry_run_returns_ok_even_when_assert_invariants_would_fail(monkeypatch, 
     (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
 
     monkeypatch.setattr(stack.auth, "write_auth_fragment", lambda root: None)
-    monkeypatch.setattr(stack, "assert_real_dirs", lambda root: None)
+    monkeypatch.setattr(stack, "assert_real_dirs", lambda *a, **k: None)
     monkeypatch.setattr(stack, "assert_invariants",
-                        lambda root: (_ for _ in ()).throw(CliError("boom", EXIT_DOCTOR)))
+                        lambda *a, **k: (_ for _ in ()).throw(CliError("boom", EXIT_DOCTOR)))
     monkeypatch.setattr(stack, "compose_run", lambda *a, **k: None)
 
     rc = cli.cmd_up(tmp_path, _args(remote=False, print_only=True), cli.Out(color=False))

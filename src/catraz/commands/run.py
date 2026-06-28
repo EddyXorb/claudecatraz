@@ -4,7 +4,7 @@ from pathlib import Path
 
 from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
 from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants
-from catraz import auth, image
+from catraz import image, compose
 from catraz.commands.stack import _row_ready, _security_preflight
 from catraz.commands.setup import _auto_sync_if_needed
 
@@ -22,10 +22,10 @@ def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list
     return args
 
 
-def _ensure_infra(root, out):
+def _ensure_infra(root, out, prefix=None):
     """Lazy infra: if warden+squid are already healthy, return fast; otherwise run the
     security preflight + auto-sync, warn about the trust boundary, and start infra only."""
-    rows = compose_ps(root)
+    rows = compose_ps(root, prefix=prefix)
     healthy = {r.get("Service") for r in rows if _row_ready(r)}
     if {"gitlab-warden", "forward-proxy"} <= healthy:
         return
@@ -33,14 +33,15 @@ def _ensure_infra(root, out):
         raise CliError("preflight failed — fix the ✘ above", EXIT_DOCTOR)
     _auto_sync_if_needed(root, out)
     out.warn("catraz: sandbox active (warden+squid) — protects network/git, NOT your files")
-    compose_run(root, ["up", "-d"], check=False)
+    compose_run(root, ["up", "-d"], prefix=prefix, check=False)
 
 
 def cmd_run(root, args, out):
     assert_real_dirs(root)
-    auth.write_auth_fragment(root)
-    assert_invariants(root)                        # ALWAYS, uncached
-    _ensure_infra(root, out)                        # lazy: preflight+up only when cold
+    extra_env = {"BASE_IMAGE": image.resolve_base(root)}
+    prefix = compose.prepare(root, render=True, extra_env=extra_env)
+    assert_invariants(root, prefix=prefix)
+    _ensure_infra(root, out, prefix=prefix)
     relpath = str(Path.cwd().resolve().relative_to(root))
     if relpath == ".":
         relpath = ""
@@ -51,18 +52,20 @@ def cmd_run(root, args, out):
                    if args.claude_args and args.claude_args[0] == "--"
                    else args.claude_args)
     run_args = _oneoff_args(relpath, tty, "run", claude_args)
-    extra_env = {"BASE_IMAGE": image.resolve_base(root)}
-    r = compose_run(root, run_args, check=False, extra_env=extra_env)
+    r = compose_run(root, run_args, prefix=prefix, check=False)
     return r.returncode if r else EXIT_GENERAL
 
 
 def cmd_shell(root, args, out):
-    assert_real_dirs(root); auth.write_auth_fragment(root); assert_invariants(root)
-    _ensure_infra(root, out)
-    relpath = str(Path.cwd().resolve().relative_to(root)); relpath = "" if relpath == "." else relpath
+    assert_real_dirs(root)
+    extra_env = {"BASE_IMAGE": image.resolve_base(root)}
+    prefix = compose.prepare(root, render=True, extra_env=extra_env)
+    assert_invariants(root, prefix=prefix)
+    _ensure_infra(root, out, prefix=prefix)
+    relpath = str(Path.cwd().resolve().relative_to(root))
+    relpath = "" if relpath == "." else relpath
     tty = sys.stdin.isatty()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd      # may be empty → entrypoint runs bash
     run_args = _oneoff_args(relpath, tty, "exec", cmd)
-    extra_env = {"BASE_IMAGE": image.resolve_base(root)}
-    r = compose_run(root, run_args, check=False, extra_env=extra_env)
+    r = compose_run(root, run_args, prefix=prefix, check=False)
     return r.returncode if r else EXIT_GENERAL

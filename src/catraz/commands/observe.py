@@ -8,6 +8,7 @@ import webbrowser
 
 from catraz.errors import EXIT_OK, EXIT_GENERAL
 from catraz.compose import run as compose_run, resolve_service, _rc
+from catraz import compose
 
 
 def _tail_audit(root, args, out):
@@ -55,7 +56,8 @@ def cmd_logs(root, args, out):
     log_args += ["--tail", str(args.tail)]
     if args.service:
         log_args.append(resolve_service(args.service))
-    r = compose_run(root, log_args, check=False)
+    prefix = compose.prepare(root, render=False)
+    r = compose_run(root, log_args, prefix=prefix, check=False)
     return _rc(r)
 
 

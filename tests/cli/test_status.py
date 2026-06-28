@@ -26,7 +26,7 @@ def test_status_not_setup_returns_ok(tmp_path):
 def test_status_not_running_returns_general(monkeypatch, tmp_path):
     """Set up but compose_ps returns [] → EXIT_GENERAL."""
     _seed(tmp_path)
-    monkeypatch.setattr(stack, "compose_ps", lambda root: [])
+    monkeypatch.setattr(stack, "compose_ps", lambda *a, **kw: [])
     rc = stack.cmd_status(tmp_path, types.SimpleNamespace(), _out())
     assert rc == EXIT_GENERAL
 
@@ -38,7 +38,7 @@ def test_status_all_ready_returns_ok(monkeypatch, tmp_path):
         {"Service": "gitlab-warden", "State": "running", "Health": "healthy"},
         {"Service": "forward-proxy", "State": "running", "Health": "healthy"},
     ]
-    monkeypatch.setattr(stack, "compose_ps", lambda root: rows)
+    monkeypatch.setattr(stack, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(stack, "_print_urls", lambda out: None)
     rc = stack.cmd_status(tmp_path, types.SimpleNamespace(), _out())
     assert rc == EXIT_OK
@@ -51,7 +51,7 @@ def test_status_partial_ready_returns_general(monkeypatch, tmp_path):
         {"Service": "gitlab-warden", "State": "running", "Health": "healthy"},
         {"Service": "forward-proxy", "State": "starting", "Health": ""},
     ]
-    monkeypatch.setattr(stack, "compose_ps", lambda root: rows)
+    monkeypatch.setattr(stack, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(stack, "_print_urls", lambda out: None)
     rc = stack.cmd_status(tmp_path, types.SimpleNamespace(), _out())
     assert rc == EXIT_GENERAL

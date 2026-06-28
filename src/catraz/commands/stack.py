@@ -4,7 +4,7 @@ import time
 from catraz.errors import CliError, EXIT_OK, EXIT_GENERAL, EXIT_DOCTOR
 from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants, _rc
 from catraz.doctor import run_doctor, print_findings, SECURITY_SECTIONS
-from catraz import auth, image
+from catraz import auth, image, compose
 from catraz.commands.setup import _auto_sync_if_needed
 
 
@@ -32,11 +32,11 @@ def _security_preflight(root, out):
     return print_findings(run_doctor(root, only=SECURITY_SECTIONS), out)[0]
 
 
-def _wait_healthy(root, out, timeout=120):
+def _wait_healthy(root, out, prefix=None, timeout=120):
     out.info(f"• waiting for health (≤{timeout}s)…")
     deadline = time.time() + timeout
     while time.time() < deadline:
-        rows = compose_ps(root)
+        rows = compose_ps(root, prefix=prefix)
         if rows and all(_row_ready(r) for r in rows):
             out.info(out.green("• all services healthy"))
             return
@@ -53,8 +53,7 @@ def cmd_up(root, args, out):
     if args.pull:
         up_args.append("--pull=always")
 
-    # Fragment is part of EVERY real up (base_cmd attaches -f when it exists) →
-    # a faithful --print must reflect it. Writing is also harmless in dry-run.
+    # Fragment written before print_only so a faithful --print reflects -f .auth.compose.yml.
     (root / ".catraz").mkdir(exist_ok=True)
     auth.write_auth_fragment(root)
 
@@ -72,20 +71,27 @@ def cmd_up(root, args, out):
 
     try:
         assert_real_dirs(root)
-        assert_invariants(root)
     except CliError as e:
         out.err(str(e))
         return EXIT_DOCTOR
 
+    # agent commands pass BASE_IMAGE; infra-only does not (avoids base build on plain up).
     extra_env = {"BASE_IMAGE": image.resolve_base(root)} if args.remote else None
+    prefix = compose.prepare(root, render=True, extra_env=extra_env)
+
+    try:
+        assert_invariants(root, prefix=prefix)
+    except CliError as e:
+        out.err(str(e))
+        return EXIT_DOCTOR
 
     out.info("• starting the stack…")
-    r = compose_run(root, up_args, check=False, extra_env=extra_env)
+    r = compose_run(root, up_args, prefix=prefix, check=False)
     if r.returncode != 0:
         return EXIT_GENERAL
 
     if not args.no_wait:
-        _wait_healthy(root, out, timeout=args.timeout)
+        _wait_healthy(root, out, prefix=prefix, timeout=args.timeout)
     _print_urls(out)
     return EXIT_OK
 
@@ -103,7 +109,8 @@ def cmd_down(root, args, out):
         compose_run(root, down_args, print_only=True)
         return EXIT_OK
     out.info("• stopping the stack…")
-    r = compose_run(root, down_args, check=False)
+    prefix = compose.prepare(root, render=True)
+    r = compose_run(root, down_args, prefix=prefix, check=False)
     return _rc(r)
 
 
@@ -111,7 +118,8 @@ def cmd_status(root, args, out):
     if not (root / ".catraz" / ".env").exists():
         out.info("Not set up yet. Run " + out.bold("catraz init") + ".")
         return EXIT_OK
-    rows = compose_ps(root)
+    prefix = compose.prepare(root, render=False)
+    rows = compose_ps(root, prefix=prefix)
     if not rows:
         out.info("Stack is not running. Start it with " + out.bold("catraz up") + ".")
         return EXIT_GENERAL
