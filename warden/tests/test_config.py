@@ -165,3 +165,47 @@ def test_invalid_toml_type_aborts(tmp_path):
     toml.write_text('max_open_mrs = "lots"\n')
     with pytest.raises(ConfigError, match="integer"):
         from_env({}, strict=False, toml_path=str(toml))
+
+
+# --- _secret / *_FILE indirection (11.1) --------------------------------------
+
+def test_secret_file_read_token(tmp_path):
+    """(a) GITLAB_READ_TOKEN_FILE → tmp file "glpat-x\n" → read_token == "glpat-x"."""
+    f = tmp_path / "rt"
+    f.write_text("glpat-x\n")
+    cfg = from_env(
+        {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": ""},
+        strict=True,
+    )
+    assert cfg.read_token == "glpat-x"
+
+
+def test_secret_file_wins_over_env(tmp_path):
+    """(b) *_FILE and the bare env var both set → the file wins."""
+    f = tmp_path / "rt"
+    f.write_text("from-file\n")
+    cfg = from_env(
+        {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": "from-env"},
+        strict=True,
+    )
+    assert cfg.read_token == "from-file"
+
+
+def test_secret_file_missing_raises(tmp_path):
+    """(c) *_FILE → missing path → ConfigError."""
+    with pytest.raises(ConfigError, match="GITLAB_READ_TOKEN_FILE"):
+        from_env(
+            {**_MIN, "GITLAB_READ_TOKEN_FILE": str(tmp_path / "nonexistent")},
+            strict=True,
+        )
+
+
+def test_secret_file_empty_fails_validate(tmp_path):
+    """(d) *_FILE → empty file → _validate raises the existing 'required' error."""
+    f = tmp_path / "rt"
+    f.write_text("")
+    with pytest.raises(ConfigError, match="GITLAB_READ_TOKEN"):
+        from_env(
+            {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": ""},
+            strict=True,
+        )

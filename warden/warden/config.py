@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Optional
 
 
@@ -66,6 +67,19 @@ class Config:
             if project == allowed or project.startswith(allowed + "/"):
                 return True
         return False
+
+
+def _secret(env: Mapping[str, str], name: str) -> str:
+    """Read a secret from <name>_FILE (compose secret / mounted file) if set, else <name>.
+    File wins so the running stack reads /run/secrets/…; the bare env var stays the fallback
+    for tests and bare `docker run`. Trailing newline (common in token files) is stripped."""
+    path = env.get(f"{name}_FILE")
+    if path:
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except OSError as e:
+            raise ConfigError(f"{name}_FILE={path!r} unreadable: {e}") from e
+    return env.get(name, "")
 
 
 def _split_csv(value: str) -> tuple[str, ...]:
@@ -154,8 +168,8 @@ def from_env(
         max_writes_per_hour=_tunable_int("MAX_WRITES_PER_HOUR", "max_writes_per_hour", 60),
         allowed_projects=_tunable_projects("ALLOWED_PROJECTS", "allowed_projects"),
         api_url=env.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/api/v4",
-        read_token=env.get("GITLAB_READ_TOKEN", ""),
-        write_token=env.get("GITLAB_WRITE_TOKEN", ""),
+        read_token=_secret(env, "GITLAB_READ_TOKEN"),
+        write_token=_secret(env, "GITLAB_WRITE_TOKEN"),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
