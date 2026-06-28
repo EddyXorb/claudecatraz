@@ -117,6 +117,12 @@ def drop_to_dev() -> None:
     os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
 
+def cmd_exec(cmd: list[str]) -> None:
+    drop_to_dev()                       # chowns /workspace + re-execs as dev (as in start/run)
+    argv = cmd or ["bash"]
+    os.execvp(argv[0], argv)
+
+
 def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
     mode = os.environ.get("AUTH_MODE", "subscription")
@@ -170,6 +176,8 @@ def main() -> None:
     rn = sub.add_parser("run")
     rn.add_argument("rest", nargs=argparse.REMAINDER)   # ["--", "<args>"...]
 
+    ex = sub.add_parser("exec"); ex.add_argument("rest", nargs=argparse.REMAINDER)
+
     args = parser.parse_args()
 
     if args.command == "sync":
@@ -179,6 +187,9 @@ def main() -> None:
         rest = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
         cmd_run(Path(args.claude_home).resolve(), rest)
         return
+    if args.command == "exec":
+        rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
+        cmd_exec(rest); return
     cmd_start(Path(args.claude_home).resolve())
 
 

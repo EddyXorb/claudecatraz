@@ -118,6 +118,9 @@ def build_parser():
         help="run claude one-off inside the sandbox (drop-in: alias claude='catraz run')")
     p_run.add_argument("claude_args", nargs=argparse.REMAINDER)
 
+    psh = sub.add_parser("shell", help="open a shell (or run a command) inside the sandbox")
+    psh.add_argument("cmd", nargs=argparse.REMAINDER, help="command to run (default: bash)")
+
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
     pl = sub.add_parser("logs", parents=[_g()], help="tail logs (agent|warden|proxy, or --audit)")
@@ -146,6 +149,7 @@ HANDLERS = {
     "down":    stack.cmd_down,
     "status":  stack.cmd_status,
     "run":     run_cmd.cmd_run,
+    "shell":   run_cmd.cmd_shell,
     "logs":    observe.cmd_logs,
     "audit":   observe.cmd_audit,
     "sync":    setup.cmd_sync,
