@@ -1,9 +1,9 @@
 # Sandbox — Context & Rules for the Agent
 
-> This file is the **harness documentation** of the `claude-dev-env` sandbox. It is
-> versioned in the image (`/opt/claude-dev-env/AGENT.md`) and injected by
-> `entrypoint.py` at container start into `~/.claude/CLAUDE.md` (user memory) — so it
-> applies to **every** mounted project. It does NOT belong in the project repo;
+> This file is the **harness documentation** of the `claude-dev-env` sandbox. catraz
+> mounts it read-only from the asset cache into `~/.claude/.ro/CLAUDE.md`, and
+> `entrypoint.py` copies it at container start to `~/.claude/CLAUDE.md` (user memory) —
+> so it applies to **every** mounted project. It does NOT belong in the project repo;
 > project-specific notes go in the CLAUDE.md of the respective `/workspace` project.
 
 You are running as user `dev` in the container `claude-dev-env`. The `/workspace`

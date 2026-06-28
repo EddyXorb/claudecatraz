@@ -23,6 +23,10 @@ def read_json(p: Path) -> dict:
         return {}
 
 
+def _env_true(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 # ── host-side sync ────────────────────────────────────────────────────────────
 
 
@@ -70,9 +74,43 @@ def build_claude_home(home: Path, mode: str, remote: bool = True) -> None:
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
     (home / "settings.json").write_text(
         json.dumps({"theme": "dark", "hasCompletedOnboarding": True}, indent=2))
-    agent_md = Path("/opt/claude-dev-env/AGENT.md")
-    if agent_md.exists():
-        shutil.copy2(agent_md, home / "CLAUDE.md")
+    install_claude_md(home)
+
+
+def install_claude_md(home: Path) -> None:
+    """Install the agent user-memory (~/.claude/CLAUDE.md) from its read-only source.
+
+    catraz mounts the packaged AGENT.md read-only at ~/.claude/.ro/CLAUDE.md (see
+    docker-compose.yml) and we copy it to the writable live path so Claude's `#`
+    add-memory shortcut keeps working. The image itself carries NO CLAUDE.md — the
+    single source of truth is the asset cache, which also lets a bare `docker run` of
+    the image start without the bind for local testing.
+
+    catraz hard-sets REQUIRE_CLAUDE_FILE=true in compose, so on the normal path a
+    missing/misconfigured mount fails loud instead of silently starting the agent
+    without its guidance.
+    """
+    src = home / ".ro" / "CLAUDE.md"
+    if src.exists():
+        shutil.copy2(src, home / "CLAUDE.md")
+        return
+    if _env_true("REQUIRE_CLAUDE_FILE"):
+        sys.exit(
+            f"error: REQUIRE_CLAUDE_FILE is set but no CLAUDE.md is mounted at {src}.\n\n"
+            "The agent user-memory (CLAUDE.md) is delivered as a read-only bind mount of\n"
+            "the packaged AGENT.md from the catraz asset cache. docker-compose.yml expects:\n\n"
+            "    - type: bind\n"
+            "      source: ${CATRAZ_ASSETS}/AGENT.md\n"
+            f"      target: {src}\n"
+            "      read_only: true\n\n"
+            "Check that:\n"
+            "  - you launched the stack via the `catraz` CLI (it sets CATRAZ_ASSETS and\n"
+            "    attaches the bind); a bare `docker compose`/`docker run` does not,\n"
+            "  - the asset cache contains AGENT.md ($CATRAZ_ASSETS/AGENT.md on the host),\n"
+            "  - no compose override removed the mount.\n\n"
+            "For local image testing without the bind, leave REQUIRE_CLAUDE_FILE unset."
+        )
+    # Not required (e.g. bare `docker run` for local testing) -> start without user-memory.
 
 
 def configure_git_warden() -> None:

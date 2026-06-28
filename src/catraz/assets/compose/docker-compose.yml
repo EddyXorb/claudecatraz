@@ -119,6 +119,11 @@ services:
       # Canonical GitLab URL for the insteadOf rewrite to gitlab-warden (entrypoint.py).
       # No token in the agent container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      # The CLAUDE.md bind below is part of every catraz-launched container; require it
+      # so a missing/misconfigured mount fails loud in the entrypoint instead of starting
+      # the agent without its user-memory. A bare `docker run` of the image leaves this
+      # unset and may start without CLAUDE.md (local image testing). See install_claude_md().
+      - REQUIRE_CLAUDE_FILE=true
     volumes:
       - type: bind
         source: ${PROJECT_DIR}
@@ -128,6 +133,13 @@ services:
         tmpfs: { size: 1048576, mode: 0700 }
       - type: tmpfs
         target: /home/dev/.claude
+      # Agent user-memory source: read-only bind of the packaged AGENT.md from the asset
+      # cache, nested inside the tmpfs above. entrypoint.py copies it to the writable live
+      # ~/.claude/CLAUDE.md. Single source of truth = the asset cache (not baked in image).
+      - type: bind
+        source: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/AGENT.md
+        target: /home/dev/.claude/.ro/CLAUDE.md
+        read_only: true
     # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
     # activated in stage 03 once the Forward-Proxy service is in Compose.
     # Until then: default bridge (internet access for api.anthropic.com).
