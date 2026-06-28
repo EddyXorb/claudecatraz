@@ -9,6 +9,7 @@ Container entrypoint — and host-side credential sync tool.
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -125,18 +126,22 @@ def cmd_exec(cmd: list[str]) -> None:
 
 def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
-    mode = os.environ.get("AUTH_MODE", "subscription")
+    mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
     build_home(claude_home, mode)
     configure_git_warden()
-    os.execvp("claude", ["claude", "remote-control", "--permission-mode", "bypassPermissions",
-                         "--spawn", "same-dir", "--debug-file", str(claude_home / "rc-debug.log")])
+    spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
+    debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
+    extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
+    os.execvp("claude", ["claude", "remote-control",
+                         "--permission-mode", "bypassPermissions",   # keep-fixed (headless)
+                         "--spawn", spawn, "--debug-file", debug, *extra])
 
 
 def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     drop_to_dev()
-    mode = os.environ.get("AUTH_MODE", "subscription")
+    mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
     build_home(claude_home, mode, remote=False)

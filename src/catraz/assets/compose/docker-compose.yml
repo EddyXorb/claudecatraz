@@ -98,6 +98,10 @@ services:
       - no-new-privileges:true
     environment:
       - AUTH_MODE=${AUTH_MODE}
+      # Agent runtime (advanced) — remote-control invocation tuning:
+      - CLAUDE_RC_SPAWN=${CLAUDE_RC_SPAWN:-same-dir}
+      - CLAUDE_RC_DEBUG_FILE=${CLAUDE_RC_DEBUG_FILE:-}
+      - CLAUDE_RC_EXTRA_ARGS=${CLAUDE_RC_EXTRA_ARGS:-}
       # Research/Build egress via the Forward-Proxy (§6.6):
       - http_proxy=http://forward-proxy:3128
       - https_proxy=http://forward-proxy:3128
