@@ -228,7 +228,9 @@ def check_net(root, f):
 
 
 def check_auth(root, env, f):
-    mode = env.get("AUTH_MODE", "")
+    # Canonical rule (matches auth.auth_mode): absent/empty → subscription; only a
+    # present-but-invalid value is an error.
+    mode = env.get("AUTH_MODE") or "subscription"
     if mode not in ("subscription", "api_key"):
         f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"); return
     cred = paths.claude_home(root) / ".credentials.json"
