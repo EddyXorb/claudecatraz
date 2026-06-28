@@ -18,7 +18,7 @@ A dockerized, hardened environment in which an **autonomous Claude Code agent** 
 
 The point is the security model: the agent is treated as **potentially malicious**. It therefore holds **no GitLab credential whatsoever** and has **no internet route of its own**. Two purpose-built proxies sit in front of it instead:
 
-- **Warden** — the sole holder of the GitLab tokens. It enforces rules R1–R6 on *every* git push and API call (only your own `claude/*` branches, no merge, quotas, …) and audits everything.
+- **Warden** — the sole holder of the GitLab tokens. It enforces rules R0–R6 on *every* git push and API call (only your own `claude/*` branches, no merge, quotas, …) and audits everything.
 - **Forward proxy (Squid)** — the only way to the internet, filtered against a domain allowlist (npm, PyPI, crates, docs …). Default-deny, no TLS interception.
 
 Even a fully compromised agent stays within policy: it cannot write to foreign branches, cannot merge anything, and can only talk to allowlisted destinations.
@@ -32,7 +32,7 @@ flowchart LR
 
     subgraph agentnet["agent-net · internal — NO egress"]
         agent["claude-dev-env<br/>Claude Code · no GitLab token (R6)"]
-        warden["gitlab-warden<br/>enforces R1–R6 · holds all tokens"]
+        warden["gitlab-warden<br/>enforces R0–R6 · holds all tokens"]
         proxy["forward-proxy<br/>Squid domain allowlist"]
     end
 
@@ -135,7 +135,7 @@ nothing you run here can be killed by another session tearing its stack down. Ev
 > ### ⚠️ What the sandbox protects — and what it does **not**
 >
 > The sandbox protects your **network and git egress**: the Warden is the sole holder of the
-> GitLab tokens and enforces R1–R6, and Squid restricts the agent to an allowlist. It does
+> GitLab tokens and enforces R0–R6, and Squid restricts the agent to an allowlist. It does
 > **NOT** protect your **files** — `/workspace` is bind-mounted **read-write**, so the agent
 > can read and modify any file in the project. Only `.catraz/` is hidden (a tmpfs shadow).
 > Run it on code you're willing to let the agent change.
@@ -217,10 +217,11 @@ allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 > This is deliberate: an explicit, enumerable allowlist is auditable and keeps the
 > read/exfiltration surface small (least privilege, design §6.10).
 
-## Security model (R1–R6)
+## Security model (R0–R6)
 
 | #  | Rule | Enforced by |
 | -- | ---- | ----------- |
+| R0 | Mode gate — `GITLAB_MODE=off` denies all GitLab ops; `read-only` denies all writes | Warden checks the mode before any other rule and never sends a token upstream when the op is disabled |
 | R1 | Read anything in the work scope | Read token in the Warden, GET pass-through |
 | R2 | Push only to `claude/*` branches | Warden parses the git ref commands + GitLab push rules |
 | R3 | MR/comment/CI only for your own branches | Warden API filter (ownership) + Developer role |
@@ -234,7 +235,7 @@ zero-code). If the Warden goes down, the agent structurally has **no** route to 
 
 ## Audit log
 
-The Warden records **every** GitLab decision (allow/deny with rule R1–R6, R4/R5 highlighted).
+The Warden records **every** GitLab decision (allow/deny with rule R0–R6, R4/R5 highlighted).
 View it in the browser with a single command — no fixed IP or published port; it forwards an
 **ephemeral host-only loopback port** to the Warden's admin **unix socket** in `.catraz/`, so
 parallel sandboxes never collide and the agent has no route to it:
