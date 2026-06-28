@@ -87,7 +87,7 @@ def cmd_audit(root, args, out):
     if not args.web:
         return _tail_audit(root, args, out)            # existing JSONL tail
     if not sock.exists():
-        out.err("audit socket not found — run `catraz up` first")
+        out.err("audit socket not found — run `catraz run` first")
         return EXIT_GENERAL
     handler = type("H", (_UdsProxy,), {"sock_path": str(sock)})
     srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)   # ephemeral port

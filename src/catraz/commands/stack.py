@@ -1,4 +1,4 @@
-"""Stack lifecycle commands: up, down, status."""
+"""Stack lifecycle commands: stop, status."""
 import time
 
 from catraz.errors import CliError, EXIT_OK, EXIT_GENERAL, EXIT_DOCTOR
@@ -22,9 +22,8 @@ def _print_urls(out):
           + out.dim("  (the agent 'claude-dev-env' registers there)"))
     print("  Audit viewer:    " + out.cyan("catraz audit --web")
           + out.dim("   (host-only, ephemeral loopback port)"))
-    # Plain `up` runs infra only (warden+squid). The agent is opt-in:
-    print("  Agent daemon:    " + out.cyan("catraz up --remote")
-          + out.dim("   ·   interactive: ") + out.cyan("catraz run"))
+    # `run` lazy-starts infra (warden+squid) and runs the agent one-off:
+    print("  Interactive:     " + out.cyan("catraz run"))
 
 
 def _security_preflight(root, out):
@@ -42,58 +41,6 @@ def _wait_healthy(root, out, prefix=None, timeout=120):
             return
         time.sleep(2)
     out.warn("timed out waiting for health — check `catraz status`")
-
-
-def cmd_up(root, args, out):
-    # Build up_args first — needed by both print_only and real up paths.
-    # --profile is a top-level compose flag and must precede the `up` subcommand.
-    up_args = (["--profile", "remote"] if args.remote else []) + ["up", "-d"]
-    if args.build:
-        up_args.append("--build")
-    if args.pull:
-        up_args.append("--pull=always")
-
-    # Fragment written before print_only so a faithful --print reflects -f .auth.compose.yml.
-    (root / ".catraz").mkdir(exist_ok=True)
-    auth.write_auth_fragment(root)
-
-    if args.print_only:
-        compose_run(root, up_args, print_only=True)
-        return EXIT_OK
-
-    # ── from here Docker/validating: auto-sync, preflight, assert_*, build, up ──
-    _auto_sync_if_needed(root, out)
-    out.head("— preflight (security checks always run) —")
-    if _security_preflight(root, out):
-        out.err("preflight failed — fix the ✘ above (or `catraz doctor --fix`)")
-        return EXIT_DOCTOR
-    print()
-
-    try:
-        assert_real_dirs(root)
-    except CliError as e:
-        out.err(str(e))
-        return EXIT_DOCTOR
-
-    # agent commands pass BASE_IMAGE; infra-only does not (avoids base build on plain up).
-    extra_env = {"BASE_IMAGE": image.resolve_base(root)} if args.remote else None
-    prefix = compose.prepare(root, render=True, extra_env=extra_env)
-
-    try:
-        assert_invariants(root, prefix=prefix)
-    except CliError as e:
-        out.err(str(e))
-        return EXIT_DOCTOR
-
-    out.info("• starting the stack…")
-    r = compose_run(root, up_args, prefix=prefix, check=False)
-    if r.returncode != 0:
-        return EXIT_GENERAL
-
-    if not args.no_wait:
-        _wait_healthy(root, out, prefix=prefix, timeout=args.timeout)
-    _print_urls(out)
-    return EXIT_OK
 
 
 def cmd_down(root, args, out):
@@ -121,7 +68,7 @@ def cmd_status(root, args, out):
     prefix = compose.prepare(root, render=False)
     rows = compose_ps(root, prefix=prefix)
     if not rows:
-        out.info("Stack is not running. Start it with " + out.bold("catraz up") + ".")
+        out.info("Stack is not running. Start it with " + out.bold("catraz run") + ".")
         return EXIT_GENERAL
     out.head("Services")
     all_ready = True

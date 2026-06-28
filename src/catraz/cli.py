@@ -33,7 +33,6 @@ from catraz.ui import Out  # noqa: F811
 from catraz.commands.setup import _ensure_gitignore, _run_sync  # noqa: F401
 from catraz.commands.run import _oneoff_args  # noqa: F401
 from catraz.commands.observe import _UdsProxy  # noqa: F401
-from catraz.commands.stack import cmd_up  # noqa: F401
 # Compose helpers re-exported for tests that access them via cli.*
 from catraz.compose import run as compose_run  # noqa: F401
 from catraz.compose import compose_ps  # noqa: F401
@@ -90,19 +89,9 @@ def build_parser():
     pd.add_argument("--strict", action="store_true", help="warnings count as failures (exit 3)")
     pd.add_argument("--section", choices=DOCTOR_SECTIONS, help="run only one section")
 
-    pu = sub.add_parser("up", parents=[_g()], help="start the stack, wait for health, print URLs")
-    pu.add_argument("--build", action="store_true", help="rebuild images first")
-    pu.add_argument("--pull", action="store_true", help="pull base images first")
-    pu.add_argument("--remote", action="store_true",
-                    help="also start the agent daemon (remote-control)")
-    pu.add_argument("--no-wait", action="store_true", help="don't wait for health")
-    pu.add_argument("--timeout", type=int, default=120, help="health-wait limit (s)")
-    pu.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
-                    help="show the compose command without running it")
-
-    pdn = sub.add_parser("down", parents=[_g()], help="stop the stack")
-    pdn.add_argument("-v", "--volumes", action="store_true", help="also remove volumes")
-    pdn.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
+    pst = sub.add_parser("stop", aliases=["down"], parents=[_g()], help="stop the stack")
+    pst.add_argument("-v", "--volumes", action="store_true", help="also remove volumes")
+    pst.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
                      help="show the compose command without running it")
 
     p_run = sub.add_parser(
@@ -144,8 +133,8 @@ def build_parser():
 HANDLERS = {
     "init":    setup.cmd_init,
     "doctor":  setup.cmd_doctor,
-    "up":      stack.cmd_up,
-    "down":    stack.cmd_down,
+    "stop":    stack.cmd_down,   # canonical
+    "down":    stack.cmd_down,   # back-compat alias (argparse aliases=["down"])
     "status":  stack.cmd_status,
     "ps":      observe.cmd_ps,
     "reload":  reload_cmd.cmd_reload,

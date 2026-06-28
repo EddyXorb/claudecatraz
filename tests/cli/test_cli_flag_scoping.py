@@ -17,16 +17,6 @@ def parse(argv):
 
 # ── 1. Post-form stays valid ──────────────────────────────────────────────────
 
-def test_up_dry_run_post():
-    args = parse(["up", "--dry-run"])
-    assert args.print_only is True
-
-
-def test_up_print_post():
-    args = parse(["up", "--print"])
-    assert args.print_only is True
-
-
 def test_down_print_post():
     args = parse(["down", "--print"])
     assert args.print_only is True
@@ -66,10 +56,10 @@ def test_audit_dry_run_fails(capsys):
 
 # ── 3. Pre-subcommand form now fail-loud (pins deliberate decision) ───────────
 
-def test_dry_run_before_up_fails(capsys):
+def test_dry_run_before_stop_fails(capsys):
     """--dry-run is no longer on the top-level parser; pre-subcommand form must fail."""
     with pytest.raises(SystemExit):
-        parse(["--dry-run", "up"])
+        parse(["--dry-run", "stop"])
 
 
 def test_yes_before_init_fails(capsys):

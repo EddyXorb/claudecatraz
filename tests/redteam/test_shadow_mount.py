@@ -63,7 +63,7 @@ def live_stack(tmp_path_factory):
     - init runs with check=False: the closing doctor may exit 3 (preflight warnings
       such as missing GitLab tokens), but the .catraz scaffold is created regardless.
     - .catraz/.env is written AFTER init so it is not overwritten by init's seed.
-    - up --remote starts the agent daemon (profiles: ["remote"] in compose).
+    - run claude-remote starts the agent daemon (profiles: ["remote"] in compose).
     - DEV_UID is set so bind-mount ownership matches the runner's uid.
     """
     root = tmp_path_factory.mktemp("catraz-proj")
@@ -83,9 +83,10 @@ def live_stack(tmp_path_factory):
         f"DEV_UID={os.getuid()}\n"
     )
 
-    subprocess.run([*catraz, "-C", str(root), "up", "--remote"], env=env, check=True)
+    # `run claude-remote` starts the Remote-Control daemon (item 07 of cli-worklist).
+    subprocess.run([*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True)
     yield root
-    subprocess.run([*catraz, "-C", str(root), "down"], env=env, check=False)
+    subprocess.run([*catraz, "-C", str(root), "stop"], env=env, check=False)
 
 
 # ── T1 — live stack: /workspace/.catraz is empty inside container ─────────────

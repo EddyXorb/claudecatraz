@@ -87,7 +87,7 @@ def _init_preflight(root: Path, out: Out) -> int:
     if bad:
         out.info(out.yellow("Some checks failed above. Fix them, then:") + "  catraz doctor")
         return EXIT_DOCTOR
-    out.info(out.green("Ready.") + " Next:  " + out.bold("catraz up"))
+    out.info(out.green("Ready.") + " Next:  " + out.bold("catraz run"))
     return EXIT_OK
 
 

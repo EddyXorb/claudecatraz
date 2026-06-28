@@ -82,7 +82,7 @@ def cmd_reload(root, args, out):
 
     up_args = ["up", "-d", "--force-recreate", *sorted(stale)]
     if args.print_only:
-        # render-free prefix from above — do not re-render on a dry-run (matches cmd_up)
+        # render-free prefix from above — do not re-render on a dry-run (like cmd_down's print path)
         compose.run(root, up_args, prefix=prefix, print_only=True)
         return EXIT_OK
 

@@ -295,7 +295,7 @@ def check_net(root, f):
     if sock.exists():
         f.ok("net", "admin socket present (stack up)")
     else:
-        f.ok("net", "admin socket absent (stack down — start with `catraz up`)")
+        f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
 
 
 def _read_secret_file(root, filename):

@@ -14,7 +14,7 @@
 
 ## What it does
 
-A dockerized, hardened environment in which an **autonomous Claude Code agent** (C++/Rust/Python toolchain) can work on GitLab projects — interactively (`catraz run`) or driven over Remote Control from claude.ai (`catraz up --remote`).
+A dockerized, hardened environment in which an **autonomous Claude Code agent** (C++/Rust/Python toolchain) can work on GitLab projects — interactively (`catraz run`) or driven over Remote Control from claude.ai (`catraz run claude-remote`).
 
 The point is the security model: the agent is treated as **potentially malicious**. It therefore holds **no GitLab credential whatsoever** and has **no internet route of its own**. Two purpose-built proxies sit in front of it instead:
 
@@ -86,8 +86,11 @@ before they bite.
 ```bash
 cd ~/code/my-project
 catraz init           # wizard: create .catraz/, 3 secrets, allowed projects, credential sync
-catraz up --remote    # preflight, build, start the stack incl. the agent daemon, print URLs
+catraz run -p "hi"    # lazy-starts infra (Warden + Squid) and runs Claude one-off
 ```
+
+> The always-on Remote-Control **daemon** is started with `catraz run claude-remote`
+> (see *Interactive mode* below).
 
 `catraz init` creates a single **`.catraz/`** directory in your project that holds all settings
 and runtime files (config, credentials, logs, state) — nothing else is added to your repo, and
@@ -102,9 +105,7 @@ with `catraz audit --web`.
 | Command | What it does |
 | ------- | ------------ |
 | `catraz init` | Wizard: create `.catraz/`, collect secrets + allowed projects, sync credentials |
-| `catraz up` | Start **infra only** (Warden + Squid) |
-| `catraz up --remote` | Also start the **agent daemon** (Remote Control from claude.ai) |
-| `catraz run -- …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`) |
+| `catraz run -- …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`); lazy-starts infra |
 | `catraz doctor` | Re-run the preflight; `--fix` repairs dirs/ownership |
 | `catraz status` | Health per service, URLs, quota snapshot |
 | `catraz ps` | List active agent containers for this repo |
@@ -112,7 +113,7 @@ with `catraz audit --web`.
 | `catraz logs` | Tail logs (`agent`\|`warden`\|`proxy`, or `--audit`) |
 | `catraz audit --web` | Open the read-only GitLab decision viewer (ephemeral loopback port) |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
-| `catraz down` | Stop the stack |
+| `catraz stop` | Stop the stack (alias: `catraz down`) |
 
 Run `catraz <command> --help` for the details of any command. Full CLI design:
 [`docs/design/agentic-workflow/04-cli.md`](docs/design/agentic-workflow/04-cli.md).
