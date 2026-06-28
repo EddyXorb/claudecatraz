@@ -65,17 +65,24 @@ def cmd_init(root, args, out):
     # 3. secrets — always create dir + files (empty allowed); compose mount fails opaquely otherwise
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
+    auth_mode = env.get("AUTH_MODE") or "subscription"
+    # Build the full secrets list: always GitLab tokens + Anthropic key in api_key mode.
+    secret_prompts = list(SECRETS)
+    if auth_mode == "api_key":
+        secret_prompts.append(("anthropic_api_key",
+                                "Anthropic API key (dedicated sandbox account, not your primary)",
+                                "Anthropic API key"))
 
     if args.yes:
         out.info("• --yes: keeping existing .env values, skipping prompts")
-        for filename, _, _desc in SECRETS:
+        for filename, _, _desc in secret_prompts:
             p = secrets_dir / filename
             if not p.exists():
                 p.write_text("")
                 p.chmod(0o600)
     else:
         print()
-        for filename, prompt, desc in SECRETS:
+        for filename, prompt, desc in secret_prompts:
             p = secrets_dir / filename
             cur = ""
             if p.exists():

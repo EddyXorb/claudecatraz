@@ -16,10 +16,15 @@ services:
         read_only: true
 """
 API_KEY_FRAGMENT = """\
+secrets:
+  anthropic_api_key:
+    file: ${PROJECT_DIR}/.catraz/secrets/anthropic_api_key
+
 services:
   claude-dev-env:
+    secrets: [anthropic_api_key]
     environment:
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
 """
 
 def auth_mode(root: Path) -> str:

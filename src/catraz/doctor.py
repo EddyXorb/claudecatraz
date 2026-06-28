@@ -256,6 +256,15 @@ def check_net(root, f):
         f.ok("net", "admin socket absent (stack down — start with `catraz up`)")
 
 
+def _read_secret_file(root, filename):
+    """Return the stripped contents of .catraz/secrets/<filename>, or '' if missing/empty."""
+    p = root / ".catraz" / "secrets" / filename
+    try:
+        return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+    except OSError:
+        return ""
+
+
 def check_auth(root, env, f):
     # Canonical rule (matches auth.auth_mode): absent/empty → subscription; only a
     # present-but-invalid value is an error.
@@ -263,19 +272,21 @@ def check_auth(root, env, f):
     if mode not in ("subscription", "api_key"):
         f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"); return
     cred = paths.claude_home(root) / ".credentials.json"
-    has_key = bool(env.get("ANTHROPIC_API_KEY"))
+    # api_key: key is in .catraz/secrets/anthropic_api_key (compose secret); bare env var is fallback.
+    api_key = _read_secret_file(root, "anthropic_api_key") or env.get("ANTHROPIC_API_KEY", "")
     if mode == "subscription":
-        if has_key: f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
+        if api_key: f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
         if not cred.exists(): f.bad("auth", "no .credentials.json", "run `catraz sync`")
         else:
             f.ok("auth", "subscription credential present")
             f.warn("auth", "subscription token refreshes are not persisted across restarts "
                    "— re-run `catraz sync` if auth breaks")
     else:
-        if not has_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty", "set it")
+        if not api_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty",
+                               "set it in .catraz/secrets/anthropic_api_key or .catraz/.env")
         if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",
                                 "remove .catraz/claude/.credentials.json")
-        if has_key and not cred.exists(): f.ok("auth", "api_key set")
+        if api_key and not cred.exists(): f.ok("auth", "api_key set")
 
 
 def check_base(root, env, f):
@@ -331,7 +342,11 @@ def _doctor_fix(root, env):
     # Always ensure secrets/ dir + empty token files exist (compose mount fails opaquely if missing).
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
-    for filename, _, _desc in SECRETS:
+    mode = env.get("AUTH_MODE") or "subscription"
+    secret_files = [f for f, _, _ in SECRETS]
+    if mode == "api_key":
+        secret_files.append("anthropic_api_key")
+    for filename in secret_files:
         p = secrets_dir / filename
         if not p.exists():
             p.write_text("")

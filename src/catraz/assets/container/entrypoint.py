@@ -162,11 +162,25 @@ def cmd_exec(cmd: list[str]) -> None:
     os.execvp(argv[0], argv)
 
 
+def _resolve_api_key() -> str:
+    """Read ANTHROPIC_API_KEY from _FILE (compose secret) falling back to the bare var."""
+    file_path = os.environ.get("ANTHROPIC_API_KEY_FILE")
+    if file_path:
+        try:
+            return Path(file_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    return os.environ.get("ANTHROPIC_API_KEY", "")
+
+
 def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
     mode = os.environ.get("AUTH_MODE") or "subscription"
-    if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
-        sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
+    if mode == "api_key":
+        key = _resolve_api_key()
+        if not key:
+            sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
+        os.environ["ANTHROPIC_API_KEY"] = key
     build_claude_home(claude_home, mode)
     configure_git_warden()
     spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
@@ -180,8 +194,11 @@ def cmd_start(claude_home: Path) -> None:
 def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     drop_to_dev()
     mode = os.environ.get("AUTH_MODE") or "subscription"
-    if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
-        sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
+    if mode == "api_key":
+        key = _resolve_api_key()
+        if not key:
+            sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
+        os.environ["ANTHROPIC_API_KEY"] = key
     build_claude_home(claude_home, mode, remote=False)
     configure_git_warden()
     os.execvp("claude", ["claude", *claude_args])

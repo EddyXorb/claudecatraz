@@ -54,3 +54,46 @@ def test_permission_mode_always_hardcoded(ep, tmp_path, monkeypatch):
     _, argv = calls[0]
     idx = argv.index("--permission-mode")
     assert argv[idx + 1] == "bypassPermissions"
+
+
+def test_api_key_file_exported_to_env(ep, tmp_path, monkeypatch):
+    """ANTHROPIC_API_KEY_FILE is read, stripped, and exported to os.environ before exec."""
+    key_file = tmp_path / "anthropic_api_key"
+    key_file.write_text("sk-ant-testkey\n")
+
+    calls = []
+    monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
+    monkeypatch.setattr(ep, "build_claude_home", lambda *a, **kw: None)
+    monkeypatch.setattr(ep, "configure_git_warden", lambda: None)
+    monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
+    monkeypatch.setenv("AUTH_MODE", "api_key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_FILE", str(key_file))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_RC_SPAWN", raising=False)
+    monkeypatch.delenv("CLAUDE_RC_DEBUG_FILE", raising=False)
+    monkeypatch.delenv("CLAUDE_RC_EXTRA_ARGS", raising=False)
+
+    ep.cmd_start(tmp_path / ".claude")
+    assert ep.os.environ["ANTHROPIC_API_KEY"] == "sk-ant-testkey"
+    assert len(calls) == 1
+
+
+def test_api_key_file_wins_over_bare_env(ep, tmp_path, monkeypatch):
+    """When both _FILE and bare var are set, the file value wins."""
+    key_file = tmp_path / "anthropic_api_key"
+    key_file.write_text("sk-from-file\n")
+
+    calls = []
+    monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
+    monkeypatch.setattr(ep, "build_claude_home", lambda *a, **kw: None)
+    monkeypatch.setattr(ep, "configure_git_warden", lambda: None)
+    monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
+    monkeypatch.setenv("AUTH_MODE", "api_key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_FILE", str(key_file))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    monkeypatch.delenv("CLAUDE_RC_SPAWN", raising=False)
+    monkeypatch.delenv("CLAUDE_RC_DEBUG_FILE", raising=False)
+    monkeypatch.delenv("CLAUDE_RC_EXTRA_ARGS", raising=False)
+
+    ep.cmd_start(tmp_path / ".claude")
+    assert ep.os.environ["ANTHROPIC_API_KEY"] == "sk-from-file"
