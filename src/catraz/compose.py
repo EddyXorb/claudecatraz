@@ -1,4 +1,5 @@
 """docker-compose call + invariants."""
+import datetime
 import hashlib
 import json
 import os
@@ -149,6 +150,36 @@ def compose_ps(root, *, prefix=None):
     except json.JSONDecodeError:
         rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
     return rows
+
+
+def _parse_docker_time(s: str) -> datetime.datetime | None:
+    """Parse a docker `StartedAt` timestamp into an aware datetime, or None.
+
+    Python 3.11+ `fromisoformat` accepts arbitrary fractional-second digits (it
+    truncates 9-digit nanoseconds to micros) and we normalize a trailing `Z` to an
+    explicit UTC offset. requires-python >=3.11, so no manual digit-stripping needed.
+    """
+    s = s.strip().replace("Z", "+00:00")
+    try:
+        return datetime.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def container_started_at(root, name_or_id, *, prefix=None) -> datetime.datetime | None:
+    """Container start time via `docker inspect`, or None if unreadable/unparseable.
+
+    Pass the `Name`/`ID` already carried by `compose ps --format json` rows — no
+    separate `ps -q` per service. None means "couldn't read it" (caller treats a
+    running-but-unknown service as stale, never as up-to-date)."""
+    try:
+        r = subprocess.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", name_or_id],
+                           capture_output=True, text=True)
+    except FileNotFoundError:
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    return _parse_docker_time(r.stdout)
 
 
 def resolve_service(name):

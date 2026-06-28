@@ -24,6 +24,7 @@ from catraz.ui import Out
 from catraz import image as _image_mod  # noqa: F401 (kept for tests that import catraz.image)
 from catraz.commands import setup, stack, observe
 from catraz.commands import run as run_cmd
+from catraz.commands import reload as reload_cmd
 
 # ── re-exports (keep these importable from catraz.cli for test back-compat) ─────
 # Pure imports keep working: from catraz.cli import X
@@ -114,6 +115,11 @@ def build_parser():
 
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
+    pr = sub.add_parser("reload", parents=[_g()],
+                        help="restart services whose .catraz config changed")
+    pr.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
+                    help="show the compose command without running it")
+
     pl = sub.add_parser("logs", parents=[_g()], help="tail logs (agent|warden|proxy, or --audit)")
     pl.add_argument("service", nargs="?", help="agent | warden | proxy")
     pl.add_argument("-f", "--follow", action="store_true", help="follow")
@@ -139,6 +145,7 @@ HANDLERS = {
     "up":      stack.cmd_up,
     "down":    stack.cmd_down,
     "status":  stack.cmd_status,
+    "reload":  reload_cmd.cmd_reload,
     "run":     run_cmd.cmd_run,
     "shell":   run_cmd.cmd_shell,
     "logs":    observe.cmd_logs,
