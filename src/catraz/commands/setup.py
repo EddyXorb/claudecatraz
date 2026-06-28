@@ -173,7 +173,9 @@ def _run_sync(root, out, source=None, force=False, quiet=False):
     from catraz.paths import claude_home
     home = claude_home(root)
     cmd = [sys.executable, str(entry), "sync", "--claude-home", str(home)]
-    src = source or env.get("CLAUDE_CREDENTIAL_SOURCE")
+    src = (source
+           or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
+           or env.get("CLAUDE_CREDENTIAL_SOURCE"))
     if src:
         cmd += ["--from", str(Path(src).expanduser())]
     # quiet swallows the entrypoint's "Credentials synced …" line for silent refreshes.
