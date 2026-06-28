@@ -128,6 +128,42 @@ def test_doctor_fix_creates_secrets_dir_and_files(tmp_path):
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
 
+def test_cmd_init_yes_reads_tokens_from_env(tmp_path, monkeypatch):
+    """--yes writes token env vars to secret files at 0600."""
+    root = _make_root(tmp_path)
+    monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read-from-env")
+    monkeypatch.setenv("GITLAB_WRITE_TOKEN", "glpat-write-from-env")
+    monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
+    monkeypatch.setattr("catraz.commands.setup.run_doctor",
+                        lambda *a, **kw: types.SimpleNamespace(items=[]))
+    monkeypatch.setattr("catraz.commands.setup.print_findings",
+                        lambda *a, **kw: (0, 0))
+
+    setup.cmd_init(root, _yes_args(), Out(color=False))
+
+    secrets_dir = root / ".catraz" / "secrets"
+    assert (secrets_dir / "gitlab_read_token").read_text() == "glpat-read-from-env"
+    assert (secrets_dir / "gitlab_write_token").read_text() == "glpat-write-from-env"
+    for filename, _, _ in SECRETS:
+        assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
+
+
+def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path, monkeypatch):
+    """--yes writes WARDEN_ALLOWED_PROJECTS from env to .env."""
+    root = _make_root(tmp_path)
+    monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
+    monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
+    monkeypatch.setattr("catraz.commands.setup.run_doctor",
+                        lambda *a, **kw: types.SimpleNamespace(items=[]))
+    monkeypatch.setattr("catraz.commands.setup.print_findings",
+                        lambda *a, **kw: (0, 0))
+
+    setup.cmd_init(root, _yes_args(), Out(color=False))
+
+    env = load_env(root / ".catraz" / ".env")
+    assert env.get("WARDEN_ALLOWED_PROJECTS") == "group/proj-a,group/proj-b"
+
+
 def test_doctor_fix_does_not_overwrite_existing_token(tmp_path):
     """doctor --fix leaves an already-populated token file unchanged."""
     root = _make_root(tmp_path)

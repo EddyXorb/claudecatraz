@@ -75,11 +75,35 @@ def cmd_init(root, args, out):
 
     if args.yes:
         out.info("• --yes: keeping existing .env values, skipping prompts")
+        # Secret filenames are the lowercase form of their env var names
+        # (e.g. gitlab_read_token <-> GITLAB_READ_TOKEN).
         for filename, _, _desc in secret_prompts:
-            p = secrets_dir / filename
-            if not p.exists():
-                p.write_text("")
-                p.chmod(0o600)
+            path = secrets_dir / filename
+            env_val = os.environ.get(filename.upper(), "").strip()
+            if env_val:
+                path.write_text(env_val)
+                path.chmod(0o600)
+            elif not path.exists():
+                path.write_text("")
+                path.chmod(0o600)
+
+        # .env key injection — different storage from secrets above (dict, not files).
+        gitlab_url = os.environ.get("GITLAB_URL", "").strip()
+        if gitlab_url:
+            updates["GITLAB_URL"] = gitlab_url
+
+        raw_projects = os.environ.get("WARDEN_ALLOWED_PROJECTS", "").strip()
+        if raw_projects:
+            projects = [proj.strip() for proj in raw_projects.split(",") if proj.strip()]
+            valid = []
+            for proj in projects:
+                reason = validate_project(proj)
+                if reason:
+                    out.warn(f"  WARDEN_ALLOWED_PROJECTS: skipping {proj!r}: {reason}")
+                else:
+                    valid.append(proj)
+            if valid:
+                updates["WARDEN_ALLOWED_PROJECTS"] = ",".join(valid)
     else:
         print()
         for filename, prompt, desc in secret_prompts:
