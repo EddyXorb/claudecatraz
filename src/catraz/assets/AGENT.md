@@ -10,6 +10,23 @@ You are running as user `dev` in the container `claude-dev-env`. The `/workspace
 folder is a **bind-mount** — the host (VSCode) and the agent share the same
 working clone. Every change is immediately visible on the host and vice versa.
 
+## Persistence — `/workspace` is the ONLY durable directory
+
+> **Do all of your work under `/workspace`.** Clone every repository, create every
+> file, and run every build there.
+
+`/workspace` is the **only** path backed by the host. The rest of the container
+filesystem — including your home directory (`/home/dev`, `~`), `/tmp`, and `/var/tmp`
+— is **ephemeral**: it lives only inside this container and is **permanently lost**
+the moment the session ends. Anything you `git clone`, write, or build outside
+`/workspace` will silently disappear with no way to recover it.
+
+- ✅ `cd /workspace && git clone <url>` — survives, visible on the host.
+- ❌ `cd ~ && git clone <url>` or cloning into `/tmp` — gone when the container stops.
+
+When in doubt, run `pwd` and confirm you are under `/workspace` before starting
+work. The container always starts you there.
+
 ---
 
 ## Network & Egress
