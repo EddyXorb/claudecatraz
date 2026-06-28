@@ -14,6 +14,9 @@ services:
       - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
       # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
+      # ADMIN_UDS is the authoritative source of the admin socket path.
+      # The host-side CLI path (.catraz/run/warden/admin.sock in observe.py/doctor.py)
+      # mirrors it by contract (bind-mount: host .catraz/run/warden → container /run/warden).
       - ADMIN_UDS=/run/warden/admin.sock
       # Non-secret policy — SOURCE OF TRUTH is config/warden.toml. The vars below
       # OVERRIDE the toml only when set (non-empty); leave empty to use warden.toml.
@@ -31,7 +34,7 @@ services:
       - ${PROJECT_DIR}/.catraz/run/warden:/run/warden   # Socket directory (file is created at runtime)
     networks: [agent-net, egress-net]
     healthcheck:
-      test: ["CMD","python3","-c","import socket;socket.socket(socket.AF_UNIX).connect('/run/warden/admin.sock')"]
+      test: ["CMD","python3","-c","import os,socket;socket.socket(socket.AF_UNIX).connect(os.environ.get('ADMIN_UDS','/run/warden/admin.sock'))"]
       interval: 10s
       timeout: 3s
       retries: 5
