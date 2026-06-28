@@ -115,7 +115,7 @@ If `--confirm` was set, present the final plan path and a short summary, then wa
 
 ## Step 6 — Execution (unless `--plan-only`)
 
-Run execution in **execution subagents** (see *Models & subagents*): **Sonnet by default**, Opus only if the user explicitly asked for Opus execution. Execution never runs inline in the orchestrator session. The orchestrator dispatches work, hands each subagent its slice plus the relevant plan file(s), and collects results.
+Run execution in **execution subagents** (see *Models & subagents*): **Sonnet by default**, Opus only if the user explicitly asked for Opus execution. Execution never runs inline in the orchestrator session. The orchestrator dispatches work, hands each subagent its slice plus the relevant plan file(s), and collects results. Commit the work in reasonably small commits, or let the executors do it. Commit even if the user didn't ask for it (but don't commit if he explicitly said "plan-only" or "don't commit").
 
 **Single-file plan:** dispatch it to one execution subagent.
 
