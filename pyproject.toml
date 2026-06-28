@@ -5,6 +5,9 @@ requires-python = ">=3.11"
 description = "Sandbox front door for an autonomous Claude Code agent."
 dependencies = []
 
+[dependency-groups]
+dev = ["pytest"]
+
 [project.scripts]
 catraz = "catraz.cli:main"
 
