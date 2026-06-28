@@ -1,0 +1,187 @@
+import argparse
+import re
+from pathlib import Path
+
+from catraz.envfile import load_env, unset_env_keys
+from catraz.policy import _resolve_allowed_projects, set_toml_list, set_toml_scalar, validate_project
+from catraz.ui import Out
+
+from ._secrets import _ensure_secret, _write_secret_value
+from ._wizard_yes import _VALID_GITLAB_MODES
+
+
+def _read_branch_prefix(env: dict[str, str], warden_toml: Path | None) -> str:
+    """Current branch_prefix: env override wins, else read from warden.toml."""
+    ov = env.get("WARDEN_BRANCH_PREFIX", "").strip()
+    if ov:
+        return ov
+    if not warden_toml or not warden_toml.exists():
+        return "claude/"
+    text = warden_toml.read_text(encoding="utf-8")
+    m = re.search(r'branch_prefix\s*=\s*"([^"]*)"', text)
+    return m.group(1) if m else "claude/"
+
+
+def _prompt_auth_mode(env: dict[str, str], args: argparse.Namespace, out: Out) -> str:
+    auth_mode = env.get("AUTH_MODE") or "subscription"
+    if args.force or "AUTH_MODE" not in env:
+        auth_mode = out.choice(
+            "Claude auth mode?",
+            [("subscription", "subscription — import host ~/.claude (default)"),
+             ("api_key", "api_key — dedicated Anthropic API key")],
+            default=0 if auth_mode == "subscription" else 1,
+        )
+    return auth_mode
+
+
+def _prompt_gitlab_mode(env: dict[str, str], out: Out) -> str:
+    cur_mode = (env.get("GITLAB_MODE") or "read-write").strip()
+    if cur_mode not in _VALID_GITLAB_MODES:
+        cur_mode = "read-write"
+    return out.choice(
+        "GitLab integration?",
+        [("read-write", "read-write — read + push (needs read & write tokens)"),
+         ("read-only", "read-only — read only (needs a read token)"),
+         ("off", "off — no GitLab (the agent can't talk to GitLab)")],
+        default={"read-write": 0, "read-only": 1, "off": 2}[cur_mode],
+    )
+
+
+def _prompt_gitlab_tokens(
+    secrets_dir: Path, mode: str, args: argparse.Namespace, out: Out
+) -> None:
+    existing_read = ""
+    p_read = secrets_dir / "gitlab_read_token"
+    if p_read.exists() and not args.force:
+        try:
+            existing_read = p_read.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    val = out.secret("GitLab READ token (read_api, read_repository)", current=existing_read)
+    _write_secret_value(secrets_dir, "gitlab_read_token", val)
+    if not val:
+        out.warn("gitlab_read_token left empty — doctor will flag it")
+
+    if mode == "read-write":
+        existing_write = ""
+        p_write = secrets_dir / "gitlab_write_token"
+        if p_write.exists() and not args.force:
+            try:
+                existing_write = p_write.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+        val = out.secret("GitLab WRITE token (api scope)", current=existing_write)
+        _write_secret_value(secrets_dir, "gitlab_write_token", val)
+        if not val:
+            out.warn("gitlab_write_token left empty — doctor will flag it")
+    else:
+        _ensure_secret(secrets_dir, "gitlab_write_token")
+
+
+def _prompt_allowed_projects(
+    root: Path,
+    env: dict[str, str],
+    warden_toml: Path,
+    args: argparse.Namespace,
+    out: Out,
+) -> None:
+    cur_proj, _ = _resolve_allowed_projects(root, env)
+    if cur_proj and not args.force:
+        out.info(f"\n  allowed projects already set: {', '.join(cur_proj)} — keeping.")
+        return
+    print()
+    out.info("  Which GitLab project(s) may the agent touch? Full path(s),")
+    out.info("  e.g. group/sub/project — comma-separated, no wildcards.")
+    raw = out.ask("projects (group/sub/project,...)", "")
+    projects = [p.strip() for p in raw.split(",") if p.strip()]
+    valid: list[str] = []
+    for p in projects:
+        reason = validate_project(p)
+        if reason:
+            out.warn(f"skipping {p!r}: {reason}")
+        else:
+            valid.append(p)
+    if valid and warden_toml.exists():
+        set_toml_list(warden_toml, "allowed_projects", valid)
+        out.info(f"  • wrote {len(valid)} project(s) to warden.toml")
+    elif not valid:
+        out.warn(
+            "no projects allowed yet — the stack still starts (you can "
+            "work offline), but every GitLab op is denied until you add a "
+            "project to allowed_projects in .catraz/config/warden.toml"
+        )
+
+
+def _prompt_branch_prefix(
+    env: dict[str, str], warden_toml: Path, env_path: Path, out: Out
+) -> None:
+    cur_prefix = _read_branch_prefix(env, warden_toml)
+    prefix = out.ask("Branch prefix the agent may push to", cur_prefix or "claude/")
+    if warden_toml.exists():
+        set_toml_scalar(warden_toml, "branch_prefix", prefix)
+    unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
+
+
+def _prompt_anthropic_key(
+    secrets_dir: Path, args: argparse.Namespace, out: Out
+) -> None:
+    existing_key = ""
+    p_key = secrets_dir / "anthropic_api_key"
+    if p_key.exists() and not args.force:
+        try:
+            existing_key = p_key.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    val = out.secret(
+        "Anthropic API key (dedicated sandbox account, not your primary)",
+        current=existing_key,
+    )
+    _write_secret_value(secrets_dir, "anthropic_api_key", val)
+    if not val:
+        out.warn("anthropic_api_key left empty — doctor will flag it")
+
+
+def _wizard_interactive(
+    root: Path,
+    env: dict[str, str],
+    env_path: Path,
+    secrets_dir: Path,
+    warden_toml: Path,
+    updates: dict[str, str],
+    args: argparse.Namespace,
+    out: Out,
+) -> None:
+    """Interactive wizard: each question offers a sensible default via one Enter."""
+    print()
+
+    auth_mode = _prompt_auth_mode(env, args, out)
+    updates["AUTH_MODE"] = auth_mode
+
+    mode = _prompt_gitlab_mode(env, out)
+    updates["GITLAB_MODE"] = mode
+
+    if mode != "off":
+        url = out.ask(
+            "GitLab base URL (set for self-hosted)",
+            env.get("GITLAB_URL") or "https://gitlab.com",
+        )
+        updates["GITLAB_URL"] = url
+        _prompt_gitlab_tokens(secrets_dir, mode, args, out)
+        _prompt_allowed_projects(root, env, warden_toml, args, out)
+        _prompt_branch_prefix(env, warden_toml, env_path, out)
+    else:
+        _ensure_secret(secrets_dir, "gitlab_read_token")
+        _ensure_secret(secrets_dir, "gitlab_write_token")
+
+    if auth_mode == "api_key":
+        _prompt_anthropic_key(secrets_dir, args, out)
+
+    proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
+    url_part = (f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}"
+                if mode != "off" else "")
+    proj_part = f"  projects={len(proj_count)}" if mode != "off" else ""
+    out.info(
+        f"\n• auth_mode={auth_mode}  gitlab_mode={mode}"
+        f"{url_part}{proj_part}"
+        "  (edit quotas in .catraz/config/warden.toml)"
+    )

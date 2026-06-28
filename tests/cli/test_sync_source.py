@@ -22,6 +22,7 @@ def _stub_entrypoint(tmp_path):
 def test_shell_env_credential_source(tmp_path, monkeypatch):
     """CLAUDE_CREDENTIAL_SOURCE in os.environ → passed as --from."""
     import catraz.commands.setup as setup
+    from catraz.commands.setup import _sync as setup_sync
     root = _make_root(tmp_path / "project")
     asset_root = _stub_entrypoint(tmp_path / "cache")
 
@@ -33,7 +34,7 @@ def test_shell_env_credential_source(tmp_path, monkeypatch):
         r.returncode = 0
         return r
 
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
+    monkeypatch.setattr(setup_sync.subprocess, "run", fake_run)
     from catraz import paths
     monkeypatch.setattr(paths, "asset_root", lambda: asset_root)
     monkeypatch.setenv("CLAUDE_CREDENTIAL_SOURCE", "/custom/claude")
@@ -51,6 +52,7 @@ def test_shell_env_credential_source(tmp_path, monkeypatch):
 def test_from_flag_overrides_shell_env(tmp_path, monkeypatch):
     """--from flag takes precedence over shell env CLAUDE_CREDENTIAL_SOURCE."""
     import catraz.commands.setup as setup
+    from catraz.commands.setup import _sync as setup_sync
     root = _make_root(tmp_path / "project")
     asset_root = _stub_entrypoint(tmp_path / "cache")
 
@@ -62,7 +64,7 @@ def test_from_flag_overrides_shell_env(tmp_path, monkeypatch):
         r.returncode = 0
         return r
 
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
+    monkeypatch.setattr(setup_sync.subprocess, "run", fake_run)
     from catraz import paths
     monkeypatch.setattr(paths, "asset_root", lambda: asset_root)
     monkeypatch.setenv("CLAUDE_CREDENTIAL_SOURCE", "/shell/claude")
