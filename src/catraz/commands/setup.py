@@ -78,7 +78,17 @@ def cmd_init(root, args, out):
             elif not cur:
                 out.warn(f"{key} left empty — doctor will flag it")
 
-        # 4. allowed projects (the roast fix: without this the warden won't start)
+        # 4. GitLab base URL (non-secret, use input() not getpass)
+        cur_url = env.get("GITLAB_URL", "")
+        default_url = cur_url or "https://gitlab.com"
+        print()
+        raw_url = input(f"  GitLab base URL (set this for self-hosted GitLab)\n"
+                        f"  GITLAB_URL [{default_url}]: ").strip()
+        new_url = raw_url or default_url
+        if new_url != cur_url:
+            updates["GITLAB_URL"] = new_url
+
+        # 5. allowed projects (the roast fix: without this the warden won't start)
         cur_proj, _ = _resolve_allowed_projects(root, env)
         if cur_proj and not args.force:
             out.info(f"\n  allowed projects already set: {', '.join(cur_proj)} — keeping.")
@@ -163,7 +173,9 @@ def _run_sync(root, out, source=None, force=False, quiet=False):
     from catraz.paths import claude_home
     home = claude_home(root)
     cmd = [sys.executable, str(entry), "sync", "--claude-home", str(home)]
-    src = source or env.get("CLAUDE_CREDENTIAL_SOURCE")
+    src = (source
+           or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
+           or env.get("CLAUDE_CREDENTIAL_SOURCE"))
     if src:
         cmd += ["--from", str(Path(src).expanduser())]
     # quiet swallows the entrypoint's "Credentials synced …" line for silent refreshes.

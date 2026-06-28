@@ -37,3 +37,40 @@ def test_doctor_auth_warns_about_refresh_persistence(tmp_path):
     # tie the assertion to the auth SECTION so a misplaced warn elsewhere can't pass it
     assert any(i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower()
                for i in f.items)
+
+
+def test_doctor_auth_absent_auth_mode_is_subscription(tmp_path):
+    """AUTH_MODE absent → defaults to subscription (no bad finding)."""
+    from catraz import doctor
+    (tmp_path/".catraz/claude").mkdir(parents=True)
+    (tmp_path/".catraz/claude/.credentials.json").write_text("{}")
+    f = doctor.Findings()
+    doctor.check_auth(tmp_path, {}, f)   # no AUTH_MODE key
+    assert not any(i[0] == doctor.BAD for i in f.items)
+
+
+def test_doctor_auth_empty_auth_mode_is_subscription(tmp_path):
+    """AUTH_MODE="" → defaults to subscription (no bad finding)."""
+    from catraz import doctor
+    (tmp_path/".catraz/claude").mkdir(parents=True)
+    (tmp_path/".catraz/claude/.credentials.json").write_text("{}")
+    f = doctor.Findings()
+    doctor.check_auth(tmp_path, {"AUTH_MODE": ""}, f)
+    assert not any(i[0] == doctor.BAD for i in f.items)
+
+
+def test_doctor_auth_bogus_mode_is_bad(tmp_path):
+    """AUTH_MODE=bogus → bad finding."""
+    from catraz import doctor
+    f = doctor.Findings()
+    doctor.check_auth(tmp_path, {"AUTH_MODE": "bogus"}, f)
+    assert any(i[0] == doctor.BAD for i in f.items)
+
+
+def test_doctor_auth_api_key_with_key(tmp_path):
+    """api_key mode with key set and no cred file → ok."""
+    from catraz import doctor
+    (tmp_path/".catraz/claude").mkdir(parents=True)
+    f = doctor.Findings()
+    doctor.check_auth(tmp_path, {"AUTH_MODE": "api_key", "ANTHROPIC_API_KEY": "sk-x"}, f)
+    assert not any(i[0] == doctor.BAD for i in f.items)

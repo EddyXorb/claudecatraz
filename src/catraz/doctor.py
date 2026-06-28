@@ -126,13 +126,22 @@ def check_env(root, env, f):
                 f.ok("env", f"{d.name}/ owned by DEV_UID")
 
 
+def check_gitlab(env, f):
+    url = (env.get("GITLAB_URL") or "").strip()
+    if not url:
+        f.warn("tokens", "GITLAB_URL unset — defaulting to https://gitlab.com",
+               "set GITLAB_URL in .catraz/.env for self-hosted GitLab")
+    else:
+        f.ok("tokens", f"GitLab endpoint: {url}")
+
+
 def check_tokens(env, f):
     for key, _ in SECRETS:
         if not env.get(key):
             f.bad("tokens", f"{key} is empty", "run `catraz init`")
     if any(not env.get(k) for k, _ in SECRETS):
         return
-    f.ok("tokens", "all three secrets are set")
+    f.ok("tokens", "both GitLab tokens are set")
     _probe_gitlab_tokens(env, f)
 
 
@@ -228,7 +237,9 @@ def check_net(root, f):
 
 
 def check_auth(root, env, f):
-    mode = env.get("AUTH_MODE", "")
+    # Canonical rule (matches auth.auth_mode): absent/empty → subscription; only a
+    # present-but-invalid value is an error.
+    mode = env.get("AUTH_MODE") or "subscription"
     if mode not in ("subscription", "api_key"):
         f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"); return
     cred = paths.claude_home(root) / ".credentials.json"
@@ -281,6 +292,7 @@ def run_doctor(root, only=None, fix=False):
     if "docker" in sections: check_docker(f)
     if "compose" in sections: check_compose(root, env, f)
     if "env" in sections: check_env(root, env, f)
+    if "tokens" in sections: check_gitlab(env, f)
     if "tokens" in sections: check_tokens(env, f)
     if "policy" in sections: check_policy(root, env, f)
     if "claude" in sections: check_claude(root, env, f)

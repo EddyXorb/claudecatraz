@@ -6,6 +6,8 @@ from catraz import paths, __version__
 def test_asset_root_extracts(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     root = paths.asset_root()
     assert root == tmp_path / ".cache" / "catraz" / __version__
     assert (root / "assets" / "warden").is_dir()
@@ -33,6 +35,8 @@ def test_nested_catraz_refused(tmp_path):
 
 def test_asset_cache_refreshes_on_source_change(tmp_path, monkeypatch):
     monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     root = paths.asset_root()
     sig1 = (root / ".extracted").read_text()
     src = paths._repo_root() / "src/catraz/assets/compose/docker-compose.yml"
@@ -49,6 +53,28 @@ def test_asset_cache_refreshes_on_source_change(tmp_path, monkeypatch):
 
 def test_asset_cache_stable_without_change(tmp_path, monkeypatch):
     monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     sig1 = (paths.asset_root() / ".extracted").read_text()
     sig2 = (paths.asset_root() / ".extracted").read_text()
     assert sig1 == sig2                                 # no churn when source is unchanged
+
+
+def test_catraz_cache_dir_overrides_home(tmp_path, monkeypatch):
+    """CATRAZ_CACHE_DIR → <dir>/catraz/<v>."""
+    cache_dir = tmp_path / "custom_cache"
+    cache_dir.mkdir()
+    monkeypatch.setenv("CATRAZ_CACHE_DIR", str(cache_dir))
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    root = paths.asset_root()
+    assert root == cache_dir / "catraz" / __version__
+
+
+def test_xdg_cache_home_overrides_home(tmp_path, monkeypatch):
+    """XDG_CACHE_HOME set (no CATRAZ_CACHE_DIR) → <xdg>/catraz/<v>."""
+    xdg_dir = tmp_path / "xdg_cache"
+    xdg_dir.mkdir()
+    monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_dir))
+    root = paths.asset_root()
+    assert root == xdg_dir / "catraz" / __version__

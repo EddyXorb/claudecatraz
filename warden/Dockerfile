@@ -15,8 +15,8 @@ RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim
 
-# Non-root runtime user. DEV_UID passt den Owner an die Host-UID an, damit
-# Bind-gemountete State- und Log-Verzeichnisse ohne Docker-Tools lesbar sind (W12).
+# Non-root runtime user. DEV_UID adjusts the owner to the host UID so that
+# bind-mounted state and log directories are readable without Docker tools (W12).
 ARG DEV_UID=10001
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gosu \

@@ -13,7 +13,10 @@ services:
       - GITLAB_READ_TOKEN=${GITLAB_READ_TOKEN}
       - GITLAB_WRITE_TOKEN=${GITLAB_WRITE_TOKEN}
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
-      # Admin/Viewer über Unix-Socket (Commit 2.4) — kein Subnetz/keine feste IP mehr.
+      # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
+      # ADMIN_UDS is the authoritative source of the admin socket path.
+      # The host-side CLI path (.catraz/run/warden/admin.sock in observe.py/doctor.py)
+      # mirrors it by contract (bind-mount: host .catraz/run/warden → container /run/warden).
       - ADMIN_UDS=/run/warden/admin.sock
       # Non-secret policy — SOURCE OF TRUTH is config/warden.toml. The vars below
       # OVERRIDE the toml only when set (non-empty); leave empty to use warden.toml.
@@ -23,15 +26,15 @@ services:
       - MAX_OPEN_BRANCHES=${WARDEN_MAX_OPEN_BRANCHES:-}
       - MAX_WRITES_PER_HOUR=${WARDEN_MAX_WRITES_PER_HOUR:-}
     volumes:
-      # Bind-Mounts statt Named Volumes → SQLite-State + Audit-JSONL ohne Docker-Tools
-      # auditierbar (W12). DEV_UID steuert Owner, damit Host-User lesen kann.
+      # Bind-mounts instead of named volumes → SQLite state + audit JSONL auditable
+      # without Docker tools (W12). DEV_UID controls ownership so the host user can read.
       - ${PROJECT_DIR}/.catraz/state/warden:/var/lib/warden
       - ${PROJECT_DIR}/.catraz/logs/warden:/var/log/warden
       - ${PROJECT_DIR}/.catraz/config/warden.toml:/etc/warden/warden.toml:ro
-      - ${PROJECT_DIR}/.catraz/run/warden:/run/warden   # Socket-Verzeichnis (Datei entsteht zur Laufzeit)
+      - ${PROJECT_DIR}/.catraz/run/warden:/run/warden   # Socket directory (file is created at runtime)
     networks: [agent-net, egress-net]
     healthcheck:
-      test: ["CMD","python3","-c","import socket;socket.socket(socket.AF_UNIX).connect('/run/warden/admin.sock')"]
+      test: ["CMD","python3","-c","import os,socket;socket.socket(socket.AF_UNIX).connect(os.environ.get('ADMIN_UDS','/run/warden/admin.sock'))"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -42,29 +45,28 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  # ── Forward-Proxy (Research/Build-Egress, haelt KEINE Credentials) ──────────
+  # ── Forward-Proxy (Research/Build-Egress, holds NO credentials) ─────────────
   # docs/design/agentic-workflow/02-forward-proxy/03-deployment.md
   forward-proxy:
     build:
-      context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/forward-proxy   # Squid mit OpenSSL/ssl_bump-Support
+      context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/forward-proxy   # Squid with OpenSSL/ssl_bump support
       args:
-        DEV_UID: ${DEV_UID:-1000}               # Audit-Log host-lesbar (README §11.6)
+        DEV_UID: ${DEV_UID:-1000}               # Audit log readable on host (README §11.6)
     networks: [agent-net, egress-net]
     volumes:
-      # host-editierbare Config, read-only (zentraler config/-Ordner, README §11):
+      # host-editable config, read-only (central config/ folder, README §11):
       - ${PROJECT_DIR}/.catraz/config/squid.conf:/etc/squid/squid.conf:ro
       - ${PROJECT_DIR}/.catraz/config/allowlist.txt:/etc/squid/allowlist.txt:ro
-      - ${PROJECT_DIR}/.catraz/logs/squid:/var/log/squid   # Bind-Mount: Egress-Audit (access.log)
+      - ${PROJECT_DIR}/.catraz/logs/squid:/var/log/squid   # Bind-mount: egress audit (access.log)
     read_only: true
     tmpfs:
       - /var/spool/squid
       - /var/run
       - /tmp
     healthcheck:
-      # TCP-Liveness von 3128 (dependency-arm, version-stabil). Die im Design
-      # genannte squidclient-mgr-Variante braeuchte eine manager-ACL — fuer reine
-      # Liveness genuegt der Port-Check.
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/3128"]
+      # TCP liveness check on the squid port (SQUID_PORT default 3128). If you change
+      # http_port in squid.conf, also set SQUID_PORT in .catraz/.env to match.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/${SQUID_PORT:-3128}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -87,8 +89,8 @@ services:
         NODE_VERSION: ${NODE_VERSION:-22}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
         DEV_UID: ${DEV_UID:-1000}
-    # NUR agent-net (internal) -> keine eigene Internet-/DNS-Route. Research/Build
-    # laeuft ausschliesslich ueber den Forward-Proxy (02-network-isolation.md).
+    # ONLY agent-net (internal) -> no direct internet/DNS route. Research/Build
+    # traffic runs exclusively through the Forward-Proxy (02-network-isolation.md).
     networks: [agent-net]
     # The agent is treated as potentially malicious. The base image inherits setuid/
     # setgid binaries from Ubuntu (passwd, su, mount, ...) as a latent privilege-
@@ -98,16 +100,20 @@ services:
       - no-new-privileges:true
     environment:
       - AUTH_MODE=${AUTH_MODE}
-      # Research/Build-Egress ueber den Forward-Proxy (§6.6):
-      - http_proxy=http://forward-proxy:3128
-      - https_proxy=http://forward-proxy:3128
-      - HTTP_PROXY=http://forward-proxy:3128
-      - HTTPS_PROXY=http://forward-proxy:3128
-      # gitlab-warden direkt (kein Proxy); loopback ebenfalls.
+      # Agent runtime (advanced) — remote-control invocation tuning:
+      - CLAUDE_RC_SPAWN=${CLAUDE_RC_SPAWN:-same-dir}
+      - CLAUDE_RC_DEBUG_FILE=${CLAUDE_RC_DEBUG_FILE:-}
+      - CLAUDE_RC_EXTRA_ARGS=${CLAUDE_RC_EXTRA_ARGS:-}
+      # Research/Build egress via the Forward-Proxy (§6.6):
+      - http_proxy=http://forward-proxy:${SQUID_PORT:-3128}
+      - https_proxy=http://forward-proxy:${SQUID_PORT:-3128}
+      - HTTP_PROXY=http://forward-proxy:${SQUID_PORT:-3128}
+      - HTTPS_PROXY=http://forward-proxy:${SQUID_PORT:-3128}
+      # gitlab-warden directly (no proxy); loopback likewise.
       - no_proxy=gitlab-warden,localhost,127.0.0.1
       - NO_PROXY=gitlab-warden,localhost,127.0.0.1
-      # Kanonische GitLab-URL fuer den insteadOf-Rewrite auf gitlab-warden (entrypoint.py).
-      # Kein Token im Agent-Container (R6/W9.3).
+      # Canonical GitLab URL for the insteadOf rewrite to gitlab-warden (entrypoint.py).
+      # No token in the agent container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
     volumes:
       - type: bind
@@ -118,10 +124,10 @@ services:
         tmpfs: { size: 1048576, mode: 0700 }
       - type: tmpfs
         target: /home/dev/.claude
-    # Network isolation (agent-net internal: true + forward-proxy für http_proxy) wird
-    # in Stufe 03 aktiviert, sobald der Forward-Proxy-Service im Compose steht.
-    # Bis dahin: Default-Bridge (Internet-Zugriff für api.anthropic.com).
-    # Kein `command:` — der claude-layer setzt ENTRYPOINT ["python3","/entrypoint.py"].
+    # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
+    # activated in stage 03 once the Forward-Proxy service is in Compose.
+    # Until then: default bridge (internet access for api.anthropic.com).
+    # No `command:` — the claude-layer sets ENTRYPOINT ["python3","/entrypoint.py"].
     working_dir: /workspace
     tty: true
     stdin_open: true
@@ -133,5 +139,5 @@ services:
         condition: service_healthy
 
 networks:
-  agent-net:  { internal: true }   # KEIN Egress — Agent erreicht nur Proxy (+ MCP-Sidecars)
-  egress-net: {}                   # Internet — nur Forward-Proxy & MCP-Sidecars
+  agent-net:  { internal: true }   # NO egress — agent reaches only the proxy (+ MCP sidecars)
+  egress-net: {}                   # Internet — only Forward-Proxy & MCP sidecars

@@ -9,6 +9,7 @@ Container entrypoint — and host-side credential sync tool.
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -87,16 +88,16 @@ def configure_git_warden() -> None:
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
 
-# NOTE (Stufe 01 — Bootstrap-Härtung, R6):
-# Die früheren Funktionen configure_git() und configure_gitlab() wurden bewusst entfernt.
-# Sie injizierten GitLab-Credentials in den Agent-Container:
-#   - configure_git()    schrieb GITLAB_GIT_TOKEN (write_repository) in ~/.netrc
-#   - configure_gitlab() registrierte das MCP mit Authorization: Bearer GITLAB_API_TOKEN
-# Beide Tokens lagen damit im Prozessraum des Agenten und galten als kompromittiert
-# (docs/design/agentic-workflow, §3/§4). Der Agent hält ab jetzt KEIN GitLab-Token.
-# GitLab-Zugriff kehrt in Stufe 02 über den Warden zurück (git Smart-HTTP-Proxy + REST-
-# Filter); der git-Remote zeigt dann auf den Warden, nicht auf gitlab.com.
-# GitHub ist vorerst nicht im Scope (configure_github wurde entfernt).
+# NOTE (Stage 01 — Bootstrap hardening, R6):
+# The former configure_git() and configure_gitlab() functions were deliberately removed.
+# They injected GitLab credentials into the agent container:
+#   - configure_git()    wrote GITLAB_GIT_TOKEN (write_repository) into ~/.netrc
+#   - configure_gitlab() registered the MCP with Authorization: Bearer GITLAB_API_TOKEN
+# Both tokens were therefore in the agent's process space and considered compromised
+# (docs/design/agentic-workflow, §3/§4). The agent no longer holds any GitLab token.
+# GitLab access returns in stage 02 via the Warden (git Smart-HTTP proxy + REST
+# filter); the git remote will then point to the Warden, not gitlab.com.
+# GitHub is out of scope for now (configure_github was removed).
 
 
 def drop_to_dev() -> None:
@@ -117,20 +118,30 @@ def drop_to_dev() -> None:
     os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
 
+def cmd_exec(cmd: list[str]) -> None:
+    drop_to_dev()                       # chowns /workspace + re-execs as dev (as in start/run)
+    argv = cmd or ["bash"]
+    os.execvp(argv[0], argv)
+
+
 def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
-    mode = os.environ.get("AUTH_MODE", "subscription")
+    mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
     build_home(claude_home, mode)
     configure_git_warden()
-    os.execvp("claude", ["claude", "remote-control", "--permission-mode", "bypassPermissions",
-                         "--spawn", "same-dir", "--debug-file", str(claude_home / "rc-debug.log")])
+    spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
+    debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
+    extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
+    os.execvp("claude", ["claude", "remote-control",
+                         "--permission-mode", "bypassPermissions",   # keep-fixed (headless)
+                         "--spawn", spawn, "--debug-file", debug, *extra])
 
 
 def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     drop_to_dev()
-    mode = os.environ.get("AUTH_MODE", "subscription")
+    mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key" and not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
     build_home(claude_home, mode, remote=False)
@@ -170,6 +181,8 @@ def main() -> None:
     rn = sub.add_parser("run")
     rn.add_argument("rest", nargs=argparse.REMAINDER)   # ["--", "<args>"...]
 
+    ex = sub.add_parser("exec"); ex.add_argument("rest", nargs=argparse.REMAINDER)
+
     args = parser.parse_args()
 
     if args.command == "sync":
@@ -179,6 +192,9 @@ def main() -> None:
         rest = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
         cmd_run(Path(args.claude_home).resolve(), rest)
         return
+    if args.command == "exec":
+        rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
+        cmd_exec(rest); return
     cmd_start(Path(args.claude_home).resolve())
 
 

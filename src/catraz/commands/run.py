@@ -9,12 +9,12 @@ from catraz.commands.stack import _row_ready, _security_preflight
 from catraz.commands.setup import _auto_sync_if_needed
 
 
-def _oneoff_args(relpath: str, tty: bool, claude_args: list[str]) -> list[str]:
+def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list[str]:
     args = ["run", "--rm", "--no-deps"]
     if not tty:
         args.append("-T")
     args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
-             "claude-dev-env", "run", "--", *claude_args]
+             "claude-dev-env", sub, "--", *sub_args]
     return args
 
 
@@ -46,7 +46,19 @@ def cmd_run(root, args, out):
     claude_args = (args.claude_args[1:]
                    if args.claude_args and args.claude_args[0] == "--"
                    else args.claude_args)
-    run_args = _oneoff_args(relpath, tty, claude_args)
+    run_args = _oneoff_args(relpath, tty, "run", claude_args)
+    extra_env = {"BASE_IMAGE": image.resolve_base(root)}
+    r = compose_run(root, run_args, check=False, extra_env=extra_env)
+    return r.returncode if r else EXIT_GENERAL
+
+
+def cmd_shell(root, args, out):
+    assert_real_dirs(root); auth.write_auth_fragment(root); assert_invariants(root)
+    _ensure_infra(root, out)
+    relpath = str(Path.cwd().resolve().relative_to(root)); relpath = "" if relpath == "." else relpath
+    tty = sys.stdin.isatty()
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd      # may be empty → entrypoint runs bash
+    run_args = _oneoff_args(relpath, tty, "exec", cmd)
     extra_env = {"BASE_IMAGE": image.resolve_base(root)}
     r = compose_run(root, run_args, check=False, extra_env=extra_env)
     return r.returncode if r else EXIT_GENERAL

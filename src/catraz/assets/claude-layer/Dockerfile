@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y gosu && \
     curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get install -y nodejs && rm -rf /var/lib/apt/lists/* && \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
-# UID-1000-Konflikt (Ubuntus `ubuntu`-User) auflösen, sonst scheitert useradd:
+# Resolve UID-1000 conflict (Ubuntu's `ubuntu` user), otherwise useradd fails:
 RUN (userdel -r ubuntu 2>/dev/null || true) && useradd -m -u ${DEV_UID} -s /bin/bash dev
 COPY container/entrypoint.py /entrypoint.py
 COPY AGENT.md /opt/claude-dev-env/AGENT.md
