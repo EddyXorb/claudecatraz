@@ -147,12 +147,14 @@ class TestGitLabModeReadOnly:
         assert not any(i[0] == doctor.BAD for i in f.items)
         assert any(i[0] == doctor.OK for i in f.items)
 
-    def test_check_policy_empty_allowlist_bad(self, tmp_path, monkeypatch):
-        """Empty allowlist must still be bad in read-only mode (warden needs it)."""
+    def test_check_policy_empty_allowlist_warns(self, tmp_path, monkeypatch):
+        """Empty allowlist in read-only: a warning, not bad — the stack still boots
+        and denies every GitLab op until a project is added."""
         _mock_allowlist(tmp_path, monkeypatch, [])
         f = doctor.Findings()
         doctor.check_policy(tmp_path, {"GITLAB_MODE": "read-only"}, f)
-        assert any(i[0] == doctor.BAD for i in f.items)
+        assert any(i[0] == doctor.WARN for i in f.items)
+        assert not any(i[0] == doctor.BAD for i in f.items)
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +202,13 @@ class TestGitLabModeReadWrite:
         doctor.check_tokens(tmp_path, {}, f)
         assert any(i[0] == doctor.BAD for i in f.items)
 
-    def test_empty_allowlist_bad(self, tmp_path, monkeypatch):
+    def test_empty_allowlist_warns(self, tmp_path, monkeypatch):
+        """read-write: empty allowlist warns (deny-all) — not bad, the stack boots."""
         _mock_allowlist(tmp_path, monkeypatch, [])
         f = doctor.Findings()
         doctor.check_policy(tmp_path, {"GITLAB_MODE": "read-write"}, f)
-        assert any(i[0] == doctor.BAD for i in f.items)
+        assert any(i[0] == doctor.WARN for i in f.items)
+        assert not any(i[0] == doctor.BAD for i in f.items)
 
     def test_check_gitlab_url_unset_warns(self):
         """URL-unset warning still fires in read-write mode."""

@@ -29,6 +29,13 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
 
 async def _serve() -> None:
     cfg = from_env()
+    if cfg.gitlab_enabled and not cfg.allowed_projects:
+        print(
+            "warden: WARNING: allowed_projects is empty — ALL GitLab operations "
+            "will be denied (R-rules) until a project is added to warden.toml. "
+            "The dev-env still starts for offline work.",
+            file=sys.stderr,
+        )
     upstream = Upstream(cfg)
     state = State(cfg.state_db_path)
     audit = AuditLog(cfg.audit_log_path)

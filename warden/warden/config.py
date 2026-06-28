@@ -1,7 +1,9 @@
 """Env → typed Config with hard fail-closed validation (W10).
 
-Missing token or empty allowlist ⇒ abort, never "open". `ALLOWED_PROJECTS`
-empty ⇒ nothing is allowed (fail-closed), not "everything".
+Missing token ⇒ abort, never "open". `ALLOWED_PROJECTS` empty ⇒ nothing is
+allowed (fail-closed *by denying*, not by crashing): the warden still boots so
+the dev-env can run offline, and every GitLab op is denied until a project is
+allowed. Fail-closed means *deny*, not *refuse to start*.
 
 GITLAB_MODE selects one of three operating modes:
   off         — GitLab is intentionally disabled; no token or allowlist required;
@@ -226,20 +228,20 @@ def _validate(cfg: Config) -> None:
     elif cfg.gitlab_mode == "read-only":
         if not cfg.read_token:
             problems.append("GITLAB_READ_TOKEN is required")
-        if not cfg.allowed_projects:
-            problems.append("ALLOWED_PROJECTS must be non-empty (fail-closed)")
         if not cfg.branch_prefix:
             problems.append("BRANCH_PREFIX must be non-empty")
+        # An empty allowlist is NOT a startup error: project_allowed() already
+        # denies everything, so the warden boots (dev-env runs offline) and
+        # simply refuses every GitLab op until a project is allowed.
 
     else:  # read-write (default)
         if not cfg.read_token:
             problems.append("GITLAB_READ_TOKEN is required")
         if not cfg.write_token:
             problems.append("GITLAB_WRITE_TOKEN is required")
-        if not cfg.allowed_projects:
-            problems.append("ALLOWED_PROJECTS must be non-empty (fail-closed)")
         if not cfg.branch_prefix:
             problems.append("BRANCH_PREFIX must be non-empty")
+        # Empty allowlist ⇒ deny-all (see read-only note above), not an abort.
 
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))

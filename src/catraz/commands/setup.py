@@ -344,9 +344,9 @@ def _wizard_interactive(root, env, env_path, secrets_dir, warden_toml,
                 out.info(f"  • wrote {len(valid)} project(s) to warden.toml")
             elif not valid:
                 out.warn(
-                    "no valid projects entered — the warden is fail-closed and "
-                    "the stack won't start until allowed_projects is set in "
-                    ".catraz/config/warden.toml"
+                    "no projects allowed yet — the stack still starts (you can "
+                    "work offline), but every GitLab op is denied until you add a "
+                    "project to allowed_projects in .catraz/config/warden.toml"
                 )
 
         # ── Branch prefix ─────────────────────────────────────────────────────

@@ -257,8 +257,9 @@ def check_policy(root, env, f):
     from catraz.policy import _resolve_allowed_projects, validate_project
     resolved, source = _resolve_allowed_projects(root, env)
     if not resolved:
-        f.bad("policy", f"allowed_projects empty (source: {source})",
-              "run `catraz init` — an empty allowlist is fail-closed (warden won't start)")
+        f.warn("policy", f"allowed_projects empty (source: {source})",
+               "stack still starts (offline work OK); every GitLab op is denied "
+               "until you add a project")
         return
     bad = []
     for p in resolved:

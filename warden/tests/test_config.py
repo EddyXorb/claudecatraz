@@ -83,10 +83,12 @@ def test_missing_tokens_abort_startup():
     assert "GITLAB_READ_TOKEN" in msg and "GITLAB_WRITE_TOKEN" in msg
 
 
-def test_empty_allowlist_aborts_startup():
-    """In GITLAB_MODE=read-write (default) an empty allowlist aborts."""
-    with pytest.raises(ConfigError, match="ALLOWED_PROJECTS"):
-        from_env({"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w"}, strict=True)
+def test_empty_allowlist_boots_and_denies():
+    """In GITLAB_MODE=read-write an empty allowlist does NOT abort: the warden
+    boots (dev-env runs offline) and project_allowed() denies every project."""
+    cfg = from_env({"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w"}, strict=True)
+    assert cfg.allowed_projects == ()
+    assert not cfg.project_allowed("group/proj")
 
 
 # --- GITLAB_MODE=off: no token or allowlist required --------------------------
@@ -138,10 +140,11 @@ def test_read_only_missing_read_token_aborts():
         from_env({"GITLAB_MODE": "read-only", "ALLOWED_PROJECTS": "group/proj"}, strict=True)
 
 
-def test_read_only_empty_allowlist_aborts():
-    """GITLAB_MODE=read-only: empty allowlist still aborts (fail-closed)."""
-    with pytest.raises(ConfigError, match="ALLOWED_PROJECTS"):
-        from_env({"GITLAB_MODE": "read-only", "GITLAB_READ_TOKEN": "r"}, strict=True)
+def test_read_only_empty_allowlist_boots_and_denies():
+    """GITLAB_MODE=read-only: empty allowlist boots (deny-all), not abort."""
+    cfg = from_env({"GITLAB_MODE": "read-only", "GITLAB_READ_TOKEN": "r"}, strict=True)
+    assert cfg.allowed_projects == ()
+    assert not cfg.project_allowed("group/proj")
 
 
 # --- Invalid mode aborts -------------------------------------------------------
