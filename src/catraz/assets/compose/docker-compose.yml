@@ -64,10 +64,9 @@ services:
       - /var/run
       - /tmp
     healthcheck:
-      # TCP liveness check on port 3128 (dependency anchor, version-stable). The
-      # squidclient-mgr variant mentioned in the design would need a manager ACL —
-      # for pure liveness the port check is sufficient.
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/3128"]
+      # TCP liveness check on the squid port (SQUID_PORT default 3128). If you change
+      # http_port in squid.conf, also set SQUID_PORT in .catraz/.env to match.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/${SQUID_PORT:-3128}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -106,10 +105,10 @@ services:
       - CLAUDE_RC_DEBUG_FILE=${CLAUDE_RC_DEBUG_FILE:-}
       - CLAUDE_RC_EXTRA_ARGS=${CLAUDE_RC_EXTRA_ARGS:-}
       # Research/Build egress via the Forward-Proxy (§6.6):
-      - http_proxy=http://forward-proxy:3128
-      - https_proxy=http://forward-proxy:3128
-      - HTTP_PROXY=http://forward-proxy:3128
-      - HTTPS_PROXY=http://forward-proxy:3128
+      - http_proxy=http://forward-proxy:${SQUID_PORT:-3128}
+      - https_proxy=http://forward-proxy:${SQUID_PORT:-3128}
+      - HTTP_PROXY=http://forward-proxy:${SQUID_PORT:-3128}
+      - HTTPS_PROXY=http://forward-proxy:${SQUID_PORT:-3128}
       # gitlab-warden directly (no proxy); loopback likewise.
       - no_proxy=gitlab-warden,localhost,127.0.0.1
       - NO_PROXY=gitlab-warden,localhost,127.0.0.1
