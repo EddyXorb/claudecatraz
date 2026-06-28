@@ -44,13 +44,6 @@ from catraz.commands.stack import _wait_healthy, _print_urls  # noqa: F401
 
 # ── commands that stay in cli.py (< 7 lines, no module worth making) ────────────
 
-def cmd_prune(root, args, out):
-    from catraz import image
-    image.prune()
-    out.info(out.green("• removed built catraz-base images"))
-    return EXIT_OK
-
-
 def cmd_version(root, args, out):
     print(f"catraz {__version__}")
     return EXIT_OK
@@ -111,8 +104,6 @@ def build_parser():
     pdn.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
                      help="show the compose command without running it")
 
-    sub.add_parser("prune", parents=[_g()], help="remove built catraz-base images")
-
     p_run = sub.add_parser(
         "run",
         help="run claude one-off inside the sandbox (drop-in: alias claude='catraz run')")
@@ -153,7 +144,6 @@ HANDLERS = {
     "logs":    observe.cmd_logs,
     "audit":   observe.cmd_audit,
     "sync":    setup.cmd_sync,
-    "prune":   cmd_prune,
     "version": cmd_version,
 }
 

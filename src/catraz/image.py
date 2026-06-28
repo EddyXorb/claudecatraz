@@ -33,9 +33,3 @@ def resolve_base(root: Path) -> str:
                 raise CliError(f"BASE_CONTEXT not a directory: {ctx}", EXIT_DOCKER)
         return _build_base(df, ctx)
     return _build_base(asset_root() / "assets/bases/cpp-rust-python/Dockerfile")
-
-def prune() -> None:
-    r = subprocess.run(["docker", "image", "ls", "catraz-base", "--format", "{{.Repository}}:{{.Tag}}"],
-                       capture_output=True, text=True)
-    for tag in r.stdout.split():
-        subprocess.run(["docker", "image", "rm", tag], capture_output=True)
