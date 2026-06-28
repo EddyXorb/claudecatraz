@@ -97,7 +97,9 @@ async def handle(request: Request) -> Response:
     )
 
     # Ownership lookup (W6.2) only when an endpoint needs it — before deciding.
-    if ep is not None and mr_owned_by_claude in ep.checks:
+    # Guard with writes_enabled: the write token must never be used in off/read-only
+    # mode. (decide() will deny the write anyway, but we must not send the token first.)
+    if ctx.cfg.writes_enabled and ep is not None and mr_owned_by_claude in ep.checks:
         if iid is not None and project:
             req.mr_owner_ok = await ctx.mr_owned_by_claude(project, iid)
 

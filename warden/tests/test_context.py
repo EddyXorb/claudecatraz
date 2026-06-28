@@ -11,6 +11,7 @@ from __future__ import annotations
 import httpx
 
 from warden.audit import AuditLog
+from warden.config import Config
 from warden.context import AppContext
 from warden.state import State
 from warden.upstream import Upstream
@@ -196,4 +197,35 @@ async def test_resolve_service_account_none_on_error(cfg, respx_router):
         return_value=httpx.Response(403)
     )
     assert await ctx.resolve_service_account() is None
+    await ctx.upstream.aclose()
+
+
+# --- GITLAB_MODE gates (mode-enforcement, step 6/7) ----------------------------
+
+async def test_resolve_service_account_no_upstream_call_when_writes_disabled(respx_router):
+    """resolve_service_account() must make NO upstream call in off or read-only mode."""
+    for mode in ("off", "read-only"):
+        cfg_mode = Config(
+            allowed_projects=("group/proj",),
+            read_token="r",
+            gitlab_mode=mode,
+        )
+        ctx = _ctx(cfg_mode, sa=None)
+        # No mock registered — any upstream call raises respx.MockTransportError.
+        result = await ctx.resolve_service_account()
+        assert result is None, f"expected None in {mode} mode, got {result}"
+        await ctx.upstream.aclose()
+
+
+async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
+    """reconcile() must make NO upstream call when GITLAB_MODE=off, and must unlock state."""
+    cfg_off = Config(gitlab_mode="off")
+    ctx = _ctx(cfg_off, sa=None)
+    assert ctx.state.view().locked is True  # starts locked
+
+    # No mock registered — any upstream call raises respx.MockTransportError.
+    ok = await ctx.reconcile()
+
+    assert ok is True
+    assert ctx.state.view().locked is False  # unlocked so the warden can serve (and deny)
     await ctx.upstream.aclose()

@@ -42,6 +42,28 @@ def set_env_values(path, updates):
     path.write_text("\n".join(out) + "\n")
 
 
+def unset_env_keys(path, keys):
+    """Remove active KEY=value lines for the given keys from a .env file.
+
+    Lines that are already commented out (``# KEY=…``) are left untouched.
+    A no-op when the file does not exist or none of the keys are present as
+    active assignments.
+    """
+    if not path.exists():
+        return
+    keys_set = set(keys)
+    lines = path.read_text().splitlines()
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("#") and "=" in stripped:
+            k = stripped.split("=", 1)[0].strip()
+            if k in keys_set:
+                continue  # drop this active assignment
+        out.append(line)
+    path.write_text("\n".join(out) + "\n")
+
+
 def mask(val):
     if not val:
         return ""

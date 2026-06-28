@@ -8,6 +8,7 @@ import pytest
 from catraz.commands import setup
 from catraz.doctor import run_doctor, _doctor_fix, Findings, SECRETS
 from catraz.envfile import load_env
+from catraz.policy import _read_toml_allowed_projects
 from catraz.ui import Out
 
 
@@ -30,7 +31,10 @@ def _yes_args():
 
 
 def test_cmd_init_creates_secret_files_even_blank(tmp_path, monkeypatch):
-    """cmd_init --yes creates secrets/ at 0700 and both token files at 0600, even if blank."""
+    """cmd_init --yes creates secrets/ at 0700 and both token files at 0600, even if blank.
+
+    With no token env vars the wizard infers GITLAB_MODE=off and writes it to .env.
+    """
     root = _make_root(tmp_path)
 
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
@@ -51,14 +55,25 @@ def test_cmd_init_creates_secret_files_even_blank(tmp_path, monkeypatch):
         assert p.exists(), f"missing: {p}"
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
+    # GITLAB_MODE must be written to .env (inferred as "off" — no tokens provided)
+    env = load_env(root / ".catraz" / ".env")
+    assert env.get("GITLAB_MODE") == "off"
+
 
 def test_cmd_init_writes_token_via_getpass(tmp_path, monkeypatch):
-    """cmd_init (interactive) writes the token value to the secret file at 0600."""
+    """cmd_init (interactive) writes the token value to the secret file at 0600.
+
+    The interactive wizard uses out.secret() (in ui.py) which calls getpass internally,
+    so we patch catraz.ui.getpass.getpass rather than catraz.commands.setup.getpass.
+    Empty input() returns defaults for choice/ask prompts.
+    """
     root = _make_root(tmp_path)
 
     secrets = iter(["glpat-readtoken", "glpat-writetoken"])
-    monkeypatch.setattr("catraz.commands.setup.getpass.getpass", lambda prompt: next(secrets))
-    monkeypatch.setattr("builtins.input", lambda prompt: "")  # GITLAB_URL + projects prompts
+    # out.secret() imports getpass locally and calls getpass.getpass(); patch at the module level
+    monkeypatch.setattr("getpass.getpass", lambda prompt: next(secrets))
+    # out.choice() and out.ask() use input(); "" picks the default each time
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
     monkeypatch.setattr("catraz.commands.setup.run_doctor",
                         lambda *a, **kw: types.SimpleNamespace(items=[]))
@@ -149,7 +164,11 @@ def test_cmd_init_yes_reads_tokens_from_env(tmp_path, monkeypatch):
 
 
 def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path, monkeypatch):
-    """--yes writes WARDEN_ALLOWED_PROJECTS from env to .env."""
+    """--yes writes WARDEN_ALLOWED_PROJECTS from env to warden.toml (not .env).
+
+    Old cmd_init wrote to .env; new cmd_init uses warden.toml as the SSOT and
+    unsets any stale WARDEN_ALLOWED_PROJECTS from .env.
+    """
     root = _make_root(tmp_path)
     monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
@@ -160,8 +179,14 @@ def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path, monkeypatch):
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
+    # Projects must now be in warden.toml
+    toml_path = root / ".catraz" / "config" / "warden.toml"
+    projects = _read_toml_allowed_projects(toml_path)
+    assert projects == ["group/proj-a", "group/proj-b"]
+
+    # WARDEN_ALLOWED_PROJECTS must NOT be written to .env
     env = load_env(root / ".catraz" / ".env")
-    assert env.get("WARDEN_ALLOWED_PROJECTS") == "group/proj-a,group/proj-b"
+    assert "WARDEN_ALLOWED_PROJECTS" not in env
 
 
 def test_doctor_fix_does_not_overwrite_existing_token(tmp_path):

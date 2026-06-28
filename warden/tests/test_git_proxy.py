@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import base64
+from typing import AsyncIterator
 
 import httpx
+import pytest
 
+from warden.app import create_app
+from warden.audit import AuditLog
+from warden.config import Config
+from warden.context import AppContext
 from warden.pktline import FLUSH, pkt_line
+from warden.state import State
+from warden.upstream import Upstream
 
 ZERO = "0" * 40
 SHA1 = "1" * 40
@@ -107,3 +115,75 @@ async def test_push_forwards_content_encoding(client, respx_router):
     resp = await client.post(RECV, content=body, headers={"content-encoding": "gzip"})
     assert resp.status_code == 200
     assert route.calls.last.request.headers.get("content-encoding") == "gzip"
+
+
+# --- GITLAB_MODE gate tests (mode-enforcement, step 9) -------------------------
+# Build a fresh test client per mode; no upstream mock needed (a hit would fail).
+
+UPSTREAM = "https://gitlab.example"
+
+
+def _mode_client(mode: str) -> httpx.AsyncClient:
+    """Build an ASGI test client for a warden with the given GITLAB_MODE."""
+    cfg = Config(
+        branch_prefix="claude/",
+        allowed_projects=("group/proj",),
+        api_url=f"{UPSTREAM}/api/v4",
+        read_token="READ-TOKEN",
+        write_token="WRITE-TOKEN",
+        state_db_path=":memory:",
+        gitlab_mode=mode,
+    )
+    state = State(":memory:")
+    state.mark_reconciled()
+    upstream = Upstream(cfg)
+    audit = AuditLog("-")
+    ctx = AppContext(cfg, upstream, state, audit)
+    ctx.service_account_id = 42
+    app = create_app(ctx)
+    transport = httpx.ASGITransport(app=app)
+    return httpx.AsyncClient(transport=transport, base_url="http://warden")
+
+
+async def test_off_advertise_clone_denied_no_upstream():
+    """GITLAB_MODE=off: git clone discovery (git-upload-pack) is denied R0; no upstream call."""
+    async with _mode_client("off") as c:
+        resp = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R0"
+    assert "off" in resp.json()["reason"]
+
+
+async def test_off_upload_pack_denied_no_upstream():
+    """GITLAB_MODE=off: git fetch body (upload-pack) is denied R0; no upstream call."""
+    async with _mode_client("off") as c:
+        resp = await c.post("/git/group/proj.git/git-upload-pack", content=b"0032want ...")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R0"
+
+
+async def test_read_only_advertise_receive_pack_denied_no_upstream():
+    """GITLAB_MODE=read-only: push discovery (git-receive-pack) is denied R0 before git_get."""
+    async with _mode_client("read-only") as c:
+        resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R0"
+    assert "read-only" in resp.json()["reason"]
+
+
+async def test_read_only_advertise_upload_pack_passes_through(respx_router):
+    """GITLAB_MODE=read-only: clone discovery (git-upload-pack) still passes through with READ."""
+    import respx as respx_module
+
+    with respx_module.mock(base_url=UPSTREAM, assert_all_called=False) as router:
+        route = router.route(method="GET", url__regex=r".*/info/refs.*").mock(
+            return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
+        )
+        async with _mode_client("read-only") as c:
+            resp = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
+
+    assert resp.status_code == 200
+    assert route.call_count == 1
+    # read token is used (not write)
+    auth = route.calls.last.request.headers["authorization"]
+    assert "READ-TOKEN" in base64.b64decode(auth.split(" ", 1)[1]).decode()

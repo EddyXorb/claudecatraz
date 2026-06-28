@@ -41,3 +41,51 @@ def _read_toml_allowed_projects(path):
         if not m:
             return []
         return re.findall(r'"([^"]+)"', m.group(1))
+
+
+def set_toml_scalar(path, key, value):
+    """Set a scalar string value for *key* in a TOML file.
+
+    Uses a targeted regex replace that preserves the line's leading
+    whitespace/alignment and trailing inline comment.  If the key is absent
+    the new assignment is appended.  Quote strings with json.dumps so
+    escaping is always valid TOML.
+    """
+    import json as _json
+    text = path.read_text(encoding="utf-8")
+    serialized = _json.dumps(value)
+    pat = re.compile(
+        rf'^(?P<pre>\s*{re.escape(key)}\s*=\s*)(?P<val>"[^"]*"|\[[^\]]*\])(?P<post>\s*(#.*)?)$',
+        re.M,
+    )
+    if pat.search(text):
+        new_text = pat.sub(
+            lambda m: m.group("pre") + serialized + m.group("post"), text
+        )
+    else:
+        new_text = text.rstrip("\n") + f"\n{key} = {serialized}\n"
+    path.write_text(new_text, encoding="utf-8")
+
+
+def set_toml_list(path, key, values):
+    """Set a list of strings for *key* in a TOML file.
+
+    Same comment-preserving strategy as set_toml_scalar.  The shipped
+    allowed_projects line is ``allowed_projects = [""]`` (one empty string,
+    not an empty list), so the regex ``\\[[^\\]]*\\]`` matches it.  If the
+    key is absent the new assignment is appended.
+    """
+    import json as _json
+    text = path.read_text(encoding="utf-8")
+    serialized = _json.dumps(values)
+    pat = re.compile(
+        rf'^(?P<pre>\s*{re.escape(key)}\s*=\s*)(?P<val>"[^"]*"|\[[^\]]*\])(?P<post>\s*(#.*)?)$',
+        re.M,
+    )
+    if pat.search(text):
+        new_text = pat.sub(
+            lambda m: m.group("pre") + serialized + m.group("post"), text
+        )
+    else:
+        new_text = text.rstrip("\n") + f"\n{key} = {serialized}\n"
+    path.write_text(new_text, encoding="utf-8")

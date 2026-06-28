@@ -21,6 +21,7 @@ services:
       - GITLAB_READ_TOKEN_FILE=/run/secrets/gitlab_read_token
       - GITLAB_WRITE_TOKEN_FILE=/run/secrets/gitlab_write_token
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - GITLAB_MODE=${GITLAB_MODE:-read-write}
       # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
       # ADMIN_UDS is the authoritative source of the admin socket path.
       # The host-side CLI path (.catraz/run/warden/admin.sock in observe.py/doctor.py)
@@ -127,6 +128,7 @@ services:
       # Canonical GitLab URL for the insteadOf rewrite to gitlab-warden (entrypoint.py).
       # No token in the agent container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - GITLAB_MODE=${GITLAB_MODE:-read-write}
       # The CLAUDE.md bind below is part of every catraz-launched container; require it
       # so a missing/misconfigured mount fails loud in the entrypoint instead of starting
       # the agent without its user-memory. A bare `docker run` of the image leaves this

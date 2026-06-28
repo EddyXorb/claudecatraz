@@ -2,6 +2,12 @@
 
 Missing token or empty allowlist ⇒ abort, never "open". `ALLOWED_PROJECTS`
 empty ⇒ nothing is allowed (fail-closed), not "everything".
+
+GITLAB_MODE selects one of three operating modes:
+  off         — GitLab is intentionally disabled; no token or allowlist required;
+                all GitLab operations are denied (R0).
+  read-only   — only the read token is required; writes are denied (R0).
+  read-write  — both tokens are required; full current behaviour (default).
 """
 
 from __future__ import annotations
@@ -27,6 +33,9 @@ def normalize_project(project: str) -> str:
     return project.removesuffix(".git").strip("/")
 
 
+_VALID_MODES = frozenset({"off", "read-only", "read-write"})
+
+
 @dataclass(frozen=True)
 class Config:
     branch_prefix: str = "claude/"
@@ -47,6 +56,17 @@ class Config:
     agent_port: int = 8080
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"
+    gitlab_mode: str = "read-write"
+
+    @property
+    def gitlab_enabled(self) -> bool:
+        """True unless GitLab is intentionally disabled (GITLAB_MODE=off)."""
+        return self.gitlab_mode != "off"
+
+    @property
+    def writes_enabled(self) -> bool:
+        """True only in read-write mode — never in off or read-only."""
+        return self.gitlab_mode == "read-write"
 
     @property
     def git_base(self) -> str:
@@ -176,6 +196,7 @@ def from_env(
         agent_port=_int("AGENT_PORT", 8080),
         admin_port=_int("ADMIN_PORT", 9090),
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
+        gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
     )
 
     if strict:
@@ -185,16 +206,40 @@ def from_env(
 
 def _validate(cfg: Config) -> None:
     problems: list[str] = []
-    if not cfg.read_token:
-        problems.append("GITLAB_READ_TOKEN is required")
-    if not cfg.write_token:
-        problems.append("GITLAB_WRITE_TOKEN is required")
-    if not cfg.allowed_projects:
-        problems.append("ALLOWED_PROJECTS must be non-empty (fail-closed)")
-    if not cfg.branch_prefix:
-        problems.append("BRANCH_PREFIX must be non-empty")
+
+    if cfg.gitlab_mode not in _VALID_MODES:
+        problems.append(
+            f"GITLAB_MODE must be one of {sorted(_VALID_MODES)!r}, got {cfg.gitlab_mode!r}"
+        )
+        # Mode is unknown — skip mode-specific checks to avoid confusing secondary errors.
+        raise ConfigError("invalid configuration: " + "; ".join(problems))
+
+    # Quota limits apply in all modes.
     for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour"):
         if getattr(cfg, name) <= 0:
             problems.append(f"{name.upper()} must be > 0")
+
+    if cfg.gitlab_mode == "off":
+        # Intentionally disabled — no token or allowlist requirement.
+        pass
+
+    elif cfg.gitlab_mode == "read-only":
+        if not cfg.read_token:
+            problems.append("GITLAB_READ_TOKEN is required")
+        if not cfg.allowed_projects:
+            problems.append("ALLOWED_PROJECTS must be non-empty (fail-closed)")
+        if not cfg.branch_prefix:
+            problems.append("BRANCH_PREFIX must be non-empty")
+
+    else:  # read-write (default)
+        if not cfg.read_token:
+            problems.append("GITLAB_READ_TOKEN is required")
+        if not cfg.write_token:
+            problems.append("GITLAB_WRITE_TOKEN is required")
+        if not cfg.allowed_projects:
+            problems.append("ALLOWED_PROJECTS must be non-empty (fail-closed)")
+        if not cfg.branch_prefix:
+            problems.append("BRANCH_PREFIX must be non-empty")
+
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))

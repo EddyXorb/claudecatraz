@@ -127,7 +127,15 @@ def check_env(root, env, f):
                 f.ok("env", f"{d.name}/ owned by DEV_UID")
 
 
+def _gitlab_mode(env):
+    return (env.get("GITLAB_MODE") or "read-write").strip()
+
+
 def check_gitlab(env, f):
+    mode = _gitlab_mode(env)
+    if mode == "off":
+        f.ok("tokens", "GitLab disabled (GITLAB_MODE=off)")
+        return
     url = (env.get("GITLAB_URL") or "").strip()
     if not url:
         f.warn("tokens", "GITLAB_URL unset — defaulting to https://gitlab.com",
@@ -137,23 +145,43 @@ def check_gitlab(env, f):
 
 
 def check_tokens(root, env, f):
+    mode = _gitlab_mode(env)
     secrets_dir = root / ".catraz" / "secrets"
+
+    def _read_token(filename):
+        p = secrets_dir / filename
+        try:
+            return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+        except OSError:
+            return ""
+
+    if mode == "off":
+        f.ok("tokens", "GitLab off — tokens not required")
+        return
+
+    if mode == "read-only":
+        read_t = _read_token("gitlab_read_token")
+        write_t = _read_token("gitlab_write_token")
+        if not read_t:
+            f.bad("tokens", "gitlab_read_token is empty", "run `catraz init`")
+            return
+        if write_t:
+            f.warn("tokens", "write token set but GITLAB_MODE=read-only — it will be ignored")
+        f.ok("tokens", "read token is set")
+        _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token")])
+        return
+
+    # read-write: current behaviour (both required, probe both)
     missing = []
     for filename, _, desc in SECRETS:
-        p = secrets_dir / filename
-        val = ""
-        if p.exists():
-            try:
-                val = p.read_text(encoding="utf-8").strip()
-            except OSError:
-                pass
+        val = _read_token(filename)
         if not val:
             f.bad("tokens", f"{filename} is empty", "run `catraz init`")
             missing.append(filename)
     if missing:
         return
     f.ok("tokens", "both GitLab tokens are set")
-    _probe_gitlab_tokens(root, env, f)
+    _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")])
 
 
 def _gitlab_get(base, path, token, timeout=5):
@@ -163,9 +191,12 @@ def _gitlab_get(base, path, token, timeout=5):
         return json.loads(resp.read().decode())
 
 
-def _probe_gitlab_tokens(root, env, f):
+def _probe_gitlab_tokens(root, env, f, tokens=None):
     """Best-effort online probe (P1 roast fix): catch expired/swapped/wrong-scope
-    tokens. Degrades silently to 'set/not set' when the host can't reach GitLab."""
+    tokens. Degrades silently to 'set/not set' when the host can't reach GitLab.
+
+    tokens: list of (label, filename) pairs to probe. Defaults to both tokens.
+    """
     base = env.get("GITLAB_URL", "https://gitlab.com")
     secrets_dir = root / ".catraz" / "secrets"
 
@@ -176,13 +207,19 @@ def _probe_gitlab_tokens(root, env, f):
         except OSError:
             return ""
 
-    read_t = _read_secret("gitlab_read_token")
-    write_t = _read_secret("gitlab_write_token")
+    if tokens is None:
+        tokens = [("read", "gitlab_read_token"), ("write", "gitlab_write_token")]
 
+    token_values = [(label, _read_secret(filename)) for label, filename in tokens]
+
+    # Warn if read and write are identical (only meaningful when both are probed).
+    probed_labels = {label: val for label, val in token_values}
+    read_t = probed_labels.get("read", "")
+    write_t = probed_labels.get("write", "")
     if read_t and write_t and read_t == write_t:
         f.warn("tokens", "READ and WRITE token are identical — likely a paste mistake")
 
-    for label, token in (("read", read_t), ("write", write_t)):
+    for label, token in token_values:
         try:
             me = _gitlab_get(base, "/api/v4/personal_access_tokens/self", token)
         except urllib.error.HTTPError as e:
@@ -213,6 +250,10 @@ def _probe_gitlab_tokens(root, env, f):
 def check_policy(root, env, f):
     """Fast pre-check of allowed_projects. Authoritative validation stays the
     warden reconcile — this just turns the obvious traps loud before start."""
+    mode = _gitlab_mode(env)
+    if mode == "off":
+        f.ok("policy", "GitLab off — allowlist not required")
+        return
     from catraz.policy import _resolve_allowed_projects, validate_project
     resolved, source = _resolve_allowed_projects(root, env)
     if not resolved:

@@ -116,7 +116,17 @@ def install_claude_md(home: Path) -> None:
 def configure_git_warden() -> None:
     """Set up global git insteadOf rewrite so canonical GitLab URLs are transparently
     redirected to the Warden inside the container (W3.1). The repo's .git/config
-    stays untouched; the rewrite lives only in ~/.gitconfig."""
+    stays untouched; the rewrite lives only in ~/.gitconfig.
+
+    When GITLAB_MODE=off the rewrite is skipped: the warden denies all GitLab ops in
+    that mode, so routing git there would only produce confusing errors. The agent's
+    git commands will reach gitlab.com directly (and fail, as expected — no token).
+    """
+    gitlab_mode = os.environ.get("GITLAB_MODE", "read-write")
+    if gitlab_mode == "off":
+        print("GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden")
+        os.environ["GIT_TERMINAL_PROMPT"] = "0"
+        return
     gitlab_base = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/"
     warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
     subprocess.run(
