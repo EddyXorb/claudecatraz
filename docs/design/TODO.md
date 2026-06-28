@@ -2,6 +2,7 @@
 
 Offene Punkte, in loser Reihenfolge:
 
+- wenn man catraz einem ordner hinzufügt will man meist, dass die repos darin wenn sie gitlab-repos sind zu den allowed projects gehören. Es sollte eine mechanik geben, die das abfragt. Weiters sollte es ein command geben, dass nach init aufrufbar ist um die allowed projects zu ergänzen
 - es ist irgendwie noch nicht ausgereift, dass man mit "run" claude startet, aber mit "up --remote"  remote control startet, obwohl beide dinge auf einer ebene liegen. Das muss besser werden und vielleicht indem man profile einführt, die als asset mit ins catraz home verzeichnis kommen und die man mit "run [profile_name]" startet, wobei es zwei vorinstallierte gibt: einfach claude starten (profil: claude) bzw. remote-control starten (profil: claude-remote) bzw. einfach eine shell (profil: shell), damit fällt dann auch das shell subcommand weg
 - es ist fraglich, ob es überhaupt relevant ist up/down als cli interface zu haben, von außen betrachtet will man ja nur claude starten in einer gesicherten art und weise und es leuchtet ein, dass man das einrichten muss (init), aber up und down ist zuviel detail, eventuell weglassen und beim ersten run einfach up machen intern, und dann den forwarder/warden laufen lassen (eventuell ein command belassen zum beenden)
 - es fehlt noch die Möglichkeit einen container zu detachen bzw. reattachen und eine liste der aktiven container des aktuellen catraz-repos zu sehen
