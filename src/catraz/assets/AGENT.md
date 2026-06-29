@@ -95,15 +95,25 @@ curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/
   -H "Content-Type: application/json" \
   -d '{"body":"fixed in the latest push"}'
 
+# Edit an MR (title / description / labels) or close it (state_event=close)
+curl -sS -X PUT "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Refactor X","description":"...","state_event":"close"}'
+
 # Trigger CI pipeline
 curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
   -H "Content-Type: application/json" \
   -d '{"ref":"claude/my-branch"}'
+
+# Merge — NOT allowed: the Warden answers 403 (R4) and sends no token upstream.
+#   PUT …/merge_requests/<iid>/merge        (also state_event=merge on the edit above)
 ```
 
-You may comment, discuss, and edit only on MRs **you** authored (R3); merging is never
-allowed (R4). The Warden expects **no auth** from the agent — token injection happens
-internally.
+These are **every** write endpoint the Warden permits — anything else (e.g. creating
+branches/tags directly, editing project settings) is default-denied. You may create MRs
+and trigger CI only for `claude/*` branches (R2/R3), and comment/discuss/edit only on MRs
+**you** authored (R3); merging is never allowed (R4). The Warden expects **no auth** from
+the agent — token injection happens internally.
 
 **Responses come back as plain, uncompressed JSON.** The Warden decompresses any
 upstream `Content-Encoding` (gzip/deflate) before relaying and strips the header, so
