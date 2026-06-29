@@ -21,7 +21,9 @@ def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list
     # entrypoint subcommand like `exec`). Docker's layer cache makes this a near-instant
     # no-op when nothing changed, so every one-off self-heals against CLI/image skew —
     # otherwise a stale image's entrypoint rejects subcommands the CLI now emits.
-    args = ["run", "--rm", "--no-deps", "--build"]
+    # --quiet-build hides the (usually cached, no-op) build progress dump on every run;
+    # the infra "Container … Running" lines still print, so catraz visibly works.
+    args = ["run", "--rm", "--no-deps", "--build", "--quiet-build"]
     if not tty:
         args.append("-T")
     args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
