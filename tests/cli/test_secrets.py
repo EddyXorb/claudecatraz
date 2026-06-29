@@ -136,6 +136,7 @@ def test_doctor_ok_on_non_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     """doctor reports ok when both secret files are non-empty (probe skipped in unit tests)."""
     import catraz.doctor as doc
     monkeypatch.setattr(doc, "_probe_gitlab_tokens", lambda *a, **kw: None)
+    monkeypatch.setattr(doc, "_probe_write_user_read", lambda *a, **kw: None)
 
     root = _make_root(tmp_path)
     secrets_dir = root / ".catraz" / "secrets"

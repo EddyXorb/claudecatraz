@@ -207,9 +207,26 @@ no value lives in both at once:
 AUTH_MODE=subscription             # subscription (host login) | api_key
 # ANTHROPIC_API_KEY=               # only for AUTH_MODE=api_key
 GITLAB_READ_TOKEN=                 # scopes: read_api, read_repository  — only the Warden (R6)
-GITLAB_WRITE_TOKEN=                # scopes: api (service account / Developer)
+GITLAB_WRITE_TOKEN=                # scope: api (service account / Developer) + read its own user
 DEV_UID=1000                       # `id -u` on the host so bind mounts get the right ownership
 ```
+
+> ### ⚠️ Write token must be able to read its own user
+>
+> The Warden resolves **which user the write token is** via `GET /user` and uses that
+> identity to enforce **R3** (you may only comment on / edit / close MRs the service
+> account authored). A classic personal access token with the **`api`** scope already
+> covers this. A **fine-grained** PAT does **not** — by default it lacks the
+> **`User: Read`** permission, so `GET /user` returns `403`, the Warden never learns its
+> service account, and **every comment and MR edit is denied R3** — even though MR
+> *creation* and `git push` still work (they only check the `claude/*` branch prefix).
+>
+> So for the write token, use **either**:
+> - a **classic** PAT with the `api` scope, **or**
+> - a **fine-grained** PAT with the repo/MR permissions **plus `User: Read`** (`read_user`).
+>
+> `catraz doctor` probes this and fails loudly (`WRITE token cannot read its own user
+> (GET /user → 403)`) so you catch it before the agent runs into silent R3 denials.
 
 ```toml
 # .catraz/config/warden.toml — non-secret policy (the source of truth)

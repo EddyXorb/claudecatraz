@@ -19,7 +19,7 @@ from catraz import image
 # via compose secrets: at /run/secrets/<filename>. Never stored in .env.
 SECRETS = [
     ("gitlab_read_token", "GitLab READ token (scopes: read_api, read_repository)", "GitLab READ token"),
-    ("gitlab_write_token", "GitLab WRITE token (scopes: api — service account / Developer)", "GitLab WRITE token"),
+    ("gitlab_write_token", "GitLab WRITE token (classic 'api' scope, or fine-grained + 'User: Read')", "GitLab WRITE token"),
 ]
 
 OK, WARN, BAD = "ok", "warn", "bad"
@@ -183,6 +183,7 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
         return
     f.ok("tokens", "both GitLab tokens are set")
     _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")])
+    _probe_write_user_read(root, env, f)
 
 
 def _gitlab_get(base: str, path: str, token: str, timeout: int = 5) -> dict[str, Any]:
@@ -246,6 +247,42 @@ def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: l
         if label == "write" and "api" not in scopes:
             f.bad("tokens", "WRITE token lacks the 'api' scope — pushes will fail",
                   "issue a token with the 'api' scope")
+
+
+def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None:
+    """The warden resolves its service-account id via `GET /user` with the WRITE
+    token, and needs that id to enforce MR ownership (R3: comment / edit / close
+    only your own MRs). Fine-grained PATs omit the **User: Read** permission by
+    default, so `GET /user` 403s, the warden's service_account_id stays null, and
+    every ownership-gated write is denied R3 — while MR *creation* still works
+    (it only checks the branch prefix). That asymmetry is a silent runtime trap;
+    probe it explicitly so it surfaces at setup. Degrades quietly when offline."""
+    base = env.get("GITLAB_URL", "https://gitlab.com")
+    token = _read_secret_file(root, "gitlab_write_token")
+    if not token:
+        return
+    try:
+        me = _gitlab_get(base, "/api/v4/user", token)
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            f.bad("tokens", "WRITE token cannot read its own user (GET /user → 403)",
+                  "the warden needs this to resolve its service account and enforce MR "
+                  "ownership (R3) — comments and MR edits will be denied. Grant the token "
+                  "the 'User: Read' (read_user) permission, or use a classic api-scope PAT")
+        elif e.code == 401:
+            f.bad("tokens", "WRITE token rejected on GET /user (401)",
+                  "rotate the token — it's invalid or expired")
+        else:
+            f.warn("tokens", f"WRITE token GET /user not probed (HTTP {e.code}) — online check skipped")
+        return
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+        f.warn("tokens", f"WRITE token GET /user not probed ({type(e).__name__}) — offline, check skipped")
+        return
+    uid = me.get("id")
+    if uid is not None:
+        f.ok("tokens", f"WRITE token resolves its service account (GET /user → @{me.get('username')}, id {uid})")
+    else:
+        f.warn("tokens", "WRITE token GET /user returned no id — MR ownership checks (R3) may fail")
 
 
 def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
