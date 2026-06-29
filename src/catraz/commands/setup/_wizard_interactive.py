@@ -3,7 +3,13 @@ import re
 from pathlib import Path
 
 from catraz.envfile import load_env, unset_env_keys
-from catraz.policy import _resolve_allowed_projects, set_toml_list, set_toml_scalar, validate_project
+from catraz.policy import (
+    _discover_gitlab_projects,
+    _resolve_allowed_projects,
+    set_toml_list,
+    set_toml_scalar,
+    validate_project,
+)
 from catraz.ui import Out
 
 from ._secrets import _ensure_secret, _write_secret_value
@@ -82,6 +88,7 @@ def _prompt_allowed_projects(
     root: Path,
     env: dict[str, str],
     warden_toml: Path,
+    gitlab_url: str,
     args: argparse.Namespace,
     out: Out,
 ) -> None:
@@ -92,7 +99,13 @@ def _prompt_allowed_projects(
     print()
     out.info("  Which GitLab project(s) may the agent touch? Full path(s),")
     out.info("  e.g. group/sub/project — comma-separated, no wildcards.")
-    raw = out.ask("projects (group/sub/project,...)", "")
+    # Offer (never silently add) any GitLab remotes found under the init folder as the
+    # default — the user accepts with Enter, or edits/clears to decline.
+    discovered = _discover_gitlab_projects(root, gitlab_url)
+    default = ", ".join(discovered) if discovered else ""
+    if discovered:
+        out.info("  Detected GitLab project(s) from git remotes: " + ", ".join(discovered))
+    raw = out.ask("projects (group/sub/project,...)", default)
     projects = [p.strip() for p in raw.split(",") if p.strip()]
     valid: list[str] = []
     for p in projects:
@@ -167,7 +180,7 @@ def _wizard_interactive(
         )
         updates["GITLAB_URL"] = url
         _prompt_gitlab_tokens(secrets_dir, mode, args, out)
-        _prompt_allowed_projects(root, env, warden_toml, args, out)
+        _prompt_allowed_projects(root, env, warden_toml, url, args, out)
         _prompt_branch_prefix(env, warden_toml, env_path, out)
     else:
         _ensure_secret(secrets_dir, "gitlab_read_token")

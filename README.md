@@ -104,7 +104,7 @@ with `catraz audit --web`.
 
 | Command | What it does |
 | ------- | ------------ |
-| `catraz init` | Wizard: create `.catraz/`, collect secrets + allowed projects, sync credentials |
+| `catraz init` | Wizard: create `.catraz/`, collect secrets + allowed projects (offers detected GitLab remotes), sync credentials |
 | `catraz run -- …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`); lazy-starts infra |
 | `catraz doctor` | Re-run the preflight; `--fix` repairs dirs/ownership |
 | `catraz status` | Health per service, URLs, quota snapshot |
@@ -113,6 +113,7 @@ with `catraz audit --web`.
 | `catraz logs` | Tail logs (`agent`\|`warden`\|`proxy`, or `--audit`) |
 | `catraz audit --web` | Open the read-only GitLab decision viewer (ephemeral loopback port) |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
+| `catraz allow <path>…` | Append GitLab project(s) to the warden allowlist |
 | `catraz stop` | Stop the stack (alias: `catraz down`) |
 
 Run `catraz <command> --help` for the details of any command. Full CLI design:

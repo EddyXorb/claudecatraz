@@ -121,6 +121,11 @@ def build_parser():
     ps.add_argument("--from", dest="source", help="source ~/.claude path")
     ps.add_argument("--force", action="store_true", help="overwrite existing credential")
 
+    pal = sub.add_parser("allow", parents=[_g()],
+                         help="add GitLab project(s) to the warden allowlist")
+    pal.add_argument("projects", nargs="+",
+                     help="full project path(s), e.g. group/sub/project")
+
     pa = sub.add_parser("audit", parents=[_g()], help="warden decision log (JSONL tail or --web viewer)")
     pa.add_argument("--web", action="store_true", help="open the live viewer over the admin socket")
     pa.add_argument("-f", "--follow", action="store_true", help="follow")
@@ -143,6 +148,7 @@ HANDLERS = {
     "logs":    observe.cmd_logs,
     "audit":   observe.cmd_audit,
     "sync":    setup.cmd_sync,
+    "allow":   setup.cmd_allow,
     "version": cmd_version,
 }
 
