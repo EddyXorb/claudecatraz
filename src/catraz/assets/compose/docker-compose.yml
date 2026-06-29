@@ -52,7 +52,7 @@ services:
     # privilege escalation inside the container regardless of base-image contents.
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    restart: on-failure:2
 
   # ── Forward-Proxy (Research/Build-Egress, holds NO credentials) ─────────────
   # docs/design/agentic-workflow/02-forward-proxy/03-deployment.md
@@ -83,7 +83,7 @@ services:
     # Defense-in-depth: same setuid/setgid escalation block as the other services.
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    restart: on-failure:2
 
   claude-dev-env:
     # Agent daemon only starts under the `remote` profile: a profile-less `up`
@@ -166,7 +166,7 @@ services:
     working_dir: /workspace
     tty: true
     stdin_open: true
-    restart: unless-stopped
+    restart: no
     depends_on:
       forward-proxy:
         condition: service_healthy
