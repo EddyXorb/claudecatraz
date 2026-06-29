@@ -14,6 +14,13 @@ def test_asset_root_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert (root / "assets" / "warden").is_dir()
 
 
+def test_version() -> None:
+    import tomllib
+    root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
+    assert __version__ == pyproject["project"]["version"]
+
+
 def test_find_root_walks_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".catraz").mkdir(); sub = tmp_path / "a" / "b"; sub.mkdir(parents=True)
     monkeypatch.chdir(sub)
