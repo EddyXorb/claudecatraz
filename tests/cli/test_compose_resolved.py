@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 import pytest
 
-from catraz import compose, auth as _auth_mod
+from catraz import compose
+from catraz.paths import asset_root
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -79,7 +80,6 @@ def test_generate_resolved_writes_file_at_0600(tmp_path: Path, monkeypatch: pyte
 def test_prepare_render_true_returns_resolved_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _make_root(tmp_path)
     monkeypatch.setattr(compose, "subprocess", _fake_subprocess_success())
-    monkeypatch.setattr(_auth_mod, "write_auth_fragment", lambda root: None)
     prefix = compose.prepare(root, render=True)
     resolved_path = str(root / ".catraz/compose.resolved.yml")
     assert resolved_path in prefix
@@ -92,7 +92,6 @@ def test_prepare_render_true_returns_resolved_prefix(tmp_path: Path, monkeypatch
 def test_prepare_render_fail_returns_source_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = _make_root(tmp_path)
     monkeypatch.setattr(compose, "subprocess", _fake_subprocess_fail())
-    monkeypatch.setattr(_auth_mod, "write_auth_fragment", lambda root: None)
     prefix = compose.prepare(root, render=True)
     # Should return the layered source cmd (not resolved)
     resolved_path = str(root / ".catraz/compose.resolved.yml")
@@ -103,20 +102,15 @@ def test_prepare_render_fail_returns_source_cmd(tmp_path: Path, monkeypatch: pyt
     assert "WARNING" in captured.err or "fallback" in captured.err.lower() or "stale" in captured.err
 
 
-# ── (c) render=False with existing resolved.yml: returns resolved prefix, no fragment write ──
+# ── (c) render=False with existing resolved.yml: returns resolved prefix ──
 
 def test_prepare_render_false_existing_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _make_root(tmp_path)
     resolved = root / ".catraz/compose.resolved.yml"
     resolved.write_text("# existing\n")
 
-    write_calls: list[Path] = []
-    monkeypatch.setattr(_auth_mod, "write_auth_fragment",
-                        lambda root: write_calls.append(root))
-
     prefix = compose.prepare(root, render=False)
     assert str(resolved) in prefix
-    assert write_calls == [], "render=False must not call write_auth_fragment"
 
 
 # ── (d) render=False, no resolved.yml: returns layered source, no side effects ──
@@ -124,31 +118,26 @@ def test_prepare_render_false_existing_resolved(tmp_path: Path, monkeypatch: pyt
 def test_prepare_render_false_no_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _make_root(tmp_path)
     # No resolved.yml
-    write_calls: list[Path] = []
-    monkeypatch.setattr(_auth_mod, "write_auth_fragment",
-                        lambda root: write_calls.append(root))
-
     prefix = compose.prepare(root, render=False)
     assert str(root / ".catraz/compose.resolved.yml") not in prefix
     assert "docker-compose.yml" in " ".join(prefix)
-    assert write_calls == []
 
 
-# ── (e) _source_cmd includes -f .auth.compose.yml when fragment exists ──
+# ── (e) _source_cmd always includes the auth asset (unconditional -f) ──
 
-def test_source_cmd_includes_auth_fragment(tmp_path: Path) -> None:
-    root = _make_root(tmp_path)
-    frag = root / ".catraz/.auth.compose.yml"
-    frag.write_text("# fragment\n")
-    cmd = compose._source_cmd(root)
-    assert str(frag) in cmd
-
-
-def test_source_cmd_omits_auth_fragment_when_absent(tmp_path: Path) -> None:
+def test_source_cmd_includes_auth_asset_subscription(tmp_path: Path) -> None:
     root = _make_root(tmp_path)
     cmd = compose._source_cmd(root)
-    frag = str(root / ".catraz/.auth.compose.yml")
-    assert frag not in cmd
+    ar = str(asset_root() / "assets" / "compose" / "auth.subscription.yml")
+    assert ar in cmd
+
+
+def test_source_cmd_includes_auth_asset_api_key(tmp_path: Path) -> None:
+    root = _make_root(tmp_path)
+    (root / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
+    cmd = compose._source_cmd(root)
+    ar = str(asset_root() / "assets" / "compose" / "auth.api_key.yml")
+    assert ar in cmd
 
 
 # ── (f) leak guard: resolved.yml is always written at 0600 ──

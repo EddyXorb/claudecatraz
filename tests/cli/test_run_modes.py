@@ -56,7 +56,6 @@ def test_start_remote_daemon_brings_up_remote_profile(monkeypatch: pytest.Monkey
     compose_calls: list[list[str]] = []
     monkeypatch.setattr(run_cmd, "assert_real_dirs", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
-    monkeypatch.setattr(auth, "write_auth_fragment", lambda root: None)
     monkeypatch.setattr(run_cmd, "_security_preflight", lambda root, out: False)
     monkeypatch.setattr(run_cmd, "_auto_sync_if_needed", lambda root, out: None)
     monkeypatch.setattr(run_cmd, "_wait_healthy", lambda *a, **k: None)
@@ -81,7 +80,6 @@ def test_start_remote_daemon_brings_up_remote_profile(monkeypatch: pytest.Monkey
 def test_start_remote_daemon_preflight_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     (tmp_path / ".catraz").mkdir()
     monkeypatch.setattr(run_cmd, "assert_real_dirs", lambda *a, **k: None)
-    monkeypatch.setattr(auth, "write_auth_fragment", lambda root: None)
     monkeypatch.setattr(run_cmd, "_security_preflight", lambda root, out: True)
     monkeypatch.setattr(run_cmd, "compose_run",
                         lambda *a, **k: pytest.fail("must not start the stack on preflight fail"))
