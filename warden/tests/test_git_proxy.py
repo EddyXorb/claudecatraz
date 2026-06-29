@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import base64
-from typing import AsyncIterator
 
 import httpx
-import pytest
 
 from warden.app import create_app
 from warden.audit import AuditLog
