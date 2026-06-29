@@ -99,3 +99,15 @@ def _wizard_yes(
 
     _yes_apply_tokens(secrets_dir, auth_mode, out)
     _yes_apply_warden_policy(env, env_path, warden_toml, out)
+
+    base_image = (os.environ.get("BASE_IMAGE", "").strip() or env.get("BASE_IMAGE", "")).strip()
+    base_dockerfile = (os.environ.get("BASE_DOCKERFILE", "").strip() or env.get("BASE_DOCKERFILE", "")).strip()
+    base_context = (os.environ.get("BASE_CONTEXT", "").strip() or env.get("BASE_CONTEXT", "")).strip()
+    if base_image:
+        updates["BASE_IMAGE"] = base_image
+        unset_env_keys(env_path, ["BASE_DOCKERFILE", "BASE_CONTEXT"])
+    elif base_dockerfile:
+        updates["BASE_DOCKERFILE"] = base_dockerfile
+        unset_env_keys(env_path, ["BASE_IMAGE"])
+        if base_context:
+            updates["BASE_CONTEXT"] = base_context

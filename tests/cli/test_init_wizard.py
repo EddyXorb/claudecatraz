@@ -541,3 +541,174 @@ class TestUnsetEnvKeys:
         assert "WARDEN_BRANCH_PREFIX" not in env
         assert env.get("A") == "1"
         assert env.get("B") == "2"
+
+
+# ---------------------------------------------------------------------------
+# Base image wizard
+# ---------------------------------------------------------------------------
+
+class TestBaseImageWizard:
+    """Tests for base image configuration in both interactive and --yes modes."""
+
+    def _run_interactive(
+        self,
+        root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        inputs: list[str],
+        force: bool = False,
+    ) -> dict[str, str]:
+        """Helper: run cmd_init in interactive mode with the given input sequence."""
+        _patch_common(monkeypatch)
+        it = iter(inputs)
+
+        def _input(prompt: object) -> str:
+            try:
+                return next(it)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=force), Out(color=False))
+        return load_env(root / ".catraz" / ".env")
+
+    # ------------------------------------------------------------------
+    # Interactive tests (force=False, AUTH_MODE already in .env)
+    # Prompt sequence: gitlab_mode (1 input) → base_image choice [+ optional asks]
+    # ------------------------------------------------------------------
+
+    def test_bundled_choice_writes_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Choosing bundled (1) writes neither BASE_IMAGE nor BASE_DOCKERFILE."""
+        root = _make_root(tmp_path)
+        # "3" → gitlab off; "1" → bundled base image
+        env = self._run_interactive(root, monkeypatch, ["3", "1"])
+        assert "BASE_IMAGE" not in env
+        assert "BASE_DOCKERFILE" not in env
+
+    def test_custom_image_written_to_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Choosing custom image (2) and entering a tag writes BASE_IMAGE."""
+        root = _make_root(tmp_path)
+        # "3" → gitlab off; "2" → image; "python:3.11" → tag
+        env = self._run_interactive(root, monkeypatch, ["3", "2", "python:3.11"])
+        assert env.get("BASE_IMAGE") == "python:3.11"
+        assert "BASE_DOCKERFILE" not in env
+
+    def test_dockerfile_written_to_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Choosing dockerfile (3) writes BASE_DOCKERFILE; empty context → no BASE_CONTEXT."""
+        root = _make_root(tmp_path)
+        # "3" → gitlab off; "3" → dockerfile; "./Dockerfile" → path; "" → no context
+        env = self._run_interactive(root, monkeypatch, ["3", "3", "./Dockerfile", ""])
+        assert env.get("BASE_DOCKERFILE") == "./Dockerfile"
+        assert "BASE_CONTEXT" not in env
+
+    def test_dockerfile_with_context_written(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Choosing dockerfile with a non-empty context writes both keys."""
+        root = _make_root(tmp_path)
+        # "3" → gitlab off; "3" → dockerfile; "./Dockerfile" → path; "." → context
+        env = self._run_interactive(root, monkeypatch, ["3", "3", "./Dockerfile", "."])
+        assert env.get("BASE_DOCKERFILE") == "./Dockerfile"
+        assert env.get("BASE_CONTEXT") == "."
+
+    def test_already_set_not_reprompted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With BASE_IMAGE already in .env and force=False, no base image prompt occurs."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_IMAGE=python:3.11\n")
+        # Only "3" for gitlab off; no base image input needed
+        env = self._run_interactive(root, monkeypatch, ["3"], force=False)
+        assert env.get("BASE_IMAGE") == "python:3.11"
+
+    def test_force_reprompts_even_when_set(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With force=True, base image is re-prompted even if already set in .env."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_IMAGE=old:tag\n")
+        _patch_common(monkeypatch)
+
+        # force=True sequence:
+        #   "" → auth_mode default (subscription)
+        #   "1" → gitlab read-write default
+        #   "" → url default
+        #   "" → projects (none)
+        #   "" → branch prefix default
+        #   "2" → image choice
+        #   "new:tag" → new tag
+        inputs = iter(["", "1", "", "", "", "2", "new:tag"])
+
+        def _input(prompt: object) -> str:
+            try:
+                return next(inputs)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        # Two getpass calls for read + write tokens
+        tokens = iter(["glpat-read", "glpat-write"])
+        monkeypatch.setattr("getpass.getpass", lambda p: next(tokens, ""))
+        setup.cmd_init(root, _interactive_args(force=True), Out(color=False))
+        env = load_env(env_path)
+        assert env.get("BASE_IMAGE") == "new:tag"
+
+    def test_switching_to_dockerfile_removes_base_image(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Switching from BASE_IMAGE to Dockerfile removes BASE_IMAGE from .env."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_IMAGE=old:tag\n")
+        _patch_common(monkeypatch)
+
+        # force=True sequence:
+        #   "" → auth_mode default
+        #   "3" → gitlab off
+        #   "3" → dockerfile choice
+        #   "./Dockerfile" → path
+        #   "" → no context
+        inputs = iter(["", "3", "3", "./Dockerfile", ""])
+
+        def _input(prompt: object) -> str:
+            try:
+                return next(inputs)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=True), Out(color=False))
+        env = load_env(env_path)
+        assert env.get("BASE_DOCKERFILE") == "./Dockerfile"
+        assert "BASE_IMAGE" not in env
+
+    # ------------------------------------------------------------------
+    # --yes mode tests
+    # ------------------------------------------------------------------
+
+    def test_yes_base_image_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--yes with BASE_IMAGE env var writes BASE_IMAGE to .env."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("BASE_IMAGE", "python:3.11")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(root / ".catraz" / ".env")
+        assert env.get("BASE_IMAGE") == "python:3.11"
+
+    def test_yes_base_dockerfile_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--yes with BASE_DOCKERFILE env var writes BASE_DOCKERFILE to .env."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("BASE_DOCKERFILE", "./Dockerfile")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(root / ".catraz" / ".env")
+        assert env.get("BASE_DOCKERFILE") == "./Dockerfile"
+
+    def test_yes_base_image_takes_priority_over_dockerfile(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--yes with both BASE_IMAGE and BASE_DOCKERFILE: BASE_IMAGE wins, BASE_DOCKERFILE removed."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        # Pre-populate BASE_DOCKERFILE in .env to test removal
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_DOCKERFILE=./Dockerfile\n")
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("BASE_IMAGE", "img:1")
+        monkeypatch.setenv("BASE_DOCKERFILE", "./Dockerfile")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(env_path)
+        assert env.get("BASE_IMAGE") == "img:1"
+        assert "BASE_DOCKERFILE" not in env

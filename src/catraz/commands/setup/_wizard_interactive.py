@@ -155,6 +155,54 @@ def _prompt_anthropic_key(
         out.warn("anthropic_api_key left empty — doctor will flag it")
 
 
+def _prompt_base_image(
+    root: Path,
+    env: dict[str, str],
+    env_path: Path,
+    args: argparse.Namespace,
+    updates: dict[str, str],
+    out: Out,
+) -> None:
+    """Ask which base image / Dockerfile to use; write to updates and clean up .env."""
+    # Skip re-prompt if already configured and not forced
+    if not args.force and (env.get("BASE_IMAGE") or env.get("BASE_DOCKERFILE")):
+        existing = env.get("BASE_IMAGE") or env.get("BASE_DOCKERFILE")
+        out.info(f"\n  base image already set ({existing}) — keeping. Use --force to change.")
+        return
+
+    # out.choice() returns the value string; user types 1/2/3.
+    # On StopIteration/empty input it retries 3 times then falls back to default=0 → "bundled".
+    choice = out.choice(
+        "\nBase image for the container?",
+        [
+            ("bundled",    "bundled — built-in cpp/rust/python toolchain (default)"),
+            ("image",      "custom image — a ready-made Docker image tag"),
+            ("dockerfile", "Dockerfile — build from a local Dockerfile"),
+        ],
+        default=0,
+    )
+    if choice == "bundled":
+        return
+    if choice == "image":
+        tag = out.ask("Docker image tag (e.g. python:3.11)", env.get("BASE_IMAGE", ""))
+        if tag:
+            updates["BASE_IMAGE"] = tag
+            # Remove stale Dockerfile keys from .env (set_env_values cannot delete keys)
+            unset_env_keys(env_path, ["BASE_DOCKERFILE", "BASE_CONTEXT"])
+    elif choice == "dockerfile":
+        df = out.ask("Dockerfile path (relative to project)", env.get("BASE_DOCKERFILE", "./Dockerfile"))
+        if df:
+            df_abs = (root / df).resolve()
+            if not df_abs.exists():
+                out.warn(f"Dockerfile not found at {df_abs} — run `catraz run` after placing it there.")
+            updates["BASE_DOCKERFILE"] = df
+            # Remove stale BASE_IMAGE key from .env
+            unset_env_keys(env_path, ["BASE_IMAGE"])
+            ctx = out.ask("Build context directory (Enter for Dockerfile's dir)", env.get("BASE_CONTEXT", ""))
+            if ctx:
+                updates["BASE_CONTEXT"] = ctx
+
+
 def _wizard_interactive(
     root: Path,
     env: dict[str, str],
@@ -190,12 +238,19 @@ def _wizard_interactive(
     if auth_mode == "api_key":
         _prompt_anthropic_key(secrets_dir, args, out)
 
+    _prompt_base_image(root, env, env_path, args, updates, out)
+
     proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
     url_part = (f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}"
                 if mode != "off" else "")
     proj_part = f"  projects={len(proj_count)}" if mode != "off" else ""
+    base_part = ""
+    if updates.get("BASE_IMAGE"):
+        base_part = f"  base={updates['BASE_IMAGE']}"
+    elif updates.get("BASE_DOCKERFILE"):
+        base_part = f"  dockerfile={updates['BASE_DOCKERFILE']}"
     out.info(
         f"\n• auth_mode={auth_mode}  gitlab_mode={mode}"
-        f"{url_part}{proj_part}"
+        f"{url_part}{proj_part}{base_part}"
         "  (edit quotas in .catraz/config/warden.toml)"
     )
