@@ -58,6 +58,23 @@ You hold **no** GitLab token. This is intentional (security architecture §R6). 
 GitLab operations run exclusively through the **Warden** (`gitlab-warden:8080`), which
 holds all tokens and enforces the policy.
 
+### Your policy & limits — read `/etc/catraz/warden.toml`
+
+Your active rules are not hardcoded — they live in **`/etc/catraz/warden.toml`** (mounted
+read-only for you; the Warden enforces this same file). **Read it** to learn your real
+limits before you push or open MRs:
+
+- **`branch_prefix`** — the prefix your branches **must** carry to be pushable (R2) and to
+  be allowed as an MR `source_branch` (R3). It defaults to `claude/`, **but it is
+  configurable** — a project may set e.g. `bot/` or `agent/`. The examples below use
+  `claude/`; substitute whatever `branch_prefix` your `warden.toml` actually specifies.
+- **`allowed_projects`** — the only projects you may touch at all (R6); anything else is denied.
+- **`max_open_mrs` / `max_open_branches` / `max_writes_per_hour`** — your quotas (R5).
+
+```bash
+cat /etc/catraz/warden.toml        # your branch_prefix, allowed_projects and quotas
+```
+
 ### GitLab runs through the Warden
 
 `git` is automatically redirected — no difference in usage:

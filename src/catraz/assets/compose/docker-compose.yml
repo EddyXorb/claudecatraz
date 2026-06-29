@@ -159,6 +159,17 @@ services:
         source: ${HOST_GITCONFIG:-/dev/null}
         target: /home/dev/.claude/.ro/.gitconfig
         read_only: true
+      # Non-secret warden policy (branch_prefix, allowed_projects, quotas), read-only.
+      # Lets the agent discover its ACTUAL limits — especially a custom branch_prefix —
+      # instead of assuming the claude/ default; AGENT.md points the agent here. This is
+      # the very file the warden enforces from, so the agent's view can't drift from the
+      # rules. The mount is read-only and purely advisory: the warden reads its own copy
+      # and stays the sole enforcer, and no secrets live here (the GitLab tokens are in
+      # .catraz/secrets/, never in warden.toml).
+      - type: bind
+        source: ${PROJECT_DIR}/.catraz/config/warden.toml
+        target: /etc/catraz/warden.toml
+        read_only: true
     # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
     # activated in stage 03 once the Forward-Proxy service is in Compose.
     # Until then: default bridge (internet access for api.anthropic.com).
