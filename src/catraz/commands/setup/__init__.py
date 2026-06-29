@@ -15,6 +15,21 @@ from ._sync import _auto_sync_if_needed, _ensure_gitignore, _run_sync  # noqa: F
 from ._wizard_interactive import _wizard_interactive
 from ._wizard_yes import _wizard_yes, _yes_gitlab_mode  # noqa: F401
 
+__all__ = [
+    "cmd_doctor",
+    "cmd_init",
+    "cmd_sync",
+    "cmd_allow",
+    "_auto_sync_if_needed",
+    "_ensure_gitignore",
+    "_run_sync",
+    "_ensure_secret",
+    "_write_secret_value",
+    "_wizard_interactive",
+    "_wizard_yes",
+    "_yes_gitlab_mode",
+]
+
 
 def cmd_doctor(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.doctor import DOCTOR_SECTIONS  # noqa: F401

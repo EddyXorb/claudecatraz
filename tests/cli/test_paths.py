@@ -1,11 +1,12 @@
 import os
+from pathlib import Path
 import pytest
 from catraz import paths, __version__
 
 
-def test_asset_root_extracts(tmp_path, monkeypatch):
+def test_asset_root_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     root = paths.asset_root()
@@ -13,33 +14,34 @@ def test_asset_root_extracts(tmp_path, monkeypatch):
     assert (root / "assets" / "warden").is_dir()
 
 
-def test_version():
+def test_version() -> None:
     assert __version__ == "0.2.0"
 
 
-def test_find_root_walks_up(tmp_path, monkeypatch):
+def test_find_root_walks_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".catraz").mkdir(); sub = tmp_path / "a" / "b"; sub.mkdir(parents=True)
     monkeypatch.chdir(sub)
     from catraz import paths
     assert paths.find_root() == tmp_path
 
 
-def test_nested_catraz_refused(tmp_path):
+def test_nested_catraz_refused(tmp_path: Path) -> None:
     (tmp_path / ".catraz").mkdir()
     (tmp_path / "inner").mkdir(); (tmp_path / "inner" / ".catraz").mkdir()
     from catraz import paths, errors
-    import pytest
     with pytest.raises(errors.CliError):
         paths.find_root(str(tmp_path))
 
 
-def test_asset_cache_refreshes_on_source_change(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+def test_asset_cache_refreshes_on_source_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     root = paths.asset_root()
     sig1 = (root / ".extracted").read_text()
-    src = paths._repo_root() / "src/catraz/assets/compose/docker-compose.yml"
+    src_root = paths._repo_root()
+    assert src_root is not None
+    src = src_root / "src/catraz/assets/compose/docker-compose.yml"
     orig = src.stat().st_mtime
     try:
         new_mtime = orig + 100000  # large offset so it's definitely newer than all other assets
@@ -51,8 +53,8 @@ def test_asset_cache_refreshes_on_source_change(tmp_path, monkeypatch):
         os.utime(src, (orig, orig))                     # leave the working tree mtimes intact
 
 
-def test_asset_cache_stable_without_change(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+def test_asset_cache_stable_without_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     sig1 = (paths.asset_root() / ".extracted").read_text()
@@ -60,7 +62,7 @@ def test_asset_cache_stable_without_change(tmp_path, monkeypatch):
     assert sig1 == sig2                                 # no churn when source is unchanged
 
 
-def test_catraz_cache_dir_overrides_home(tmp_path, monkeypatch):
+def test_catraz_cache_dir_overrides_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CATRAZ_CACHE_DIR → <dir>/catraz/<v>."""
     cache_dir = tmp_path / "custom_cache"
     cache_dir.mkdir()
@@ -70,7 +72,7 @@ def test_catraz_cache_dir_overrides_home(tmp_path, monkeypatch):
     assert root == cache_dir / "catraz" / __version__
 
 
-def test_xdg_cache_home_overrides_home(tmp_path, monkeypatch):
+def test_xdg_cache_home_overrides_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """XDG_CACHE_HOME set (no CATRAZ_CACHE_DIR) → <xdg>/catraz/<v>."""
     xdg_dir = tmp_path / "xdg_cache"
     xdg_dir.mkdir()

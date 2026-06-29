@@ -6,11 +6,16 @@ services consume a config file (or `.env`) that is newer than the container's
 start time, and `up -d --force-recreate`s them. Force-recreate (not `restart`) so
 `.env` changes also take effect — env is baked at container create.
 """
+from __future__ import annotations
+
+import argparse
 import datetime
+from pathlib import Path
 
 from catraz.errors import EXIT_OK
 from catraz.compose import compose_ps, _rc
 from catraz import compose
+from catraz.ui import Out
 
 # service → config paths it consumes, relative to `.catraz`. `.env` is added for
 # both in _config_paths (compose interpolation feeds env into both services).
@@ -20,25 +25,25 @@ SERVICE_CONFIG = {
 }
 
 
-def _config_paths(root, service):
+def _config_paths(root: Path, service: str) -> list[Path]:
     """Existing config Paths a service consumes (its files + `.catraz/.env`)."""
     rel = SERVICE_CONFIG.get(service, []) + [".env"]
     paths = [root / ".catraz" / r for r in rel]
     return [p for p in paths if p.exists()]
 
 
-def stale_services(root, started_at):
+def stale_services(root: Path, started_at: dict[str, datetime.datetime | None]) -> dict[str, list[Path] | list[str]]:
     """Map of stale service → list of changed Paths (or `<unknown start>` marker).
 
     `started_at` is `{service: datetime|None}`, injected so this is unit-testable.
     A service present with a None start time is treated as stale (running but
     unreadable → reload to be safe). Services with no changes are omitted."""
-    stale = {}
+    stale: dict[str, list[Path] | list[str]] = {}
     for service, start in started_at.items():
         if start is None:
             stale[service] = ["<unknown start>"]
             continue
-        changed = []
+        changed: list[Path] = []
         for p in _config_paths(root, service):
             mtime = datetime.datetime.fromtimestamp(
                 p.stat().st_mtime, tz=datetime.timezone.utc)
@@ -49,7 +54,7 @@ def stale_services(root, started_at):
     return stale
 
 
-def cmd_reload(root, args, out):
+def cmd_reload(root: Path, args: argparse.Namespace, out: Out) -> int:
     if not (root / ".catraz/.env").exists():
         out.info("Not set up yet — run catraz init.")
         return EXIT_OK

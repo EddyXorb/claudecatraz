@@ -34,5 +34,8 @@ jobs:
           ./catraz --version
           ./catraz run --help
 
+      - name: Type-check (mypy --strict)
+        run: uv run mypy
+
       - name: Unit tests
         run: uv run --with pytest python -m pytest tests/cli/ tests/container/ -q

@@ -2,6 +2,7 @@
 import argparse
 import stat
 import types
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +13,7 @@ from catraz.policy import _read_toml_allowed_projects
 from catraz.ui import Out
 
 
-def _make_root(tmp_path):
+def _make_root(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     root.mkdir()
     cat = root / ".catraz"
@@ -23,14 +24,14 @@ def _make_root(tmp_path):
     return root
 
 
-def _yes_args():
+def _yes_args() -> argparse.Namespace:
     return argparse.Namespace(
         yes=True, force=False, skip_sync=False,
         dir=None, no_color=True, print_only=False,
     )
 
 
-def test_cmd_init_creates_secret_files_even_blank(tmp_path, monkeypatch):
+def test_cmd_init_creates_secret_files_even_blank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_init --yes creates secrets/ at 0700 and both token files at 0600, even if blank.
 
     With no token env vars the wizard infers GITLAB_MODE=off and writes it to .env.
@@ -60,7 +61,7 @@ def test_cmd_init_creates_secret_files_even_blank(tmp_path, monkeypatch):
     assert env.get("GITLAB_MODE") == "off"
 
 
-def test_cmd_init_writes_token_via_getpass(tmp_path, monkeypatch):
+def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_init (interactive) writes the token value to the secret file at 0600.
 
     The interactive wizard uses out.secret() (in ui.py) which calls getpass internally,
@@ -94,7 +95,7 @@ def test_cmd_init_writes_token_via_getpass(tmp_path, monkeypatch):
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_doctor_bad_on_empty_file(tmp_path):
+def test_doctor_bad_on_empty_file(tmp_path: Path) -> None:
     """doctor reports bad for each token file that exists but is empty."""
     root = _make_root(tmp_path)
     secrets_dir = root / ".catraz" / "secrets"
@@ -110,7 +111,7 @@ def test_doctor_bad_on_empty_file(tmp_path):
         assert any(filename in m for m in bad_msgs), f"expected bad for {filename!r}"
 
 
-def test_doctor_ok_on_non_empty(tmp_path, monkeypatch):
+def test_doctor_ok_on_non_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """doctor reports ok when both secret files are non-empty (probe skipped in unit tests)."""
     import catraz.doctor as doc
     monkeypatch.setattr(doc, "_probe_gitlab_tokens", lambda *a, **kw: None)
@@ -128,7 +129,7 @@ def test_doctor_ok_on_non_empty(tmp_path, monkeypatch):
     assert any(i[0] == "ok" and "both GitLab tokens" in i[2] for i in f.items)
 
 
-def test_doctor_fix_creates_secrets_dir_and_files(tmp_path):
+def test_doctor_fix_creates_secrets_dir_and_files(tmp_path: Path) -> None:
     """doctor --fix always creates secrets/ dir (0700) and empty token files (0600)."""
     root = _make_root(tmp_path)
     env = load_env(root / ".catraz" / ".env")
@@ -143,7 +144,7 @@ def test_doctor_fix_creates_secrets_dir_and_files(tmp_path):
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_reads_tokens_from_env(tmp_path, monkeypatch):
+def test_cmd_init_yes_reads_tokens_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--yes writes token env vars to secret files at 0600."""
     root = _make_root(tmp_path)
     monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read-from-env")
@@ -163,7 +164,7 @@ def test_cmd_init_yes_reads_tokens_from_env(tmp_path, monkeypatch):
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path, monkeypatch):
+def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--yes writes WARDEN_ALLOWED_PROJECTS from env to warden.toml (not .env).
 
     Old cmd_init wrote to .env; new cmd_init uses warden.toml as the SSOT and
@@ -189,7 +190,7 @@ def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path, monkeypatch):
     assert "WARDEN_ALLOWED_PROJECTS" not in env
 
 
-def test_doctor_fix_does_not_overwrite_existing_token(tmp_path):
+def test_doctor_fix_does_not_overwrite_existing_token(tmp_path: Path) -> None:
     """doctor --fix leaves an already-populated token file unchanged."""
     root = _make_root(tmp_path)
     secrets_dir = root / ".catraz" / "secrets"

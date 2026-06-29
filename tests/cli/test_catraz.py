@@ -6,11 +6,12 @@ Tests cover the parts that don't need Docker: project-path validation,
 Run:  python3 -m pytest tests/cli/ -q
 """
 
+from pathlib import Path
 import pytest
 
 from catraz import cli, envfile, policy
 from catraz.compose import resolve_service, SERVICES
-from catraz.cli import CliError
+from catraz.errors import CliError
 
 
 # ── validate_project ────────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ from catraz.cli import CliError
     "group/sub/project",
     "my_group/my_project",
 ])
-def test_validate_project_accepts_full_paths(path):
+def test_validate_project_accepts_full_paths(path: str) -> None:
     assert policy.validate_project(path) is None
 
 
@@ -33,7 +34,7 @@ def test_validate_project_accepts_full_paths(path):
     ("/group/project", "slash"),
     ("group/project/", "slash"),
 ])
-def test_validate_project_rejects_traps(path, fragment):
+def test_validate_project_rejects_traps(path: str, fragment: str) -> None:
     reason = policy.validate_project(path)
     assert reason is not None
     assert fragment in reason
@@ -41,7 +42,7 @@ def test_validate_project_rejects_traps(path, fragment):
 
 # ── load_env / set_env_values round-trip ────────────────────────────────────────
 
-def test_load_env_strips_inline_comments(tmp_path):
+def test_load_env_strips_inline_comments(tmp_path: Path) -> None:
     p = tmp_path / ".env"
     p.write_text(
         "ANTHROPIC_API_KEY=sk-test\n"
@@ -57,7 +58,7 @@ def test_load_env_strips_inline_comments(tmp_path):
     assert "a comment line" not in env
 
 
-def test_set_env_values_uncomments_and_updates(tmp_path):
+def test_set_env_values_uncomments_and_updates(tmp_path: Path) -> None:
     p = tmp_path / ".env"
     p.write_text(
         "ANTHROPIC_API_KEY=\n"
@@ -77,7 +78,7 @@ def test_set_env_values_uncomments_and_updates(tmp_path):
     assert len(active) == 1
 
 
-def test_set_env_values_appends_absent_key(tmp_path):
+def test_set_env_values_appends_absent_key(tmp_path: Path) -> None:
     p = tmp_path / ".env"
     p.write_text("DEV_UID=1000\n")
     envfile.set_env_values(p, {"NEW_KEY": "value"})
@@ -86,7 +87,7 @@ def test_set_env_values_appends_absent_key(tmp_path):
 
 # ── allowed_projects precedence (.env override wins over warden.toml) ────────────
 
-def _project(tmp_path, env_override=None, toml_projects=None):
+def _project(tmp_path: Path, env_override: str | None = None, toml_projects: list[str] | None = None) -> dict[str, str]:
     (tmp_path / ".catraz" / "config").mkdir(parents=True, exist_ok=True)
     env = tmp_path / ".catraz" / ".env"
     lines = ["DEV_UID=1000"]
@@ -100,7 +101,7 @@ def _project(tmp_path, env_override=None, toml_projects=None):
     return envfile.load_env(env)
 
 
-def test_env_override_beats_toml(tmp_path, monkeypatch):
+def test_env_override_beats_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
     env = _project(tmp_path, env_override="group/sub/from-env",
                    toml_projects=["group/sub/from-toml"])
@@ -109,7 +110,7 @@ def test_env_override_beats_toml(tmp_path, monkeypatch):
     assert "override" in source
 
 
-def test_toml_used_when_no_override(tmp_path, monkeypatch):
+def test_toml_used_when_no_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
     env = _project(tmp_path, env_override=None,
                    toml_projects=["group/sub/a", "group/sub/b"])
@@ -120,20 +121,20 @@ def test_toml_used_when_no_override(tmp_path, monkeypatch):
 
 # ── service aliases ─────────────────────────────────────────────────────────────
 
-def test_resolve_service_aliases():
+def test_resolve_service_aliases() -> None:
     assert resolve_service("agent") == "claude-dev-env"
     assert resolve_service("warden") == "gitlab-warden"
     assert resolve_service("gitlab-warden") == "gitlab-warden"
 
 
-def test_resolve_service_unknown_raises():
+def test_resolve_service_unknown_raises() -> None:
     with pytest.raises(CliError):
         resolve_service("nope")
 
 
 # ── secret masking never leaks the full value ───────────────────────────────────
 
-def test_mask_hides_value():
+def test_mask_hides_value() -> None:
     assert envfile.mask("supersecrettoken").startswith("sup")
     assert "secrettoken"[3:] not in envfile.mask("supersecrettoken")
     assert envfile.mask("") == ""

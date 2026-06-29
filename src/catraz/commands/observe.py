@@ -1,17 +1,22 @@
 """Observability commands: logs, audit."""
+from __future__ import annotations
+
+import argparse
 import contextlib
 import socket
 import socketserver
 import subprocess
 import threading
 import webbrowser
+from pathlib import Path
 
 from catraz.errors import EXIT_OK, EXIT_GENERAL
 from catraz.compose import run as compose_run, resolve_service, _rc
 from catraz import compose
+from catraz.ui import Out
 
 
-def _tail_audit(root, args, out):
+def _tail_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
     d = root / ".catraz" / "logs" / "warden"
     files = sorted(d.glob("*.jsonl")) if d.exists() else []
     if not files:
@@ -28,11 +33,11 @@ def _tail_audit(root, args, out):
 class _UdsProxy(socketserver.BaseRequestHandler):
     sock_path = ""           # per-instance via type(...)
 
-    def handle(self):
+    def handle(self) -> None:
         with socket.socket(socket.AF_UNIX) as up:
             up.connect(self.sock_path)
 
-            def fwd(a, b):
+            def fwd(a: socket.socket, b: socket.socket) -> None:
                 try:
                     while (d := a.recv(65536)):
                         b.sendall(d)
@@ -47,7 +52,7 @@ class _UdsProxy(socketserver.BaseRequestHandler):
             t.join()
 
 
-def cmd_logs(root, args, out):
+def cmd_logs(root: Path, args: argparse.Namespace, out: Out) -> int:
     log_args = ["logs"]
     if args.audit:
         return _tail_audit(root, args, out)
@@ -61,7 +66,7 @@ def cmd_logs(root, args, out):
     return _rc(r)
 
 
-def cmd_ps(root, args, out):
+def cmd_ps(root: Path, args: argparse.Namespace, out: Out) -> int:
     # all=True so in-flight `run --rm` one-offs (hidden from a plain `ps`) are visible,
     # not just the `up -d` daemon. Always EXIT_OK — this is a query, not a health gate.
     prefix = compose.prepare(root, render=False)
@@ -82,7 +87,7 @@ def cmd_ps(root, args, out):
     return EXIT_OK
 
 
-def cmd_audit(root, args, out):
+def cmd_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
     sock = root / ".catraz/run/warden/admin.sock"
     if not args.web:
         return _tail_audit(root, args, out)            # existing JSONL tail

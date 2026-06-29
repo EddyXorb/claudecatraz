@@ -3,9 +3,9 @@ import re
 from pathlib import Path
 
 
-def load_env(path):
+def load_env(path: Path) -> dict[str, str]:
     """Parse a .env file into {key: value}, stripping inline comments."""
-    env = {}
+    env: dict[str, str] = {}
     if not path.exists():
         return env
     for line in path.read_text().splitlines():
@@ -22,7 +22,7 @@ def load_env(path):
     return env
 
 
-def set_env_values(path, updates):
+def set_env_values(path: Path, updates: dict[str, str]) -> None:
     """Set keys in-place, preserving order/comments. Uncomments `# KEY=` forms;
     appends keys that are absent. Writes a clean `KEY=value` (drops inline hints)."""
     lines = path.read_text().splitlines() if path.exists() else []
@@ -42,7 +42,7 @@ def set_env_values(path, updates):
     path.write_text("\n".join(out) + "\n")
 
 
-def unset_env_keys(path, keys):
+def unset_env_keys(path: Path, keys: list[str]) -> None:
     """Remove active KEY=value lines for the given keys from a .env file.
 
     Lines that are already commented out (``# KEY=…``) are left untouched.
@@ -64,7 +64,7 @@ def unset_env_keys(path, keys):
     path.write_text("\n".join(out) + "\n")
 
 
-def mask(val):
+def mask(val: str) -> str:
     if not val:
         return ""
     return val[:3] + "…" + val[-2:] if len(val) > 6 else "•" * len(val)

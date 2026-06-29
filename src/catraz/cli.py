@@ -10,6 +10,7 @@ Pure Python standard library — no install step needed (Docker is the only real
 dependency). The CLI is a thin layer over `docker compose`; it never holds
 secrets and only ever *writes* `.env` (never config/, never TOML).
 """
+from __future__ import annotations
 
 import argparse
 import sys
@@ -20,45 +21,46 @@ from catraz.errors import (
     CliError, EXIT_OK, EXIT_GENERAL, EXIT_CONFIG, EXIT_DOCTOR, EXIT_DOCKER,
 )
 from catraz.doctor import DOCTOR_SECTIONS
-from catraz.ui import Out
+from catraz.ui import Out as Out  # also re-exported for tests that access cli.Out
 from catraz import image as _image_mod  # noqa: F401 (kept for tests that import catraz.image)
 from catraz.commands import setup, stack, observe
 from catraz.commands import run as run_cmd
 from catraz.commands import reload as reload_cmd
 
 # ── re-exports (keep these importable from catraz.cli for test back-compat) ─────
-# Pure imports keep working: from catraz.cli import X
-from catraz.errors import CliError  # noqa: F811 (already imported above, explicit re-export)
-from catraz.ui import Out  # noqa: F811
-from catraz.commands.setup import _ensure_gitignore, _run_sync  # noqa: F401
-from catraz.commands.run import _oneoff_args  # noqa: F401
-from catraz.commands.observe import _UdsProxy  # noqa: F401
+# Pure imports keep working: from catraz.cli import X. The redundant `X as X` form
+# marks these as explicit re-exports so mypy --strict (no_implicit_reexport) allows
+# tests to access them via cli.*.
+from catraz.errors import CliError as CliError  # noqa: F811 (already imported above, explicit re-export)
+from catraz.commands.setup import _ensure_gitignore as _ensure_gitignore, _run_sync as _run_sync  # noqa: F401
+from catraz.commands.run import _oneoff_args as _oneoff_args  # noqa: F401
+from catraz.commands.observe import _UdsProxy as _UdsProxy  # noqa: F401
 # Compose helpers re-exported for tests that access them via cli.*
 from catraz.compose import run as compose_run  # noqa: F401
-from catraz.compose import compose_ps  # noqa: F401
-from catraz.compose import assert_real_dirs, assert_invariants  # noqa: F401
-from catraz.doctor import run_doctor, print_findings  # noqa: F401
-from catraz import auth  # noqa: F401
-from catraz.commands.stack import _wait_healthy, _print_urls  # noqa: F401
+from catraz.compose import compose_ps as compose_ps  # noqa: F401
+from catraz.compose import assert_real_dirs as assert_real_dirs, assert_invariants as assert_invariants  # noqa: F401
+from catraz.doctor import run_doctor as run_doctor, print_findings as print_findings  # noqa: F401
+from catraz import auth as auth  # noqa: F401
+from catraz.commands.stack import _wait_healthy as _wait_healthy, _print_urls as _print_urls  # noqa: F401
 
 
 # ── commands that stay in cli.py (< 7 lines, no module worth making) ────────────
 
-def cmd_version(root, args, out):
+def cmd_version(root: Path | None, args: argparse.Namespace, out: Out) -> int:
     print(f"catraz {__version__}")
     return EXIT_OK
 
 
 # ── argument parsing ─────────────────────────────────────────────────────────────
 
-def _g():
+def _g() -> argparse.ArgumentParser:
     """A parent parser carrying the global flags, for subparsers to inherit."""
     parent = argparse.ArgumentParser(add_help=False)
     add_global(parent)
     return parent
 
 
-def add_global(parser):
+def add_global(parser: argparse.ArgumentParser) -> None:
     """Truly global flags — repeated on top parser and every subparser so they work
     before *or* after the subcommand. Command-specific flags (--dry-run, --yes) live
     on their own subparser instead, so they appear only where they actually act."""
@@ -68,7 +70,7 @@ def add_global(parser):
                         help="disable ANSI colors")
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="catraz",
         description="Front door for the claudecatraz stack. Start with `catraz init`.",
@@ -149,7 +151,7 @@ HANDLERS = {
 }
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     from catraz.paths import find_root
     parser = build_parser()
     args = parser.parse_args(argv)

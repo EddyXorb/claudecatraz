@@ -12,6 +12,6 @@ EXIT_DOCKER = 4
 
 
 class CliError(Exception):
-    def __init__(self, msg, code=EXIT_GENERAL):
+    def __init__(self, msg: str, code: int = EXIT_GENERAL) -> None:
         super().__init__(msg)
         self.code = code

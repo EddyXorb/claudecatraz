@@ -1,6 +1,7 @@
 import argparse
 import re
 from pathlib import Path
+from typing import cast
 
 from catraz.envfile import load_env, unset_env_keys
 from catraz.policy import (
@@ -44,13 +45,13 @@ def _prompt_gitlab_mode(env: dict[str, str], out: Out) -> str:
     cur_mode = (env.get("GITLAB_MODE") or "read-write").strip()
     if cur_mode not in _VALID_GITLAB_MODES:
         cur_mode = "read-write"
-    return out.choice(
+    return cast(str, out.choice(
         "GitLab integration?",
         [("read-write", "read-write — read + push (needs read & write tokens)"),
          ("read-only", "read-only — read only (needs a read token)"),
          ("off", "off — no GitLab (the agent can't talk to GitLab)")],
         default={"read-write": 0, "read-only": 1, "off": 2}[cur_mode],
-    )
+    ))
 
 
 def _prompt_gitlab_tokens(

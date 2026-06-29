@@ -3,9 +3,10 @@ import os
 import re
 import urllib.parse
 from pathlib import Path
+from typing import cast
 
 
-def validate_project(p):
+def validate_project(p: str) -> str | None:
     """Return an error reason for an allowed_projects entry, or None if plausible.
     We can only catch the mechanically-detectable traps; group-vs-project ambiguity
     (group/sub looks like a project) is left to the warden reconcile."""
@@ -21,7 +22,7 @@ def validate_project(p):
     return None
 
 
-def _resolve_allowed_projects(root, env):
+def _resolve_allowed_projects(root: Path, env: dict[str, str]) -> tuple[list[str], str]:
     """Env override wins over warden.toml (README §11 precedence)."""
     ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
     if ov.strip():
@@ -32,11 +33,11 @@ def _resolve_allowed_projects(root, env):
     return _read_toml_allowed_projects(toml), "warden.toml"
 
 
-def _read_toml_allowed_projects(path):
+def _read_toml_allowed_projects(path: Path) -> list[str]:
     text = path.read_text()
     try:
         import tomllib  # py3.11+, read-only — we never write TOML
-        return tomllib.loads(text).get("allowed_projects", [])
+        return cast(list[str], tomllib.loads(text).get("allowed_projects", []))
     except ModuleNotFoundError:
         m = re.search(r"allowed_projects\s*=\s*\[(.*?)\]", text, re.S)
         if not m:
@@ -44,7 +45,7 @@ def _read_toml_allowed_projects(path):
         return re.findall(r'"([^"]+)"', m.group(1))
 
 
-def _host_of(s):
+def _host_of(s: str) -> str:
     """Lowercased hostname of a URL-ish string (scheme optional), ignoring port."""
     s = (s or "").strip()
     if "://" not in s:
@@ -52,7 +53,7 @@ def _host_of(s):
     return (urllib.parse.urlsplit(s).hostname or "").lower()
 
 
-def _project_from_remote_url(url, gitlab_url="https://gitlab.com"):
+def _project_from_remote_url(url: str, gitlab_url: str = "https://gitlab.com") -> str | None:
     """Derive a GitLab project path (group/sub/project) from a git remote URL,
     iff its host matches *gitlab_url*'s host. Else (or on an invalid path) None.
 
@@ -86,7 +87,7 @@ def _project_from_remote_url(url, gitlab_url="https://gitlab.com"):
     return path
 
 
-def merge_allowed(existing, additions):
+def merge_allowed(existing: list[str], additions: list[str]) -> list[str]:
     """Drop falsy entries from *existing*, append *additions*, dedupe preserving
     first-seen order. (The shipped default is ``[]``; the empty-string drop is
     defensive against an older ``[""]`` placeholder.)"""
@@ -97,7 +98,7 @@ def merge_allowed(existing, additions):
     return merged
 
 
-def _discover_gitlab_projects(root, gitlab_url):
+def _discover_gitlab_projects(root: Path, gitlab_url: str) -> list[str]:
     """Scan *root* and its immediate git subdirs for remotes whose host matches
     *gitlab_url*; return the derived project paths (deduped, order-preserving).
 
@@ -112,7 +113,7 @@ def _discover_gitlab_projects(root, gitlab_url):
     for d in subdirs[:50]:
         if (d / ".git").exists():
             candidates.append(d)
-    found = []
+    found: list[str] = []
     for d in candidates:
         try:
             r = subprocess.run(["git", "-C", str(d), "remote", "-v"],
@@ -131,7 +132,7 @@ def _discover_gitlab_projects(root, gitlab_url):
     return found
 
 
-def set_toml_scalar(path, key, value):
+def set_toml_scalar(path: Path, key: str, value: str) -> None:
     """Set a scalar string value for *key* in a TOML file.
 
     Uses a targeted regex replace that preserves the line's leading
@@ -155,7 +156,7 @@ def set_toml_scalar(path, key, value):
     path.write_text(new_text, encoding="utf-8")
 
 
-def set_toml_list(path, key, values):
+def set_toml_list(path: Path, key: str, values: list[str]) -> None:
     """Set a list of strings for *key* in a TOML file.
 
     Same comment-preserving strategy as set_toml_scalar.  The shipped

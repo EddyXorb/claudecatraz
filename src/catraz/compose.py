@@ -1,4 +1,6 @@
 """docker-compose call + invariants."""
+from __future__ import annotations
+
 import datetime
 import hashlib
 import json
@@ -7,6 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from catraz.paths import asset_root
 from catraz.errors import CliError, EXIT_CONFIG
@@ -67,7 +70,7 @@ def _warn_fallback(msg: str) -> None:
     print(f"catraz WARNING: {msg}", file=sys.stderr)
 
 
-def generate_resolved(root: Path, extra_env=None) -> bool:
+def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bool:
     """Render the effective compose and write .catraz/compose.resolved.yml at mode 0600.
 
     Runs `docker compose ... --profile remote config` (interpolated, agent stays gated).
@@ -99,7 +102,7 @@ def generate_resolved(root: Path, extra_env=None) -> bool:
     return True
 
 
-def prepare(root: Path, *, render: bool, extra_env=None) -> list[str]:
+def prepare(root: Path, *, render: bool, extra_env: dict[str, str] | None = None) -> list[str]:
     """Return the compose cmd prefix for this handler to use consistently.
 
     render=True  (up/run/shell/down): write auth fragment + (re)generate resolved.yml.
@@ -118,8 +121,8 @@ def prepare(root: Path, *, render: bool, extra_env=None) -> list[str]:
     return _source_cmd(root)  # read-only before first up → layered, no side effects
 
 
-def run(root: Path, args, *, prefix=None, capture=False, check=True, print_only=False,
-        extra_env=None, tee: Path | None = None):
+def run(root: Path, args: list[str], *, prefix: list[str] | None = None, capture: bool = False, check: bool = True, print_only: bool = False,
+        extra_env: dict[str, str] | None = None, tee: Path | None = None) -> subprocess.CompletedProcess[str] | None:
     from catraz.errors import CliError, EXIT_DOCKER
     _prefix = prefix if prefix is not None else _source_cmd(root)
     cmd = [*_prefix, *args]
@@ -144,7 +147,9 @@ def run(root: Path, args, *, prefix=None, capture=False, check=True, print_only=
                                      stderr=subprocess.STDOUT)
                 # read1 (not read) returns as soon as data is available, preserving live
                 # output — read(n) would block until n bytes or EOF.
-                for chunk in iter(lambda: p.stdout.read1(65536), b""):
+                assert p.stdout is not None
+                stdout = p.stdout
+                for chunk in iter(lambda: stdout.read1(65536), b""):  # type: ignore[attr-defined]
                     sys.stdout.buffer.write(chunk)
                     sys.stdout.buffer.flush()
                     f.write(chunk)
@@ -158,7 +163,7 @@ def run(root: Path, args, *, prefix=None, capture=False, check=True, print_only=
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
 
 
-def compose_ps(root, *, prefix=None, all=False):
+def compose_ps(root: Path, *, prefix: list[str] | None = None, all: bool = False) -> list[dict[str, str]]:
     """Return [{Service, State, Health}, …] from `docker compose ps`.
 
     all=True passes `-a` so stopped containers *and* `run --rm` one-offs (hidden by
@@ -191,7 +196,7 @@ def _parse_docker_time(s: str) -> datetime.datetime | None:
         return None
 
 
-def container_started_at(root, name_or_id, *, prefix=None) -> datetime.datetime | None:
+def container_started_at(root: Path, name_or_id: str, *, prefix: list[str] | None = None) -> datetime.datetime | None:
     """Container start time via `docker inspect`, or None if unreadable/unparseable.
 
     Pass the `Name`/`ID` already carried by `compose ps --format json` rows — no
@@ -207,7 +212,7 @@ def container_started_at(root, name_or_id, *, prefix=None) -> datetime.datetime 
     return _parse_docker_time(r.stdout)
 
 
-def resolve_service(name):
+def resolve_service(name: str) -> str:
     from catraz.errors import CliError, EXIT_CONFIG
     if name in SERVICES:
         return SERVICES[name]
@@ -218,7 +223,7 @@ def resolve_service(name):
     )
 
 
-def _rc(r):
+def _rc(r: subprocess.CompletedProcess[str] | None) -> int:
     """Return EXIT_OK if r succeeded, EXIT_GENERAL otherwise.
 
     Used by cmd_down and cmd_logs only. cmd_run propagates claude's own exit
@@ -227,20 +232,20 @@ def _rc(r):
     return EXIT_OK if r and r.returncode == 0 else EXIT_GENERAL
 
 
-def assert_real_dirs(root) -> None:
+def assert_real_dirs(root: Path) -> None:
     for p in (root, root / ".catraz"):
         if p.is_symlink():
             raise CliError(f"{p} is a symlink — bind source must be a real dir", EXIT_CONFIG)
 
 
-def _env_keys(agent) -> set:
+def _env_keys(agent: dict[str, Any]) -> set[str]:
     env = agent.get("environment") or {}
     if isinstance(env, list):
         return {e.split("=", 1)[0] for e in env}
     return set(env.keys())
 
 
-def _good_tmpfs(v) -> bool:
+def _good_tmpfs(v: dict[str, Any]) -> bool:
     """True when v is the /workspace/.catraz tmpfs with the correct mode and size.
 
     compose config normalizes mode 0700 → 448 (0o700 == 448). Always assert the
@@ -252,7 +257,7 @@ def _good_tmpfs(v) -> bool:
     return opts.get("mode") == 448 and "size" in opts
 
 
-def assert_invariants(root, *, prefix=None) -> None:
+def assert_invariants(root: Path, *, prefix: list[str] | None = None) -> None:
     _prefix = prefix if prefix is not None else _source_cmd(root)
     r = run(root, ["--profile", "remote", "config", "--format", "json"],
             prefix=_prefix, capture=True, check=False)

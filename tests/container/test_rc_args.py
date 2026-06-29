@@ -1,7 +1,9 @@
+from pathlib import Path
+from typing import Any
 import pytest
 
 
-def test_rc_args_defaults(ep, tmp_path, monkeypatch):
+def test_rc_args_defaults(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No env set → argv equals today's literal list (regression guard)."""
     calls = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
@@ -22,7 +24,7 @@ def test_rc_args_defaults(ep, tmp_path, monkeypatch):
     assert "--permission-mode" not in ep.os.environ if hasattr(ep.os, "environ") else True
 
 
-def test_rc_args_env_driven(ep, tmp_path, monkeypatch):
+def test_rc_args_env_driven(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLAUDE_RC_SPAWN and CLAUDE_RC_EXTRA_ARGS override the defaults."""
     calls = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
@@ -39,7 +41,7 @@ def test_rc_args_env_driven(ep, tmp_path, monkeypatch):
     assert "--foo" in argv and "bar" in argv
 
 
-def test_permission_mode_always_hardcoded(ep, tmp_path, monkeypatch):
+def test_permission_mode_always_hardcoded(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--permission-mode bypassPermissions is always present and never env-driven."""
     calls = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
@@ -56,7 +58,7 @@ def test_permission_mode_always_hardcoded(ep, tmp_path, monkeypatch):
     assert argv[idx + 1] == "bypassPermissions"
 
 
-def test_api_key_file_exported_to_env(ep, tmp_path, monkeypatch):
+def test_api_key_file_exported_to_env(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """ANTHROPIC_API_KEY_FILE is read, stripped, and exported to os.environ before exec."""
     key_file = tmp_path / "anthropic_api_key"
     key_file.write_text("sk-ant-testkey\n")
@@ -78,7 +80,7 @@ def test_api_key_file_exported_to_env(ep, tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_api_key_file_wins_over_bare_env(ep, tmp_path, monkeypatch):
+def test_api_key_file_wins_over_bare_env(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When both _FILE and bare var are set, the file value wins."""
     key_file = tmp_path / "anthropic_api_key"
     key_file.write_text("sk-from-file\n")

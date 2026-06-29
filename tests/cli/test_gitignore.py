@@ -1,12 +1,16 @@
-def test_ensure_gitignore_appends_once(tmp_path):
+from pathlib import Path
+import pytest
+
+
+def test_ensure_gitignore_appends_once(tmp_path: Path) -> None:
     from catraz import cli
     cli._ensure_gitignore(tmp_path)
-    cli._ensure_gitignore(tmp_path)  # idempotent — must not add a second line
+    cli._ensure_gitignore(tmp_path)
     gi = (tmp_path / ".gitignore").read_text()
     assert gi.count(".catraz/") == 1
 
 
-def test_ensure_gitignore_preserves_existing(tmp_path):
+def test_ensure_gitignore_preserves_existing(tmp_path: Path) -> None:
     from catraz import cli
     (tmp_path / ".gitignore").write_text("node_modules/\n")
     cli._ensure_gitignore(tmp_path)

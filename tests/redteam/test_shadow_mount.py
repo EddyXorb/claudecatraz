@@ -19,10 +19,11 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Iterator
 import pytest
 
 
-def _docker_available():
+def _docker_available() -> bool:
     if not shutil.which("docker"):
         return False
     r = subprocess.run(["docker", "info"], capture_output=True)
@@ -32,13 +33,16 @@ def _docker_available():
 pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
 
 
-def _run(cmd):
+def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
 # ── T2 — baseline: tmpfs ordering guarantee (gating test) ────────────────────
 
-def test_t2_tmpfs_overdeck_ordering(tmp_path):
+from pathlib import Path
+
+
+def test_t2_tmpfs_overdeck_ordering(tmp_path: Path) -> None:
     """tmpfs over a bind subpath masks host content deterministically."""
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz/secret").write_text("TOP")
@@ -53,7 +57,7 @@ def test_t2_tmpfs_overdeck_ordering(tmp_path):
 # ── Fixture: running stack via catraz init -y + up --remote ──────────────────
 
 @pytest.fixture(scope="module")
-def live_stack(tmp_path_factory):
+def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Start a catraz stack in a temporary project dir; tear down after module.
 
     Requires Docker + a real ANTHROPIC_API_KEY in the environment.
@@ -92,7 +96,7 @@ def live_stack(tmp_path_factory):
 # ── T1 — live stack: /workspace/.catraz is empty inside container ─────────────
 
 @pytest.mark.slow
-def test_t1_workspace_catraz_empty(live_stack):
+def test_t1_workspace_catraz_empty(live_stack: Path) -> None:
     """Inside the running agent container .catraz is the empty tmpfs shadow."""
     r = _run(["docker", "compose",
               "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
@@ -106,7 +110,7 @@ def test_t1_workspace_catraz_empty(live_stack):
 # ── T3 — tmpfs write does NOT propagate to host .catraz ──────────────────────
 
 @pytest.mark.slow
-def test_t3_tmpfs_write_isolation(live_stack):
+def test_t3_tmpfs_write_isolation(live_stack: Path) -> None:
     """Writing into the tmpfs shadow must NOT appear on the host."""
     _run(["docker", "compose",
           "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
@@ -119,7 +123,7 @@ def test_t3_tmpfs_write_isolation(live_stack):
 # ── T4 — dev user cannot umount the tmpfs shadow ─────────────────────────────
 
 @pytest.mark.slow
-def test_t4_umount_eperm(live_stack):
+def test_t4_umount_eperm(live_stack: Path) -> None:
     """Unprivileged dev user must get EPERM when trying to umount the shadow."""
     r = _run(["docker", "compose",
               "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
@@ -132,7 +136,7 @@ def test_t4_umount_eperm(live_stack):
 # ── T7a — in-container symlink stays in container namespace ──────────────────
 # No @slow: uses only `docker run alpine`, no catraz stack.
 
-def test_t7a_container_symlink_no_host_escape(tmp_path):
+def test_t7a_container_symlink_no_host_escape(tmp_path: Path) -> None:
     """A symlink created inside the container resolves within the container namespace
     and must not reveal the host path to the host-side .catraz secret."""
     (tmp_path / ".catraz").mkdir()
@@ -151,7 +155,7 @@ def test_t7a_container_symlink_no_host_escape(tmp_path):
 # ── T8 — /proc/self/mountinfo shows no reachable secret path ─────────────────
 # No @slow: uses only `docker run alpine`, no catraz stack.
 
-def test_t8_mountinfo_no_secret_path(tmp_path):
+def test_t8_mountinfo_no_secret_path(tmp_path: Path) -> None:
     """/proc/self/mountinfo inside the container must not expose a device path
     that references the host .catraz directory directly."""
     (tmp_path / ".catraz").mkdir()

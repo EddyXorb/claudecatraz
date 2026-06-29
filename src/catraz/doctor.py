@@ -6,6 +6,7 @@ import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any, cast
 
 from catraz.envfile import load_env
 from catraz.compose import run as compose_run
@@ -29,18 +30,18 @@ SECURITY_SECTIONS = ["docker", "compose", "env", "policy", "auth"]
 
 
 class Findings:
-    def __init__(self):
-        self.items = []
+    def __init__(self) -> None:
+        self.items: list[tuple[str, str, str, str | None]] = []
 
-    def add(self, level, section, msg, hint=None):
+    def add(self, level: str, section: str, msg: str, hint: str | None = None) -> None:
         self.items.append((level, section, msg, hint))
 
-    def ok(self, sec, msg): self.add(OK, sec, msg)
-    def warn(self, sec, msg, hint=None): self.add(WARN, sec, msg, hint)
-    def bad(self, sec, msg, hint=None): self.add(BAD, sec, msg, hint)
+    def ok(self, sec: str, msg: str) -> None: self.add(OK, sec, msg)
+    def warn(self, sec: str, msg: str, hint: str | None = None) -> None: self.add(WARN, sec, msg, hint)
+    def bad(self, sec: str, msg: str, hint: str | None = None) -> None: self.add(BAD, sec, msg, hint)
 
 
-def which(cmd):
+def which(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
@@ -48,16 +49,16 @@ MIN_ENGINE = (24, 0)
 MIN_COMPOSE = (2, 20)
 
 
-def _parse_version(text):
+def _parse_version(text: str) -> tuple[int, int] | None:
     """Extract the first x.y.z tuple from a version string like 'Docker version 24.0.7, ...'."""
     import re
     m = re.search(r"(\d+)\.(\d+)", text)
     if not m:
         return None
-    return tuple(int(x) for x in m.groups())
+    return tuple(int(x) for x in m.groups())  # type: ignore[return-value]
 
 
-def check_docker(f):
+def check_docker(f: Findings) -> None:
     if not which("docker"):
         f.bad("docker", "docker not on PATH", "install Docker + Compose v2")
         return
@@ -84,7 +85,7 @@ def check_docker(f):
             f.ok("docker", f"Compose {r.stdout.strip()} (≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} ✔)")
 
 
-def check_compose(root, env, f):
+def check_compose(root: Path, env: dict[str, str], f: Findings) -> None:
     """Sanity check that the warden — the trust boundary — resolves in the compose
     config. It's unconditional now (no profile gate), so its absence means someone
     edited it out; agent depends_on gitlab-warden, so the stack would fail closed."""
@@ -102,7 +103,7 @@ def check_compose(root, env, f):
         f.ok("compose", "warden service present")
 
 
-def check_env(root, env, f):
+def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
     envf = root / ".catraz" / ".env"
     if not envf.exists():
         f.bad("env", ".env missing", "run `catraz init`")
@@ -127,11 +128,11 @@ def check_env(root, env, f):
                 f.ok("env", f"{d.name}/ owned by DEV_UID")
 
 
-def _gitlab_mode(env):
+def _gitlab_mode(env: dict[str, str]) -> str:
     return (env.get("GITLAB_MODE") or "read-write").strip()
 
 
-def check_gitlab(env, f):
+def check_gitlab(env: dict[str, str], f: Findings) -> None:
     mode = _gitlab_mode(env)
     if mode == "off":
         f.ok("tokens", "GitLab disabled (GITLAB_MODE=off)")
@@ -144,11 +145,11 @@ def check_gitlab(env, f):
         f.ok("tokens", f"GitLab endpoint: {url}")
 
 
-def check_tokens(root, env, f):
+def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
     mode = _gitlab_mode(env)
     secrets_dir = root / ".catraz" / "secrets"
 
-    def _read_token(filename):
+    def _read_token(filename: str) -> str:
         p = secrets_dir / filename
         try:
             return p.read_text(encoding="utf-8").strip() if p.exists() else ""
@@ -184,14 +185,14 @@ def check_tokens(root, env, f):
     _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")])
 
 
-def _gitlab_get(base, path, token, timeout=5):
+def _gitlab_get(base: str, path: str, token: str, timeout: int = 5) -> dict[str, Any]:
     url = base.rstrip("/") + path
     req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": token})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+        return cast(dict[str, Any], json.loads(resp.read().decode()))
 
 
-def _probe_gitlab_tokens(root, env, f, tokens=None):
+def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: list[tuple[str, str]] | None = None) -> None:
     """Best-effort online probe (P1 roast fix): catch expired/swapped/wrong-scope
     tokens. Degrades silently to 'set/not set' when the host can't reach GitLab.
 
@@ -200,7 +201,7 @@ def _probe_gitlab_tokens(root, env, f, tokens=None):
     base = env.get("GITLAB_URL", "https://gitlab.com")
     secrets_dir = root / ".catraz" / "secrets"
 
-    def _read_secret(filename):
+    def _read_secret(filename: str) -> str:
         p = secrets_dir / filename
         try:
             return p.read_text(encoding="utf-8").strip() if p.exists() else ""
@@ -247,7 +248,7 @@ def _probe_gitlab_tokens(root, env, f, tokens=None):
                   "issue a token with the 'api' scope")
 
 
-def check_policy(root, env, f):
+def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
     """Fast pre-check of allowed_projects. Authoritative validation stays the
     warden reconcile — this just turns the obvious traps loud before start."""
     mode = _gitlab_mode(env)
@@ -273,7 +274,7 @@ def check_policy(root, env, f):
         f.ok("policy", f"{len(resolved)} allowed project(s) [{source}]")
 
 
-def check_claude(root, env, f):
+def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
     from catraz.paths import claude_home
     home = claude_home(root)
     creds = home / ".credentials.json"
@@ -288,7 +289,7 @@ def check_claude(root, env, f):
         f.ok("claude", "Claude sandbox credential present")
 
 
-def check_net(root, f):
+def check_net(root: Path, f: Findings) -> None:
     # Admin/audit moved from TCP (172.31.0.2:9090) to a per-project unix socket
     # under .catraz/run/warden/. The socket file only exists while the stack runs.
     sock = root / ".catraz" / "run" / "warden" / "admin.sock"
@@ -298,7 +299,7 @@ def check_net(root, f):
         f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
 
 
-def _read_secret_file(root, filename):
+def _read_secret_file(root: Path, filename: str) -> str:
     """Return the stripped contents of .catraz/secrets/<filename>, or '' if missing/empty."""
     p = root / ".catraz" / "secrets" / filename
     try:
@@ -307,7 +308,7 @@ def _read_secret_file(root, filename):
         return ""
 
 
-def check_auth(root, env, f):
+def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
     # Canonical rule (matches auth.auth_mode): absent/empty → subscription; only a
     # present-but-invalid value is an error.
     mode = env.get("AUTH_MODE") or "subscription"
@@ -331,7 +332,7 @@ def check_auth(root, env, f):
         if api_key and not cred.exists(): f.ok("auth", "api_key set")
 
 
-def check_base(root, env, f):
+def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
     if not which("docker"):
         f.warn("base", "docker missing — base not checked"); return
     try:
@@ -356,8 +357,8 @@ def check_base(root, env, f):
         f.ok("base", f"{len(extra)} setuid/setgid binaries in base — neutralized by no-new-privileges")
 
 
-def run_doctor(root, only=None, fix=False):
-    env = load_env(root / ".catraz" / ".env")
+def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> Findings:
+    env: dict[str, str] = load_env(root / ".catraz" / ".env")
     f = Findings()
     sections = only or DOCTOR_SECTIONS
     if fix:
@@ -375,7 +376,7 @@ def run_doctor(root, only=None, fix=False):
     return f
 
 
-def _doctor_fix(root, env):
+def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     """Repair only the safe things: missing dirs + chown. Never secrets/policy."""
     dev_uid = env.get("DEV_UID", "")
     cat = root / ".catraz"
@@ -401,13 +402,13 @@ def _doctor_fix(root, env):
                 pass  # surfaced as a finding by check_env; --fix is best-effort
 
 
-def _chown_r(path, uid):
+def _chown_r(path: Path, uid: int) -> None:
     os.chown(path, uid, -1)
     for p in path.rglob("*"):
         os.chown(p, uid, -1)
 
 
-def print_findings(f, out):
+def print_findings(f: Findings, out: Any) -> tuple[int, int]:
     glyph = {OK: out.green("✔"), WARN: out.yellow("▲"), BAD: out.red("✘")}
     cur = None
     for level, section, msg, hint in f.items:

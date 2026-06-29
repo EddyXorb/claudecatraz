@@ -1,14 +1,20 @@
 """Stack lifecycle commands: stop, status."""
+from __future__ import annotations
+
+import argparse
 import time
+from pathlib import Path
+from typing import Any
 
 from catraz.errors import CliError, EXIT_OK, EXIT_GENERAL, EXIT_DOCTOR
 from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants, _rc
 from catraz.doctor import run_doctor, print_findings, SECURITY_SECTIONS
 from catraz import auth, image, compose
+from catraz.ui import Out
 from catraz.commands.setup import _auto_sync_if_needed
 
 
-def _row_ready(row):
+def _row_ready(row: dict[str, str]) -> bool:
     state = (row.get("State") or "").lower()
     health = (row.get("Health") or "").lower()
     if state != "running":
@@ -16,7 +22,7 @@ def _row_ready(row):
     return health in ("", "healthy")
 
 
-def _print_urls(out):
+def _print_urls(out: Out) -> None:
     out.head("URLs")
     print("  Remote Control:  " + out.cyan("https://claude.ai")
           + out.dim("  (the agent 'claude-dev-env' registers there)"))
@@ -27,12 +33,12 @@ def _print_urls(out):
           + out.dim("   ·   interactive: ") + out.cyan("catraz run"))
 
 
-def _security_preflight(root, out):
+def _security_preflight(root: Path, out: Out) -> bool:
     """Run security-section doctor checks; return True if any bad findings."""
-    return print_findings(run_doctor(root, only=SECURITY_SECTIONS), out)[0]
+    return bool(print_findings(run_doctor(root, only=SECURITY_SECTIONS), out)[0])
 
 
-def _wait_healthy(root, out, prefix=None, timeout=120):
+def _wait_healthy(root: Path, out: Out, prefix: list[str] | None = None, timeout: int = 120) -> None:
     out.info(f"• waiting for health (≤{timeout}s)…")
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -44,7 +50,7 @@ def _wait_healthy(root, out, prefix=None, timeout=120):
     out.warn("timed out waiting for health — check `catraz status`")
 
 
-def cmd_down(root, args, out):
+def cmd_down(root: Path, args: argparse.Namespace, out: Out) -> int:
     # `--profile remote` brings the agent service (profiles: ["remote"]) into scope so a
     # plain `down` actually tears it down. Without it the agent container survives, pinned
     # to the now-deleted agent-net → "network <id> not found" on the next `up --remote`.
@@ -62,7 +68,7 @@ def cmd_down(root, args, out):
     return _rc(r)
 
 
-def cmd_status(root, args, out):
+def cmd_status(root: Path, args: argparse.Namespace, out: Out) -> int:
     if not (root / ".catraz" / ".env").exists():
         out.info("Not set up yet. Run " + out.bold("catraz init") + ".")
         return EXIT_OK

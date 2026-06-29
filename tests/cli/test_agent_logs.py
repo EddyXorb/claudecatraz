@@ -1,6 +1,10 @@
 """P10: non-interactive `catraz run` tees its transcript to .catraz/logs/agent."""
+import argparse
 import shutil
+import sys
 import types
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -11,7 +15,8 @@ from catraz.ui import Out
 
 # ── _prune_agent_logs ─────────────────────────────────────────────────────────
 
-def test_prune_keeps_newest_50(tmp_path):
+
+def test_prune_keeps_newest_50(tmp_path: Path) -> None:
     for i in range(53):
         (tmp_path / f"{i:04d}.log").write_text("x")
     run_cmd._prune_agent_logs(tmp_path, keep=50)
@@ -24,11 +29,11 @@ def test_prune_keeps_newest_50(tmp_path):
 
 # ── cmd_run tee wiring ────────────────────────────────────────────────────────
 
-def _mock_cmd_run(monkeypatch, tmp_path):
+def _mock_cmd_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[str, Any]]:
     """Stub every side-effecting collaborator cmd_run touches; record compose_run kwargs."""
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
-    compose_calls = []
+    compose_calls: list[dict[str, Any]] = []
 
     monkeypatch.setattr(run_cmd, "assert_real_dirs", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
@@ -37,7 +42,9 @@ def _mock_cmd_run(monkeypatch, tmp_path):
     monkeypatch.setattr(compose_mod, "prepare",
                         lambda root, *, render, extra_env=None: ["docker", "compose"])
 
-    def fake_compose_run(root, args, *, prefix=None, check=True, tee=None, **k):
+    def fake_compose_run(root: Path, args: list[str], *, prefix: list[str] | None = None,
+                         check: bool = True, tee: Path | None = None,
+                         **k: object) -> types.SimpleNamespace:
         compose_calls.append({"args": list(args), "tee": tee})
         return types.SimpleNamespace(returncode=0)
 
@@ -45,11 +52,12 @@ def _mock_cmd_run(monkeypatch, tmp_path):
     return compose_calls
 
 
-def test_cmd_run_non_tty_tees_transcript(monkeypatch, tmp_path):
+def test_cmd_run_non_tty_tees_transcript(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     compose_calls = _mock_cmd_run(monkeypatch, tmp_path)
-    monkeypatch.setattr(run_cmd.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
     monkeypatch.chdir(tmp_path)
-    rc = run_cmd.cmd_run(tmp_path, types.SimpleNamespace(claude_args=[]), Out(color=False))
+    args = cast(argparse.Namespace, types.SimpleNamespace(claude_args=[]))
+    rc = run_cmd.cmd_run(tmp_path, args, Out(color=False))
     assert rc == 0
     assert len(compose_calls) == 1
     tee = compose_calls[0]["tee"]
@@ -58,11 +66,12 @@ def test_cmd_run_non_tty_tees_transcript(monkeypatch, tmp_path):
     assert tee.name.endswith(".log")
 
 
-def test_cmd_run_tty_no_tee(monkeypatch, tmp_path):
+def test_cmd_run_tty_no_tee(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     compose_calls = _mock_cmd_run(monkeypatch, tmp_path)
-    monkeypatch.setattr(run_cmd.sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
     monkeypatch.chdir(tmp_path)
-    rc = run_cmd.cmd_run(tmp_path, types.SimpleNamespace(claude_args=[]), Out(color=False))
+    args = cast(argparse.Namespace, types.SimpleNamespace(claude_args=[]))
+    rc = run_cmd.cmd_run(tmp_path, args, Out(color=False))
     assert rc == 0
     assert len(compose_calls) == 1
     assert compose_calls[0]["tee"] is None
@@ -71,10 +80,11 @@ def test_cmd_run_tty_no_tee(monkeypatch, tmp_path):
 # ── compose.run tee streaming ─────────────────────────────────────────────────
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash unavailable")
-def test_compose_run_tee_writes_file(tmp_path):
+def test_compose_run_tee_writes_file(tmp_path: Path) -> None:
     # prefix=[] is mandatory: an omitted prefix defaults to the docker-compose source cmd.
     log = tmp_path / "out.log"
     r = compose_mod.run(tmp_path, ["bash", "-c", "printf hello"],
                         prefix=[], check=False, tee=log)
+    assert r is not None
     assert r.returncode == 0
     assert log.read_text() == "hello"

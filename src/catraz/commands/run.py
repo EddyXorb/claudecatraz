@@ -1,4 +1,7 @@
 """One-off agent run command."""
+from __future__ import annotations
+
+import argparse
 import datetime
 import sys
 from pathlib import Path
@@ -6,6 +9,7 @@ from pathlib import Path
 from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
 from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants
 from catraz import image, compose, auth
+from catraz.ui import Out
 from catraz.commands.stack import _row_ready, _security_preflight, _wait_healthy, _print_urls
 from catraz.commands.setup import _auto_sync_if_needed
 
@@ -34,7 +38,7 @@ def _prune_agent_logs(log_dir: Path, keep: int = 50) -> None:
         p.unlink(missing_ok=True)
 
 
-def _ensure_infra(root, out, prefix=None):
+def _ensure_infra(root: Path, out: Out, prefix: list[str] | None = None) -> None:
     """Lazy infra: if warden+squid are already healthy, return fast; otherwise run the
     security preflight + auto-sync, warn about the trust boundary, and start infra only."""
     rows = compose_ps(root, prefix=prefix)
@@ -48,7 +52,7 @@ def _ensure_infra(root, out, prefix=None):
     compose_run(root, ["up", "-d"], prefix=prefix, check=False)
 
 
-def cmd_run(root, args, out):
+def cmd_run(root: Path, args: argparse.Namespace, out: Out) -> int:
     """Dispatch `run [<mode>] [-- <args>]` to one of the named modes.
 
     The first token, if it names a mode, selects it; otherwise the mode defaults to
@@ -66,7 +70,7 @@ def cmd_run(root, args, out):
     return _run_oneoff(root, out, sub, raw)
 
 
-def _run_oneoff(root, out, sub, raw):
+def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
     """Shared ephemeral one-off path for `claude` (sub=run) and `shell` (sub=exec)."""
     assert_real_dirs(root)
     extra_env = {"BASE_IMAGE": image.resolve_base(root)}
@@ -93,7 +97,7 @@ def _run_oneoff(root, out, sub, raw):
     return r.returncode if r else EXIT_GENERAL
 
 
-def _start_remote_daemon(root, args, out):
+def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
     """Start the Remote-Control agent daemon (ports item 05's removed `up --remote`).
 
     Unlike the ephemeral `claude`/`shell` one-offs (`run --rm`), this is a long-lived

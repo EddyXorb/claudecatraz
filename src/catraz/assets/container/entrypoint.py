@@ -14,11 +14,12 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 
-def read_json(p: Path) -> dict:
+def read_json(p: Path) -> dict[str, Any]:
     try:
-        return json.loads(p.read_text())
+        return cast(dict[str, Any], json.loads(p.read_text()))
     except Exception:
         return {}
 

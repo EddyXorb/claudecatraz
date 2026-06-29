@@ -5,6 +5,8 @@ No Docker required — compose.run is monkeypatched to return a fake JSON respon
 import copy
 import json
 import types
+from pathlib import Path
+from typing import Any
 import pytest
 
 from catraz import compose
@@ -26,7 +28,7 @@ GOOD = {
 }
 
 
-def _patch(monkeypatch, cfg):
+def _patch(monkeypatch: pytest.MonkeyPatch, cfg: Any) -> None:
     monkeypatch.setattr(
         compose,
         "run",
@@ -34,7 +36,7 @@ def _patch(monkeypatch, cfg):
     )
 
 
-def test_invariants_pass(monkeypatch, tmp_path):
+def test_invariants_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch(monkeypatch, GOOD)
     compose.assert_invariants(tmp_path)   # no raise
 
@@ -50,7 +52,7 @@ def test_invariants_pass(monkeypatch, tmp_path):
     # tmpfs size missing
     lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].pop("size"),
 ])
-def test_invariants_fail(monkeypatch, tmp_path, mut):
+def test_invariants_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mut: Any) -> None:
     bad = copy.deepcopy(GOOD)
     mut(bad)
     _patch(monkeypatch, bad)
@@ -58,7 +60,7 @@ def test_invariants_fail(monkeypatch, tmp_path, mut):
         compose.assert_invariants(tmp_path)
 
 
-def test_symlink_guard(tmp_path):
+def test_symlink_guard(tmp_path: Path) -> None:
     (tmp_path / ".catraz").mkdir()
     link = tmp_path / "l"
     link.symlink_to(tmp_path)
@@ -66,7 +68,7 @@ def test_symlink_guard(tmp_path):
         compose.assert_real_dirs(link)
 
 
-def test_t7b_host_symlink_on_project_dir(tmp_path):
+def test_t7b_host_symlink_on_project_dir(tmp_path: Path) -> None:
     """T7b: if PROJECT_DIR itself is a symlink catraz up must abort (assert_real_dirs)."""
     real_dir = tmp_path / "real"
     real_dir.mkdir()

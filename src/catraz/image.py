@@ -19,7 +19,7 @@ def _build_base(dockerfile: Path, context: Path | None = None) -> str:
     return tag
 
 def resolve_base(root: Path) -> str:
-    env = load_env(root / ".catraz/.env")
+    env: dict[str, str] = load_env(root / ".catraz/.env")
     if env.get("BASE_IMAGE"):
         return env["BASE_IMAGE"]
     if env.get("BASE_DOCKERFILE"):
