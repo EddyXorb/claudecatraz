@@ -123,7 +123,7 @@ def stream_upstream(resp: httpx.Response) -> StreamingResponse:
 
     async def body_iter() -> AsyncIterator[bytes]:
         try:
-            async for chunk in resp.aiter_raw():
+            async for chunk in resp.aiter_bytes():
                 yield chunk
         finally:
             await resp.aclose()
