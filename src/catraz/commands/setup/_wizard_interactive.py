@@ -33,7 +33,7 @@ def _inh_env(inherited: dict[str, Any] | None, key: str) -> str:
     """Return inherited .env value for *key*, or '' if not inherited."""
     if inherited is None:
         return ""
-    return inherited.get("env", {}).get(key, "")
+    return cast(str, inherited.get("env", {}).get(key, ""))
 
 
 def _prompt_auth_mode(
