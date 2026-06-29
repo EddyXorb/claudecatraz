@@ -14,7 +14,7 @@
 
 ## What it does
 
-A dockerized, hardened environment in which an **autonomous Claude Code agent** (C++/Rust/Python toolchain) can work on GitLab projects — interactively (`catraz run`) or driven over Remote Control from claude.ai (`catraz run claude-remote`).
+A dockerized, hardened environment in which an **autonomous Claude Code agent** (with a toolchain of your choice, as lang as it can be dockered) can work on GitLab projects — interactively (`catraz run`) or driven over Remote Control from claude.ai (`catraz run claude-remote`).
 
 The point is the security model: the agent is treated as **potentially malicious**. It therefore holds **no GitLab credential whatsoever** and has **no internet route of its own**. Two purpose-built proxies sit in front of it instead:
 
