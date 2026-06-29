@@ -1,5 +1,5 @@
 [project]
-name = "claudecatraz"
+name = "catraz"
 version = "0.1.0"
 requires-python = ">=3.11"
 description = "Sandbox front door for an autonomous Claude Code agent."

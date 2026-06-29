@@ -42,20 +42,28 @@ def _source_signature(*roots: Path) -> str:
     return repr(newest)
 
 
+def _installed_sig() -> str:
+    """Signature derived from the installed wheel's RECORD — changes on every reinstall."""
+    try:
+        from importlib.metadata import distribution
+        record = distribution("catraz").read_text("RECORD") or ""
+        return repr(hash(record))
+    except Exception:
+        return ""
+
+
 def asset_root() -> Path:
     """Deterministically extract packaged assets to a versioned cache and return it.
     Build contexts and compose files are read from here, never from the venv/CWD."""
     dst = _cache_root()
     marker = dst / ".extracted"
     repo = _repo_root()
-    sig = _source_signature(repo / "src/catraz/assets", repo / "warden",
-                            repo / "forward-proxy") if repo else ""
+    sig = (_source_signature(repo / "src/catraz/assets", repo / "warden",
+                             repo / "forward-proxy") if repo else _installed_sig())
     if marker.exists():
-        if repo is None:                       # installed wheel: version-keyed, trust marker
+        if marker.read_text() == sig:          # source/wheel unchanged → trust cache
             return dst
-        if marker.read_text() == sig:          # zero-install: source unchanged
-            return dst
-        shutil.rmtree(dst / "assets", ignore_errors=True)   # stale dev cache → rebuild clean
+        shutil.rmtree(dst / "assets", ignore_errors=True)   # stale cache → rebuild clean
     (dst / "assets").mkdir(parents=True, exist_ok=True)
     pkg_assets = ir.files("catraz") / "assets"
     if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():   # installed wheel
