@@ -380,9 +380,12 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     """Repair only the safe things: missing dirs + chown. Never secrets/policy."""
     dev_uid = env.get("DEV_UID", "")
     cat = root / ".catraz"
-    # secrets/ and secrets/claude must be created first at 0700 BEFORE the generic loop,
-    # because mkdir(parents=True) in the loop would create secrets/ at the umask default
-    # (0755) and a later chmod on an already-existing dir is a no-op for mode.
+    # .catraz/ itself first — on a fresh init it does not exist yet, and the 0700 secrets
+    # dirs below use mode= (not parents=) so they cannot create it implicitly.
+    cat.mkdir(parents=True, exist_ok=True)
+    # secrets/ and secrets/claude must be created at 0700 BEFORE the generic loop, because
+    # mkdir(parents=True) in the loop would create secrets/ at the umask default (0755) and
+    # a later chmod on an already-existing dir is a no-op for mode.
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
     secrets_dir.chmod(0o700)

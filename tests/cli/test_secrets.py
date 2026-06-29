@@ -95,6 +95,27 @@ def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.M
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
+def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
+    """_doctor_fix on a project where .catraz/ does not exist yet must not crash.
+
+    Regression: the 0700 secrets dirs are created with mode= (not parents=), so
+    .catraz/ itself has to be created first — otherwise the first mkdir raises
+    FileNotFoundError on a fresh init.
+    """
+    root = tmp_path / "fresh"
+    root.mkdir()
+    assert not (root / ".catraz").exists()
+
+    _doctor_fix(root, {"DEV_UID": "1000", "AUTH_MODE": "subscription"})
+
+    secrets_dir = root / ".catraz" / "secrets"
+    claude_dir = secrets_dir / "claude"
+    assert secrets_dir.is_dir()
+    assert claude_dir.is_dir()
+    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700
+
+
 def test_doctor_bad_on_empty_file(tmp_path: Path) -> None:
     """doctor reports bad for each token file that exists but is empty."""
     root = _make_root(tmp_path)
