@@ -142,12 +142,17 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
             shutil.copy2(readme_src, readme_dst)
             out.info("• created .catraz/README.md (tier guide)")
 
-    _init_config_templates(cat, assets, out)
-
-    # Stage inherited config/ and secrets/ before the wizard so prompts can
-    # read staged values as defaults.
+    # Stage inherited config/ and secrets/ BEFORE seeding the default templates, so an
+    # inherited Dockerfile / warden.toml / allowlist / squid.conf wins. _init_config_templates
+    # only copies a default when the file is absent (`not dst.exists()`), so it now fills just
+    # the gaps the source did not provide instead of pre-empting the inherited copy (in
+    # interactive mode stage_inherited skips existing files, so order — not its `yes` flag —
+    # is what made the inherited config get dropped). Also lets the wizard read staged values
+    # as defaults.
     if inherited:
         stage_inherited(cat, inherited, yes=args.yes, out=out)
+
+    _init_config_templates(cat, assets, out)
 
     env, updates = _init_seed_env(cat, assets, env_path, out)
     # Overlay inherited .env keys as defaults (local .env takes precedence for DEV_UID).

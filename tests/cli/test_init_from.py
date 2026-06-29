@@ -233,6 +233,39 @@ def test_yes_clone_config_file_copied(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "echo src" in df.read_text()
 
 
+# ── interactive (no -y) clone — ordering regression ───────────────────────────
+
+def _interactive_args(init_from: str | None = None) -> argparse.Namespace:
+    return argparse.Namespace(
+        yes=False, force=False, skip_sync=True,
+        dir=None, no_color=True, print_only=False,
+        init_from=init_from,
+    )
+
+
+def test_interactive_clone_inherits_config_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive `init --from` must inherit config/ files (Dockerfile, allowlist,
+    squid.conf), not silently keep the freshly-seeded defaults.
+
+    Regression: _init_config_templates seeded the defaults first, so stage_inherited's
+    `not dst.exists()` guard skipped the inherited copies in interactive mode (where its
+    `yes` override is off). The fix stages inherited files before seeding defaults.
+    """
+    src = _make_source(tmp_path, gitlab_mode="off")  # off → wizard needs no tokens
+    dst = _make_dst(tmp_path)
+    _patch_common(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda p: "")     # accept inherited defaults
+    monkeypatch.setattr("getpass.getpass", lambda p: "")
+    setup.cmd_init(dst, _interactive_args(str(src)), Out(color=False))
+
+    cfg = dst / ".catraz" / "config"
+    assert "echo src" in (cfg / "image" / "Dockerfile").read_text(), "Dockerfile not inherited"
+    assert (cfg / "allowlist.txt").read_text() == "example.com\n", "allowlist not inherited"
+    assert (cfg / "squid.conf").read_text() == "# squid src\n", "squid.conf not inherited"
+
+
 # ── secret never printed ──────────────────────────────────────────────────────
 
 def test_secret_never_echoed_to_stdout(
