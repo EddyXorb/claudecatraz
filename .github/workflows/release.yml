@@ -20,6 +20,17 @@ jobs:
           # git-cliff needs full history + tags to diff against the prior tag.
           fetch-depth: 0
 
+      - name: Verify tag matches pyproject.toml version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          pyproject_ver=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          tag_ver="${TAG#v}"
+          if [ "$pyproject_ver" != "$tag_ver" ]; then
+            echo "ERROR: pyproject.toml version '$pyproject_ver' does not match tag '$TAG'"
+            exit 1
+          fi
+
       - name: Generate changelog for this tag
         uses: orhun/git-cliff-action@v4
         id: cliff
