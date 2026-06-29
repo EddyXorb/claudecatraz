@@ -340,10 +340,10 @@ def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
     except CliError as e:
         f.bad("base", str(e)); return
     contract = subprocess.run(
-        ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get && python3 --version"],
+        ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get"],
         capture_output=True, text=True)
     if contract.returncode != 0:
-        f.bad("base", "base lacks apt-get or python3", "base contract: Debian/Ubuntu + python3")
+        f.bad("base", "base lacks apt-get", "base contract: Debian/Ubuntu")
     else:
         f.ok("base", f"base contract ok ({base})")
     setuid = subprocess.run(["docker", "run", "--rm", base, "find", "/", "-perm", "/6000",
