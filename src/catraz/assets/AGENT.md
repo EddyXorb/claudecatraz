@@ -75,13 +75,35 @@ curl -sS "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests" \
   -H "Content-Type: application/json" \
   -d '{"source_branch":"claude/my-branch","target_branch":"main","title":"..."}'
 
+# Comment on an MR (top-level note)
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/notes" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"looks good"}'
+
+# Inline code-review comment on a specific file/line (a "discussion" with a position).
+# Get base_sha/head_sha/start_sha from the MR's diff_refs:
+#   GET …/merge_requests/<iid>/changes  →  .diff_refs
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/discussions" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"this can overflow",
+       "position":{"position_type":"text",
+         "base_sha":"<base>","head_sha":"<head>","start_sha":"<start>",
+         "new_path":"src/main.rs","new_line":12}}'
+
+# Reply in an existing review thread
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/discussions/<discussion_id>/notes" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"fixed in the latest push"}'
+
 # Trigger CI pipeline
 curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
   -H "Content-Type: application/json" \
   -d '{"ref":"claude/my-branch"}'
 ```
 
-The Warden expects **no auth** from the agent — token injection happens internally.
+You may comment, discuss, and edit only on MRs **you** authored (R3); merging is never
+allowed (R4). The Warden expects **no auth** from the agent — token injection happens
+internally.
 
 **Responses come back as plain, uncompressed JSON.** The Warden decompresses any
 upstream `Content-Encoding` (gzip/deflate) before relaying and strips the header, so

@@ -280,6 +280,25 @@ Two layers: the **Warden** (primary, code) and **GitLab-native** restrictions (b
 zero-code). If the Warden goes down, the agent structurally has **no** route to gitlab.com
 (fail-closed). Details: [threat model & design](docs/design/agentic-workflow/README.md).
 
+### Allowed write endpoints
+
+REST **reads** (GET) pass through with the read token. REST **writes** are an explicit
+allowlist — anything not listed is default-denied (`warden/warden/api_endpoints.py`):
+
+| Method & path | What it does | Guard |
+| ------------- | ------------ | ----- |
+| `POST …/merge_requests` | open a merge request | source branch must be `claude/*` (R2/R3) |
+| `POST …/merge_requests/{iid}/notes` | post a top-level MR comment | MR authored by the service account (R3) |
+| `POST …/merge_requests/{iid}/discussions` | start a discussion thread — incl. an **inline diff comment** on a file/line (pass a `position`) | MR authored by the service account (R3) |
+| `POST …/merge_requests/{iid}/discussions/{discussion_id}/notes` | **reply** to an existing discussion thread | MR authored by the service account (R3) |
+| `PUT …/merge_requests/{iid}` | edit the MR (title/description/labels, or close) | own MR (R3); `state_event=merge` blocked (R4) |
+| `POST …/pipeline` | trigger a CI pipeline | ref must be `claude/*` (R3) |
+| `PUT …/merge_requests/{iid}/merge` | merge — **always 403** | never permitted (R4) |
+
+> Inline review comments (`discussions`) need the MR's `position` (`base_sha`/`head_sha`/
+> `start_sha` from the MR's `diff_refs`, plus `new_path` + `new_line`). The Warden only
+> checks ownership and forwards the body untouched.
+
 ## Audit log
 
 The Warden records **every** GitLab decision (allow/deny with rule R0–R6, R4/R5 highlighted).
