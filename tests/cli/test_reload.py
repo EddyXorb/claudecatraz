@@ -104,7 +104,7 @@ def test_cmd_reload_up_to_date_no_up_call(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 
 def test_cmd_reload_stale_force_recreates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A stale service → `up -d --force-recreate <service>` issued."""
+    """A stale service → `up -d --force-recreate --build <service>` issued."""
     _seed(tmp_path)
     rows = [{"Service": "gitlab-warden", "Name": "c-warden"}]
     old = datetime.datetime(2000, 1, 1, tzinfo=UTC)
@@ -118,7 +118,7 @@ def test_cmd_reload_stale_force_recreates(monkeypatch: pytest.MonkeyPatch, tmp_p
         lambda root, args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
     rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)), _out())
     assert rc == EXIT_OK
-    assert calls == [["up", "-d", "--force-recreate", "gitlab-warden"]]
+    assert calls == [["up", "-d", "--force-recreate", "--build", "gitlab-warden"]]
 
 
 def test_cmd_reload_not_running(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -132,3 +132,37 @@ def test_cmd_reload_not_running(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)), _out())
     assert rc == EXIT_OK
     assert calls == []
+
+
+def test_cmd_reload_force_not_running_rebuilds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """--force with the stack down → rebuild + start every infra service anyway."""
+    _seed(tmp_path)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: [])
+    monkeypatch.setattr(
+        compose, "run",
+        lambda root, args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)), _out())
+    assert rc == EXIT_OK
+    assert calls == [["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]]
+
+
+def test_cmd_reload_force_running_not_stale(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """--force ignores staleness: rebuilds even when config is up to date."""
+    _seed(tmp_path)
+    rows = [
+        {"Service": "gitlab-warden", "Name": "c-warden"},
+        {"Service": "forward-proxy", "Name": "c-proxy"},
+    ]
+    future = datetime.datetime.now(UTC) + datetime.timedelta(hours=1)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
+    monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: future)
+    monkeypatch.setattr(
+        compose, "run",
+        lambda root, args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)), _out())
+    assert rc == EXIT_OK
+    assert calls == [["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]]

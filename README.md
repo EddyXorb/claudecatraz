@@ -109,7 +109,7 @@ with `catraz audit --web`.
 | `catraz doctor` | Re-run the preflight; `--fix` repairs dirs/ownership |
 | `catraz status` | Health per service, URLs, quota snapshot |
 | `catraz ps` | List active agent containers for this repo |
-| `catraz reload` | Restart Warden/Squid after editing `.catraz` config |
+| `catraz reload` | Rebuild + restart Warden/Squid whose `.catraz` config changed; `--force` rebuilds all infra even if unchanged or stopped |
 | `catraz logs` | Tail logs (`agent`\|`warden`\|`proxy`, or `--audit`) |
 | `catraz audit --web` | Open the read-only GitLab decision viewer (ephemeral loopback port) |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
@@ -226,6 +226,13 @@ allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 > Set one (non-empty) to **override** `warden.toml` for that single setting; leave it
 > empty/unset to use the file. So a value is read from exactly one place at a time —
 > the env var if present, otherwise the toml.
+
+> **Applying changes.** The Warden and Squid read their config once at startup, so an edit
+> to `warden.toml`, `squid.conf`, `allowlist.txt`, or `.env` is inert until the container is
+> recreated. Run `catraz reload` — it detects which infra service's config changed and
+> rebuilds + recreates only that one. Use `catraz reload --force` to rebuild **all** infra
+> regardless of staleness (and even when the stack is stopped) — the escape hatch when the
+> image is stale but no config file changed, e.g. after a Warden source fix.
 
 > ### ⚠️ `allowed_projects` — no wildcards
 >

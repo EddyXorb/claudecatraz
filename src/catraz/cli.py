@@ -107,6 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr = sub.add_parser("reload", parents=[_g()],
                         help="restart services whose .catraz config changed")
+    pr.add_argument("--force", action="store_true",
+                    help="rebuild + (re)start all infra even if not stale or not running")
     pr.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
                     help="show the compose command without running it")
 
