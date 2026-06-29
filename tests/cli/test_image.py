@@ -21,6 +21,29 @@ def test_resolve_prefers_base_image(tmp_path: Path) -> None:
     assert image.resolve_base(tmp_path) == "x/y:1"
 
 
+def test_resolve_default_uses_local_dockerfile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default branch of resolve_base builds .catraz/config/image/Dockerfile."""
+    df = tmp_path / ".catraz" / "config" / "image" / "Dockerfile"
+    df.parent.mkdir(parents=True)
+    df.write_text("FROM ubuntu:24.04\n")
+    (tmp_path / ".catraz" / ".env").write_text("")
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(image, "_image_exists", lambda t: False)
+    monkeypatch.setattr(image.subprocess, "run",  # type: ignore[attr-defined]
+                        lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0))
+    image.resolve_base(tmp_path)
+    assert str(df) in seen["cmd"]
+
+
+def test_resolve_default_raises_if_dockerfile_missing(tmp_path: Path) -> None:
+    """Missing local Dockerfile raises CliError, not FileNotFoundError."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text("")
+    with pytest.raises(Exception) as exc_info:
+        image.resolve_base(tmp_path)
+    assert "catraz init" in str(exc_info.value) or "Dockerfile" in str(exc_info.value)
+
+
 def _seed(tmp_path: Path, env: str) -> None:
     (tmp_path/".catraz").mkdir(); (tmp_path/".catraz/.env").write_text(env)
 

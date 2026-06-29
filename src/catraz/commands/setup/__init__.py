@@ -53,6 +53,14 @@ def _init_config_templates(cat: Path, assets: Path, out: Out) -> None:
         if src.exists() and not dst.exists():
             shutil.copy2(src, dst)
             out.info(f"• copied {name} to .catraz/config/")
+    # Seed the user-owned base Dockerfile (default FROM ubuntu:24.04).
+    img_dst = cfg_dst / "image"
+    img_dst.mkdir(parents=True, exist_ok=True)
+    df_dst = img_dst / "Dockerfile"
+    df_src = assets / "image" / "Dockerfile"
+    if df_src.exists() and not df_dst.exists():
+        shutil.copy2(df_src, df_dst)
+        out.info("• created .catraz/config/image/Dockerfile (edit to change the base)")
 
 
 def _init_seed_env(
