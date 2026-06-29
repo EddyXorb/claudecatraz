@@ -16,11 +16,10 @@ from catraz import compose
 from catraz.ui import Out
 
 
-def _tail_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
-    d = root / ".catraz" / "logs" / "warden"
-    files = sorted(d.glob("*.jsonl")) if d.exists() else []
+def _tail_files(d: Path, glob: str, label: str, args: argparse.Namespace, out: Out) -> int:
+    files = sorted(d.glob(glob)) if d.exists() else []
     if not files:
-        out.warn(f"no audit logs in {d}")
+        out.warn(f"no {label} in {d}")
         return EXIT_OK
     cmd = ["tail"]
     if args.follow:
@@ -28,6 +27,10 @@ def _tail_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
     cmd += ["-n", str(args.tail), *map(str, files)]
     subprocess.run(cmd)
     return EXIT_OK
+
+
+def _tail_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
+    return _tail_files(root / ".catraz/logs/warden", "*.jsonl", "audit logs", args, out)
 
 
 class _UdsProxy(socketserver.BaseRequestHandler):
@@ -53,9 +56,14 @@ class _UdsProxy(socketserver.BaseRequestHandler):
 
 
 def cmd_logs(root: Path, args: argparse.Namespace, out: Out) -> int:
-    log_args = ["logs"]
     if args.audit:
         return _tail_audit(root, args, out)
+    # The agent runs as an ephemeral `run --rm` one-off, not a daemon, so
+    # `docker compose logs` never captures it — tail its file transcripts in
+    # .catraz/logs/agent instead (written by non-interactive runs, see run.py).
+    if args.service and resolve_service(args.service) == compose.SERVICES["agent"]:
+        return _tail_files(root / ".catraz/logs/agent", "*.log", "agent logs", args, out)
+    log_args = ["logs"]
     if args.follow:
         log_args.append("-f")
     log_args += ["--tail", str(args.tail)]

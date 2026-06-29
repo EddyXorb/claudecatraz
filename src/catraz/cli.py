@@ -98,8 +98,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser(
         "run",
-        help="run the sandbox: run [claude|claude-remote|shell] -- <args> (default mode: claude)")
-    p_run.add_argument("claude_args", nargs=argparse.REMAINDER)
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="run the sandbox in a named mode (default: claude)",
+        description=(
+            "Run the sandbox in a named mode (default: claude).\n\n"
+            "Everything after the mode is passed verbatim to the sandbox, so the\n"
+            "mode's own flags need no `--` separator.\n\n"
+            "modes:\n"
+            "  claude         one-off Claude run (default)\n"
+            "  claude-remote  long-lived Remote-Control daemon\n"
+            "  shell          interactive shell in the sandbox\n\n"
+            "examples:\n"
+            "  catraz run                    # sandboxed claude, interactive\n"
+            "  catraz run -p \"fix the bug\"   # sandboxed claude, headless\n"
+            "  catraz run shell ls -la       # run a shell command in the sandbox (or run interactive shell when no command is given)\n"
+            "  catraz run claude-remote      # start the remote-session claude daemon (connect via web remote control)\n"
+            "  catraz run -- --help          # pass --help to claude itself"))
+    p_run.add_argument("claude_args", nargs=argparse.REMAINDER,
+                       metavar="[mode] [args ...]",
+                       help="optional mode (claude|claude-remote|shell), then its args")
 
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
@@ -113,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="show the compose command without running it")
 
     pl = sub.add_parser("logs", parents=[_g()], help="tail logs (agent|warden|proxy, or --audit)")
-    pl.add_argument("service", nargs="?", help="agent | warden | proxy")
+    pl.add_argument("service", nargs="?", help="choose which service to tail logs for", choices=["agent", "warden", "proxy"])
     pl.add_argument("-f", "--follow", action="store_true", help="follow")
     pl.add_argument("--tail", type=int, default=100, help="last N lines (default 100)")
     pl.add_argument("--audit", action="store_true", help="warden decision log instead of stdout")
@@ -153,10 +170,42 @@ HANDLERS = {
 }
 
 
+def _split_run(raw: list[str]) -> tuple[list[str], list[str] | None]:
+    """Split argv at the `run` command so its tail is opaque to argparse.
+
+    Returns (head, tail): `head` is everything up to and including `run` (argparse
+    parses it for globals + the command), `tail` is the verbatim rest handed to the
+    sandbox — so claude's own flags (`-p`, `-lh`, …) reach it without a `--`. For any
+    other command (or none) returns (raw, None).
+
+    The only value-taking global is -C/--dir, whose value is skipped so a directory
+    literally named `run` is never mistaken for the command."""
+    skip = False
+    for i, tok in enumerate(raw):
+        if skip:
+            skip = False
+            continue
+        if tok in ("-C", "--dir"):
+            skip = True
+            continue
+        if tok.startswith("-"):           # attached forms (-Cx, --dir=x, -V) self-contained
+            continue
+        return (raw[:i + 1], raw[i + 1:]) if tok == "run" else (raw, None)
+    return raw, None
+
+
 def main(argv: list[str] | None = None) -> int:
     from catraz.paths import find_root
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = sys.argv[1:] if argv is None else list(argv)
+    head, tail = _split_run(raw)
+    # A lone -h/--help after `run` means "show catraz's run help" — fold it back into
+    # argparse. To pass --help to claude itself, use `run -- --help`.
+    if tail in (["-h"], ["--help"]):
+        head, tail = head + tail, None
+    args = parser.parse_args(head)
+    if tail is not None:
+        args.claude_args = tail
     # Normalize SUPPRESS'd global flags so they read uniformly regardless of position.
     args.dir = getattr(args, "dir", None)
     args.print_only = getattr(args, "print_only", False)

@@ -58,12 +58,12 @@ def cmd_run(root: Path, args: argparse.Namespace, out: Out) -> int:
     """Dispatch `run [<mode>] [-- <args>]` to one of the named modes.
 
     The first token, if it names a mode, selects it; otherwise the mode defaults to
-    `claude`. (`claude_args` stays a REMAINDER, so detecting the mode in code avoids
-    argparse positional-vs-REMAINDER ambiguity and mirrors the leading-`--` strip.)"""
+    `claude`. `claude_args` is the opaque tail that cli._split_run captured verbatim
+    after `run`, so claude's own flags arrive intact (e.g. `run -p x` → ["-p","x"])."""
     raw = list(args.claude_args)
     mode = raw.pop(0) if raw and raw[0] in MODES else "claude"
-    # Strip one leading `--` so `run -- -p x`, `run claude -- -p x`, and `run -p x`
-    # all yield ["-p","x"]; _oneoff_args adds its own `--` separator.
+    # Strip one leading `--` so the explicit-separator forms `run -- -p x` and
+    # `run claude -- -p x` also yield ["-p","x"]; _oneoff_args adds its own `--`.
     if raw and raw[0] == "--":
         raw = raw[1:]
     if mode == "claude-remote":
