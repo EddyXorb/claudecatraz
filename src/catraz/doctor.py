@@ -229,7 +229,7 @@ def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: l
                       "rotate the token — it's invalid or expired")
                 continue
             # 403/407/5xx etc. can be the proxy or a scope quirk → don't over-claim.
-            f.warn("tokens", f"{label} token not probed (HTTP {e.code}) — online check skipped")
+            f.warn("tokens", f"{label} token not probed (HTTP {e.code}) — online check skipped (likely because you chose a fine-grained scope)")
             return
         except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
             f.warn("tokens", f"{label} token not probed ({type(e).__name__}) — offline, check skipped")

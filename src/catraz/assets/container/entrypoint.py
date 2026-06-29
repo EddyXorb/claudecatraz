@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 
 def read_json(p: Path) -> dict[str, Any]:
@@ -115,9 +116,21 @@ def install_claude_md(home: Path) -> None:
 
 
 def configure_git_warden() -> None:
-    """Set up global git insteadOf rewrite so canonical GitLab URLs are transparently
+    """Set up global git insteadOf rewrites so canonical GitLab URLs are transparently
     redirected to the Warden inside the container (W3.1). The repo's .git/config
-    stays untouched; the rewrite lives only in ~/.gitconfig.
+    stays untouched; the rewrites live only in ~/.gitconfig.
+
+    All three canonical remote forms are routed to the same warden base — git applies
+    the longest matching insteadOf prefix, so HTTPS as well as SSH remotes land on the
+    warden's Smart-HTTP endpoint:
+
+        https://gitlab.com/grp/repo.git   (https)
+        git@gitlab.com:grp/repo.git       (scp-like ssh)
+        ssh://git@gitlab.com/grp/repo.git (ssh://)
+
+    Rewriting SSH → warden-HTTP means the agent needs no SSH key at all: pushes succeed
+    because the warden injects the write-token upstream (R1). The SSH user defaults to
+    `git` (GITLAB_SSH_USER overrides it for self-hosted instances).
 
     When GITLAB_MODE=off the rewrite is skipped: the warden denies all GitLab ops in
     that mode, so routing git there would only produce confusing errors. The agent's
@@ -128,12 +141,21 @@ def configure_git_warden() -> None:
         print("GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden")
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
         return
-    gitlab_base = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/"
+    gitlab_url = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/")
     warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
-    subprocess.run(
-        ["git", "config", "--global", f"url.{warden_git}.insteadOf", gitlab_base],
-        check=True,
-    )
+    host = urlsplit(gitlab_url).hostname or "gitlab.com"
+    ssh_user = os.environ.get("GITLAB_SSH_USER", "git")
+    rewrites = [
+        gitlab_url + "/",             # https://gitlab.com/
+        f"{ssh_user}@{host}:",        # git@gitlab.com:   (scp-like)
+        f"ssh://{ssh_user}@{host}/",  # ssh://git@gitlab.com/
+    ]
+    key = f"url.{warden_git}.insteadOf"
+    # --unset-all first so re-running on the same ~/.gitconfig stays idempotent
+    # (no duplicate multivar entries); ignore the rc=5 "key not found" on a fresh home.
+    subprocess.run(["git", "config", "--global", "--unset-all", key], check=False)
+    for src in rewrites:
+        subprocess.run(["git", "config", "--global", "--add", key, src], check=True)
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
 
@@ -167,12 +189,6 @@ def drop_to_dev() -> None:
     os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
 
-def cmd_exec(cmd: list[str]) -> None:
-    drop_to_dev()                       # chowns /workspace + re-execs as dev (as in start/run)
-    argv = cmd or ["bash"]
-    os.execvp(argv[0], argv)
-
-
 def _resolve_api_key() -> str:
     """Read ANTHROPIC_API_KEY from _FILE (compose secret) falling back to the bare var."""
     file_path = os.environ.get("ANTHROPIC_API_KEY_FILE")
@@ -184,7 +200,14 @@ def _resolve_api_key() -> str:
     return os.environ.get("ANTHROPIC_API_KEY", "")
 
 
-def cmd_start(claude_home: Path) -> None:
+def _bootstrap(claude_home: Path, remote: bool) -> None:
+    """Shared per-start setup for every container entry mode (start/run/exec).
+
+    Drops root → dev (chowning /workspace + re-execing via gosu), resolves the auth
+    mode — loading ANTHROPIC_API_KEY for api_key mode — rebuilds the tmpfs Claude-home
+    and routes git through the warden. `remote` is forwarded to build_claude_home: only
+    the remote-control daemon needs the one-time accept prompts pre-dismissed.
+    """
     drop_to_dev()
     mode = os.environ.get("AUTH_MODE") or "subscription"
     if mode == "api_key":
@@ -192,8 +215,24 @@ def cmd_start(claude_home: Path) -> None:
         if not key:
             sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
         os.environ["ANTHROPIC_API_KEY"] = key
-    build_claude_home(claude_home, mode)
+    build_claude_home(claude_home, mode, remote=remote)
     configure_git_warden()
+
+
+def cmd_exec(claude_home: Path, cmd: list[str]) -> None:
+    """Interactive shell / one-off command in the sandbox (`catraz run shell`).
+
+    Lands in the same configured state as claude/claude-remote: full _bootstrap so the
+    Claude-home and the git-warden insteadOf rewrite are in place. remote=False — this
+    is not the remote-control daemon, so keep normal permissions.
+    """
+    _bootstrap(claude_home, remote=False)
+    argv = cmd or ["bash"]
+    os.execvp(argv[0], argv)
+
+
+def cmd_start(claude_home: Path) -> None:
+    _bootstrap(claude_home, remote=True)
     spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
     debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
     extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
@@ -203,15 +242,7 @@ def cmd_start(claude_home: Path) -> None:
 
 
 def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
-    drop_to_dev()
-    mode = os.environ.get("AUTH_MODE") or "subscription"
-    if mode == "api_key":
-        key = _resolve_api_key()
-        if not key:
-            sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
-        os.environ["ANTHROPIC_API_KEY"] = key
-    build_claude_home(claude_home, mode, remote=False)
-    configure_git_warden()
+    _bootstrap(claude_home, remote=False)
     os.execvp("claude", ["claude", *claude_args])
 
 
@@ -260,7 +291,7 @@ def main() -> None:
         return
     if args.command == "exec":
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
-        cmd_exec(rest); return
+        cmd_exec(Path(args.claude_home).resolve(), rest); return
     cmd_start(Path(args.claude_home).resolve())
 
 
