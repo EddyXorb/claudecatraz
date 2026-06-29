@@ -15,7 +15,10 @@ def test_asset_root_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_version() -> None:
-    assert __version__ == "0.2.0"
+    import tomllib
+    root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
+    assert __version__ == pyproject["project"]["version"]
 
 
 def test_find_root_walks_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
