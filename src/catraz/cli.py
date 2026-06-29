@@ -85,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--skip-sync", action="store_true", help="skip the Claude credential import")
     pi.add_argument("-y", "--yes", action="store_true",
                     help="non-interactive; keep existing .env values, skip prompts")
+    pi.add_argument("--from", dest="init_from", metavar="PATH",
+                    help="inherit curated .env keys, config/, and secrets/ from an existing sandbox")
 
     pd = sub.add_parser("doctor", parents=[_g()], help="preflight: turn silent setup failures loud")
     pd.add_argument("--fix", action="store_true", help="repair safe findings (dirs, chown)")
@@ -211,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     args.print_only = getattr(args, "print_only", False)
     args.yes = getattr(args, "yes", False)
     args.no_color = getattr(args, "no_color", False)
+    args.init_from = getattr(args, "init_from", None)
     out = Out(color=not args.no_color)
 
     if args.version:

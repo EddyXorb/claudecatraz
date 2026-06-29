@@ -116,10 +116,20 @@ def _init_preflight(root: Path, out: Out) -> int:
 
 def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.paths import asset_root
+    from ._from import load_inherited, stage_inherited
     out.head("catraz init — let's get the stack ready\n")
     cat = root / ".catraz"
     env_path = cat / ".env"
     assets = asset_root() / "assets"
+
+    # --from: validate source and load inheritable state before creating dirs.
+    init_from: str | None = getattr(args, "init_from", None)
+    inherited = None
+    if init_from:
+        from pathlib import Path as _P
+        src_root = _P(init_from).resolve()
+        inherited = load_inherited(src_root)  # raises CliError if invalid
+        out.info(f"• inheriting from {src_root}/.catraz")
 
     out.info("• creating .catraz/ directories…")
     _doctor_fix(root, load_env(env_path))
@@ -134,16 +144,26 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
 
     _init_config_templates(cat, assets, out)
 
+    # Stage inherited config/ and secrets/ before the wizard so prompts can
+    # read staged values as defaults.
+    if inherited:
+        stage_inherited(cat, inherited, yes=args.yes, out=out)
+
     env, updates = _init_seed_env(cat, assets, env_path, out)
+    # Overlay inherited .env keys as defaults (local .env takes precedence for DEV_UID).
+    if inherited:
+        for k, v in inherited.get("env", {}).items():
+            if k not in env:
+                env[k] = v
 
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
     warden_toml = cat / "config" / "warden.toml"
 
     if args.yes:
-        _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out)
+        _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out, inherited)
     else:
-        _wizard_interactive(root, env, env_path, secrets_dir, warden_toml, updates, args, out)
+        _wizard_interactive(root, env, env_path, secrets_dir, warden_toml, updates, args, out, inherited)
 
     if updates:
         set_env_values(env_path, updates)
