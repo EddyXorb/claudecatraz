@@ -18,7 +18,11 @@ from .model import TokenKind
 
 # Hop-by-hop headers that must not be forwarded verbatim.
 _DROP_REQUEST_HEADERS = {"host", "authorization", "private-token", "content-length", "connection", "accept-encoding"}
-_DROP_RESPONSE_HEADERS = {"transfer-encoding", "connection", "content-length"}
+# content-encoding is dropped because the warden hands the client a *decoded* body
+# (httpx decompresses via .content / aiter_bytes). Forwarding a stale "gzip" header
+# alongside already-decompressed bytes makes the client try to gunzip plain data →
+# "compressed data" garbage. Strip it so body and headers stay consistent.
+_DROP_RESPONSE_HEADERS = {"content-encoding", "transfer-encoding", "connection", "content-length"}
 
 
 def project_id(project: str) -> str:
@@ -123,7 +127,11 @@ def stream_upstream(resp: httpx.Response) -> StreamingResponse:
 
     async def body_iter() -> AsyncIterator[bytes]:
         try:
-            async for chunk in resp.aiter_raw():
+            # aiter_bytes (not aiter_raw): httpx transparently decompresses the
+            # upstream content-encoding, so the client receives a plain body that
+            # matches the (content-encoding-stripped) headers — readable by clients
+            # that never negotiated gzip (curl, glab, the GitLab MCP, …).
+            async for chunk in resp.aiter_bytes():
                 yield chunk
         finally:
             await resp.aclose()

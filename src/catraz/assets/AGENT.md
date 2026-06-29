@@ -83,15 +83,13 @@ curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
 
 The Warden expects **no auth** from the agent — token injection happens internally.
 
-**Always use `--compressed` with curl against the GitLab API.** The response comes
-back gzip-compressed (`Content-Encoding: gzip`, magic bytes `\x1f\x8b`). curl only
-decompresses automatically with `--compressed` — without the flag you get raw binary,
-even if you manually set `Accept-Encoding: gzip`. `Accept: application/json` does
-**not** help here: that negotiates the content type, not the compression. So don't
-pipe through `gunzip`, instead use:
+**Responses come back as plain, uncompressed JSON.** The Warden decompresses any
+upstream `Content-Encoding` (gzip/deflate) before relaying and strips the header, so
+the body always matches the headers — no `--compressed`, no `gunzip`, no
+`Accept-Encoding` juggling needed. Just read the body:
 
 ```bash
-curl -sS --compressed "http://gitlab-warden:8080/api/v4/groups/<id>/projects"
+curl -sS "http://gitlab-warden:8080/api/v4/groups/<id>/projects"
 ```
 
 ### Warden not active (stage 01 / no Warden profile)
