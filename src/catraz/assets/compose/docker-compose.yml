@@ -24,8 +24,8 @@ services:
       - GITLAB_MODE=${GITLAB_MODE:-read-write}
       # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
       # ADMIN_UDS is the authoritative source of the admin socket path.
-      # The host-side CLI path (.catraz/run/warden/admin.sock in observe.py/doctor.py)
-      # mirrors it by contract (bind-mount: host .catraz/run/warden → container /run/warden).
+      # The host-side CLI path (.catraz/state/warden/run/admin.sock in observe.py/doctor.py)
+      # mirrors it by contract (bind-mount: host .catraz/state/warden/run → container /run/warden).
       - ADMIN_UDS=/run/warden/admin.sock
       # Non-secret policy — SOURCE OF TRUTH is config/warden.toml. The vars below
       # OVERRIDE the toml only when set (non-empty); leave empty to use warden.toml.

@@ -291,7 +291,7 @@ def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
 
 def check_net(root: Path, f: Findings) -> None:
     # Admin/audit moved from TCP (172.31.0.2:9090) to a per-project unix socket
-    # under .catraz/run/warden/. The socket file only exists while the stack runs.
+    # under .catraz/state/warden/run/. The socket file only exists while the stack runs.
     sock = root / ".catraz" / "state" / "warden" / "run" / "admin.sock"
     if sock.exists():
         f.ok("net", "admin socket present (stack up)")
