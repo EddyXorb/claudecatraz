@@ -42,7 +42,13 @@ class AppContext:
 
     # --- service account -------------------------------------------------------
     async def resolve_service_account(self) -> Optional[int]:
-        """Resolve and cache the write-token's user id once (W6.2)."""
+        """Resolve and cache the write-token's user id once (W6.2).
+
+        Returns None immediately when writes are disabled — the (possibly empty)
+        write token must never be sent upstream in off/read-only mode.
+        """
+        if not self.cfg.writes_enabled:
+            return None
         if self.service_account_id is not None:
             return self.service_account_id
         resp = await self.upstream.get_json("user", TokenKind.WRITE)
@@ -81,7 +87,19 @@ class AppContext:
 
     # --- reconcile (W8.2) ------------------------------------------------------
     async def reconcile(self) -> bool:
-        """Rebuild branch/MR counters from GitLab. Returns True on full success."""
+        """Rebuild branch/MR counters from GitLab. Returns True on full success.
+
+        In ``off`` mode no upstream call is made — the warden marks itself
+        reconciled/unlocked so it can serve (and then deny) requests without ever
+        contacting GitLab. Both tokens are empty in ``off``; no upstream call may
+        happen.
+        """
+        if not self.cfg.gitlab_enabled:
+            # off mode: skip all upstream calls; mark reconciled so the warden
+            # opens the agent port and denies ops (instead of staying fail-safe locked).
+            self.state.mark_reconciled()
+            return True
+
         sa = await self.resolve_service_account()
         ok = True
         resolved_ids: list[str] = []

@@ -1,96 +1,96 @@
-# Git Smart-HTTP — Protokoll-Referenz
+# Git Smart-HTTP — Protocol Reference
 
-Git kommuniziert über HTTP mit genau drei Endpunkten. Zwei davon sind ein
-Handshake (Ref Advertisement), einer führt die eigentliche Operation durch
-(Pack-Transfer). Das nennt sich **Smart HTTP**.
+Git communicates over HTTP using exactly three endpoints. Two of them are a
+handshake (Ref Advertisement) and one carries out the actual operation
+(Pack Transfer). This is called **Smart HTTP**.
 
-## URL, Remote und Repo-Pfad
+## URL, Remote, and Repo Path
 
-Ein Git-Remote ist eine URL in `.git/config`:
+A Git remote is a URL in `.git/config`:
 
 ```text
 [remote "origin"]
     url = https://warden.example.com/git/group/proj.git
 ```
 
-Die URL hat zwei Teile, die Git trennt:
+The URL has two parts that Git separates:
 
-- **Host** — `warden.example.com` (oder `gitlab.com` bei direktem Zugriff).
-  Git öffnet eine TCP-Verbindung auf Port 443 (HTTPS) oder 80 (HTTP).
-- **Pfad** — alles danach, hier `/git/group/proj.git`. Das ist das `{repo}`
-  in allen Smart-HTTP-Endpunkten.
+- **Host** — `warden.example.com` (or `gitlab.com` for direct access).
+  Git opens a TCP connection on port 443 (HTTPS) or 80 (HTTP).
+- **Path** — everything after that, here `/git/group/proj.git`. This is the `{repo}`
+  in all Smart-HTTP endpoints.
 
-Git hängt dann die Endpunkt-Suffixe an diesen Pfad an:
+Git then appends the endpoint suffixes to this path:
 
 ```text
 https://warden.example.com/git/group/proj.git/info/refs?service=git-receive-pack
 https://warden.example.com/git/group/proj.git/git-receive-pack
 ```
 
-Bei direktem GitLab-Zugriff (`https://gitlab.com/group/proj.git`) entfällt
-der `/git/`-Prefix — GitLab mounted den Git-Endpunkt direkt unter dem Root.
-Der Warden braucht diesen Prefix, weil er auf Port 8080 Git-Routen
-(`/git/…`) und API-Routen (`/api/v4/…`) gemeinsam exposed.
+For direct GitLab access (`https://gitlab.com/group/proj.git`) the `/git/`
+prefix is omitted — GitLab mounts the git endpoint directly under the root.
+The Warden needs this prefix because it exposes both git routes (`/git/…`)
+and API routes (`/api/v4/…`) on port 8080.
 
-Die Remote-URL in `.git/config` bleibt **kanonisch** (`https://gitlab.com/…`)
-— identisch zum normalen Clone. Die Umleitung auf den Warden steht
-ausschließlich in der globalen Container-`~/.gitconfig` und wird beim
-Container-Start einmalig gesetzt:
+The remote URL in `.git/config` remains **canonical** (`https://gitlab.com/…`)
+— identical to a normal clone. The redirect to the Warden is stored
+exclusively in the global container `~/.gitconfig` and is set once at
+container start:
 
 ```text
 git config --global \
   url."http://gitlab-warden:8080/git/".insteadOf "https://gitlab.com/"
 ```
 
-Damit greift der Rewrite nur im Container (wo `~/.gitconfig` existiert),
-nicht auf dem Host (anderes `$HOME`). `git remote -v` zeigt im Container
-die umgeschriebene Adresse; `.git/config` und Host bleiben unberührt.
-Der `/git/`-Prefix im Rewrite-Ziel ist nötig, damit das Routing auf Port
-8080 funktioniert.
+This means the rewrite only applies inside the container (where `~/.gitconfig`
+exists), not on the host (different `$HOME`). `git remote -v` shows the
+rewritten address inside the container; `.git/config` and the host remain
+untouched. The `/git/` prefix in the rewrite target is required for routing
+on port 8080 to work.
 
-## HTTP kurz erklärt
+## HTTP in Brief
 
-HTTP ist ein Klartext-Anfrage-Antwort-Protokoll über TCP (in der Praxis
-fast immer als HTTPS über TLS). Jede Anfrage besteht aus:
+HTTP is a plain-text request-response protocol over TCP (in practice almost
+always as HTTPS over TLS). Each request consists of:
 
 ```text
 GET /git/group/proj.git/info/refs?service=git-receive-pack HTTP/1.1
 Host: warden.example.com
 Authorization: Basic <base64(user:token)>
-Git-Protocol: version=2         ← optionaler Capability-Header
-                                ← Leerzeile = Ende der Headers
+Git-Protocol: version=2         ← optional capability header
+                                ← blank line = end of headers
 ```
 
-Die Antwort:
+The response:
 
 ```text
 HTTP/1.1 200 OK
 Content-Type: application/x-git-receive-pack-advertisement
-                                ← Leerzeile
+                                ← blank line
 <pkt-line Body>
 ```
 
-Für Git-Operationen verwendet HTTP zwei Methoden:
+For git operations HTTP uses two methods:
 
-- `GET` — Ref Advertisement (`info/refs`), kein Body
-- `POST` — Pack-Transfer (`git-upload-pack`, `git-receive-pack`), binärer Body
+- `GET` — Ref Advertisement (`info/refs`), no body
+- `POST` — Pack Transfer (`git-upload-pack`, `git-receive-pack`), binary body
 
-Der `Content-Type` identifiziert dabei eindeutig, um welchen Git-Endpunkt es
-sich handelt (`application/x-git-upload-pack-request` usw.). Ein normaler
-HTTP-Proxy ohne Git-Kenntnis würde diese Requests einfach durchreichen — der
-Warden hingegen parst den Body aktiv.
+The `Content-Type` uniquely identifies which git endpoint is being addressed
+(`application/x-git-upload-pack-request` etc.). A normal HTTP proxy without
+git awareness would simply forward these requests — the Warden, however,
+actively parses the body.
 
-## Der Repo-Pfad im Warden
+## The Repo Path in the Warden
 
-In allen drei Endpunkten steht `{repo}` für den vollständigen Pfad des
-Repositories auf dem Server — ohne führenden Slash, mit `.git`-Suffix.
-Bei GitLab ist das der Namespace-Pfad: `group/projekt.git` für ein
-Top-Level-Repo, `group/subgroup/projekt.git` für ein Subgroup-Repo.
-Beliebig viele Namespace-Ebenen sind möglich.
+In all three endpoints `{repo}` represents the full path of the repository
+on the server — without a leading slash, with a `.git` suffix.
+In GitLab this is the namespace path: `group/projekt.git` for a
+top-level repo, `group/subgroup/projekt.git` for a subgroup repo.
+Any number of namespace levels are possible.
 
-Der Warden mounted die Endpunkte unter dem Prefix `/git/` und fängt den
-Repo-Pfad mit dem Starlette-Converter `:path`, der im Gegensatz zu
-`:str` auch Slashes matcht:
+The Warden mounts the endpoints under the prefix `/git/` and captures the
+repo path using the Starlette converter `:path`, which unlike `:str`
+also matches slashes:
 
 ```text
 GET  /git/{project:path}/info/refs
@@ -98,37 +98,37 @@ POST /git/{project:path}/git-upload-pack
 POST /git/{project:path}/git-receive-pack
 ```
 
-`project` in `path_params` enthält dann z.B. `group/subgroup/projekt.git`.
-Die Config-Methode `project_allowed()` entfernt das `.git`-Suffix vor dem
-Allowlist-Vergleich.
+`project` in `path_params` then contains e.g. `group/subgroup/projekt.git`.
+The config method `project_allowed()` removes the `.git` suffix before the
+allowlist comparison.
 
-## Endpunkte
+## Endpoints
 
 ### GET `/{repo}/info/refs?service=<service>`
 
-Ref Advertisement — der Handshake. Der Client fragt, welche Refs (Branches,
-Tags) der Server kennt und welche Capabilities er unterstützt. `service` ist
-`git-upload-pack` für Fetch/Clone oder `git-receive-pack` für Push.
+Ref Advertisement — the handshake. The client asks which refs (branches,
+tags) the server knows about and which capabilities it supports. `service` is
+`git-upload-pack` for fetch/clone or `git-receive-pack` for push.
 
-Der Server antwortet mit einem pkt-line-Stream:
+The server responds with a pkt-line stream:
 
 ```text
-001e# service=git-upload-pack\n    ← Service-Header
-0000                                ← Flush (Ende des Headers)
-00b4<sha1> HEAD\0side-band-64k ...  ← erste Ref + Capabilities (NUL-getrennt)
+001e# service=git-upload-pack\n    ← service header
+0000                                ← flush (end of header)
+00b4<sha1> HEAD\0side-band-64k ...  ← first ref + capabilities (NUL-separated)
 003f<sha1> refs/heads/main\n
-0000                                ← Flush (Ende der Ref-Liste)
+0000                                ← flush (end of ref list)
 ```
 
-Der Warden reicht diesen Endpunkt vollständig durch — nach dem Allowlist-Check
-ohne weitere Inspektion. Fetch/Clone verwenden den Read-Token, Push den
-Write-Token (anhand von `service`).
+The Warden forwards this endpoint completely — after the allowlist check,
+without further inspection. Fetch/clone uses the read token, push uses the
+write token (based on `service`).
 
 ### POST `/{repo}/git-upload-pack`
 
-Fetch / Clone. Der Client schickt eine `want`-Liste (welche Commits er
-haben möchte) und eine `have`-Liste (was er schon hat). Der Server antwortet
-mit einem Packfile das genau den fehlenden Delta enthält.
+Fetch / Clone. The client sends a `want` list (which commits it wants)
+and a `have` list (what it already has). The server responds with a packfile
+containing exactly the missing delta.
 
 ```text
 0032want <sha1> side-band-64k ofs-delta\n
@@ -136,56 +136,56 @@ mit einem Packfile das genau den fehlenden Delta enthält.
 0009done\n
 ```
 
-Response bei `side-band-64k` multiplext über drei Kanäle: `\x01` Packfile-Daten,
-`\x02` Progress (stderr beim Client), `\x03` fataler Fehler.
+Response with `side-band-64k` is multiplexed over three channels: `\x01` packfile data,
+`\x02` progress (stderr on the client), `\x03` fatal error.
 
-Warden reicht vollständig durch — nach Allowlist-Check mit Read-Token, keine
-Inspektion des Bodies.
+Warden forwards completely — after allowlist check with read token, no
+inspection of the body.
 
 ### POST `/{repo}/git-receive-pack`
 
-Push. Der Request-Body besteht aus zwei Abschnitten, getrennt durch ein
-Flush-Packet:
+Push. The request body consists of two sections, separated by a
+flush packet:
 
 ```text
-Abschnitt 1 — Ref-Commands (vom Warden geparsed):
+Section 1 — Ref commands (parsed by the Warden):
 00a9<old-sha1> <new-sha1> refs/heads/claude/x\0report-status side-band-64k\n
-0000   ← Flush
+0000   ← flush
 
-Abschnitt 2 — Packfile (vom Warden nie gepuffert):
+Section 2 — Packfile (never buffered by the Warden):
 PACK....
 ```
 
-Der Warden liest nur Abschnitt 1 vollständig (bis zum Flush), policed die
-Ref-Commands, und streamt dann den unveränderten Body (Abschnitt 1 + 2) weiter.
-Das Packfile wird zu keinem Zeitpunkt vollständig im Speicher gehalten.
+The Warden reads only section 1 completely (up to the flush), polices the
+ref commands, and then streams the unchanged body (section 1 + 2) onwards.
+The packfile is never held entirely in memory at any point.
 
 ## pkt-line Format
 
-Jedes Paket beginnt mit einer 4-stelligen Hex-Zahl, die die Gesamtlänge des
-Pakets inklusive der 4 Längen-Bytes selbst angibt:
+Each packet begins with a 4-digit hex number indicating the total length of
+the packet including the 4 length bytes themselves:
 
 ```text
-0006a\n   ← Länge 6, Inhalt "a\n"
-0000      ← Flush-Packet (Länge 0) — Trennmarkierung zwischen Abschnitten
+0006a\n   ← length 6, content "a\n"
+0000      ← flush packet (length 0) — separator between sections
 ```
 
-`0001` (delimiter) und `0002` (response-end) sind Protokoll-v2-Erweiterungen,
-die der Warden nicht auswertet.
+`0001` (delimiter) and `0002` (response-end) are protocol-v2 extensions
+that the Warden does not interpret.
 
-## Vollständiges Beispiel: git push
+## Complete Example: git push
 
 ```text
 git push origin claude/feature
 ```
 
-### Schritt 0 — Remote-URL nachschlagen
+### Step 0 — Look up the remote URL
 
-Git liest `.git/config`, findet `url = https://warden.example.com/git/group/proj.git`
-und baut den Host (`warden.example.com:443`) und den Repo-Pfad (`group/proj.git`)
-daraus.
+Git reads `.git/config`, finds `url = https://warden.example.com/git/group/proj.git`
+and derives the host (`warden.example.com:443`) and the repo path (`group/proj.git`)
+from it.
 
-### Schritt 1 — Ref Advertisement (GET)
+### Step 1 — Ref Advertisement (GET)
 
 ```text
 → GET /git/group/proj.git/info/refs?service=git-receive-pack HTTP/1.1
@@ -200,74 +200,73 @@ daraus.
      0000
 ```
 
-Der Warden prüft hier: Projekt in Allowlist? Token-Injektion (Write-Token
-statt Agent-Credentials). Dann Weiterleitung an GitLab.
+The Warden checks here: is the project in the allowlist? Token injection (write token
+instead of agent credentials). Then forwards to GitLab.
 
-Git vergleicht nun die beworbenen Refs mit dem lokalen Stand und stellt fest:
-`claude/feature` zeigt auf `<sha-old>`, lokal ist es jetzt `<sha-new>` —
-es gibt also etwas zu pushen.
+Git now compares the advertised refs with the local state and determines:
+`claude/feature` points to `<sha-old>`, locally it is now `<sha-new>` —
+so there is something to push.
 
-### Schritt 2 — Push (POST)
+### Step 2 — Push (POST)
 
-Git packt die fehlenden Objekte in ein Packfile und schickt:
+Git packs the missing objects into a packfile and sends:
 
 ```text
 → POST /git/group/proj.git/git-receive-pack HTTP/1.1
      Content-Type: application/x-git-receive-pack-request
 
      00a9<sha-old> <sha-new> refs/heads/claude/feature\0report-status side-band-64k\n
-     0000          ← Ende Abschnitt 1
-     PACK<binäre Objektdaten>   ← Abschnitt 2
+     0000          ← end of section 1
+     PACK<binary object data>   ← section 2
 ```
 
-Der Warden liest Abschnitt 1 vollständig, parst die Ref-Commands und ruft
-`decide()` auf:
+The Warden reads section 1 completely, parses the ref commands and calls
+`decide()`:
 
-- R6: `group/proj` in Allowlist? ✓
-- R2: `claude/feature` hat Prefix `claude/`? ✓
-- R2: kein Delete (old ≠ 0000…)? ✓
-- R5: Quotas (Branches, Rate, Lock)? ✓
+- R6: `group/proj` in allowlist? ✓
+- R2: `claude/feature` has prefix `claude/`? ✓
+- R2: no delete (old ≠ 0000…)? ✓
+- R5: quotas (branches, rate, lock)? ✓
 
-Alle Checks bestehen → Warden schreibt Audit-Log-Eintrag, injiziert den
-Write-Token, und streamt den kompletten Body (Abschnitt 1 + 2) an GitLab weiter.
+All checks pass → Warden writes an audit log entry, injects the write
+token, and streams the complete body (section 1 + 2) to GitLab.
 
-### Schritt 3 — Antwort an den Client
+### Step 3 — Response to the Client
 
-GitLab antwortet mit einem pkt-line-Stream, den der Warden ungepuffert
-durchreicht:
+GitLab responds with a pkt-line stream that the Warden forwards unbuffered:
 
 ```text
 ← 200 OK
-     0030\x01unpack ok\n           ← Packfile wurde entpackt
-     0036\x01ok refs/heads/claude/feature\n  ← Ref akzeptiert
+     0030\x01unpack ok\n           ← packfile was unpacked
+     0036\x01ok refs/heads/claude/feature\n  ← ref accepted
      0000
 ```
 
-Der Git-Client zeigt:
+The git client displays:
 
 ```text
 To https://warden.example.com/git/group/proj.git
    sha-old..sha-new  claude/feature -> claude/feature
 ```
 
-Bei einem Policy-Verstoß (z.B. falscher Prefix) antwortet der Warden
-selbst mit `403` — ohne den Request an GitLab weiterzuleiten.
+On a policy violation (e.g. wrong prefix) the Warden itself responds
+with `403` — without forwarding the request to GitLab.
 
-## Sonderfälle
+## Special Cases
 
-**Git LFS** — Objekte werden über einen separaten Endpunkt übertragen
-(`/{repo}/info/lfs/objects/batch`). Dieser ist im Warden nicht gemountet;
-LFS-Requests fallen in den API-Proxy oder erhalten eine 404.
+**Git LFS** — objects are transferred via a separate endpoint
+(`/{repo}/info/lfs/objects/batch`). This is not mounted in the Warden;
+LFS requests fall through to the API proxy or receive a 404.
 
-**Push Certificates** (`git push --signed`) — fügen vor dem ersten Flush eine
-zusätzliche pkt-line-Sektion in den receive-pack-Body ein. `parse_commands`
-liest bis zum Flush; das Zertifikat landet ungeparsed im `head`-Puffer und
-wird ungeprüft weitergeleitet.
+**Push Certificates** (`git push --signed`) — insert an additional
+pkt-line section before the first flush in the receive-pack body. `parse_commands`
+reads up to the flush; the certificate lands unparsed in the `head` buffer and
+is forwarded unchecked.
 
-**Git-Protokoll v2** — ab git 2.26 kann der Client den Header
-`Git-Protocol: version=2` schicken, der einen effizienteren Handshake
-aktiviert. Der Warden leitet diesen Header nicht explizit weiter; GitLab
-fällt in dem Fall auf Protokoll v1 zurück.
+**Git Protocol v2** — from git 2.26 onward the client can send the header
+`Git-Protocol: version=2`, which activates a more efficient handshake.
+The Warden does not explicitly forward this header; GitLab falls back to
+protocol v1 in that case.
 
-**SSH** — `git+ssh://` ist ein eigenes Protokoll und liegt vollständig
-außerhalb des Warden-Scopes.
+**SSH** — `git+ssh://` is a separate protocol and is entirely outside
+the Warden's scope.

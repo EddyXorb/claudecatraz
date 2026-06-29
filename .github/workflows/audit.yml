@@ -1,0 +1,33 @@
+name: audit
+
+# Scan resolved dependencies (runtime + dev) for known vulnerabilities via
+# pip-audit against the uv lockfile. Runs weekly so newly disclosed CVEs in
+# already-pinned packages surface even without a code change.
+on:
+  push:
+    paths:
+      - "uv.lock"
+      - "pyproject.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "uv.lock"
+      - "pyproject.toml"
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Export locked dependencies
+        run: uv export --frozen --all-groups --format requirements-txt --no-emit-project > requirements.txt
+
+      - name: Audit for known vulnerabilities
+        run: uvx pip-audit -r requirements.txt

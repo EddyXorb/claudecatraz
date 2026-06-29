@@ -5,12 +5,18 @@ on:
   push:
     paths:
       - "catraz"
+      - "src/catraz/**"
+      - "pyproject.toml"
       - "tests/cli/**"
+      - "tests/container/**"
       - ".github/workflows/cli-ci.yml"
   pull_request:
     paths:
       - "catraz"
+      - "src/catraz/**"
+      - "pyproject.toml"
       - "tests/cli/**"
+      - "tests/container/**"
       - ".github/workflows/cli-ci.yml"
 
 jobs:
@@ -26,6 +32,10 @@ jobs:
         run: |
           ./catraz --help
           ./catraz --version
+          ./catraz run --help
+
+      - name: Type-check (mypy --strict)
+        run: uv run mypy
 
       - name: Unit tests
-        run: uv run --with pytest python -m pytest tests/cli/ -q
+        run: uv run --with pytest python -m pytest tests/cli/ tests/container/ -q

@@ -5,7 +5,10 @@ claude-home/
 workspace*
 .claude
 claude
-
+.mypy_cache
+.ruff_cache
+.venv
+.pytest_cache
 # Secrets
 .env
 # Local env overrides
@@ -24,3 +27,5 @@ logs/
 # Python
 __pycache__/
 *.pyc
+
+.catraz/

@@ -14,7 +14,7 @@ from warden.config import ConfigError
 
 def test_main_exits_2_on_config_error(monkeypatch):
     def _raise() -> None:
-        raise ConfigError("ALLOWED_PROJECTS must be non-empty (fail-closed)")
+        raise ConfigError("GITLAB_READ_TOKEN is required")
 
     monkeypatch.setattr(main_mod, "from_env", _raise)
     with pytest.raises(SystemExit) as exc:

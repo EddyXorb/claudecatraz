@@ -3,14 +3,18 @@ name: compose validate
 on:
   push:
     paths:
-      - "docker-compose.yml"
-      - ".env.example"
+      - "src/catraz/assets/compose/docker-compose.yml"
+      - "src/catraz/assets/.env.example"
       - ".github/workflows/compose-validate.yml"
   pull_request:
     paths:
-      - "docker-compose.yml"
-      - ".env.example"
+      - "src/catraz/assets/compose/docker-compose.yml"
+      - "src/catraz/assets/.env.example"
       - ".github/workflows/compose-validate.yml"
+
+env:
+  COMPOSE_FILE: src/catraz/assets/compose/docker-compose.yml
+  ENV_EXAMPLE: src/catraz/assets/.env.example
 
 jobs:
   syntax:
@@ -24,10 +28,10 @@ jobs:
           # Uncomment all "# VAR=..." lines so docker compose config has no
           # missing-variable warnings for stage-02 vars.
           python3 - <<'EOF'
-          import re, sys
+          import os, re, sys
           seen = set()
           lines = []
-          with open(".env.example") as f:
+          with open(os.environ["ENV_EXAMPLE"]) as f:
               for line in f:
                   line = line.rstrip("\n")
                   # Uncomment "# VAR=value" → "VAR=value"
@@ -42,6 +46,16 @@ jobs:
                       if var not in seen:
                           lines.append(line)
                           seen.add(var)
+          # PROJECT_DIR is now mandatory (catraz sets it); supply a placeholder for config.
+          if "PROJECT_DIR" not in seen:
+              lines.append("PROJECT_DIR=/tmp/catraz-ci")
+              seen.add("PROJECT_DIR")
+          # CATRAZ_ASSETS is injected by the catraz CLI at runtime (the extracted asset cache,
+          # anchoring build contexts). `config` only interpolates/validates, so a placeholder
+          # path that need not exist is enough to satisfy the ${CATRAZ_ASSETS:?…} requirement.
+          if "CATRAZ_ASSETS" not in seen:
+              lines.append("CATRAZ_ASSETS=/tmp/catraz-ci-assets")
+              seen.add("CATRAZ_ASSETS")
           with open("/tmp/ci.env", "w") as out:
               out.write("\n".join(lines) + "\n")
           print("vars exported:", ", ".join(sorted(seen)), file=sys.stderr)
@@ -49,7 +63,10 @@ jobs:
 
       - name: Validate compose syntax
         run: |
-          docker compose --env-file /tmp/ci.env config --quiet
+          PROJECT_DIR=/tmp/catraz-ci CATRAZ_ASSETS=/tmp/catraz-ci-assets docker compose \
+            -f "$COMPOSE_FILE" \
+            --project-directory /tmp/catraz-ci \
+            --env-file /tmp/ci.env config --quiet
           echo "docker compose config: OK"
 
   env-coverage:
@@ -61,17 +78,23 @@ jobs:
       - name: All compose variables documented in .env.example
         run: |
           python3 - <<'EOF'
-          import re, sys
+          import os, re, sys
 
-          with open("docker-compose.yml") as f:
+          with open(os.environ["COMPOSE_FILE"]) as f:
               compose = f.read()
 
           # ${VAR} and ${VAR:-default}
           compose_vars = set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)(?::-[^}]*)?\}', compose))
 
+          # PROJECT_DIR and HOST_GITCONFIG are injected by catraz at runtime
+          # (the latter points at the host ~/.gitconfig, else /dev/null) — not
+          # documented .env values.
+          compose_vars.discard("PROJECT_DIR")
+          compose_vars.discard("HOST_GITCONFIG")
+
           # All vars in .env.example, including commented-out stage-02 entries
           example_vars = set()
-          with open(".env.example") as f:
+          with open(os.environ["ENV_EXAMPLE"]) as f:
               for line in f:
                   m = re.match(r'^#?\s*([A-Z_][A-Z0-9_]*)=', line)
                   if m:

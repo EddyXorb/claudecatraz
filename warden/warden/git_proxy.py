@@ -49,9 +49,20 @@ async def advertise(request: Request) -> Response:
     project = _project(request)
     service = request.query_params.get("service", "git-upload-pack")
 
+    # R0: deny all git ops when GitLab is intentionally disabled (off mode).
+    if not ctx.cfg.gitlab_enabled:
+        return deny_json(Decision(False, "R0", "GitLab disabled (GITLAB_MODE=off)"))
+
     denied = project_gate(project, ctx.cfg)
     if denied is not None:
         return deny_json(denied)
+
+    # R0: deny push discovery when writes are disabled — the write token must not
+    # be sent upstream even for the info/refs phase of git-receive-pack.
+    if _service_token(service) == TokenKind.WRITE and not ctx.cfg.writes_enabled:
+        return deny_json(
+            Decision(False, "R0", f"writes disabled (GITLAB_MODE={ctx.cfg.gitlab_mode})")
+        )
 
     resp = await ctx.upstream.git_get(
         project,
@@ -76,6 +87,10 @@ async def upload_pack(request: Request) -> Response:
     """
     ctx: AppContext = request.app.state.ctx
     project = _project(request)
+
+    # R0: deny all git ops when GitLab is intentionally disabled (off mode).
+    if not ctx.cfg.gitlab_enabled:
+        return deny_json(Decision(False, "R0", "GitLab disabled (GITLAB_MODE=off)"))
 
     denied = project_gate(project, ctx.cfg)
     if denied is not None:

@@ -8,6 +8,9 @@ basis of the audit trail.
 Rules enforced — every :class:`Decision` is tagged with one of these for the
 audit log, so the file is self-contained without re-reading the README:
 
+  R0  Mode gate          GitLab is disabled (GITLAB_MODE=off) — all ops denied;
+                         or writes are disabled (GITLAB_MODE=read-only) — write
+                         ops denied.  Checked before all other rules.
   R1  Read pass-through  REST GET/HEAD/OPTIONS and git upload-pack/info-refs are
                          streamed upstream with the READ token.
   R2  git write limits   push only to <branch_prefix> branches; no branch
@@ -48,19 +51,30 @@ def project_gate(project: str, cfg: Config) -> Optional[Decision]:
 
 def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     """Default-deny. Every allow path is explicit (W5)."""
+    # R0: deny all ops when GitLab is intentionally disabled.
+    if not cfg.gitlab_enabled:
+        return Decision(False, "R0", "GitLab disabled (GITLAB_MODE=off)")
+
     if req.channel == Channel.GIT:
         # git always targets a concrete project — it must be allowlisted (R6).
         denied = project_gate(req.project, cfg)
         if denied is not None:
             return denied
-        return _decide_git(req, state, cfg)
-    if req.channel == Channel.API:
+        d = _decide_git(req, state, cfg)
+    elif req.channel == Channel.API:
         # Project allowlist applies where a project id appears in the path (W6.4).
         denied = project_gate(req.project, cfg)
         if denied is not None:
             return denied
-        return _decide_api(req, state, cfg)
-    return Decision(False, "R6", f"unknown channel {req.channel!r}")
+        d = _decide_api(req, state, cfg)
+    else:
+        return Decision(False, "R6", f"unknown channel {req.channel!r}")
+
+    # R0: deny write operations when writes are not enabled (read-only mode).
+    if d.allow and d.token == TokenKind.WRITE and not cfg.writes_enabled:
+        return Decision(False, "R0", f"writes disabled (GITLAB_MODE={cfg.gitlab_mode})")
+
+    return d
 
 
 def _decide_git(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:

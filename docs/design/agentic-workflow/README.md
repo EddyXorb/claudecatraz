@@ -15,6 +15,15 @@ Security-Architektur-Referenz. Stufen 01 und 02 sind implementiert.
 | **03** | [`03-observability.md`](./03-observability.md)             | Log-Viewer + optional Grafana/Loki                      | ⏳      |
 | **03** | [`03-testing-redteam.md`](./03-testing-redteam.md)         | Red-Team-Suite, CI                                      | ⏳      |
 | **04** | [`04-cli.md`](./04-cli.md)                                 | `claudecatraz`-CLI: ein Vordereingang fürs Setup        | ⏳      |
+| **05** | [`05-repackaging.md`](./05-repackaging.md)                 | `catraz` als installierbares Werkzeug, `.catraz/`-Heim, Image-Schichtung, Auth-Modus | ⏳      |
+
+> Stufe 05 wurde in adversarialen Review-Runden gehärtet — Kritik & Antworten in
+> [`roastiteration-1.md`](./roastiteration-1.md) · [`roastiteration-2.md`](./roastiteration-2.md) ·
+> [`roastiteration-3.md`](./roastiteration-3.md) (Sicherheits-Löcher → Einfachheit zurückgewinnen → Topologie-Entscheidung)
+> und [`roastiteration-4.md`](./roastiteration-4.md) (lokaler Modus §11: `catraz local` als drop-in `claude`).
+>
+> **Umsetzung:** schrittweiser, selbsttragender Implementierungsplan (Commit-Grenzen +
+> Unittests, ein LLM-umsetzbar) in [`05-packaging/`](./05-packaging/00-overview.md) (Docs 00–06).
 
 ---
 

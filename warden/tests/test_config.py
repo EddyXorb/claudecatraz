@@ -3,6 +3,11 @@
 The point of the module is to refuse to start when misconfigured rather than
 run "open". These tests assert that refusal, plus the prefix-confusion guard in
 ``project_allowed`` (Q9).
+
+GITLAB_MODE introduces three operating modes:
+  off        — no tokens or allowlist required; all GitLab ops denied.
+  read-only  — read token + allowlist required; no write token.
+  read-write — both tokens + allowlist required (default, previous behaviour).
 """
 
 from __future__ import annotations
@@ -69,17 +74,103 @@ def test_from_env_non_strict_allows_partial_config():
     assert cfg.read_token == ""
 
 
-# --- from_env: fail-closed validation -----------------------------------------
+# --- from_env: fail-closed validation (read-write mode, the default) ----------
 def test_missing_tokens_abort_startup():
+    """In GITLAB_MODE=read-write (default) both tokens are required."""
     with pytest.raises(ConfigError) as exc:
         from_env({"ALLOWED_PROJECTS": "group/proj"}, strict=True)
     msg = str(exc.value)
     assert "GITLAB_READ_TOKEN" in msg and "GITLAB_WRITE_TOKEN" in msg
 
 
-def test_empty_allowlist_aborts_startup():
-    with pytest.raises(ConfigError, match="ALLOWED_PROJECTS"):
-        from_env({"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w"}, strict=True)
+def test_empty_allowlist_boots_and_denies():
+    """In GITLAB_MODE=read-write an empty allowlist does NOT abort: the warden
+    boots (dev-env runs offline) and project_allowed() denies every project."""
+    cfg = from_env({"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w"}, strict=True)
+    assert cfg.allowed_projects == ()
+    assert not cfg.project_allowed("group/proj")
+
+
+# --- GITLAB_MODE=off: no token or allowlist required --------------------------
+def test_off_mode_allows_empty_tokens_and_allowlist():
+    """GITLAB_MODE=off is valid with no tokens and no allowlist — GitLab is intentionally off."""
+    cfg = from_env({"GITLAB_MODE": "off"}, strict=True)
+    assert cfg.gitlab_mode == "off"
+    assert not cfg.gitlab_enabled
+    assert not cfg.writes_enabled
+
+
+def test_off_mode_default_from_env():
+    """GITLAB_MODE=off builds correctly and exposes the right flags."""
+    cfg = from_env({"GITLAB_MODE": "off"}, strict=True)
+    assert cfg.gitlab_enabled is False
+    assert cfg.writes_enabled is False
+
+
+# --- GITLAB_MODE=read-only: read token + allowlist required, no write token ---
+def test_read_only_requires_read_token_not_write():
+    """GITLAB_MODE=read-only: read token + allowlist required; write token NOT required."""
+    cfg = from_env(
+        {"GITLAB_MODE": "read-only", "GITLAB_READ_TOKEN": "r", "ALLOWED_PROJECTS": "group/proj"},
+        strict=True,
+    )
+    assert cfg.gitlab_mode == "read-only"
+    assert cfg.gitlab_enabled
+    assert not cfg.writes_enabled
+
+
+def test_read_only_with_write_token_is_fine():
+    """GITLAB_MODE=read-only: a write token present is ignored (no requirement, no error)."""
+    cfg = from_env(
+        {
+            "GITLAB_MODE": "read-only",
+            "GITLAB_READ_TOKEN": "r",
+            "GITLAB_WRITE_TOKEN": "w",
+            "ALLOWED_PROJECTS": "group/proj",
+        },
+        strict=True,
+    )
+    assert cfg.gitlab_mode == "read-only"
+    assert not cfg.writes_enabled
+
+
+def test_read_only_missing_read_token_aborts():
+    """GITLAB_MODE=read-only: missing read token still aborts."""
+    with pytest.raises(ConfigError, match="GITLAB_READ_TOKEN"):
+        from_env({"GITLAB_MODE": "read-only", "ALLOWED_PROJECTS": "group/proj"}, strict=True)
+
+
+def test_read_only_empty_allowlist_boots_and_denies():
+    """GITLAB_MODE=read-only: empty allowlist boots (deny-all), not abort."""
+    cfg = from_env({"GITLAB_MODE": "read-only", "GITLAB_READ_TOKEN": "r"}, strict=True)
+    assert cfg.allowed_projects == ()
+    assert not cfg.project_allowed("group/proj")
+
+
+# --- Invalid mode aborts -------------------------------------------------------
+def test_invalid_mode_aborts():
+    """An unrecognised GITLAB_MODE value aborts with a clear error."""
+    with pytest.raises(ConfigError, match="GITLAB_MODE"):
+        from_env({"GITLAB_MODE": "nonsense"}, strict=True)
+
+
+# --- Properties on Config dataclass -------------------------------------------
+def test_config_properties_read_write():
+    cfg = Config(gitlab_mode="read-write")
+    assert cfg.gitlab_enabled is True
+    assert cfg.writes_enabled is True
+
+
+def test_config_properties_read_only():
+    cfg = Config(gitlab_mode="read-only")
+    assert cfg.gitlab_enabled is True
+    assert cfg.writes_enabled is False
+
+
+def test_config_properties_off():
+    cfg = Config(gitlab_mode="off")
+    assert cfg.gitlab_enabled is False
+    assert cfg.writes_enabled is False
 
 
 def test_non_positive_quota_aborts_startup():
@@ -165,3 +256,47 @@ def test_invalid_toml_type_aborts(tmp_path):
     toml.write_text('max_open_mrs = "lots"\n')
     with pytest.raises(ConfigError, match="integer"):
         from_env({}, strict=False, toml_path=str(toml))
+
+
+# --- _secret / *_FILE indirection (11.1) --------------------------------------
+
+def test_secret_file_read_token(tmp_path):
+    """(a) GITLAB_READ_TOKEN_FILE → tmp file "glpat-x\n" → read_token == "glpat-x"."""
+    f = tmp_path / "rt"
+    f.write_text("glpat-x\n")
+    cfg = from_env(
+        {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": ""},
+        strict=True,
+    )
+    assert cfg.read_token == "glpat-x"
+
+
+def test_secret_file_wins_over_env(tmp_path):
+    """(b) *_FILE and the bare env var both set → the file wins."""
+    f = tmp_path / "rt"
+    f.write_text("from-file\n")
+    cfg = from_env(
+        {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": "from-env"},
+        strict=True,
+    )
+    assert cfg.read_token == "from-file"
+
+
+def test_secret_file_missing_raises(tmp_path):
+    """(c) *_FILE → missing path → ConfigError."""
+    with pytest.raises(ConfigError, match="GITLAB_READ_TOKEN_FILE"):
+        from_env(
+            {**_MIN, "GITLAB_READ_TOKEN_FILE": str(tmp_path / "nonexistent")},
+            strict=True,
+        )
+
+
+def test_secret_file_empty_fails_validate(tmp_path):
+    """(d) *_FILE → empty file → _validate raises the existing 'required' error."""
+    f = tmp_path / "rt"
+    f.write_text("")
+    with pytest.raises(ConfigError, match="GITLAB_READ_TOKEN"):
+        from_env(
+            {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": ""},
+            strict=True,
+        )

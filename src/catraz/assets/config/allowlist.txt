@@ -1,0 +1,44 @@
+# Forward-Proxy Allowlist — one domain per line.
+#   .domain  -> incl. the domain AND all subdomains (.npmjs.org covers registry.npmjs.org)
+#   domain   -> exact host (no leading dot)
+# Read for HTTP (dstdomain) AND HTTPS-SNI (ssl::server_name) -> single source of truth.
+# Changes take effect via `docker compose exec forward-proxy squid -k reconfigure`.
+#
+# IMPORTANT: Package managers often follow redirects to CDNs -> the transitive hosts
+# must be included, otherwise the build silently breaks (see 04-testing.md).
+# Note: do not add exact hosts that are already covered by a .domain entry
+# (Squid will warn about redundancy).
+
+# --- Agent runtime: Claude Code talks to Anthropic via the proxy ---
+# (agent-net is internal -> without this entry the agent cannot reach the model)
+.anthropic.com
+
+# --- GitLab ---
+# The git path runs through the Warden (dedicated egress-net path, NOT via this
+# proxy). gitlab.com must NOT be listed here — otherwise a direct push with a
+# tokened remote URL could bypass the Warden (see incident analysis, 02-warden.md W3.1).
+
+# --- Package registries ---
+.npmjs.org
+.crates.io
+.pypi.org
+files.pythonhosted.org
+.conan.io
+
+# --- Toolchain ---
+apt.llvm.org
+sh.rustup.rs
+static.rust-lang.org
+deb.nodesource.com
+
+# --- Docs & Q&A ---
+docs.gitlab.com
+doc.rust-lang.org
+docs.python.org
+stackoverflow.com
+
+# --- Code (read) — optionally restrict to raw/API read (Q4 in 01-scope-and-decisions.md) ---
+github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+codeload.github.com

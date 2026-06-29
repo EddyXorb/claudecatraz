@@ -1,7 +1,15 @@
 """Env → typed Config with hard fail-closed validation (W10).
 
-Missing token or empty allowlist ⇒ abort, never "open". `ALLOWED_PROJECTS`
-empty ⇒ nothing is allowed (fail-closed), not "everything".
+Missing token ⇒ abort, never "open". `ALLOWED_PROJECTS` empty ⇒ nothing is
+allowed (fail-closed *by denying*, not by crashing): the warden still boots so
+the dev-env can run offline, and every GitLab op is denied until a project is
+allowed. Fail-closed means *deny*, not *refuse to start*.
+
+GITLAB_MODE selects one of three operating modes:
+  off         — GitLab is intentionally disabled; no token or allowlist required;
+                all GitLab operations are denied (R0).
+  read-only   — only the read token is required; writes are denied (R0).
+  read-write  — both tokens are required; full current behaviour (default).
 """
 
 from __future__ import annotations
@@ -9,6 +17,7 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Optional
 
 
@@ -24,6 +33,9 @@ def normalize_project(project: str) -> str:
     checks, REST project-ids, upstream URLs and state keys consistent (one
     definition), so a pushed branch is not counted twice in ``claude_branches``."""
     return project.removesuffix(".git").strip("/")
+
+
+_VALID_MODES = frozenset({"off", "read-only", "read-write"})
 
 
 @dataclass(frozen=True)
@@ -46,6 +58,17 @@ class Config:
     agent_port: int = 8080
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"
+    gitlab_mode: str = "read-write"
+
+    @property
+    def gitlab_enabled(self) -> bool:
+        """True unless GitLab is intentionally disabled (GITLAB_MODE=off)."""
+        return self.gitlab_mode != "off"
+
+    @property
+    def writes_enabled(self) -> bool:
+        """True only in read-write mode — never in off or read-only."""
+        return self.gitlab_mode == "read-write"
 
     @property
     def git_base(self) -> str:
@@ -66,6 +89,19 @@ class Config:
             if project == allowed or project.startswith(allowed + "/"):
                 return True
         return False
+
+
+def _secret(env: Mapping[str, str], name: str) -> str:
+    """Read a secret from <name>_FILE (compose secret / mounted file) if set, else <name>.
+    File wins so the running stack reads /run/secrets/…; the bare env var stays the fallback
+    for tests and bare `docker run`. Trailing newline (common in token files) is stripped."""
+    path = env.get(f"{name}_FILE")
+    if path:
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except OSError as e:
+            raise ConfigError(f"{name}_FILE={path!r} unreadable: {e}") from e
+    return env.get(name, "")
 
 
 def _split_csv(value: str) -> tuple[str, ...]:
@@ -154,14 +190,15 @@ def from_env(
         max_writes_per_hour=_tunable_int("MAX_WRITES_PER_HOUR", "max_writes_per_hour", 60),
         allowed_projects=_tunable_projects("ALLOWED_PROJECTS", "allowed_projects"),
         api_url=env.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/api/v4",
-        read_token=env.get("GITLAB_READ_TOKEN", ""),
-        write_token=env.get("GITLAB_WRITE_TOKEN", ""),
+        read_token=_secret(env, "GITLAB_READ_TOKEN"),
+        write_token=_secret(env, "GITLAB_WRITE_TOKEN"),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
         agent_port=_int("AGENT_PORT", 8080),
         admin_port=_int("ADMIN_PORT", 9090),
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
+        gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
     )
 
     if strict:
@@ -171,16 +208,40 @@ def from_env(
 
 def _validate(cfg: Config) -> None:
     problems: list[str] = []
-    if not cfg.read_token:
-        problems.append("GITLAB_READ_TOKEN is required")
-    if not cfg.write_token:
-        problems.append("GITLAB_WRITE_TOKEN is required")
-    if not cfg.allowed_projects:
-        problems.append("ALLOWED_PROJECTS must be non-empty (fail-closed)")
-    if not cfg.branch_prefix:
-        problems.append("BRANCH_PREFIX must be non-empty")
+
+    if cfg.gitlab_mode not in _VALID_MODES:
+        problems.append(
+            f"GITLAB_MODE must be one of {sorted(_VALID_MODES)!r}, got {cfg.gitlab_mode!r}"
+        )
+        # Mode is unknown — skip mode-specific checks to avoid confusing secondary errors.
+        raise ConfigError("invalid configuration: " + "; ".join(problems))
+
+    # Quota limits apply in all modes.
     for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour"):
         if getattr(cfg, name) <= 0:
             problems.append(f"{name.upper()} must be > 0")
+
+    if cfg.gitlab_mode == "off":
+        # Intentionally disabled — no token or allowlist requirement.
+        pass
+
+    elif cfg.gitlab_mode == "read-only":
+        if not cfg.read_token:
+            problems.append("GITLAB_READ_TOKEN is required")
+        if not cfg.branch_prefix:
+            problems.append("BRANCH_PREFIX must be non-empty")
+        # An empty allowlist is NOT a startup error: project_allowed() already
+        # denies everything, so the warden boots (dev-env runs offline) and
+        # simply refuses every GitLab op until a project is allowed.
+
+    else:  # read-write (default)
+        if not cfg.read_token:
+            problems.append("GITLAB_READ_TOKEN is required")
+        if not cfg.write_token:
+            problems.append("GITLAB_WRITE_TOKEN is required")
+        if not cfg.branch_prefix:
+            problems.append("BRANCH_PREFIX must be non-empty")
+        # Empty allowlist ⇒ deny-all (see read-only note above), not an abort.
+
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))

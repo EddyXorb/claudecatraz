@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Python dependencies (runtime + dev), resolved via uv.lock.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      # One PR per update level instead of one per package, to cut noise.
+      python-patch:
+        update-types: ["patch"]
+      python-minor:
+        update-types: ["minor"]
+    open-pull-requests-limit: 10
+
+  # Keep workflow action pins (checkout, setup-uv, git-cliff-action, ...) fresh.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]

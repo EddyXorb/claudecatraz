@@ -1,0 +1,48 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python-is-python3 \
+    git curl wget unzip pkg-config \
+    cmake gcc-multilib g++-multilib gcovr \
+    lsb-release software-properties-common gnupg \
+    libssl-dev libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python tools — system-wide so any user can call them.
+# Toolchain versions are an internal detail of THIS base image and live here, not in
+# .env: a swapped-in BASE_IMAGE/BASE_DOCKERFILE has its own, so they don't belong in
+# the user-facing secrets/infra file. Override per-build with --build-arg if needed.
+ARG UV_VERSION=0.10.11
+ARG CONAN_VERSION=2.23.0
+
+ENV CONAN_REVISIONS_ENABLED=1
+
+RUN pip install --break-system-packages uv==${UV_VERSION} conan==${CONAN_VERSION}
+
+# LLVM
+ARG CLANG_VERSION=20
+
+RUN apt-get update && \
+    wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && ./llvm.sh ${CLANG_VERSION} all && \
+    ln -s /usr/bin/clang-${CLANG_VERSION}        /usr/bin/clang && \
+    ln -s /usr/bin/clang-format-${CLANG_VERSION} /usr/bin/clang-format && \
+    ln -s /usr/bin/clang-tidy-${CLANG_VERSION}   /usr/bin/clang-tidy && \
+    rm -f llvm.sh && \
+    rm -rf /var/lib/apt/lists/*
+
+# Rust — install to global paths so the non-root dev user can use it
+ARG RUST_VERSION=1.94.0
+
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:$PATH"
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain ${RUST_VERSION} --no-modify-path && \
+    rustup component add rustfmt clippy llvm-tools-preview && \
+    curl -L --proto '=https' --tlsv1.2 -sSf \
+        https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
+    cargo binstall --no-confirm cargo-llvm-cov cargo-nextest cargo-deny && \
+    chmod -R a+rX /usr/local/rustup /usr/local/cargo

@@ -1,4 +1,4 @@
-"""Unit tests for the pure policy core (W14, §8.1): every rule R1–R6, default-deny."""
+"""Unit tests for the pure policy core (W14, §8.1): every rule R0–R6, default-deny."""
 
 from __future__ import annotations
 
@@ -233,3 +233,71 @@ def test_mr_update_without_merge_intent_allowed(cfg):
 def test_unknown_channel_default_denied(cfg):
     d = decide(ProxyRequest(channel="bogus", project=""), StateView(), cfg)
     assert not d.allow and d.rule == "R6"
+
+
+# --- R0: GITLAB_MODE gates -------------------------------------------------------
+
+def test_off_denies_reads_and_writes():
+    """GITLAB_MODE=off: both reads and writes are denied (R0) — no GitLab traffic at all."""
+    cfg_off = Config(
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+        gitlab_mode="off",
+    )
+    # API read
+    d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_off)
+    assert not d.allow and d.rule == "R0" and "off" in d.reason
+
+    # API write
+    d = decide(
+        _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
+        StateView(),
+        cfg_off,
+    )
+    assert not d.allow and d.rule == "R0"
+
+    # git push
+    d = decide(
+        ProxyRequest(
+            channel="git",
+            project="group/proj",
+            ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
+        ),
+        StateView(),
+        cfg_off,
+    )
+    assert not d.allow and d.rule == "R0"
+
+
+def test_read_only_denies_writes_allows_reads():
+    """GITLAB_MODE=read-only: reads pass (R1), writes are denied (R0)."""
+    cfg_ro = Config(
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="",
+        gitlab_mode="read-only",
+    )
+    # API read: allowed
+    d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_ro)
+    assert d.allow and d.rule == "R1"
+
+    # API write: denied R0
+    d = decide(
+        _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
+        StateView(),
+        cfg_ro,
+    )
+    assert not d.allow and d.rule == "R0" and "read-only" in d.reason
+
+    # git push: denied R0
+    d = decide(
+        ProxyRequest(
+            channel="git",
+            project="group/proj",
+            ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
+        ),
+        StateView(),
+        cfg_ro,
+    )
+    assert not d.allow and d.rule == "R0" and "read-only" in d.reason

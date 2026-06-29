@@ -70,12 +70,12 @@ async def _audit_tail(request: Request) -> Response:
 
 
 async def _viewer(request: Request) -> HTMLResponse:
-    """Statischer Log-Viewer (O.4): filtert JSONL nach Kanal/Regel/Entscheidung/Projekt."""
+    """Static log viewer (O.4): filters JSONL by channel/rule/decision/project."""
     return HTMLResponse(_VIEWER_HTML)
 
 
 _VIEWER_HTML = """<!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Warden Audit Log</title>
@@ -108,16 +108,16 @@ td{padding:4px 8px;vertical-align:top}
 <body>
 <h1>Warden Audit Log</h1>
 <div id="filters">
-  <label>Kanal <select id="fc"><option value="">alle</option><option>api</option><option>git</option></select></label>
-  <label>Entscheidung <select id="fd"><option value="">alle</option><option>allow</option><option>deny</option></select></label>
-  <label>Regel <input id="fr" placeholder="z.B. R4" style="width:60px"></label>
-  <label>Projekt <input id="fp" placeholder="Pfad-Filter" style="width:160px"></label>
-  <button id="reload" onclick="load()">&#8635; Laden</button>
+  <label>Channel <select id="fc"><option value="">all</option><option>api</option><option>git</option></select></label>
+  <label>Decision <select id="fd"><option value="">all</option><option>allow</option><option>deny</option></select></label>
+  <label>Rule <input id="fr" placeholder="e.g. R4" style="width:60px"></label>
+  <label>Project <input id="fp" placeholder="path filter" style="width:160px"></label>
+  <button id="reload" onclick="load()">&#8635; Load</button>
   <span id="count"></span>
 </div>
 <div id="err"></div>
 <table>
-<thead><tr><th>Zeit</th><th>Kanal</th><th>Methode</th><th>Entscheidung</th><th>Regel</th><th>Projekt</th><th>Pfad</th><th>Grund</th><th>ms</th></tr></thead>
+<thead><tr><th>Time</th><th>Channel</th><th>Method</th><th>Decision</th><th>Rule</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
 <tbody id="tb"></tbody>
 </table>
 <script>
@@ -132,7 +132,7 @@ async function load(){
     const t=await r.text();
     rows=t.trim().split('\\n').filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean).reverse();
     render();
-  }catch(e){document.getElementById('err').textContent='Fehler: '+e}
+  }catch(e){document.getElementById('err').textContent='Error: '+e}
 }
 function render(){
   const ch=document.getElementById('fc').value;
@@ -145,7 +145,7 @@ function render(){
     (!rule||(r.rule||'').toUpperCase().includes(rule))&&
     (!proj||(r.project||'').toLowerCase().includes(proj))
   );
-  document.getElementById('count').textContent=f.length+' / '+rows.length+' Einträge';
+  document.getElementById('count').textContent=f.length+' / '+rows.length+' entries';
   const tb=document.getElementById('tb');
   tb.innerHTML='';
   for(const r of f){
