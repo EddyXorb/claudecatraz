@@ -29,10 +29,10 @@ jobs:
           - forward-proxy/Dockerfile
           - warden/Dockerfile
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Lint ${{ matrix.dockerfile }}
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: ${{ matrix.dockerfile }}
           # DL3008/DL3015: apt-get version pinning / --no-install-recommends are
