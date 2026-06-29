@@ -38,16 +38,19 @@ def project_name(root: Path) -> str:
 
 
 def _source_cmd(root: Path) -> list[str]:
-    """Layered multi-file command — used only to generate resolved.yml (or as fallback)."""
+    """Layered multi-file command — used only to generate resolved.yml (or as fallback).
+
+    auth_mode(root) is called on every compose invocation (up/run/shell/down/ps/…).
+    An invalid AUTH_MODE therefore fails fast at every call site, not only on first `up`.
+    """
+    from catraz.auth import auth_mode
     ar = asset_root()
     cmd = ["docker", "compose",
            "-f", str(ar / "assets/compose/docker-compose.yml"),
            "--project-directory", str(root),
            "--project-name", project_name(root),
            "--env-file", str(root / ".catraz/.env")]
-    frag = root / ".catraz/.auth.compose.yml"
-    if frag.exists():
-        cmd += ["-f", str(frag)]
+    cmd += ["-f", str(ar / "assets/compose" / f"auth.{auth_mode(root)}.yml")]
     override = root / ".catraz/compose.override.yml"
     if override.exists():
         cmd += ["-f", str(override)]
@@ -109,9 +112,7 @@ def prepare(root: Path, *, render: bool, extra_env: dict[str, str] | None = None
     render=False (status/logs):       reuse existing resolved.yml; no side effects.
     Falls back to _source_cmd (with a loud warning) when rendering fails.
     """
-    from catraz import auth as _auth
     if render:
-        _auth.write_auth_fragment(root)
         if generate_resolved(root, extra_env):
             return _resolved_cmd(root)
         _warn_fallback("config render failed — running layered; resolved.yml may be stale")

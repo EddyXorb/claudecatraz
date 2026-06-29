@@ -190,6 +190,7 @@ class TestGitLabModeReadWrite:
             probe_calls.append(tokens)
 
         monkeypatch.setattr(doctor, "_probe_gitlab_tokens", _fake_probe)
+        monkeypatch.setattr(doctor, "_gitlab_get", _raise_url_error)  # keep the write/user probe offline
         f = doctor.Findings()
         doctor.check_tokens(tmp_path, {"GITLAB_MODE": "read-write"}, f)
         assert len(probe_calls) == 1
@@ -246,6 +247,60 @@ class TestGitLabModeHelper:
 
 def _raise_url_error(*args: Any, **kwargs: Any) -> Any:
     raise urllib.error.URLError("offline")
+
+
+def _http_error(code: int) -> "Any":
+    def _raise(*args: Any, **kwargs: Any) -> Any:
+        raise urllib.error.HTTPError(url="x", code=code, msg="x", hdrs=None, fp=None)  # type: ignore[arg-type]
+    return _raise
+
+
+# ---------------------------------------------------------------------------
+# _probe_write_user_read — the warden needs GET /user (write token) for R3
+# ---------------------------------------------------------------------------
+
+class TestProbeWriteUserRead:
+    """A fine-grained write token without 'User: Read' makes GET /user 403 →
+    the warden can't resolve its service account → comments/MR-edits denied (R3).
+    The probe must surface this as bad at setup time."""
+
+    def test_user_read_403_is_bad(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make_secrets(tmp_path, write_token="glpat-writetoken")
+        monkeypatch.setattr(doctor, "_gitlab_get", _http_error(403))
+        f = doctor.Findings()
+        doctor._probe_write_user_read(tmp_path, {}, f)
+        assert any(i[0] == doctor.BAD and "GET /user" in i[2] for i in f.items)
+
+    def test_user_read_401_is_bad(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make_secrets(tmp_path, write_token="glpat-writetoken")
+        monkeypatch.setattr(doctor, "_gitlab_get", _http_error(401))
+        f = doctor.Findings()
+        doctor._probe_write_user_read(tmp_path, {}, f)
+        assert any(i[0] == doctor.BAD for i in f.items)
+
+    def test_user_read_ok(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make_secrets(tmp_path, write_token="glpat-writetoken")
+        monkeypatch.setattr(doctor, "_gitlab_get",
+                            lambda *a, **kw: {"id": 42, "username": "bot"})
+        f = doctor.Findings()
+        doctor._probe_write_user_read(tmp_path, {}, f)
+        assert any(i[0] == doctor.OK and "service account" in i[2] for i in f.items)
+        assert not any(i[0] == doctor.BAD for i in f.items)
+
+    def test_user_read_offline_skips(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make_secrets(tmp_path, write_token="glpat-writetoken")
+        monkeypatch.setattr(doctor, "_gitlab_get", _raise_url_error)
+        f = doctor.Findings()
+        doctor._probe_write_user_read(tmp_path, {}, f)
+        assert not any(i[0] == doctor.BAD for i in f.items)
+
+    def test_no_token_no_op(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make_secrets(tmp_path, write_token="")
+        monkeypatch.setattr(doctor, "_gitlab_get",
+                            lambda *a, **kw: pytest.fail("must not probe without a token"))
+        f = doctor.Findings()
+        doctor._probe_write_user_read(tmp_path, {}, f)
+        assert f.items == []
 
 
 def _mock_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, projects: list[str]) -> None:

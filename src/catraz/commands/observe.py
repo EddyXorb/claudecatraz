@@ -96,7 +96,7 @@ def cmd_ps(root: Path, args: argparse.Namespace, out: Out) -> int:
 
 
 def cmd_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
-    sock = root / ".catraz/run/warden/admin.sock"
+    sock = root / ".catraz/state/warden/run/admin.sock"
     if not args.web:
         return _tail_audit(root, args, out)            # existing JSONL tail
     if not sock.exists():

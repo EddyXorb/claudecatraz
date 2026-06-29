@@ -92,15 +92,18 @@ class WriteEndpoint:
 
 
 WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
-    # Merge — ALWAYS forbidden (R4). Listed first so it can never be shadowed.
+    # Merge an MR into its target branch. ALWAYS forbidden (R4) — the agent may
+    # never merge. Listed first so no later, looser row can ever shadow it.
     WriteEndpoint(
         "PUT", "/projects/{id}/merge_requests/{iid}/merge", (always_deny,), "R4", EndpointKind.MERGE
     ),
-    # Create MR — only if source_branch carries the prefix (R2/R3).
+    # Open a new merge request. Allowed only when its source_branch carries the
+    # claude/ prefix (R2/R3) — the agent can only propose its own branches.
     WriteEndpoint(
         "POST", "/projects/{id}/merge_requests", (src_branch_prefix,), "R3", EndpointKind.MR
     ),
-    # Note/comment — only on an MR owned by Claude.
+    # Post a top-level comment ("note") on an MR. Allowed only on an MR the
+    # service account authored (R3 ownership).
     WriteEndpoint(
         "POST",
         "/projects/{id}/merge_requests/{iid}/notes",
@@ -108,7 +111,29 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "R3",
         EndpointKind.NOTE,
     ),
-    # Edit MR (incl. close) — same ownership, and never a merge intent.
+    # Start a new discussion thread on an MR — including an *inline diff comment*
+    # on a specific file/line (pass a `position`). This is how line-level code
+    # review comments are made. Same R3 ownership as a plain note.
+    WriteEndpoint(
+        "POST",
+        "/projects/{id}/merge_requests/{iid}/discussions",
+        (mr_owned_by_claude,),
+        "R3",
+        EndpointKind.NOTE,
+    ),
+    # Reply to an existing discussion thread on an MR (add a note under a given
+    # discussion_id). Lets the agent answer review threads it started. Same R3
+    # ownership — the iid still identifies the owning MR.
+    WriteEndpoint(
+        "POST",
+        "/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes",
+        (mr_owned_by_claude,),
+        "R3",
+        EndpointKind.NOTE,
+    ),
+    # Edit an MR — change title/description/labels, or close it (state_event).
+    # Same R3 ownership, and not_merge_intent blocks state_event=merge (the R4
+    # merge alias) so this row can't be used to sneak a merge through.
     WriteEndpoint(
         "PUT",
         "/projects/{id}/merge_requests/{iid}",
@@ -116,7 +141,8 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "R3",
         EndpointKind.MR_UPDATE,
     ),
-    # Trigger CI — pipeline on a claude/* ref.
+    # Trigger a CI pipeline. Allowed only for a ref carrying the claude/ prefix
+    # (R3) — the agent runs CI on its own branches, not protected ones.
     WriteEndpoint(
         "POST", "/projects/{id}/pipeline", (ref_prefix,), "R3", EndpointKind.PIPELINE
     ),

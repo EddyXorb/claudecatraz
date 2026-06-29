@@ -1,7 +1,7 @@
 import argparse
 import re
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from catraz.envfile import load_env, unset_env_keys
 from catraz.policy import (
@@ -29,9 +29,23 @@ def _read_branch_prefix(env: dict[str, str], warden_toml: Path | None) -> str:
     return m.group(1) if m else "claude/"
 
 
-def _prompt_auth_mode(env: dict[str, str], args: argparse.Namespace, out: Out) -> str:
-    auth_mode = env.get("AUTH_MODE") or "subscription"
-    if args.force or "AUTH_MODE" not in env:
+def _inh_env(inherited: dict[str, Any] | None, key: str) -> str:
+    """Return inherited .env value for *key*, or '' if not inherited."""
+    if inherited is None:
+        return ""
+    return cast(str, inherited.get("env", {}).get(key, ""))
+
+
+def _prompt_auth_mode(
+    env: dict[str, str],
+    args: argparse.Namespace,
+    out: Out,
+    inherited: dict[str, Any] | None = None,
+) -> str:
+    inh = _inh_env(inherited, "AUTH_MODE")
+    auth_mode = inh or env.get("AUTH_MODE") or "subscription"
+    has_from = inherited is not None
+    if args.force or "AUTH_MODE" not in env or has_from:
         auth_mode = out.choice(
             "Claude auth mode?",
             [("subscription", "subscription — import host ~/.claude (default)"),
@@ -41,8 +55,13 @@ def _prompt_auth_mode(env: dict[str, str], args: argparse.Namespace, out: Out) -
     return auth_mode
 
 
-def _prompt_gitlab_mode(env: dict[str, str], out: Out) -> str:
-    cur_mode = (env.get("GITLAB_MODE") or "read-write").strip()
+def _prompt_gitlab_mode(
+    env: dict[str, str],
+    out: Out,
+    inherited: dict[str, Any] | None = None,
+) -> str:
+    inh = _inh_env(inherited, "GITLAB_MODE")
+    cur_mode = (inh or env.get("GITLAB_MODE") or "read-write").strip()
     if cur_mode not in _VALID_GITLAB_MODES:
         cur_mode = "read-write"
     return cast(str, out.choice(
@@ -55,34 +74,62 @@ def _prompt_gitlab_mode(env: dict[str, str], out: Out) -> str:
 
 
 def _prompt_gitlab_tokens(
-    secrets_dir: Path, mode: str, args: argparse.Namespace, out: Out
+    secrets_dir: Path,
+    mode: str,
+    args: argparse.Namespace,
+    out: Out,
+    inherited: dict[str, Any] | None = None,
 ) -> None:
-    existing_read = ""
+    has_from = inherited is not None
     p_read = secrets_dir / "gitlab_read_token"
-    if p_read.exists() and not args.force:
-        try:
-            existing_read = p_read.read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
-    val = out.secret("GitLab READ token (read_api, read_repository)", current=existing_read)
-    _write_secret_value(secrets_dir, "gitlab_read_token", val)
-    if not val:
-        out.warn("gitlab_read_token left empty — doctor will flag it")
-
-    if mode == "read-write":
-        existing_write = ""
-        p_write = secrets_dir / "gitlab_write_token"
-        if p_write.exists() and not args.force:
+    # With --from: the file was staged; offer keep-inherited without echoing.
+    if has_from and p_read.exists():
+        _prompt_secret_keep_or_replace(secrets_dir, "gitlab_read_token",
+                                       "GitLab READ token (read_api, read_repository)", out)
+    else:
+        existing_read = ""
+        if p_read.exists() and not args.force:
             try:
-                existing_write = p_write.read_text(encoding="utf-8").strip()
+                existing_read = p_read.read_text(encoding="utf-8").strip()
             except OSError:
                 pass
-        val = out.secret("GitLab WRITE token (api scope)", current=existing_write)
-        _write_secret_value(secrets_dir, "gitlab_write_token", val)
+        val = out.secret("GitLab READ token (read_api, read_repository)", current=existing_read)
+        _write_secret_value(secrets_dir, "gitlab_read_token", val)
         if not val:
-            out.warn("gitlab_write_token left empty — doctor will flag it")
+            out.warn("gitlab_read_token left empty — doctor will flag it")
+
+    if mode == "read-write":
+        p_write = secrets_dir / "gitlab_write_token"
+        if has_from and p_write.exists():
+            _prompt_secret_keep_or_replace(secrets_dir, "gitlab_write_token",
+                                           "GitLab WRITE token (api scope)", out)
+        else:
+            existing_write = ""
+            if p_write.exists() and not args.force:
+                try:
+                    existing_write = p_write.read_text(encoding="utf-8").strip()
+                except OSError:
+                    pass
+            val = out.secret("GitLab WRITE token (api scope)", current=existing_write)
+            _write_secret_value(secrets_dir, "gitlab_write_token", val)
+            if not val:
+                out.warn("gitlab_write_token left empty — doctor will flag it")
     else:
         _ensure_secret(secrets_dir, "gitlab_write_token")
+
+
+def _prompt_secret_keep_or_replace(
+    secrets_dir: Path, filename: str, label: str, out: Out
+) -> None:
+    """Offer "keep inherited (hidden)" / "enter new" without ever echoing the value."""
+    import getpass
+    out.info(f"  {label} — inherited (hidden); Enter to keep, or type a new value.")
+    try:
+        val = getpass.getpass(f"  {label}: ").strip()
+    except EOFError:
+        val = ""
+    if val:
+        _write_secret_value(secrets_dir, filename, val)
 
 
 def _prompt_allowed_projects(
@@ -137,10 +184,18 @@ def _prompt_branch_prefix(
 
 
 def _prompt_anthropic_key(
-    secrets_dir: Path, args: argparse.Namespace, out: Out
+    secrets_dir: Path,
+    args: argparse.Namespace,
+    out: Out,
+    inherited: dict[str, Any] | None = None,
 ) -> None:
-    existing_key = ""
+    has_from = inherited is not None
     p_key = secrets_dir / "anthropic_api_key"
+    if has_from and p_key.exists():
+        _prompt_secret_keep_or_replace(secrets_dir, "anthropic_api_key",
+                                       "Anthropic API key (dedicated sandbox account)", out)
+        return
+    existing_key = ""
     if p_key.exists() and not args.force:
         try:
             existing_key = p_key.read_text(encoding="utf-8").strip()
@@ -164,23 +219,30 @@ def _wizard_interactive(
     updates: dict[str, str],
     args: argparse.Namespace,
     out: Out,
+    inherited: dict[str, Any] | None = None,
 ) -> None:
-    """Interactive wizard: each question offers a sensible default via one Enter."""
+    """Interactive wizard: each question offers a sensible default via one Enter.
+
+    When *inherited* is not None (--from mode), inherited values take precedence
+    over locally set values for defaults, and already-set values are re-prompted
+    (like --force).
+    """
     print()
 
-    auth_mode = _prompt_auth_mode(env, args, out)
+    auth_mode = _prompt_auth_mode(env, args, out, inherited)
     updates["AUTH_MODE"] = auth_mode
 
-    mode = _prompt_gitlab_mode(env, out)
+    mode = _prompt_gitlab_mode(env, out, inherited)
     updates["GITLAB_MODE"] = mode
 
     if mode != "off":
+        inh_url = _inh_env(inherited, "GITLAB_URL")
         url = out.ask(
             "GitLab base URL (set for self-hosted)",
-            env.get("GITLAB_URL") or "https://gitlab.com",
+            inh_url or env.get("GITLAB_URL") or "https://gitlab.com",
         )
         updates["GITLAB_URL"] = url
-        _prompt_gitlab_tokens(secrets_dir, mode, args, out)
+        _prompt_gitlab_tokens(secrets_dir, mode, args, out, inherited)
         _prompt_allowed_projects(root, env, warden_toml, url, args, out)
         _prompt_branch_prefix(env, warden_toml, env_path, out)
     else:
@@ -188,7 +250,7 @@ def _wizard_interactive(
         _ensure_secret(secrets_dir, "gitlab_write_token")
 
     if auth_mode == "api_key":
-        _prompt_anthropic_key(secrets_dir, args, out)
+        _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
     proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
     url_part = (f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}"
@@ -199,3 +261,4 @@ def _wizard_interactive(
         f"{url_part}{proj_part}"
         "  (edit quotas in .catraz/config/warden.toml)"
     )
+    out.info("  To change the base image, edit .catraz/config/image/Dockerfile")

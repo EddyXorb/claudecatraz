@@ -541,3 +541,107 @@ class TestUnsetEnvKeys:
         assert "WARDEN_BRANCH_PREFIX" not in env
         assert env.get("A") == "1"
         assert env.get("B") == "2"
+
+
+# ---------------------------------------------------------------------------
+# Base image wizard
+# ---------------------------------------------------------------------------
+
+class TestBaseImageWizard:
+    """Tests for base image configuration in both interactive and --yes modes.
+
+    Interactive base-image prompt removed (Workstream A): the base Dockerfile is
+    now seeded to .catraz/config/image/Dockerfile by cmd_init. BASE_* remain as
+    .env power-user overrides handled by _wizard_yes.
+    """
+
+    def _run_interactive(
+        self,
+        root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        inputs: list[str],
+        force: bool = False,
+    ) -> dict[str, str]:
+        """Helper: run cmd_init in interactive mode with the given input sequence."""
+        _patch_common(monkeypatch)
+        it = iter(inputs)
+
+        def _input(prompt: object) -> str:
+            try:
+                return next(it)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=force), Out(color=False))
+        return load_env(root / ".catraz" / ".env")
+
+    # ------------------------------------------------------------------
+    # Interactive: no base-image prompt; Dockerfile seeded to config/image/
+    # ------------------------------------------------------------------
+
+    def test_no_base_image_prompt_in_interactive(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Interactive wizard no longer prompts for base image choice."""
+        root = _make_root(tmp_path)
+        # "3" → gitlab off; no further inputs needed (prompt removed)
+        env = self._run_interactive(root, monkeypatch, ["3"])
+        assert "BASE_IMAGE" not in env
+        assert "BASE_DOCKERFILE" not in env
+
+    def test_local_dockerfile_seeded_by_init(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """cmd_init seeds .catraz/config/image/Dockerfile (FROM ubuntu:24.04)."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setattr("builtins.input", lambda p: "3")  # gitlab off
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(), Out(color=False))
+        df = root / ".catraz" / "config" / "image" / "Dockerfile"
+        assert df.exists(), "config/image/Dockerfile must be seeded by init"
+        assert "ubuntu:24.04" in df.read_text()
+
+    def test_existing_base_image_env_preserved_on_interactive(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BASE_IMAGE already in .env must be preserved (wizard doesn't touch it)."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_IMAGE=python:3.11\n")
+        env = self._run_interactive(root, monkeypatch, ["3"], force=False)
+        assert env.get("BASE_IMAGE") == "python:3.11"
+
+    # ------------------------------------------------------------------
+    # --yes mode tests (BASE_* env override still supported)
+    # ------------------------------------------------------------------
+
+    def test_yes_base_image_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--yes with BASE_IMAGE env var writes BASE_IMAGE to .env."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("BASE_IMAGE", "python:3.11")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(root / ".catraz" / ".env")
+        assert env.get("BASE_IMAGE") == "python:3.11"
+
+    def test_yes_base_dockerfile_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--yes with BASE_DOCKERFILE env var writes BASE_DOCKERFILE to .env."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("BASE_DOCKERFILE", "./Dockerfile")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(root / ".catraz" / ".env")
+        assert env.get("BASE_DOCKERFILE") == "./Dockerfile"
+
+    def test_yes_base_image_takes_priority_over_dockerfile(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--yes with both BASE_IMAGE and BASE_DOCKERFILE: BASE_IMAGE wins, BASE_DOCKERFILE removed."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        # Pre-populate BASE_DOCKERFILE in .env to test removal
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_DOCKERFILE=./Dockerfile\n")
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("BASE_IMAGE", "img:1")
+        monkeypatch.setenv("BASE_DOCKERFILE", "./Dockerfile")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(env_path)
+        assert env.get("BASE_IMAGE") == "img:1"
+        assert "BASE_DOCKERFILE" not in env

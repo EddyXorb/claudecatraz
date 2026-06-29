@@ -53,6 +53,14 @@ def _init_config_templates(cat: Path, assets: Path, out: Out) -> None:
         if src.exists() and not dst.exists():
             shutil.copy2(src, dst)
             out.info(f"• copied {name} to .catraz/config/")
+    # Seed the user-owned base Dockerfile (default FROM ubuntu:24.04).
+    img_dst = cfg_dst / "image"
+    img_dst.mkdir(parents=True, exist_ok=True)
+    df_dst = img_dst / "Dockerfile"
+    df_src = assets / "image" / "Dockerfile"
+    if df_src.exists() and not df_dst.exists():
+        shutil.copy2(df_src, df_dst)
+        out.info("• created .catraz/config/image/Dockerfile (edit to change the base)")
 
 
 def _init_seed_env(
@@ -108,26 +116,59 @@ def _init_preflight(root: Path, out: Out) -> int:
 
 def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.paths import asset_root
+    from ._from import load_inherited, stage_inherited
     out.head("catraz init — let's get the stack ready\n")
     cat = root / ".catraz"
     env_path = cat / ".env"
     assets = asset_root() / "assets"
 
+    # --from: validate source and load inheritable state before creating dirs.
+    init_from: str | None = getattr(args, "init_from", None)
+    inherited = None
+    if init_from:
+        from pathlib import Path as _P
+        src_root = _P(init_from).resolve()
+        inherited = load_inherited(src_root)  # raises CliError if invalid
+        out.info(f"• inheriting from {src_root}/.catraz")
+
     out.info("• creating .catraz/ directories…")
     _doctor_fix(root, load_env(env_path))
+
+    # Seed README.md tier guide once (never overwrite user edits).
+    readme_dst = cat / "README.md"
+    if not readme_dst.exists():
+        readme_src = assets / "catraz-README.md"
+        if readme_src.exists():
+            shutil.copy2(readme_src, readme_dst)
+            out.info("• created .catraz/README.md (tier guide)")
+
+    # Stage inherited config/ and secrets/ BEFORE seeding the default templates, so an
+    # inherited Dockerfile / warden.toml / allowlist / squid.conf wins. _init_config_templates
+    # only copies a default when the file is absent (`not dst.exists()`), so it now fills just
+    # the gaps the source did not provide instead of pre-empting the inherited copy (in
+    # interactive mode stage_inherited skips existing files, so order — not its `yes` flag —
+    # is what made the inherited config get dropped). Also lets the wizard read staged values
+    # as defaults.
+    if inherited:
+        stage_inherited(cat, inherited, yes=args.yes, out=out)
 
     _init_config_templates(cat, assets, out)
 
     env, updates = _init_seed_env(cat, assets, env_path, out)
+    # Overlay inherited .env keys as defaults (local .env takes precedence for DEV_UID).
+    if inherited:
+        for k, v in inherited.get("env", {}).items():
+            if k not in env:
+                env[k] = v
 
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
     warden_toml = cat / "config" / "warden.toml"
 
     if args.yes:
-        _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out)
+        _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out, inherited)
     else:
-        _wizard_interactive(root, env, env_path, secrets_dir, warden_toml, updates, args, out)
+        _wizard_interactive(root, env, env_path, secrets_dir, warden_toml, updates, args, out, inherited)
 
     if updates:
         set_env_values(env_path, updates)

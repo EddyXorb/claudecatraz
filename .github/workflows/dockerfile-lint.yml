@@ -3,14 +3,14 @@ name: dockerfile lint
 on:
   push:
     paths:
-      - "src/catraz/assets/bases/cpp-rust-python/Dockerfile"
+      - "src/catraz/assets/image/Dockerfile"
       - "src/catraz/assets/claude-layer/Dockerfile"
       - "forward-proxy/Dockerfile"
       - "warden/Dockerfile"
       - ".github/workflows/dockerfile-lint.yml"
   pull_request:
     paths:
-      - "src/catraz/assets/bases/cpp-rust-python/Dockerfile"
+      - "src/catraz/assets/image/Dockerfile"
       - "src/catraz/assets/claude-layer/Dockerfile"
       - "forward-proxy/Dockerfile"
       - "warden/Dockerfile"
@@ -24,7 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         dockerfile:
-          - src/catraz/assets/bases/cpp-rust-python/Dockerfile
+          - src/catraz/assets/image/Dockerfile
           - src/catraz/assets/claude-layer/Dockerfile
           - forward-proxy/Dockerfile
           - warden/Dockerfile

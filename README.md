@@ -199,17 +199,41 @@ no value lives in both at once:
 
 | Where | Holds | Visibility |
 | ----- | ----- | ---------- |
-| **`.catraz/.env`** (gitignored) | **Secrets** (Claude auth + GitLab tokens) and infra (`GITLAB_URL`, base image) | host only |
+| **`.catraz/secrets/`** (gitignored, 0600) | **Secrets** — one file each: `gitlab_read_token`, `gitlab_write_token`, (`anthropic_api_key`) — mounted as compose secrets | host only, per-service |
+| **`.catraz/.env`** (gitignored) | **Non-secret wiring** — `AUTH_MODE`, `GITLAB_URL`, `GITLAB_MODE`, base image, `DEV_UID`, `WARDEN_*` overrides | host only |
 | **`.catraz/config/warden.toml`** | **Non-secret policy** — branch prefix, R5 limits, allowed projects | mounted read-only into the Warden |
 
+```text
+# .catraz/secrets/ — one secret per file (mode 0600), never in .env
+gitlab_read_token       # scopes: read_api, read_repository  — only the Warden (R6)
+gitlab_write_token      # scope: api (service account / Developer) + read its own user
+# anthropic_api_key     # only for AUTH_MODE=api_key
+```
+
 ```dotenv
-# .catraz/.env — secrets & infra
+# .catraz/.env — non-secret wiring (NO tokens here)
 AUTH_MODE=subscription             # subscription (host login) | api_key
-# ANTHROPIC_API_KEY=               # only for AUTH_MODE=api_key
-GITLAB_READ_TOKEN=                 # scopes: read_api, read_repository  — only the Warden (R6)
-GITLAB_WRITE_TOKEN=                # scopes: api (service account / Developer)
+GITLAB_URL=https://gitlab.com      # GitLab endpoint (self-hosted: change it)
+GITLAB_MODE=read-write             # off | read-only | read-write
 DEV_UID=1000                       # `id -u` on the host so bind mounts get the right ownership
 ```
+
+> ### ⚠️ Write token must be able to read its own user
+>
+> The Warden resolves **which user the write token is** via `GET /user` and uses that
+> identity to enforce **R3** (you may only comment on / edit / close MRs the service
+> account authored). A classic personal access token with the **`api`** scope already
+> covers this. A **fine-grained** PAT does **not** — by default it lacks the
+> **`User: Read`** permission, so `GET /user` returns `403`, the Warden never learns its
+> service account, and **every comment and MR edit is denied R3** — even though MR
+> *creation* and `git push` still work (they only check the `claude/*` branch prefix).
+>
+> So for the write token, use **either**:
+> - a **classic** PAT with the `api` scope, **or**
+> - a **fine-grained** PAT with the repo/MR permissions **plus `User: Read`** (`read_user`).
+>
+> `catraz doctor` probes this and fails loudly (`WRITE token cannot read its own user
+> (GET /user → 403)`) so you catch it before the agent runs into silent R3 denials.
 
 ```toml
 # .catraz/config/warden.toml — non-secret policy (the source of truth)
@@ -262,6 +286,25 @@ allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 Two layers: the **Warden** (primary, code) and **GitLab-native** restrictions (backstop,
 zero-code). If the Warden goes down, the agent structurally has **no** route to gitlab.com
 (fail-closed). Details: [threat model & design](docs/design/agentic-workflow/README.md).
+
+### Allowed write endpoints
+
+REST **reads** (GET) pass through with the read token. REST **writes** are an explicit
+allowlist — anything not listed is default-denied (`warden/warden/api_endpoints.py`):
+
+| Method & path | What it does | Guard |
+| ------------- | ------------ | ----- |
+| `POST …/merge_requests` | open a merge request | source branch must be `claude/*` (R2/R3) |
+| `POST …/merge_requests/{iid}/notes` | post a top-level MR comment | MR authored by the service account (R3) |
+| `POST …/merge_requests/{iid}/discussions` | start a discussion thread — incl. an **inline diff comment** on a file/line (pass a `position`) | MR authored by the service account (R3) |
+| `POST …/merge_requests/{iid}/discussions/{discussion_id}/notes` | **reply** to an existing discussion thread | MR authored by the service account (R3) |
+| `PUT …/merge_requests/{iid}` | edit the MR (title/description/labels, or close) | own MR (R3); `state_event=merge` blocked (R4) |
+| `POST …/pipeline` | trigger a CI pipeline | ref must be `claude/*` (R3) |
+| `PUT …/merge_requests/{iid}/merge` | merge — **always 403** | never permitted (R4) |
+
+> Inline review comments (`discussions`) need the MR's `position` (`base_sha`/`head_sha`/
+> `start_sha` from the MR's `diff_refs`, plus `new_path` + `new_line`). The Warden only
+> checks ownership and forwards the body untouched.
 
 ## Audit log
 

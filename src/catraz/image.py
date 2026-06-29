@@ -15,7 +15,13 @@ def _build_base(dockerfile: Path, context: Path | None = None) -> str:
         r = subprocess.run(["docker", "build", "-t", tag,
                             "-f", str(dockerfile), str(ctx)])
         if r.returncode:
-            raise CliError(f"base build failed (Dockerfile {dockerfile})", EXIT_DOCKER)
+            raise CliError(
+                f"base build failed (Dockerfile {dockerfile}). "
+                "catraz's claude-layer uses apt-get and NodeSource — "
+                "the base MUST be Debian/Ubuntu-based. "
+                "Alpine, RHEL, and other non-apt distros will fail here.",
+                EXIT_DOCKER,
+            )
     return tag
 
 def resolve_base(root: Path) -> str:
@@ -32,4 +38,12 @@ def resolve_base(root: Path) -> str:
             if not ctx.is_dir():
                 raise CliError(f"BASE_CONTEXT not a directory: {ctx}", EXIT_DOCKER)
         return _build_base(df, ctx)
-    return _build_base(asset_root() / "assets/bases/cpp-rust-python/Dockerfile")
+    # Default: local user-owned Dockerfile seeded by `catraz init`.
+    df = root / ".catraz" / "config" / "image" / "Dockerfile"
+    if not df.exists():
+        raise CliError(
+            f"base Dockerfile not found: {df}. "
+            "Run `catraz init` to seed it, or set BASE_IMAGE / BASE_DOCKERFILE in .catraz/.env.",
+            EXIT_DOCKER,
+        )
+    return _build_base(df)

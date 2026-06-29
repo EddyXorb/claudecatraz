@@ -89,6 +89,62 @@ async def test_note_on_owned_mr_allowed(client, respx_router):
     assert note.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
+async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
+    # Inline diff comment (line-level review) on the bot's own MR — forwarded.
+    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
+        return_value=httpx.Response(
+            200, json={"source_branch": "claude/x", "author": {"id": 42}}
+        )
+    )
+    disc = respx_router.route(
+        method="POST", url__regex=r".*/merge_requests/7/discussions$"
+    ).mock(return_value=httpx.Response(201, json={"id": "abc"}))
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests/7/discussions",
+        json={
+            "body": "nit",
+            "position": {
+                "position_type": "text",
+                "new_path": "src/main.rs",
+                "new_line": 12,
+            },
+        },
+    )
+    assert resp.status_code == 201
+    assert disc.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
+
+
+async def test_inline_discussion_ownership_violation_denied(client, respx_router):
+    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
+        return_value=httpx.Response(
+            200, json={"source_branch": "claude/x", "author": {"id": 999}}
+        )
+    )
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests/7/discussions", json={"body": "nit"}
+    )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R3"
+
+
+async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
+    # Reply under an existing discussion thread on the bot's own MR.
+    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
+        return_value=httpx.Response(
+            200, json={"source_branch": "claude/x", "author": {"id": 42}}
+        )
+    )
+    reply = respx_router.route(
+        method="POST", url__regex=r".*/merge_requests/7/discussions/abc123/notes$"
+    ).mock(return_value=httpx.Response(201, json={"id": 2}))
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests/7/discussions/abc123/notes",
+        json={"body": "done"},
+    )
+    assert resp.status_code == 201
+    assert reply.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
+
+
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
     resp = await client.post(f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"})
     assert resp.status_code == 403

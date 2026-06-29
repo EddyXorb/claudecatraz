@@ -112,7 +112,6 @@ def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
     the lifecycle difference the old `run` vs `up --remote` split hid."""
     assert_real_dirs(root)
     (root / ".catraz").mkdir(exist_ok=True)
-    auth.write_auth_fragment(root)
     out.head("— preflight (security checks always run) —")
     if _security_preflight(root, out):
         out.err("preflight failed — fix the ✘ above (or `catraz doctor --fix`)")

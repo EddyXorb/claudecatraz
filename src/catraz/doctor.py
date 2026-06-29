@@ -19,7 +19,7 @@ from catraz import image
 # via compose secrets: at /run/secrets/<filename>. Never stored in .env.
 SECRETS = [
     ("gitlab_read_token", "GitLab READ token (scopes: read_api, read_repository)", "GitLab READ token"),
-    ("gitlab_write_token", "GitLab WRITE token (scopes: api — service account / Developer)", "GitLab WRITE token"),
+    ("gitlab_write_token", "GitLab WRITE token (classic 'api' scope, or fine-grained + 'User: Read')", "GitLab WRITE token"),
 ]
 
 OK, WARN, BAD = "ok", "warn", "bad"
@@ -183,6 +183,7 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
         return
     f.ok("tokens", "both GitLab tokens are set")
     _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")])
+    _probe_write_user_read(root, env, f)
 
 
 def _gitlab_get(base: str, path: str, token: str, timeout: int = 5) -> dict[str, Any]:
@@ -248,6 +249,42 @@ def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: l
                   "issue a token with the 'api' scope")
 
 
+def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None:
+    """The warden resolves its service-account id via `GET /user` with the WRITE
+    token, and needs that id to enforce MR ownership (R3: comment / edit / close
+    only your own MRs). Fine-grained PATs omit the **User: Read** permission by
+    default, so `GET /user` 403s, the warden's service_account_id stays null, and
+    every ownership-gated write is denied R3 — while MR *creation* still works
+    (it only checks the branch prefix). That asymmetry is a silent runtime trap;
+    probe it explicitly so it surfaces at setup. Degrades quietly when offline."""
+    base = env.get("GITLAB_URL", "https://gitlab.com")
+    token = _read_secret_file(root, "gitlab_write_token")
+    if not token:
+        return
+    try:
+        me = _gitlab_get(base, "/api/v4/user", token)
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            f.bad("tokens", "WRITE token cannot read its own user (GET /user → 403)",
+                  "the warden needs this to resolve its service account and enforce MR "
+                  "ownership (R3) — comments and MR edits will be denied. Grant the token "
+                  "the 'User: Read' (read_user) permission, or use a classic api-scope PAT")
+        elif e.code == 401:
+            f.bad("tokens", "WRITE token rejected on GET /user (401)",
+                  "rotate the token — it's invalid or expired")
+        else:
+            f.warn("tokens", f"WRITE token GET /user not probed (HTTP {e.code}) — online check skipped")
+        return
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+        f.warn("tokens", f"WRITE token GET /user not probed ({type(e).__name__}) — offline, check skipped")
+        return
+    uid = me.get("id")
+    if uid is not None:
+        f.ok("tokens", f"WRITE token resolves its service account (GET /user → @{me.get('username')}, id {uid})")
+    else:
+        f.warn("tokens", "WRITE token GET /user returned no id — MR ownership checks (R3) may fail")
+
+
 def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
     """Fast pre-check of allowed_projects. Authoritative validation stays the
     warden reconcile — this just turns the obvious traps loud before start."""
@@ -291,8 +328,8 @@ def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
 
 def check_net(root: Path, f: Findings) -> None:
     # Admin/audit moved from TCP (172.31.0.2:9090) to a per-project unix socket
-    # under .catraz/run/warden/. The socket file only exists while the stack runs.
-    sock = root / ".catraz" / "run" / "warden" / "admin.sock"
+    # under .catraz/state/warden/run/. The socket file only exists while the stack runs.
+    sock = root / ".catraz" / "state" / "warden" / "run" / "admin.sock"
     if sock.exists():
         f.ok("net", "admin socket present (stack up)")
     else:
@@ -328,7 +365,7 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
         if not api_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty",
                                "set it in .catraz/secrets/anthropic_api_key or .catraz/.env")
         if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",
-                                "remove .catraz/claude/.credentials.json")
+                                f"remove {paths.claude_home(root) / '.credentials.json'}")
         if api_key and not cred.exists(): f.ok("auth", "api_key set")
 
 
@@ -340,10 +377,10 @@ def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
     except CliError as e:
         f.bad("base", str(e)); return
     contract = subprocess.run(
-        ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get && python3 --version"],
+        ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get"],
         capture_output=True, text=True)
     if contract.returncode != 0:
-        f.bad("base", "base lacks apt-get or python3", "base contract: Debian/Ubuntu + python3")
+        f.bad("base", "base lacks apt-get", "base contract: Debian/Ubuntu")
     else:
         f.ok("base", f"base contract ok ({base})")
     setuid = subprocess.run(["docker", "run", "--rm", base, "find", "/", "-perm", "/6000",
@@ -380,11 +417,20 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     """Repair only the safe things: missing dirs + chown. Never secrets/policy."""
     dev_uid = env.get("DEV_UID", "")
     cat = root / ".catraz"
-    for d in ["config", "state/warden", "logs/warden", "logs/squid", "claude", "run/warden"]:
-        (cat / d).mkdir(parents=True, exist_ok=True)
-    # Always ensure secrets/ dir + empty token files exist (compose mount fails opaquely if missing).
+    # .catraz/ itself first — on a fresh init it does not exist yet, and the 0700 secrets
+    # dirs below use mode= (not parents=) so they cannot create it implicitly.
+    cat.mkdir(parents=True, exist_ok=True)
+    # secrets/ and secrets/claude must be created at 0700 BEFORE the generic loop, because
+    # mkdir(parents=True) in the loop would create secrets/ at the umask default (0755) and
+    # a later chmod on an already-existing dir is a no-op for mode.
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
+    secrets_dir.chmod(0o700)
+    claude_secrets = cat / "secrets" / "claude"
+    claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
+    claude_secrets.chmod(0o700)
+    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid"]:
+        (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
     secret_files = [f for f, _, _ in SECRETS]
     if mode == "api_key":
@@ -395,7 +441,7 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
             p.write_text("")
             p.chmod(0o600)
     if dev_uid.isdigit():
-        for d in ["state", "logs", "run"]:
+        for d in ["state", "logs"]:
             try:
                 _chown_r(cat / d, int(dev_uid))
             except PermissionError:

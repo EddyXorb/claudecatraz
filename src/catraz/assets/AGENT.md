@@ -58,6 +58,23 @@ You hold **no** GitLab token. This is intentional (security architecture §R6). 
 GitLab operations run exclusively through the **Warden** (`gitlab-warden:8080`), which
 holds all tokens and enforces the policy.
 
+### Your policy & limits — read `/etc/catraz/warden.toml`
+
+Your active rules are not hardcoded — they live in **`/etc/catraz/warden.toml`** (mounted
+read-only for you; the Warden enforces this same file). **Read it** to learn your real
+limits before you push or open MRs:
+
+- **`branch_prefix`** — the prefix your branches **must** carry to be pushable (R2) and to
+  be allowed as an MR `source_branch` (R3). It defaults to `claude/`, **but it is
+  configurable** — a project may set e.g. `bot/` or `agent/`. The examples below use
+  `claude/`; substitute whatever `branch_prefix` your `warden.toml` actually specifies.
+- **`allowed_projects`** — the only projects you may touch at all (R6); anything else is denied.
+- **`max_open_mrs` / `max_open_branches` / `max_writes_per_hour`** — your quotas (R5).
+
+```bash
+cat /etc/catraz/warden.toml        # your branch_prefix, allowed_projects and quotas
+```
+
 ### GitLab runs through the Warden
 
 `git` is automatically redirected — no difference in usage:
@@ -75,23 +92,53 @@ curl -sS "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests" \
   -H "Content-Type: application/json" \
   -d '{"source_branch":"claude/my-branch","target_branch":"main","title":"..."}'
 
+# Comment on an MR (top-level note)
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/notes" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"looks good"}'
+
+# Inline code-review comment on a specific file/line (a "discussion" with a position).
+# Get base_sha/head_sha/start_sha from the MR's diff_refs:
+#   GET …/merge_requests/<iid>/changes  →  .diff_refs
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/discussions" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"this can overflow",
+       "position":{"position_type":"text",
+         "base_sha":"<base>","head_sha":"<head>","start_sha":"<start>",
+         "new_path":"src/main.rs","new_line":12}}'
+
+# Reply in an existing review thread
+curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/discussions/<discussion_id>/notes" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"fixed in the latest push"}'
+
+# Edit an MR (title / description / labels) or close it (state_event=close)
+curl -sS -X PUT "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Refactor X","description":"...","state_event":"close"}'
+
 # Trigger CI pipeline
 curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
   -H "Content-Type: application/json" \
   -d '{"ref":"claude/my-branch"}'
+
+# Merge — NOT allowed: the Warden answers 403 (R4) and sends no token upstream.
+#   PUT …/merge_requests/<iid>/merge        (also state_event=merge on the edit above)
 ```
 
-The Warden expects **no auth** from the agent — token injection happens internally.
+These are **every** write endpoint the Warden permits — anything else (e.g. creating
+branches/tags directly, editing project settings) is default-denied. You may create MRs
+and trigger CI only for `claude/*` branches (R2/R3), and comment/discuss/edit only on MRs
+**you** authored (R3); merging is never allowed (R4). The Warden expects **no auth** from
+the agent — token injection happens internally.
 
-**Always use `--compressed` with curl against the GitLab API.** The response comes
-back gzip-compressed (`Content-Encoding: gzip`, magic bytes `\x1f\x8b`). curl only
-decompresses automatically with `--compressed` — without the flag you get raw binary,
-even if you manually set `Accept-Encoding: gzip`. `Accept: application/json` does
-**not** help here: that negotiates the content type, not the compression. So don't
-pipe through `gunzip`, instead use:
+**Responses come back as plain, uncompressed JSON.** The Warden decompresses any
+upstream `Content-Encoding` (gzip/deflate) before relaying and strips the header, so
+the body always matches the headers — no `--compressed`, no `gunzip`, no
+`Accept-Encoding` juggling needed. Just read the body:
 
 ```bash
-curl -sS --compressed "http://gitlab-warden:8080/api/v4/groups/<id>/projects"
+curl -sS "http://gitlab-warden:8080/api/v4/groups/<id>/projects"
 ```
 
 ### Warden not active (stage 01 / no Warden profile)

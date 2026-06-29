@@ -95,6 +95,27 @@ def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.M
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
+def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
+    """_doctor_fix on a project where .catraz/ does not exist yet must not crash.
+
+    Regression: the 0700 secrets dirs are created with mode= (not parents=), so
+    .catraz/ itself has to be created first — otherwise the first mkdir raises
+    FileNotFoundError on a fresh init.
+    """
+    root = tmp_path / "fresh"
+    root.mkdir()
+    assert not (root / ".catraz").exists()
+
+    _doctor_fix(root, {"DEV_UID": "1000", "AUTH_MODE": "subscription"})
+
+    secrets_dir = root / ".catraz" / "secrets"
+    claude_dir = secrets_dir / "claude"
+    assert secrets_dir.is_dir()
+    assert claude_dir.is_dir()
+    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700
+
+
 def test_doctor_bad_on_empty_file(tmp_path: Path) -> None:
     """doctor reports bad for each token file that exists but is empty."""
     root = _make_root(tmp_path)
@@ -115,6 +136,7 @@ def test_doctor_ok_on_non_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     """doctor reports ok when both secret files are non-empty (probe skipped in unit tests)."""
     import catraz.doctor as doc
     monkeypatch.setattr(doc, "_probe_gitlab_tokens", lambda *a, **kw: None)
+    monkeypatch.setattr(doc, "_probe_write_user_read", lambda *a, **kw: None)
 
     root = _make_root(tmp_path)
     secrets_dir = root / ".catraz" / "secrets"
@@ -203,3 +225,21 @@ def test_doctor_fix_does_not_overwrite_existing_token(tmp_path: Path) -> None:
     _doctor_fix(root, env)
 
     assert (secrets_dir / first_file).read_text() == "existing-token"
+
+
+def test_doctor_fix_secrets_and_claude_are_0700(tmp_path: Path) -> None:
+    """secrets/ and secrets/claude/ must both be 0700 after _doctor_fix (C regression guard).
+
+    Ensures the dir-creation order does not cause the umask default (0755) to win
+    over the explicit 0700 mode — which would happen if mkdir(parents=True) created
+    secrets/ implicitly in the 0755 generic loop before the explicit 0700 call.
+    """
+    root = _make_root(tmp_path)
+    env = load_env(root / ".catraz" / ".env")
+    _doctor_fix(root, env)
+
+    secrets_dir = root / ".catraz" / "secrets"
+    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700, "secrets/ must be 0700"
+    claude_dir = secrets_dir / "claude"
+    assert claude_dir.is_dir(), "secrets/claude/ must exist"
+    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700, "secrets/claude/ must be 0700"

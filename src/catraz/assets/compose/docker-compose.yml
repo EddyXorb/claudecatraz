@@ -24,8 +24,8 @@ services:
       - GITLAB_MODE=${GITLAB_MODE:-read-write}
       # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
       # ADMIN_UDS is the authoritative source of the admin socket path.
-      # The host-side CLI path (.catraz/run/warden/admin.sock in observe.py/doctor.py)
-      # mirrors it by contract (bind-mount: host .catraz/run/warden → container /run/warden).
+      # The host-side CLI path (.catraz/state/warden/run/admin.sock in observe.py/doctor.py)
+      # mirrors it by contract (bind-mount: host .catraz/state/warden/run → container /run/warden).
       - ADMIN_UDS=/run/warden/admin.sock
       # Non-secret policy — SOURCE OF TRUTH is config/warden.toml. The vars below
       # OVERRIDE the toml only when set (non-empty); leave empty to use warden.toml.
@@ -37,10 +37,10 @@ services:
     volumes:
       # Bind-mounts instead of named volumes → SQLite state + audit JSONL auditable
       # without Docker tools (W12). DEV_UID controls ownership so the host user can read.
-      - ${PROJECT_DIR}/.catraz/state/warden:/var/lib/warden
+      - ${PROJECT_DIR}/.catraz/state/warden/db:/var/lib/warden
       - ${PROJECT_DIR}/.catraz/logs/warden:/var/log/warden
       - ${PROJECT_DIR}/.catraz/config/warden.toml:/etc/warden/warden.toml:ro
-      - ${PROJECT_DIR}/.catraz/run/warden:/run/warden   # Socket directory (file is created at runtime)
+      - ${PROJECT_DIR}/.catraz/state/warden/run:/run/warden   # Socket directory (file is created at runtime)
     networks: [agent-net, egress-net]
     healthcheck:
       test: ["CMD","python3","-c","import os,socket;socket.socket(socket.AF_UNIX).connect(os.environ.get('ADMIN_UDS','/run/warden/admin.sock'))"]
@@ -52,7 +52,7 @@ services:
     # privilege escalation inside the container regardless of base-image contents.
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    restart: on-failure:2
 
   # ── Forward-Proxy (Research/Build-Egress, holds NO credentials) ─────────────
   # docs/design/agentic-workflow/02-forward-proxy/03-deployment.md
@@ -83,7 +83,7 @@ services:
     # Defense-in-depth: same setuid/setgid escalation block as the other services.
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    restart: on-failure:2
 
   claude-dev-env:
     # Agent daemon only starts under the `remote` profile: a profile-less `up`
@@ -159,6 +159,17 @@ services:
         source: ${HOST_GITCONFIG:-/dev/null}
         target: /home/dev/.claude/.ro/.gitconfig
         read_only: true
+      # Non-secret warden policy (branch_prefix, allowed_projects, quotas), read-only.
+      # Lets the agent discover its ACTUAL limits — especially a custom branch_prefix —
+      # instead of assuming the claude/ default; AGENT.md points the agent here. This is
+      # the very file the warden enforces from, so the agent's view can't drift from the
+      # rules. The mount is read-only and purely advisory: the warden reads its own copy
+      # and stays the sole enforcer, and no secrets live here (the GitLab tokens are in
+      # .catraz/secrets/, never in warden.toml).
+      - type: bind
+        source: ${PROJECT_DIR}/.catraz/config/warden.toml
+        target: /etc/catraz/warden.toml
+        read_only: true
     # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
     # activated in stage 03 once the Forward-Proxy service is in Compose.
     # Until then: default bridge (internet access for api.anthropic.com).
@@ -166,7 +177,7 @@ services:
     working_dir: /workspace
     tty: true
     stdin_open: true
-    restart: unless-stopped
+    restart: no
     depends_on:
       forward-proxy:
         condition: service_healthy

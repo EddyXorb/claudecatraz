@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any
 
 from catraz.doctor import SECRETS
 from catraz.envfile import unset_env_keys
@@ -83,19 +84,50 @@ def _wizard_yes(
     warden_toml: Path,
     updates: dict[str, str],
     out: Out,
+    inherited: dict[str, Any] | None = None,
 ) -> None:
-    """Non-interactive wizard path for --yes."""
+    """Non-interactive wizard path for --yes.
+
+    Priority: env vars > inherited > existing .env.
+    """
     out.info("• --yes: skipping prompts")
 
-    auth_mode = os.environ.get("AUTH_MODE") or env.get("AUTH_MODE") or "subscription"
+    inh_env = inherited.get("env", {}) if inherited else {}
+
+    auth_mode = (os.environ.get("AUTH_MODE") or inh_env.get("AUTH_MODE")
+                 or env.get("AUTH_MODE") or "subscription")
     updates["AUTH_MODE"] = auth_mode
 
-    mode = _yes_gitlab_mode(env)
+    mode = _yes_gitlab_mode({**inh_env, **env})  # inherited provides fallback
+    # But env vars and explicit GITLAB_MODE in env still win; re-apply env-var priority.
+    env_gitlab = os.environ.get("GITLAB_MODE", "").strip()
+    if env_gitlab in _VALID_GITLAB_MODES:
+        mode = env_gitlab
     updates["GITLAB_MODE"] = mode
 
-    gitlab_url = os.environ.get("GITLAB_URL", "").strip() or env.get("GITLAB_URL", "")
+    gitlab_url = (os.environ.get("GITLAB_URL", "").strip()
+                  or inh_env.get("GITLAB_URL", "")
+                  or env.get("GITLAB_URL", ""))
     if gitlab_url:
         updates["GITLAB_URL"] = gitlab_url
 
     _yes_apply_tokens(secrets_dir, auth_mode, out)
     _yes_apply_warden_policy(env, env_path, warden_toml, out)
+
+    base_image = (os.environ.get("BASE_IMAGE", "").strip()
+                  or inh_env.get("BASE_IMAGE", "")
+                  or env.get("BASE_IMAGE", "")).strip()
+    base_dockerfile = (os.environ.get("BASE_DOCKERFILE", "").strip()
+                       or inh_env.get("BASE_DOCKERFILE", "")
+                       or env.get("BASE_DOCKERFILE", "")).strip()
+    base_context = (os.environ.get("BASE_CONTEXT", "").strip()
+                    or inh_env.get("BASE_CONTEXT", "")
+                    or env.get("BASE_CONTEXT", "")).strip()
+    if base_image:
+        updates["BASE_IMAGE"] = base_image
+        unset_env_keys(env_path, ["BASE_DOCKERFILE", "BASE_CONTEXT"])
+    elif base_dockerfile:
+        updates["BASE_DOCKERFILE"] = base_dockerfile
+        unset_env_keys(env_path, ["BASE_IMAGE"])
+        if base_context:
+            updates["BASE_CONTEXT"] = base_context

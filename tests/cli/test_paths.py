@@ -83,3 +83,9 @@ def test_xdg_cache_home_overrides_home(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_dir))
     root = paths.asset_root()
     assert root == xdg_dir / "catraz" / __version__
+
+
+def test_claude_home_is_under_secrets(tmp_path: Path) -> None:
+    """claude_home must live under secrets/ (Workstream C)."""
+    ch = paths.claude_home(tmp_path)
+    assert ch == tmp_path / ".catraz" / "secrets" / "claude"

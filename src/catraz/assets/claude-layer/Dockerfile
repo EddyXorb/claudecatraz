@@ -4,7 +4,7 @@ ARG NODE_VERSION=22
 ARG CLAUDE_CODE_VERSION=latest
 ARG DEV_UID=1000
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y gosu && \
+RUN apt-get update && apt-get install -y python3 git curl ca-certificates gnupg gosu && \
     curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get install -y nodejs && rm -rf /var/lib/apt/lists/* && \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
