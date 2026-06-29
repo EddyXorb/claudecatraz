@@ -116,6 +116,14 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     out.info("• creating .catraz/ directories…")
     _doctor_fix(root, load_env(env_path))
 
+    # Seed README.md tier guide once (never overwrite user edits).
+    readme_dst = cat / "README.md"
+    if not readme_dst.exists():
+        readme_src = assets / "catraz-README.md"
+        if readme_src.exists():
+            shutil.copy2(readme_src, readme_dst)
+            out.info("• created .catraz/README.md (tier guide)")
+
     _init_config_templates(cat, assets, out)
 
     env, updates = _init_seed_env(cat, assets, env_path, out)

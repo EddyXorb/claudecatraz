@@ -98,4 +98,4 @@ def _assert_no_nested(root: Path) -> None:
 
 
 def claude_home(root: Path) -> Path:
-    return root / ".catraz" / "claude"
+    return root / ".catraz" / "secrets" / "claude"

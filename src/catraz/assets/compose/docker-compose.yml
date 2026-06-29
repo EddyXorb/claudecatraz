@@ -37,10 +37,10 @@ services:
     volumes:
       # Bind-mounts instead of named volumes → SQLite state + audit JSONL auditable
       # without Docker tools (W12). DEV_UID controls ownership so the host user can read.
-      - ${PROJECT_DIR}/.catraz/state/warden:/var/lib/warden
+      - ${PROJECT_DIR}/.catraz/state/warden/db:/var/lib/warden
       - ${PROJECT_DIR}/.catraz/logs/warden:/var/log/warden
       - ${PROJECT_DIR}/.catraz/config/warden.toml:/etc/warden/warden.toml:ro
-      - ${PROJECT_DIR}/.catraz/run/warden:/run/warden   # Socket directory (file is created at runtime)
+      - ${PROJECT_DIR}/.catraz/state/warden/run:/run/warden   # Socket directory (file is created at runtime)
     networks: [agent-net, egress-net]
     healthcheck:
       test: ["CMD","python3","-c","import os,socket;socket.socket(socket.AF_UNIX).connect(os.environ.get('ADMIN_UDS','/run/warden/admin.sock'))"]

@@ -7,7 +7,7 @@ from catraz import cli
 
 
 def test_audit_web_forwards_to_uds(tmp_path: Path) -> None:
-    sockdir = tmp_path/".catraz/run/warden"; sockdir.mkdir(parents=True)
+    sockdir = tmp_path/".catraz/state/warden/run"; sockdir.mkdir(parents=True)
     sp = sockdir/"admin.sock"
     srv = socket.socket(socket.AF_UNIX); srv.bind(str(sp)); srv.listen()
     def serve() -> None:

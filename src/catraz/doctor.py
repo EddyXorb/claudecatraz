@@ -292,7 +292,7 @@ def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
 def check_net(root: Path, f: Findings) -> None:
     # Admin/audit moved from TCP (172.31.0.2:9090) to a per-project unix socket
     # under .catraz/run/warden/. The socket file only exists while the stack runs.
-    sock = root / ".catraz" / "run" / "warden" / "admin.sock"
+    sock = root / ".catraz" / "state" / "warden" / "run" / "admin.sock"
     if sock.exists():
         f.ok("net", "admin socket present (stack up)")
     else:
@@ -328,7 +328,7 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
         if not api_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty",
                                "set it in .catraz/secrets/anthropic_api_key or .catraz/.env")
         if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",
-                                "remove .catraz/claude/.credentials.json")
+                                f"remove {paths.claude_home(root) / '.credentials.json'}")
         if api_key and not cred.exists(): f.ok("auth", "api_key set")
 
 
@@ -380,11 +380,17 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     """Repair only the safe things: missing dirs + chown. Never secrets/policy."""
     dev_uid = env.get("DEV_UID", "")
     cat = root / ".catraz"
-    for d in ["config", "state/warden", "logs/warden", "logs/squid", "claude", "run/warden"]:
-        (cat / d).mkdir(parents=True, exist_ok=True)
-    # Always ensure secrets/ dir + empty token files exist (compose mount fails opaquely if missing).
+    # secrets/ and secrets/claude must be created first at 0700 BEFORE the generic loop,
+    # because mkdir(parents=True) in the loop would create secrets/ at the umask default
+    # (0755) and a later chmod on an already-existing dir is a no-op for mode.
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
+    secrets_dir.chmod(0o700)
+    claude_secrets = cat / "secrets" / "claude"
+    claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
+    claude_secrets.chmod(0o700)
+    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid"]:
+        (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
     secret_files = [f for f, _, _ in SECRETS]
     if mode == "api_key":
@@ -395,7 +401,7 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
             p.write_text("")
             p.chmod(0o600)
     if dev_uid.isdigit():
-        for d in ["state", "logs", "run"]:
+        for d in ["state", "logs"]:
             try:
                 _chown_r(cat / d, int(dev_uid))
             except PermissionError:
