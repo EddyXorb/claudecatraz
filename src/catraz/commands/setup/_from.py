@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import shutil
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -63,9 +62,18 @@ def load_inherited(src_root: Path) -> dict[str, Any]:
     src_secrets = src_cat / "secrets"
     if src_secrets.is_dir():
         for child in src_secrets.iterdir():
-            # Include files and the claude/ sub-directory.
-            if child.is_file() or child.is_dir():
+            if child.is_dir():
                 inherited_secrets[child.name] = child
+            elif child.is_file():
+                # Skip empty / whitespace-only files — they are placeholder stubs,
+                # not real secrets.  Inheriting them would make the wizard show
+                # "inherited (hidden)" for a token that was never set.
+                try:
+                    content = child.read_text(encoding="utf-8", errors="replace").strip()
+                except OSError:
+                    continue
+                if content:
+                    inherited_secrets[child.name] = child
 
     return {
         "env": inherited_env,
@@ -115,7 +123,8 @@ def stage_inherited(
                         d.chmod(0o600)
             out.info(f"  • inherited secrets/{name}/ (contents not shown)")
         else:
-            if not dst.exists() or yes:
+            dst_empty = dst.is_file() and not dst.read_text(encoding="utf-8", errors="replace").strip()
+            if not dst.exists() or yes or dst_empty:
                 shutil.copy2(src_path, dst)
                 dst.chmod(0o600)
                 # Intentionally do NOT log the value.

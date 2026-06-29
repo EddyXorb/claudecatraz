@@ -3,4 +3,4 @@
 # (Alpine/musl, RHEL/dnf) will fail the claude-layer build.
 # Change the FROM or append your own RUN/COPY lines.
 FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git python3 && rm -rf /var/lib/apt/lists/*

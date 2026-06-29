@@ -125,6 +125,48 @@ def test_load_inherited_secrets(tmp_path: Path) -> None:
     assert "claude" in result["secrets"]
 
 
+def test_load_inherited_skips_empty_secrets(tmp_path: Path) -> None:
+    """Empty or whitespace-only secret files are not inherited."""
+    src = tmp_path / "src"
+    src.mkdir()
+    cat = src / ".catraz"
+    cat.mkdir()
+    (cat / ".env").write_text("AUTH_MODE=subscription\n")
+    secrets = cat / "secrets"
+    secrets.mkdir(mode=0o700)
+    (secrets / "gitlab_read_token").write_text("")
+    (secrets / "gitlab_read_token").chmod(0o600)
+    (secrets / "gitlab_write_token").write_text("  \n")
+    (secrets / "gitlab_write_token").chmod(0o600)
+    result = load_inherited(src)
+    assert "gitlab_read_token" not in result["secrets"]
+    assert "gitlab_write_token" not in result["secrets"]
+
+
+def test_stage_inherited_overwrites_empty_destination(tmp_path: Path) -> None:
+    """stage_inherited copies source secrets even when the destination file already
+    exists but is empty — e.g. a re-init after a partial setup."""
+    src = _make_source(tmp_path)
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    cat = dst / ".catraz"
+    cat.mkdir()
+    secrets = cat / "secrets"
+    secrets.mkdir(mode=0o700)
+    # Pre-seed empty placeholder files (like _ensure_secret creates).
+    (secrets / "gitlab_read_token").write_text("")
+    (secrets / "gitlab_read_token").chmod(0o600)
+    (secrets / "gitlab_write_token").write_text("")
+    (secrets / "gitlab_write_token").chmod(0o600)
+
+    inherited = load_inherited(src)
+    from io import StringIO
+    stage_inherited(cat, inherited, yes=False, out=Out(color=False))
+
+    assert (secrets / "gitlab_read_token").read_text() == "glpat-src-read"
+    assert (secrets / "gitlab_write_token").read_text() == "glpat-src-write"
+
+
 # ── -y (non-interactive) clone ────────────────────────────────────────────────
 
 def test_yes_clone_inherits_env_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
