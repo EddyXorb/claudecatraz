@@ -199,15 +199,22 @@ no value lives in both at once:
 
 | Where | Holds | Visibility |
 | ----- | ----- | ---------- |
-| **`.catraz/.env`** (gitignored) | **Secrets** (Claude auth + GitLab tokens) and infra (`GITLAB_URL`, base image) | host only |
+| **`.catraz/secrets/`** (gitignored, 0600) | **Secrets** — one file each: `gitlab_read_token`, `gitlab_write_token`, (`anthropic_api_key`) — mounted as compose secrets | host only, per-service |
+| **`.catraz/.env`** (gitignored) | **Non-secret wiring** — `AUTH_MODE`, `GITLAB_URL`, `GITLAB_MODE`, base image, `DEV_UID`, `WARDEN_*` overrides | host only |
 | **`.catraz/config/warden.toml`** | **Non-secret policy** — branch prefix, R5 limits, allowed projects | mounted read-only into the Warden |
 
+```text
+# .catraz/secrets/ — one secret per file (mode 0600), never in .env
+gitlab_read_token       # scopes: read_api, read_repository  — only the Warden (R6)
+gitlab_write_token      # scope: api (service account / Developer) + read its own user
+# anthropic_api_key     # only for AUTH_MODE=api_key
+```
+
 ```dotenv
-# .catraz/.env — secrets & infra
+# .catraz/.env — non-secret wiring (NO tokens here)
 AUTH_MODE=subscription             # subscription (host login) | api_key
-# ANTHROPIC_API_KEY=               # only for AUTH_MODE=api_key
-GITLAB_READ_TOKEN=                 # scopes: read_api, read_repository  — only the Warden (R6)
-GITLAB_WRITE_TOKEN=                # scope: api (service account / Developer) + read its own user
+GITLAB_URL=https://gitlab.com      # GitLab endpoint (self-hosted: change it)
+GITLAB_MODE=read-write             # off | read-only | read-write
 DEV_UID=1000                       # `id -u` on the host so bind mounts get the right ownership
 ```
 
