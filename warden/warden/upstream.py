@@ -17,8 +17,8 @@ from .config import Config, normalize_project
 from .model import TokenKind
 
 # Hop-by-hop headers that must not be forwarded verbatim.
-_DROP_REQUEST_HEADERS = {"host", "authorization", "private-token", "content-length", "connection"}
-_DROP_RESPONSE_HEADERS = {"content-encoding", "transfer-encoding", "connection", "content-length"}
+_DROP_REQUEST_HEADERS = {"host", "authorization", "private-token", "content-length", "connection", "accept-encoding"}
+_DROP_RESPONSE_HEADERS = {"transfer-encoding", "connection", "content-length"}
 
 
 def project_id(project: str) -> str:
@@ -123,7 +123,7 @@ def stream_upstream(resp: httpx.Response) -> StreamingResponse:
 
     async def body_iter() -> AsyncIterator[bytes]:
         try:
-            async for chunk in resp.aiter_bytes():
+            async for chunk in resp.aiter_raw():
                 yield chunk
         finally:
             await resp.aclose()
