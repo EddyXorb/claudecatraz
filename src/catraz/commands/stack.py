@@ -22,8 +22,9 @@ def _print_urls(out):
           + out.dim("  (the agent 'claude-dev-env' registers there)"))
     print("  Audit viewer:    " + out.cyan("catraz audit --web")
           + out.dim("   (host-only, ephemeral loopback port)"))
-    # `run` lazy-starts infra (warden+squid) and runs the agent one-off:
-    print("  Interactive:     " + out.cyan("catraz run"))
+    # `claude-remote` starts the agent daemon; plain `run` is the interactive one-off.
+    print("  Agent daemon:    " + out.cyan("catraz run claude-remote")
+          + out.dim("   ·   interactive: ") + out.cyan("catraz run"))
 
 
 def _security_preflight(root, out):

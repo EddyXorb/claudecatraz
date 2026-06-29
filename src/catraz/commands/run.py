@@ -5,9 +5,11 @@ from pathlib import Path
 
 from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
 from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants
-from catraz import image, compose
-from catraz.commands.stack import _row_ready, _security_preflight
+from catraz import image, compose, auth
+from catraz.commands.stack import _row_ready, _security_preflight, _wait_healthy, _print_urls
 from catraz.commands.setup import _auto_sync_if_needed
+
+MODES = ("claude", "claude-remote", "shell")
 
 
 def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list[str]:
@@ -47,6 +49,25 @@ def _ensure_infra(root, out, prefix=None):
 
 
 def cmd_run(root, args, out):
+    """Dispatch `run [<mode>] [-- <args>]` to one of the named modes.
+
+    The first token, if it names a mode, selects it; otherwise the mode defaults to
+    `claude`. (`claude_args` stays a REMAINDER, so detecting the mode in code avoids
+    argparse positional-vs-REMAINDER ambiguity and mirrors the leading-`--` strip.)"""
+    raw = list(args.claude_args)
+    mode = raw.pop(0) if raw and raw[0] in MODES else "claude"
+    # Strip one leading `--` so `run -- -p x`, `run claude -- -p x`, and `run -p x`
+    # all yield ["-p","x"]; _oneoff_args adds its own `--` separator.
+    if raw and raw[0] == "--":
+        raw = raw[1:]
+    if mode == "claude-remote":
+        return _start_remote_daemon(root, args, out)
+    sub = "exec" if mode == "shell" else "run"
+    return _run_oneoff(root, out, sub, raw)
+
+
+def _run_oneoff(root, out, sub, raw):
+    """Shared ephemeral one-off path for `claude` (sub=run) and `shell` (sub=exec)."""
     assert_real_dirs(root)
     extra_env = {"BASE_IMAGE": image.resolve_base(root)}
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
@@ -56,38 +77,43 @@ def cmd_run(root, args, out):
     if relpath == ".":
         relpath = ""
     tty = sys.stdin.isatty()
-    # Strip a leading `--` so `catraz run -- -p x` and `catraz run -p x` behave
-    # identically; _oneoff_args adds its own `--` separator.
-    claude_args = (args.claude_args[1:]
-                   if args.claude_args and args.claude_args[0] == "--"
-                   else args.claude_args)
-    run_args = _oneoff_args(relpath, tty, "run", claude_args)
-    if tty:
-        # Interactive runs allocate a real pty; teeing would fight it and capture
-        # escape-code noise — leave them unchanged (out of scope).
+    run_args = _oneoff_args(relpath, tty, sub, raw)
+    if sub == "run" and not tty:
+        # Non-TTY claude one-off: stdout is lost when the --rm container is removed, so
+        # tee the combined output to a durable per-run transcript (item 03). %f
+        # microseconds so two runs in the same second don't clobber each other. TTY runs
+        # allocate a real pty (teeing would fight it) and shell is interactive → no tee.
+        log_dir = root / ".catraz/logs/agent"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / (datetime.datetime.now().strftime("%Y%m%dT%H%M%S_%f") + ".log")
+        _prune_agent_logs(log_dir)
+        r = compose_run(root, run_args, prefix=prefix, check=False, tee=log_path)
+    else:
         r = compose_run(root, run_args, prefix=prefix, check=False)
-        return r.returncode if r else EXIT_GENERAL
-    # Non-TTY one-off: stdout is lost when the --rm container is removed, so tee the
-    # combined output to a durable per-run transcript. %f microseconds so two runs in
-    # the same second don't clobber each other.
-    log_dir = root / ".catraz/logs/agent"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / (datetime.datetime.now().strftime("%Y%m%dT%H%M%S_%f") + ".log")
-    _prune_agent_logs(log_dir)
-    r = compose_run(root, run_args, prefix=prefix, check=False, tee=log_path)
     return r.returncode if r else EXIT_GENERAL
 
 
-def cmd_shell(root, args, out):
+def _start_remote_daemon(root, args, out):
+    """Start the Remote-Control agent daemon (ports item 05's removed `up --remote`).
+
+    Unlike the ephemeral `claude`/`shell` one-offs (`run --rm`), this is a long-lived
+    daemon (`--profile remote up -d`, restart unless-stopped) — the mode name encodes
+    the lifecycle difference the old `run` vs `up --remote` split hid."""
     assert_real_dirs(root)
+    (root / ".catraz").mkdir(exist_ok=True)
+    auth.write_auth_fragment(root)
+    out.head("— preflight (security checks always run) —")
+    if _security_preflight(root, out):
+        out.err("preflight failed — fix the ✘ above (or `catraz doctor --fix`)")
+        return EXIT_DOCTOR
+    print()
+    _auto_sync_if_needed(root, out)
     extra_env = {"BASE_IMAGE": image.resolve_base(root)}
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
-    _ensure_infra(root, out, prefix=prefix)
-    relpath = str(Path.cwd().resolve().relative_to(root))
-    relpath = "" if relpath == "." else relpath
-    tty = sys.stdin.isatty()
-    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd      # may be empty → entrypoint runs bash
-    run_args = _oneoff_args(relpath, tty, "exec", cmd)
-    r = compose_run(root, run_args, prefix=prefix, check=False)
+    out.info("• starting the agent daemon…")
+    r = compose_run(root, ["--profile", "remote", "up", "-d"], prefix=prefix, check=False)
+    if r and r.returncode == 0:
+        _wait_healthy(root, out, prefix=prefix)
+        _print_urls(out)
     return r.returncode if r else EXIT_GENERAL

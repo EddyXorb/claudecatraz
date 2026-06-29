@@ -131,10 +131,23 @@ catraz run -p "fix the failing test"        # one-shot; exit code is passed thro
 
 `catraz run` starts a fresh **one-off** container (`docker compose run --rm`) with the project
 mounted at `/workspace`; Warden + Squid stay up as daemons, so the second call is fast. Each
-invocation owns its own container and lifecycle — independent of any `up --remote` daemon, so
-nothing you run here can be killed by another session tearing its stack down. Everything after
-`run` is handed verbatim to `claude` (including `--dangerously-skip-permissions`). Outside a
-`.catraz` project it fails closed — it never falls back to a host `claude`.
+invocation owns its own container and lifecycle — independent of any `catraz run claude-remote`
+daemon, so nothing you run here can be killed by another session tearing its stack down.
+Everything after `run` is handed verbatim to `claude` (including
+`--dangerously-skip-permissions`). Outside a `.catraz` project it fails closed — it never falls
+back to a host `claude`.
+
+`run` takes an optional **mode** as its first token — `run [claude|claude-remote|shell] -- <args>`
+(default `claude`):
+
+- `catraz run` / `catraz run claude -- …` — the ephemeral interactive agent (above).
+- `catraz run claude-remote` — start the always-on **Remote-Control daemon** (`--profile remote
+  up -d`), wait for health, and print the URLs; reachable on claude.ai.
+- `catraz run shell` — open a shell in a one-off sandbox container (`catraz run shell -- ls`
+  runs a command). This replaces the old `catraz shell` subcommand.
+
+Because the bare first token is the mode, pass a literal arg that collides with a mode name via
+`catraz run claude -- <arg>` (or `catraz run -- <arg>`).
 
 A **non-interactive** `catraz run` (e.g. `-p "…"` or piped — anything without a TTY) tees its
 output to a durable per-run transcript at `.catraz/logs/agent/<timestamp>.log` (the newest 50
