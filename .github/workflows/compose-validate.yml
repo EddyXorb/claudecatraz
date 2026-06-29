@@ -21,7 +21,7 @@ jobs:
     name: docker compose config
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Generate CI env file from .env.example
         run: |
@@ -73,7 +73,7 @@ jobs:
     name: .env.example coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: All compose variables documented in .env.example
         run: |

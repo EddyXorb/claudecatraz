@@ -15,7 +15,7 @@ jobs:
   draft:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # git-cliff needs full history + tags to diff against the prior tag.
           fetch-depth: 0

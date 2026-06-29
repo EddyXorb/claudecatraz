@@ -22,10 +22,10 @@ jobs:
   redteam:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       # The stack-free primitives all `docker run alpine`. Pre-pull it (with retries) so the
       # first test doesn't race a cold Docker Hub pull — that surfaced as a transient
