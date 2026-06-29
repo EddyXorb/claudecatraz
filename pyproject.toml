@@ -6,7 +6,7 @@ description = "Sandbox front door for an autonomous Claude Code agent."
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest", "mypy>=1.13,<2"]
+dev = ["pytest", "mypy>=2.1.0,<3"]
 
 [project.scripts]
 catraz = "catraz.cli:main"
