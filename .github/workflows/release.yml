@@ -1,0 +1,40 @@
+name: release
+
+# Tag a commit with a semver tag (e.g. v0.2.0) and push it; this drafts a
+# GitHub release whose notes are the Conventional-Commit changelog since the
+# previous tag. The draft is not published — review it, then hit publish.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # git-cliff needs full history + tags to diff against the prior tag.
+          fetch-depth: 0
+
+      - name: Generate changelog for this tag
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          # --current: notes for the tag that points at the pushed commit.
+          args: --current --strip all
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          NOTES: ${{ steps.cliff.outputs.content }}
+        run: |
+          gh release create "$TAG" \
+            --draft \
+            --title "$TAG" \
+            --notes "$NOTES"
