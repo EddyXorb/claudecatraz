@@ -150,6 +150,15 @@ services:
         source: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/AGENT.md
         target: /home/dev/.claude/.ro/CLAUDE.md
         read_only: true
+      # Host git identity (user.name/email, etc.), copied to the writable ~/.gitconfig
+      # at startup so the agent can commit. Staged read-only under .ro/ because the
+      # entrypoint's warden setup appends insteadOf rules to the live ~/.gitconfig — a
+      # read-only mount there would make that write fail. /dev/null when HOST_GITCONFIG
+      # is unset (no host gitconfig); the entrypoint skips the empty staged file.
+      - type: bind
+        source: ${HOST_GITCONFIG:-/dev/null}
+        target: /home/dev/.claude/.ro/.gitconfig
+        read_only: true
     # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
     # activated in stage 03 once the Forward-Proxy service is in Compose.
     # Until then: default bridge (internet access for api.anthropic.com).

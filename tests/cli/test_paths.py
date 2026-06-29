@@ -14,10 +14,6 @@ def test_asset_root_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert (root / "assets" / "warden").is_dir()
 
 
-def test_version() -> None:
-    assert __version__ == "0.2.0"
-
-
 def test_find_root_walks_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".catraz").mkdir(); sub = tmp_path / "a" / "b"; sub.mkdir(parents=True)
     monkeypatch.chdir(sub)

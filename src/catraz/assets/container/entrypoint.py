@@ -115,6 +115,22 @@ def install_claude_md(home: Path) -> None:
     # Not required (e.g. bare `docker run` for local testing) -> start without user-memory.
 
 
+def install_host_gitconfig(home: Path) -> None:
+    """Seed the writable ~/.gitconfig from the host's, so the agent can commit.
+
+    catraz bind-mounts the host's ~/.gitconfig read-only at home/.ro/.gitconfig (see
+    docker-compose.yml) and we copy it to the live ~/.gitconfig. It must be the live
+    (writable) file, not a read-only mount there, because configure_git_warden() then
+    appends insteadOf rules to it via `git config --global`.
+
+    When no host gitconfig exists the mount is /dev/null, which stages as an empty
+    file — skip it (the agent gets no identity, same as before this feature).
+    """
+    src = home / ".ro" / ".gitconfig"
+    if src.exists() and src.stat().st_size > 0:
+        shutil.copy2(src, Path.home() / ".gitconfig")
+
+
 def configure_git_warden() -> None:
     """Set up global git insteadOf rewrites so canonical GitLab URLs are transparently
     redirected to the Warden inside the container (W3.1). The repo's .git/config
@@ -216,6 +232,7 @@ def _bootstrap(claude_home: Path, remote: bool) -> None:
             sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
         os.environ["ANTHROPIC_API_KEY"] = key
     build_claude_home(claude_home, mode, remote=remote)
+    install_host_gitconfig(claude_home)
     configure_git_warden()
 
 

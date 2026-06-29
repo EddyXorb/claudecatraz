@@ -22,6 +22,8 @@ def _mock_cmd_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[list
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "_ensure_infra", lambda *a, **k: None)
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
+    # Host gitconfig is environment-dependent; pin it off so extra_env is deterministic.
+    monkeypatch.setattr(run_cmd, "_host_gitconfig_env", lambda: {})
 
     def fake_prepare(root: object, *, render: object, extra_env: object = None) -> list[str]:
         prepare_calls.append({"render": render, "extra_env": extra_env})
@@ -47,3 +49,13 @@ def test_cmd_run_passes_base_image_to_prepare(monkeypatch: pytest.MonkeyPatch, t
     assert len(prepare_calls) == 1
     assert prepare_calls[0]["extra_env"] == {"BASE_IMAGE": "catraz-base:test"}
     assert prepare_calls[0]["render"] is True
+
+
+def test_host_gitconfig_env_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """_host_gitconfig_env exports HOST_GITCONFIG when ~/.gitconfig exists, else nothing."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    assert run_cmd._host_gitconfig_env() == {}            # no ~/.gitconfig yet
+    (home / ".gitconfig").write_text("[user]\n\tname = T\n")
+    assert run_cmd._host_gitconfig_env() == {"HOST_GITCONFIG": str(home / ".gitconfig")}
