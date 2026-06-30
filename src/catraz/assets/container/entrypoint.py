@@ -71,15 +71,26 @@ def build_claude_home(home: Path, mode: str, remote: bool = True) -> None:
         data = read_json(ro / ".claude.json")
     else:
         data = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
-    # Remote-Control-only: the daemon would hang on a one-time accept prompt otherwise.
-    # In one-off `run` (drop-in claude) mode we keep normal permissions, so skip these.
+    # Both remote-control and run mode use --permission-mode bypassPermissions, so always
+    # pre-accept the one-time dialog.  remoteDialogSeen is only needed for the RC daemon.
+    # NOTE: recent Claude Code (≥2.1.x) migrates bypassPermissionsModeAccepted out of
+    # .claude.json into settings.json's skipDangerousModePermissionPrompt and then deletes
+    # the old key — so the .claude.json flag alone no longer reliably suppresses the prompt.
+    # We keep it for older versions but ALSO set the new canonical key below.
+    data["bypassPermissionsModeAccepted"] = True
     if remote:
-        data["bypassPermissionsModeAccepted"] = True
         data["remoteDialogSeen"] = True
     data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
+    # skipDangerousModePermissionPrompt is the field current Claude Code actually checks
+    # (userSettings) before showing the bypassPermissions disclaimer — set it directly so
+    # the prompt never appears, independent of the .claude.json → settings.json migration.
     (home / "settings.json").write_text(
-        json.dumps({"theme": "dark", "hasCompletedOnboarding": True}, indent=2))
+        json.dumps({
+            "theme": "dark",
+            "hasCompletedOnboarding": True,
+            "skipDangerousModePermissionPrompt": True,
+        }, indent=2))
     install_claude_md(home)
 
 
@@ -258,13 +269,13 @@ def cmd_start(claude_home: Path) -> None:
     debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
     extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
     os.execvp("claude", ["claude", "remote-control",
-                         "--permission-mode", "bypassPermissions",   # keep-fixed (headless)
+                         "--dangerously-skip-permissions", # keep-fixed (headless)
                          "--spawn", spawn, "--debug-file", debug, *extra])
 
 
 def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     _bootstrap(claude_home, remote=False)
-    os.execvp("claude", ["claude", *claude_args])
+    os.execvp("claude", ["claude", "--dangerously-skip-permissions",  *claude_args])
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
