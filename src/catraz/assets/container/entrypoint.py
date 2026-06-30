@@ -40,7 +40,11 @@ def cmd_sync(claude_home: Path, source: str | None = None) -> None:
         sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
     claude_home.mkdir(parents=True, exist_ok=True)
     shutil.copy2(cred, claude_home / ".credentials.json")
-    host_cj = src_dir.parent / ".claude.json"          # ~/.claude.json sits next to ~/.claude/
+    # A custom config dir (e.g. ~/.claude2) keeps .claude.json INSIDE it; the default
+    # ~/.claude layout keeps it as a sibling at ~/.claude.json. Prefer in-dir, then sibling.
+    host_cj = src_dir / ".claude.json"
+    if not host_cj.exists():
+        host_cj = src_dir.parent / ".claude.json"
     dst_cj = claude_home / ".claude.json"
     if host_cj.exists():
         shutil.copy2(host_cj, dst_cj)
