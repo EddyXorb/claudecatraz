@@ -29,15 +29,41 @@ def _env_true(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# Host-persistent target for Claude's own --debug-file output. catraz bind-mounts the
+# project's .catraz/logs/claude here (see docker-compose.yml), next to logs/warden and
+# logs/squid, so the remote-control daemon (rc-debug.log) and `catraz run` (run-debug.log)
+# debug logs survive container exit — the live ~/.claude is a tmpfs and loses them.
+CLAUDE_LOG_DIR = Path("/var/log/claude")
+
+
+def claude_log_dir(claude_home: Path) -> Path:
+    """Where Claude should write its --debug-file logs.
+
+    Prefer the host-persistent bind at CLAUDE_LOG_DIR when it is present and writable by
+    the dev user (the catraz path: doctor creates it and chowns to DEV_UID). Fall back to
+    the ephemeral tmpfs Claude-home when the bind is absent or root-owned — e.g. a bare
+    `docker run` for local image testing, or a stale project whose dir Docker auto-created
+    as root. The fallback keeps logging working (just non-persistent) instead of crashing.
+    """
+    if CLAUDE_LOG_DIR.is_dir() and os.access(CLAUDE_LOG_DIR, os.W_OK):
+        return CLAUDE_LOG_DIR
+    return claude_home
+
+
 # ── host-side sync ────────────────────────────────────────────────────────────
 
 
 def cmd_sync(claude_home: Path, source: str | None = None) -> None:
-    src_dir = Path(source or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
-                   or str(Path.home() / ".claude")).expanduser()
+    src_dir = Path(
+        source
+        or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
+        or str(Path.home() / ".claude")
+    ).expanduser()
     cred = src_dir / ".credentials.json"
     if not cred.exists():
-        sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
+        sys.exit(
+            f"error: {cred} not found — authenticate with `claude` on the host first"
+        )
     claude_home.mkdir(parents=True, exist_ok=True)
     shutil.copy2(cred, claude_home / ".credentials.json")
     # A custom config dir (e.g. ~/.claude2) keeps .claude.json INSIDE it; the default
@@ -49,8 +75,12 @@ def cmd_sync(claude_home: Path, source: str | None = None) -> None:
     if host_cj.exists():
         shutil.copy2(host_cj, dst_cj)
     elif not dst_cj.exists():
-        dst_cj.write_text(json.dumps(
-            {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2))
+        dst_cj.write_text(
+            json.dumps(
+                {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
+                indent=2,
+            )
+        )
     print(f"Credentials synced into {claude_home}")
 
 
@@ -64,7 +94,9 @@ def build_claude_home(home: Path, mode: str, remote: bool = True) -> None:
     if mode == "subscription":
         src = ro / ".credentials.json"
         if not src.exists():
-            sys.exit("error: subscription mode but no .credentials.json mounted (run `catraz sync`)")
+            sys.exit(
+                "error: subscription mode but no .credentials.json mounted (run `catraz sync`)"
+            )
         shutil.copy2(src, home / ".credentials.json")
     # .claude.json lives at the HOME ROOT (sibling of ~/.claude), NOT inside the tmpfs dir.
     if mode == "subscription" and (ro / ".claude.json").exists():
@@ -80,17 +112,23 @@ def build_claude_home(home: Path, mode: str, remote: bool = True) -> None:
     data["bypassPermissionsModeAccepted"] = True
     if remote:
         data["remoteDialogSeen"] = True
-    data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
+    data.setdefault("projects", {}).setdefault("/workspace", {})[
+        "hasTrustDialogAccepted"
+    ] = True
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
     # skipDangerousModePermissionPrompt is the field current Claude Code actually checks
     # (userSettings) before showing the bypassPermissions disclaimer — set it directly so
     # the prompt never appears, independent of the .claude.json → settings.json migration.
     (home / "settings.json").write_text(
-        json.dumps({
-            "theme": "dark",
-            "hasCompletedOnboarding": True,
-            "skipDangerousModePermissionPrompt": True,
-        }, indent=2))
+        json.dumps(
+            {
+                "theme": "dark",
+                "hasCompletedOnboarding": True,
+                "skipDangerousModePermissionPrompt": True,
+            },
+            indent=2,
+        )
+    )
     install_claude_md(home)
 
 
@@ -169,16 +207,21 @@ def configure_git_warden() -> None:
     """
     gitlab_mode = os.environ.get("GITLAB_MODE", "read-write")
     if gitlab_mode == "off":
-        print("GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden")
+        print(
+            "GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden"
+        )
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
         return
     gitlab_url = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/")
-    warden_git = os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
+    warden_git = (
+        os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/")
+        + "/"
+    )
     host = urlsplit(gitlab_url).hostname or "gitlab.com"
     ssh_user = os.environ.get("GITLAB_SSH_USER", "git")
     rewrites = [
-        gitlab_url + "/",             # https://gitlab.com/
-        f"{ssh_user}@{host}:",        # git@gitlab.com:   (scp-like)
+        gitlab_url + "/",  # https://gitlab.com/
+        f"{ssh_user}@{host}:",  # git@gitlab.com:   (scp-like)
         f"ssh://{ssh_user}@{host}/",  # ssh://git@gitlab.com/
     ]
     key = f"url.{warden_git}.insteadOf"
@@ -266,16 +309,34 @@ def cmd_exec(claude_home: Path, cmd: list[str]) -> None:
 def cmd_start(claude_home: Path) -> None:
     _bootstrap(claude_home, remote=True)
     spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
-    debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
+    debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(
+        claude_log_dir(claude_home) / "rc-debug.log"
+    )
     extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
-    os.execvp("claude", ["claude", "remote-control",
-                         "--dangerously-skip-permissions", # keep-fixed (headless)
-                         "--spawn", spawn, "--debug-file", debug, *extra])
+    os.execvp(
+        "claude",
+        [
+            "claude",
+            "remote-control",
+            "--permission-mode",
+            "bypassPermissions",  # keep-fixed (headless)
+            "--spawn",
+            spawn,
+            "--debug-file",
+            debug,
+            *extra,
+        ],
+    )
 
 
 def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
     _bootstrap(claude_home, remote=False)
-    os.execvp("claude", ["claude", "--dangerously-skip-permissions",  *claude_args])
+    argv = ["claude", "--dangerously-skip-permissions"]
+    # Persist a debug log to the host bind, unless the caller already drives debug output
+    # themselves (-d/--debug/--debug-file) — don't fight a user-supplied flag.
+    if not any(a == "-d" or a.startswith("--debug") for a in claude_args):
+        argv += ["--debug-file", str(claude_log_dir(claude_home) / "run-debug.log")]
+    os.execvp("claude", [*argv, *claude_args])
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -308,9 +369,10 @@ def main() -> None:
     )
 
     rn = sub.add_parser("run")
-    rn.add_argument("rest", nargs=argparse.REMAINDER)   # ["--", "<args>"...]
+    rn.add_argument("rest", nargs=argparse.REMAINDER)  # ["--", "<args>"...]
 
-    ex = sub.add_parser("exec"); ex.add_argument("rest", nargs=argparse.REMAINDER)
+    ex = sub.add_parser("exec")
+    ex.add_argument("rest", nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
 
@@ -323,7 +385,8 @@ def main() -> None:
         return
     if args.command == "exec":
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
-        cmd_exec(Path(args.claude_home).resolve(), rest); return
+        cmd_exec(Path(args.claude_home).resolve(), rest)
+        return
     cmd_start(Path(args.claude_home).resolve())
 
 

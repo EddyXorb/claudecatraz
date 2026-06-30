@@ -170,6 +170,15 @@ services:
         source: ${PROJECT_DIR}/.catraz/config/warden.toml
         target: /etc/catraz/warden.toml
         read_only: true
+      # Host-persistent Claude debug logs (--debug-file). The live ~/.claude is a tmpfs,
+      # so the remote-control daemon's rc-debug.log and `catraz run`'s run-debug.log would
+      # vanish on exit; this bind keeps them on the host next to logs/warden + logs/squid.
+      # The entrypoint points --debug-file here (claude_log_dir()). This is the only
+      # host-writable path the agent has outside /workspace — deliberately scoped to a logs
+      # dir; doctor creates it and chowns to DEV_UID so the dev user can write.
+      - type: bind
+        source: ${PROJECT_DIR}/.catraz/logs/claude
+        target: /var/log/claude
     # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
     # activated in stage 03 once the Forward-Proxy service is in Compose.
     # Until then: default bridge (internet access for api.anthropic.com).

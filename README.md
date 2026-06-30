@@ -198,6 +198,12 @@ are kept; older ones are pruned). Because the one-off always runs with `--build`
 merged into stdout, the file also contains `docker compose` build/orchestration noise — it is a
 raw session record, not a clean agent-only log. Interactive TTY runs get no transcript.
 
+Separately, Claude's own structured debug logs (`--debug-file`) are bind-mounted to the host at
+`.catraz/logs/claude/` — `rc-debug.log` from the remote-control daemon (`catraz run claude-remote`)
+and `run-debug.log` from `catraz run`. Unlike the transcript above these cover interactive runs
+too, since Claude writes them inside the container regardless of TTY. (Pass your own `--debug`/
+`--debug-file` to `catraz run` to override the default.)
+
 > ### ⚠️ What the sandbox protects — and what it does **not**
 >
 > The sandbox protects your **network and git egress**: the Warden is the sole holder of the

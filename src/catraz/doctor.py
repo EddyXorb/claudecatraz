@@ -429,7 +429,7 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     claude_secrets = cat / "secrets" / "claude"
     claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
     claude_secrets.chmod(0o700)
-    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid"]:
+    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid", "logs/claude"]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
     secret_files = [f for f, _, _ in SECRETS]
