@@ -39,18 +39,21 @@ class EndpointKind(str, Enum):
 # --- pure check predicates (W6) -------------------------------------------------
 
 
-def src_branch_prefix(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
-    src = req.fields.get("source_branch", "")
-    if src.startswith(cfg.branch_prefix):
-        return None
-    return Decision(False, "R2", f"source_branch {src!r} without prefix {cfg.branch_prefix!r}")
+def field_has_prefix(field: str) -> Check:
+    """Factory: deny unless ``req.fields[field]`` carries ``cfg.branch_prefix`` (R2).
 
+    ``source_branch`` (MR creation) and ``ref`` (pipeline trigger) are the same
+    prefix check under a different field name — one parametrised predicate
+    instead of two near-identical functions.
+    """
 
-def ref_prefix(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
-    ref = req.fields.get("ref", "")
-    if ref.startswith(cfg.branch_prefix):
-        return None
-    return Decision(False, "R2", f"ref {ref!r} without prefix {cfg.branch_prefix!r}")
+    def check(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
+        value = req.fields.get(field, "")
+        if value.startswith(cfg.branch_prefix):
+            return None
+        return Decision(False, "R2", f"{field} {value!r} without prefix {cfg.branch_prefix!r}")
+
+    return check
 
 
 def mr_owned_by_claude(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
@@ -100,7 +103,11 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
     # Open a new merge request. Allowed only when its source_branch carries the
     # claude/ prefix (R2/R3) — the agent can only propose its own branches.
     WriteEndpoint(
-        "POST", "/projects/{id}/merge_requests", (src_branch_prefix,), "R3", EndpointKind.MR
+        "POST",
+        "/projects/{id}/merge_requests",
+        (field_has_prefix("source_branch"),),
+        "R3",
+        EndpointKind.MR,
     ),
     # Post a top-level comment ("note") on an MR. Allowed only on an MR the
     # service account authored (R3 ownership).
@@ -144,7 +151,11 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
     # Trigger a CI pipeline. Allowed only for a ref carrying the claude/ prefix
     # (R3) — the agent runs CI on its own branches, not protected ones.
     WriteEndpoint(
-        "POST", "/projects/{id}/pipeline", (ref_prefix,), "R3", EndpointKind.PIPELINE
+        "POST",
+        "/projects/{id}/pipeline",
+        (field_has_prefix("ref"),),
+        "R3",
+        EndpointKind.PIPELINE,
     ),
 )
 

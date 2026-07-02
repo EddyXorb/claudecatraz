@@ -24,11 +24,10 @@ _MIN = {
 
 
 # --- project_allowed -----------------------------------------------------------
-def test_project_allowed_exact_subpath_and_git_suffix():
+def test_project_allowed_exact_match_and_git_suffix():
     cfg = Config(allowed_projects=("group/proj",))
     assert cfg.project_allowed("group/proj")
     assert cfg.project_allowed("group/proj.git")  # .git stripped
-    assert cfg.project_allowed("group/proj/sub")  # subpath
     assert cfg.project_allowed("/group/proj/")  # surrounding slashes ignored
 
 
@@ -37,6 +36,13 @@ def test_project_allowed_rejects_prefix_confusion():
     cfg = Config(allowed_projects=("group/proj",))
     assert not cfg.project_allowed("group/proj2")
     assert not cfg.project_allowed("other/secret")
+
+
+def test_project_allowed_rejects_subpath():
+    # B4: the allowlist names concrete projects, never group/project prefixes —
+    # "group/proj/sub" must NOT be allowed by an allowlist entry "group/proj".
+    cfg = Config(allowed_projects=("group/proj",))
+    assert not cfg.project_allowed("group/proj/sub")
 
 
 def test_project_allowed_empty_allowlist_denies_all():

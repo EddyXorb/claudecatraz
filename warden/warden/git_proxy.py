@@ -15,6 +15,7 @@ from typing import AsyncIterator, Optional
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .audit import build_event
 from .config import normalize_project
 from .context import AppContext
 from .errors import deny_json, git_reject_response
@@ -207,19 +208,15 @@ def _audit(
     status: Optional[int],
 ) -> None:
     ctx.audit.log(
-        {
-            "channel": "git",
-            "correlation_id": cid,
-            "method": "push",
-            "project": project,
-            "decision": "allow" if decision.allow else "deny",
-            "rule": decision.rule,
-            "reason": decision.reason,
-            "refs": [f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in commands],
-            "upstream_status": status,
-            "latency_ms": round((time.monotonic() - started) * 1000, 1),
-            "open_mrs": state.open_mrs,
-            "open_branches": state.open_branches,
-            "writes_last_hour": state.writes_last_hour,
-        }
+        build_event(
+            channel="git",
+            correlation_id=cid,
+            method="push",
+            project=project,
+            decision=decision,
+            state=state,
+            started=started,
+            upstream_status=status,
+            refs=[f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in commands],
+        )
     )

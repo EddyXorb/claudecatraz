@@ -47,3 +47,16 @@ async def test_audit_tail_empty_when_log_missing(cfg, tmp_path):
     assert resp.status_code == 200
     assert resp.text == ""
     await ctx.upstream.aclose()
+
+
+async def test_viewer_serves_the_static_html_page(cfg):
+    # F7: _VIEWER_HTML now loads from warden/static/viewer.html (a package asset,
+    # not an inline string in routing code) — the endpoint must still serve it.
+    ctx = AppContext(cfg, Upstream(cfg), State(":memory:"), AuditLog("-"))
+    async with await _admin_client(ctx) as c:
+        resp = await c.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "Warden Audit Log" in resp.text
+    assert "<script>" in resp.text
+    await ctx.upstream.aclose()

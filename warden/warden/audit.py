@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .model import Decision, StateView
+
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
 # is dropped by construction.
 _ALLOWED_FIELDS = {
@@ -41,6 +43,43 @@ _ALLOWED_FIELDS = {
 
 def redact(entry: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in entry.items() if k in _ALLOWED_FIELDS}
+
+
+def build_event(
+    *,
+    channel: str,
+    correlation_id: str,
+    method: str,
+    project: str,
+    decision: Decision,
+    state: StateView,
+    started: float,
+    upstream_status: Optional[int],
+    **channel_fields: Any,
+) -> dict[str, Any]:
+    """Assemble one audit dict — the envelope shared by every channel (F6).
+
+    ``api_proxy`` and ``git_proxy`` each log the same shape (channel,
+    correlation id, method, project, decision/rule/reason, upstream status,
+    latency, quota snapshot); only the channel-specific fields differ (api:
+    ``path``/``kind``; git: ``refs``), passed in via ``channel_fields``. One
+    definition keeps the JSONL schema identical across callers.
+    """
+    return {
+        "channel": channel,
+        "correlation_id": correlation_id,
+        "method": method,
+        "project": project,
+        "decision": "allow" if decision.allow else "deny",
+        "rule": decision.rule,
+        "reason": decision.reason,
+        "upstream_status": upstream_status,
+        "latency_ms": round((time.monotonic() - started) * 1000, 1),
+        "open_mrs": state.open_mrs,
+        "open_branches": state.open_branches,
+        "writes_last_hour": state.writes_last_hour,
+        **channel_fields,
+    }
 
 
 class AuditLog:

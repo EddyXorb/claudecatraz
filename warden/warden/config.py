@@ -75,20 +75,18 @@ class Config:
         return self.api_url.removesuffix("/api/v4")
 
     def project_allowed(self, project: str) -> bool:
-        """Default-deny match against ``ALLOWED_PROJECTS`` (Q9).
+        """Default-deny match against ``ALLOWED_PROJECTS`` (Q9, A8, B4).
 
         A request may name the project by url-encoded path *or* by numeric id
-        (GitLab treats them interchangeably). Match either: the path by
-        exact/prefix, or the numeric id against the reconcile-resolved set.
+        (GitLab treats them interchangeably). Match either: the path exactly
+        (after normalisation), or the numeric id against the reconcile-resolved
+        set. No prefix/subpath match — the allowlist names concrete projects,
+        never group prefixes (README doctrine).
         """
         project = normalize_project(project)
         if project in self.allowed_project_ids:
             return True
-        for allowed in self.allowed_projects:
-            allowed = allowed.strip("/")
-            if project == allowed or project.startswith(allowed + "/"):
-                return True
-        return False
+        return any(project == allowed.strip("/") for allowed in self.allowed_projects)
 
 
 def _secret(env: Mapping[str, str], name: str) -> str:

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 
-from warden.audit import AuditLog, redact
+from warden.audit import _ALLOWED_FIELDS, AuditLog, build_event, redact
+from warden.model import Decision, StateView
 
 
 def test_redact_keeps_only_allowlisted_fields():
@@ -71,3 +72,77 @@ async def test_write_failure_is_swallowed_not_fatal(tmp_path, capsys, monkeypatc
     al.log({"rule": "R1", "decision": "allow"})
     await al.stop()  # would hang/raise if the failure crashed the task
     assert "audit write failed" in capsys.readouterr().err
+
+
+# --- build_event (F6): one record shape, shared by api_proxy and git_proxy ----
+
+
+def test_build_event_api_channel_has_exactly_the_expected_fields():
+    event = build_event(
+        channel="api",
+        correlation_id="cid-1",
+        method="POST",
+        project="group/proj",
+        decision=Decision(True, "R3", "ok"),
+        state=StateView(open_mrs=1, open_branches=2, writes_last_hour=3),
+        started=0.0,
+        upstream_status=201,
+        path="/projects/1/merge_requests",
+        kind="mr",
+    )
+    assert set(event) == {
+        "channel",
+        "correlation_id",
+        "method",
+        "path",
+        "project",
+        "decision",
+        "rule",
+        "reason",
+        "kind",
+        "upstream_status",
+        "latency_ms",
+        "open_mrs",
+        "open_branches",
+        "writes_last_hour",
+    }
+    assert set(event) <= _ALLOWED_FIELDS | {"ts"}  # every field survives redact()
+    assert event["channel"] == "api"
+    assert event["decision"] == "allow"
+    assert event["rule"] == "R3"
+    assert event["path"] == "/projects/1/merge_requests"
+    assert event["kind"] == "mr"
+
+
+def test_build_event_git_channel_has_exactly_the_expected_fields():
+    event = build_event(
+        channel="git",
+        correlation_id="cid-2",
+        method="push",
+        project="group/proj",
+        decision=Decision(False, "R2", "no"),
+        state=StateView(),
+        started=0.0,
+        upstream_status=None,
+        refs=["aaaaaaaa→bbbbbbbb refs/heads/claude/x"],
+    )
+    assert set(event) == {
+        "channel",
+        "correlation_id",
+        "method",
+        "project",
+        "decision",
+        "rule",
+        "reason",
+        "refs",
+        "upstream_status",
+        "latency_ms",
+        "open_mrs",
+        "open_branches",
+        "writes_last_hour",
+    }
+    assert set(event) <= _ALLOWED_FIELDS | {"ts"}  # every field survives redact()
+    assert event["channel"] == "git"
+    assert event["decision"] == "deny"
+    assert event["rule"] == "R2"
+    assert event["refs"] == ["aaaaaaaa→bbbbbbbb refs/heads/claude/x"]
