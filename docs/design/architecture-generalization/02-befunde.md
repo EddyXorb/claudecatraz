@@ -16,28 +16,33 @@ Read-Token durch (R1-Pass-through). Die tatsächliche Exfiltrations-/Lese-Grenze
 **Token-Scope**, nicht `allowed_projects` — im Widerspruch zur Doku („least privilege,
 Read-Oberfläche klein", §6.10) und zu M6.
 
-**Fix-Richtung — zweiteilig (präzisiert in Röst-Runde 2):** Ein naives „projektlose Pfade
-default-deny + winzige Allowlist" bricht den dokumentierten Betrieb: `AGENT.md` weist den
-Agenten explizit an, `GET /groups/<id>/projects` für die Projekt-Discovery zu nutzen — ein
-projektloser Read, der zugleich genau die Enumerations-Fläche ist. Die ehrliche Read-Allowlist
-wird also nicht winzig, und einige ihrer Einträge sind selbst Exfil-Vektoren. Deshalb:
+**Fix-Richtung (Maintainer-Entscheid nach Röst-Runde 2):** Die Schutzlinie ist **Inhalt,
+nicht Sichtbarkeit**. Projekt- und Gruppennamen (Metadaten) dürfen gelesen werden — die
+dokumentierte Discovery (`GET /groups/<id>/projects` in `AGENT.md`) bleibt uneingeschränkt.
+Was `allowed_projects` auf dem Read-Pfad schützt, ist **Repository-Inhalt**: Files/Blobs/
+Tree/Archive, Diffs, Wiki, Snippets, Commit-Inhalte. Daraus folgt eine eingebaute
+Read-Tabelle mit vier Kategorien:
 
-1. **Request-seitig** eine eingebaute Read-Endpoint-Tabelle mit Kategorien statt binärem
-   Gate: projekt-gebunden (Gate wie heute), global-harmlos (`/user`, `/version`),
-   listend (→ 2.), Rest default-deny.
-2. **Response-seitig** Projekt-Scoping auf den Listen-Endpoints (`/projects`,
-   `/groups/:id/projects`, Suche): Einträge außerhalb `allowed_projects` werden aus der
-   JSON-Antwort entfernt. Das erzwingt die Allowlist endlich auch auf dem Read-Pfad und
-   erhält den Discovery-Workflow — Sicherheit *bei* Anwenderfreundlichkeit.
-   Ehrliche Kosten: Listen-Responses müssen dafür gebuffert werden (Bruch mit dem
-   Streaming-Prinzip, begrenzt auf Listen-Endpoints), Paginierungs-Header müssen
-   mitkorrigiert werden, und die Filterung ist forge-spezifische Logik im jeweiligen Guard.
+1. **Projekt-gebundene Pfade** (`/projects/{id}/…`) → Projekt-Gate wie heute. Deckt den
+   Inhalt fremder Projekte bereits ab — `GET /projects/<fremd>/repository/files/…` ist
+   schon heute R6-denied.
+2. **Projektlose Metadaten-Endpoints** (`/projects`, `/groups/…`, `/users/…`, `/user`,
+   `/version`) → pass. Namen, Pfade, Beschreibungen sind erlaubt.
+3. **Projektlose inhaltsfähige Endpoints** → deny. Vor allem die globale und die
+   Gruppen-Suche mit `scope=blobs|commits|wiki_blobs|notes` (liefert Code-Inhalte über
+   *alle* sichtbaren Projekte!) sowie `/snippets`. Die projekt-gebundene Suchvariante
+   (`/projects/{id}/search`) bleibt und läuft durch Kategorie 1. Achtung: `scope` ist ein
+   Query-Parameter — F12 muss dafür mitgefixt sein (Query in die Entscheidung **und** ins
+   Forwarding, konsistent).
+4. **Unbekannt** → default-deny (A1); neue Metadaten-Endpoints werden bewusst freigeschaltet.
 
-Ergänzend als Defense-in-depth: ein **Read-Volumen-Budget** (M5-Erweiterung, §01) macht
-Massen-Exfiltration durch *erlaubte* Reads sichtbar und deckelbar. Das Ganze ist eine
-Invariante an der Vertrauensgrenze im Sinn von A1/A2 und gehört als **Migrationsschritt 1**
-umgesetzt (§06) — von Anfang an als (minimale) Read-Tabelle gebaut, die Schritt 4 nur
-erweitert, nicht ersetzt.
+Damit entfällt die in Röst-Runde 2 erwogene Response-seitige Projekt-Filterung samt ihres
+Buffering-Tradeoffs — Metadaten-Listen sind ja erlaubt, das Streaming-Prinzip bleibt
+unangetastet. Als Defense-in-depth bleibt das **Read-Volumen-Budget** (M5-Erweiterung, §01)
+sinnvoll: es macht auch Metadaten-Massen-Harvesting sichtbar. Das Ganze ist eine Invariante
+an der Vertrauensgrenze im Sinn von A1/A2 und gehört als **Migrationsschritt 1** umgesetzt
+(§06) — von Anfang an als (minimale) Read-Tabelle gebaut, die Schritt 4 nur erweitert,
+nicht ersetzt.
 
 ### B2 — Verbotene Capabilities sind nicht kanalübergreifend **[HOCH, latent]**
 

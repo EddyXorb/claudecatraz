@@ -126,3 +126,13 @@ Annahmen/Ablehnungen sind hier festgehalten, damit die Begründungen nicht verlo
   werden): bewusst nicht aufgenommen. Jede „ich weiß, was ich tue"-Variante stellt genau
   die Vertrauens-Verlagerung wieder her, die Runde 2 als Kernproblem identifiziert hat;
   der Katalog-PR ist klein genug, um der einzige Weg zu bleiben.
+
+### Maintainer-Entscheidungen (nach den Röst-Runden)
+
+- **Read-Scoping: Inhalt, nicht Sichtbarkeit.** Reads werden durchgesetzt, aber
+  Projekt-/Gruppennamen und Metadaten dürfen gelesen werden — geschützt ist
+  **Repository-Inhalt** (Code, Diffs, Wiki, Snippets) nicht explizit erlaubter Projekte.
+  Damit entfällt die in Runde 2 erwogene Response-seitige Projekt-Filterung samt
+  Buffering-Tradeoff; stattdessen kategorisierte Read-Tabelle mit Deny der projektlosen
+  inhaltsfähigen Endpoints (v.a. globale Blob-/Commit-Suche). Details: Befund B1,
+  Migrationsschritt 1.

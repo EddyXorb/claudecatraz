@@ -27,7 +27,8 @@ ausschließlich im git-Pfad (`check_ref`); die REST-Seite kennt es nicht (→ Be
 Konsequenz: Invarianten werden auf einem **normalisierten Intent** durchgesetzt
 (Capability-Ebene, §03), nicht pro Kanal nachgebaut. Ehrlicher Geltungsbereich (Röst-Runde
 2): Capabilities modellieren *Wirkungen*, also Write-artiges; Reads werden nicht auf
-Capabilities abgebildet, sondern von M1/M6 plus Response-Scoping (Befund B1) regiert. Und:
+Capabilities abgebildet, sondern vom Inhalts-Gate des Read-Pfads regiert (M1/M6, Befund B1:
+Metadaten frei, Repository-Inhalt nur aus erlaubten Projekten). Und:
 ein Kanal, der gar nicht modelliert ist, bleibt **komplett zu** — GitLabs GraphQL
 (`/api/graphql`) ist heute nur zufällig nicht geroutet und darf nie „aus Bequemlichkeit"
 durchgereicht werden, bevor er ein eigener Guard mit eigener Capability-Ableitung ist
@@ -98,7 +99,7 @@ nicht alle. Nach Röst-Runde 1 ehrlich zweigeteilt:
 | ---- | ------- | ---------------------- | ------------------------- |
 | **M0** | Mode-Gate: `off` \| `read-only` \| `read-write` pro Ressource | `GITLAB_MODE` (R0) | `DB_MODE` |
 | **M5** | Quoten + Rate-Limits, fail-safe bei ungeklärtem State (A9) | max MRs/Branches/Writes-pro-h (R5); als Erweiterung ein **Read-Volumen-Budget** (Bytes/h, distinct Projekte/h) gegen Massen-Exfiltration durch erlaubte Reads | Statements/h, max Rows pro Write |
-| **M6** | Credential- & Netz-Isolation + Ressourcen-Allowlist | kein Token im Agenten, `allowed_projects` (R6) — *für Reads erst nach dem B1-Fix wahr, siehe Befund B1* | kein DB-Credential im Agenten, `allowed_databases` |
+| **M6** | Credential- & Netz-Isolation + Ressourcen-Allowlist | kein Token im Agenten, `allowed_projects` (R6) — *für Reads gilt sie als **Inhalts**-Grenze (Metadaten sind frei) und erst nach dem B1-Fix, siehe Befund B1* | kein DB-Credential im Agenten, `allowed_databases` |
 | **MA** | Vollständiges Audit mit Regel-ID (A7) | JSONL-Audit | Statement-Log |
 
 ### B.2 Plattformabhängig (generalisiert nur, wo die Plattform mitspielt)

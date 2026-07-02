@@ -8,12 +8,15 @@ dann Nutzerwert und Refactorings. Jeder Schritt ist einzeln shipbar; die bestehe
 sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-workflow/`
 (die kanonische Design-Doku, deren W-/R-Referenzen im Code stehen) mit.
 
-1. **B1 fixen: Read-Pfad scopen** — als **minimale Read-Tabelle** gebaut (Kategorien:
-   projekt-gebunden / global-harmlos / listend / default-deny), die Schritt 4 nur
-   erweitert, nicht ersetzt (kein Rework, Röst-Runde 2). Dazu die Response-seitige
-   Projekt-Filterung der Listen-Endpoints (der `AGENT.md`-Discovery-Workflow muss
-   weiterlaufen) und B5: `/api/graphql` explizit 403 + Audit. Red-Team-Tests dazu
-   (`GET /projects` darf nur Allowlist-Projekte liefern; GraphQL muss 403 sein).
+1. **B1 fixen: Read-Pfad scopen** — Schutzlinie „Inhalt, nicht Sichtbarkeit"
+   (Maintainer-Entscheid): als **minimale Read-Tabelle** gebaut mit vier Kategorien
+   (projekt-gebunden → Gate wie heute; projektlose Metadaten → pass; projektlose
+   inhaltsfähige Endpoints wie globale/Gruppen-Blob- und Commit-Suche und `/snippets` →
+   deny; unbekannt → default-deny), die Schritt 4 nur erweitert, nicht ersetzt (kein
+   Rework, Röst-Runde 2). Beifang: F12 für den `scope`-Query-Parameter (Query konsistent
+   in Entscheidung **und** Forwarding) und B5: `/api/graphql` explizit 403 + Audit.
+   Red-Team-Tests dazu (`GET /search?scope=blobs` muss 403 sein;
+   `GET /groups/<id>/projects` muss funktionieren; GraphQL muss 403 sein).
 2. **Regel-Registry + Schema-Versionierung** — zentrale Regel-IDs inkl. reserviertem
    Kernel-Namespace `core.*` (fixt B3, Röst-R7), `schema_version` in Audit-JSONL und
    State-DB, Kompat-Fenster für Viewer/`observe`. Voraussetzung für claude→agent- und
