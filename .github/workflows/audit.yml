@@ -1,21 +1,27 @@
 name: audit
 
 # Scan resolved dependencies (runtime + dev) for known vulnerabilities via
-# pip-audit against the uv lockfile. Runs weekly so newly disclosed CVEs in
-# already-pinned packages surface even without a code change.
+# pip-audit against the warden uv lockfile (the package carrying the real
+# third-party runtime deps; the repo root deliberately does not version a
+# lockfile). Runs weekly so newly disclosed CVEs in already-pinned packages
+# surface even without a code change.
 on:
   push:
     paths:
-      - "uv.lock"
-      - "pyproject.toml"
+      - "warden/uv.lock"
+      - "warden/pyproject.toml"
       - ".github/workflows/audit.yml"
   pull_request:
     paths:
-      - "uv.lock"
-      - "pyproject.toml"
+      - "warden/uv.lock"
+      - "warden/pyproject.toml"
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: warden
 
 jobs:
   pip-audit:
