@@ -143,7 +143,7 @@ def e2e(tmp_path):
 
     # 2. warden in front, pointing at the upstream
     cfg = Config(
-        branch_prefix="claude/",
+        branch_prefixes=("claude/",),
         allowed_projects=("repo",),
         api_url=f"http://127.0.0.1:{backend_port}/api/v4",
         read_token="r",

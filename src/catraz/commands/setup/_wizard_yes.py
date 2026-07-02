@@ -4,7 +4,7 @@ from typing import Any
 
 from catraz.doctor import SECRETS
 from catraz.envfile import unset_env_keys
-from catraz.policy import set_toml_list, set_toml_scalar, validate_project
+from catraz.policy import remove_toml_key, set_toml_list, validate_project
 from catraz.ui import Out
 
 _VALID_GITLAB_MODES: tuple[str, ...] = ("off", "read-only", "read-write")
@@ -72,7 +72,11 @@ def _yes_apply_warden_policy(
         os.environ.get("WARDEN_BRANCH_PREFIX") or env.get("WARDEN_BRANCH_PREFIX", "")
     ).strip()
     if raw_prefix and warden_toml.exists():
-        set_toml_scalar(warden_toml, "branch_prefix", raw_prefix)
+        prefixes = [p.strip() for p in raw_prefix.split(",") if p.strip()]
+        set_toml_list(warden_toml, "branch_prefixes", prefixes)
+        # Retire the legacy scalar key so it can't coexist with the list we just
+        # wrote (Config aborts on both being set — one source of truth).
+        remove_toml_key(warden_toml, "branch_prefix")
 
     unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
 

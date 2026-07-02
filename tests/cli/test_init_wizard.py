@@ -7,6 +7,7 @@ Covers:
 - unset_env_keys unit test
 """
 import argparse
+import re
 import shutil
 import stat
 import types
@@ -18,6 +19,7 @@ from catraz.commands import setup
 from catraz.envfile import load_env, unset_env_keys
 from catraz.policy import (
     _read_toml_allowed_projects,
+    remove_toml_key,
     set_toml_list,
     set_toml_scalar,
 )
@@ -178,6 +180,18 @@ class TestYesModeReadOnly:
         env = load_env(root / ".catraz" / ".env")
         assert "WARDEN_ALLOWED_PROJECTS" not in env
 
+    def test_warden_branch_prefix_csv_written_as_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WARDEN_BRANCH_PREFIX with multiple CSV entries is written as a TOML list."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
+        monkeypatch.setenv("WARDEN_BRANCH_PREFIX", "claude/,bot/")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        toml = root / ".catraz" / "config" / "warden.toml"
+        text = toml.read_text()
+        assert re.search(r'branch_prefixes\s*=\s*\[\s*"claude/"\s*,\s*"bot/"\s*\]', text)
+        assert not re.search(r'^\s*branch_prefix\s*=', text, re.M)
+
 
 class TestYesModeReadWrite:
     """--yes with both tokens → GITLAB_MODE=read-write."""
@@ -231,6 +245,23 @@ class TestYesMigration:
         setup.cmd_init(root, _yes_args(), Out(color=False))
         env = load_env(env_path)
         assert "WARDEN_BRANCH_PREFIX" not in env
+
+    def test_legacy_toml_scalar_migrated_to_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A pre-existing legacy `branch_prefix = "..."` in warden.toml (from an older
+        catraz version) must not survive alongside a freshly written `branch_prefixes`
+        list — the Warden's Config aborts if both are set."""
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        toml = root / ".catraz" / "config" / "warden.toml"
+        # Simulate an upgrade: strip the shipped list form, add the old scalar form.
+        remove_toml_key(toml, "branch_prefixes")
+        set_toml_scalar(toml, "branch_prefix", "old/")
+        monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
+        monkeypatch.setenv("WARDEN_BRANCH_PREFIX", "new/")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        text = toml.read_text()
+        assert re.search(r'branch_prefixes\s*=\s*\[\s*"new/"\s*\]', text)
+        assert not re.search(r'^\s*branch_prefix\s*=', text, re.M)
 
 
 # ---------------------------------------------------------------------------
@@ -331,9 +362,12 @@ class TestInteractiveModeReadOnly:
         toml = root / ".catraz" / "config" / "warden.toml"
         assert _read_toml_allowed_projects(toml) == ["group/my-proj"]
 
-        # branch_prefix default
+        # branch_prefix default — written in the new list syntax, one entry
         text = toml.read_text()
-        assert '"claude/"' in text
+        assert 'branch_prefixes' in text
+        assert re.search(r'branch_prefixes\s*=\s*\[\s*"claude/"\s*\]', text)
+        # No legacy scalar key left behind alongside the list (Config aborts on both).
+        assert not re.search(r'^\s*branch_prefix\s*=', text, re.M)
 
     def test_write_token_not_clobbered_when_existing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """If write token file already has content, read-only mode must not overwrite it."""

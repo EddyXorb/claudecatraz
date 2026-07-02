@@ -22,6 +22,17 @@ def cfg() -> Config:
     )
 
 
+@pytest.fixture
+def multi_prefix_cfg() -> Config:
+    # M2: the branch namespace is the *union* of all configured prefixes.
+    return Config(
+        branch_prefixes=("claude/", "bot/"),
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+    )
+
+
 def _api(method, path, **fields) -> ProxyRequest:
     project = "group/proj" if "/projects/" in path else ""
     return ProxyRequest(channel="api", project=project, method=method, path=path, fields=fields)
@@ -80,6 +91,26 @@ def test_r3_pipeline_ref_prefix(cfg):
     assert decide(ok, StateView(), cfg).allow
     bad = _api("POST", "/projects/group%2Fproj/pipeline", ref="main")
     assert not decide(bad, StateView(), cfg).allow
+
+
+# --- M2: branch namespace is a list of prefixes (Maintainer-Entscheid) --------
+def test_r3_create_mr_with_second_prefix_allowed(multi_prefix_cfg):
+    """A source_branch under the *second* configured prefix (``bot/``) is allowed."""
+    d = decide(
+        _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="bot/x"),
+        StateView(),
+        multi_prefix_cfg,
+    )
+    assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
+
+
+def test_r2_create_mr_outside_all_prefixes_denied(multi_prefix_cfg):
+    d = decide(
+        _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="feature/x"),
+        StateView(),
+        multi_prefix_cfg,
+    )
+    assert not d.allow and d.rule == "R2"
 
 
 # --- R4 merge block ------------------------------------------------------------
@@ -147,6 +178,17 @@ def test_git_push_prefixed_branch_allowed(cfg):
 
 def test_git_push_wrong_prefix_denied(cfg):
     d = decide(_git((ZERO, SHA, "refs/heads/main")), StateView(), cfg)
+    assert not d.allow and d.rule == "R2"
+
+
+def test_git_push_second_prefix_allowed(multi_prefix_cfg):
+    """Push to a branch under the *second* configured prefix (``bot/``) is allowed."""
+    d = decide(_git((ZERO, SHA, "refs/heads/bot/feature")), StateView(), multi_prefix_cfg)
+    assert d.allow and d.token == TokenKind.WRITE
+
+
+def test_git_push_outside_all_prefixes_denied(multi_prefix_cfg):
+    d = decide(_git((ZERO, SHA, "refs/heads/other/feature")), StateView(), multi_prefix_cfg)
     assert not d.allow and d.rule == "R2"
 
 

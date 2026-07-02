@@ -32,16 +32,18 @@ by the Warden on every git push and API call:
 | -- | ---- | ----------- |
 | R0 | Mode gate — `GITLAB_MODE=off` denies all GitLab ops; `read-only` denies all writes | Warden checks the mode before any other rule and never sends a token upstream when the op is disabled |
 | R1 | Read anything in the work scope | Read token in the Warden, GET pass-through |
-| R2 | Push only to branches under the configured `branch_prefix` (default `claude/`) | Warden parses the git ref commands + GitLab push rules |
+| R2 | Push only to branches under a configured `branch_prefixes` entry (default `claude/`) | Warden parses the git ref commands + GitLab push rules |
 | R3 | MR/comment/CI only for your own branches | Warden API filter (ownership) + Developer role |
 | R4 | **Never merge** | Warden blocks merge endpoints (403) + protected branches |
 | R5 | Quotas (open MRs/branches, writes/h) | Warden state (SQLite, durable, fail-safe) |
 | R6 | No token in the agent, network isolation | `agent-net internal` + Warden as the sole trust boundary |
 
-> **The push prefix is configurable** — `claude/` is only the default. Set `branch_prefix` in
-> `.catraz/config/warden.toml` (or `WARDEN_BRANCH_PREFIX`) to any prefix you like; R2 then
-> enforces *that* one. It must be non-empty, so pushes are always confined to a namespace you
-> choose, never to arbitrary or protected branches.
+> **The push prefix is configurable — and can be a list.** `claude/` is only the default. Set
+> `branch_prefixes` in `.catraz/config/warden.toml` (or `WARDEN_BRANCH_PREFIX`, comma-separated)
+> to one or more prefixes; R2 then enforces the *union* of them. The legacy single-value form
+> `branch_prefix = "..."` still works (treated as a one-element list). The list must be
+> non-empty and no entry may be empty, so pushes are always confined to a namespace you choose,
+> never to arbitrary or protected branches.
 
 Two layers: the **Warden** (primary, code) and **GitLab-native** restrictions (backstop,
 zero-code). If the Warden goes down, the agent structurally has **no** route to gitlab.com
@@ -54,12 +56,12 @@ allowlist — anything not listed is default-denied (`warden/warden/api_endpoint
 
 | Method & path | What it does | Guard |
 | ------------- | ------------ | ----- |
-| `POST …/merge_requests` | open a merge request | source branch under `branch_prefix` (R2/R3) |
+| `POST …/merge_requests` | open a merge request | source branch under `branch_prefixes` (R2/R3) |
 | `POST …/merge_requests/{iid}/notes` | post a top-level MR comment | MR authored by the service account (R3) |
 | `POST …/merge_requests/{iid}/discussions` | start a discussion thread — incl. an **inline diff comment** on a file/line (pass a `position`) | MR authored by the service account (R3) |
 | `POST …/merge_requests/{iid}/discussions/{discussion_id}/notes` | **reply** to an existing discussion thread | MR authored by the service account (R3) |
 | `PUT …/merge_requests/{iid}` | edit the MR (title/description/labels, or close) | own MR (R3); `state_event=merge` blocked (R4) |
-| `POST …/pipeline` | trigger a CI pipeline | ref under `branch_prefix` (R3) |
+| `POST …/pipeline` | trigger a CI pipeline | ref under `branch_prefixes` (R3) |
 | `PUT …/merge_requests/{iid}/merge` | merge — **always 403** | never permitted (R4) |
 
 > Inline review comments (`discussions`) need the MR's `position` (`base_sha`/`head_sha`/
@@ -250,7 +252,7 @@ no value lives in both at once:
 | ----- | ----- | ---------- |
 | **`.catraz/secrets/`** (gitignored, 0600) | **Secrets** — one file each: `gitlab_read_token`, `gitlab_write_token`, (`anthropic_api_key`) — mounted as compose secrets | host only, per-service |
 | **`.catraz/.env`** (gitignored) | **Non-secret wiring** — `AUTH_MODE`, `GITLAB_URL`, `GITLAB_MODE`, base image, `DEV_UID`, `WARDEN_*` overrides | host only |
-| **`.catraz/config/warden.toml`** | **Non-secret policy** — branch prefix, R5 limits, allowed projects | mounted read-only into the Warden |
+| **`.catraz/config/warden.toml`** | **Non-secret policy** — branch prefixes, R5 limits, allowed projects | mounted read-only into the Warden |
 
 ```text
 # .catraz/secrets/ — one secret per file (mode 0600), never in .env
@@ -275,7 +277,7 @@ DEV_UID=1000                       # `id -u` on the host so bind mounts get the 
 > covers this. A **fine-grained** PAT does **not** — by default it lacks the
 > **`User: Read`** permission, so `GET /user` returns `403`, the Warden never learns its
 > service account, and **every comment and MR edit is denied R3** — even though MR
-> *creation* and `git push` still work (they only check the configured `branch_prefix`).
+> *creation* and `git push` still work (they only check the configured `branch_prefixes`).
 >
 > So for the write token, use **either**:
 > - a **classic** PAT with the `api` scope, **or**
@@ -286,7 +288,8 @@ DEV_UID=1000                       # `id -u` on the host so bind mounts get the 
 
 ```toml
 # .catraz/config/warden.toml — non-secret policy (the source of truth)
-branch_prefix       = "claude/"    # R2: only branches with this prefix are pushable
+branch_prefixes     = ["claude/"]  # R2: only branches under one of these prefixes are pushable
+# Legacy single-value form still works: branch_prefix = "claude/"
 max_open_mrs        = 5            # R5
 max_open_branches   = 10           # R5
 max_writes_per_hour = 60           # R5
@@ -294,8 +297,9 @@ allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 ```
 
 > **Precedence — env overrides the file.** For each policy setting there is an optional
-> `WARDEN_*` env var (`WARDEN_BRANCH_PREFIX`, `WARDEN_MAX_OPEN_MRS`,
-> `WARDEN_MAX_OPEN_BRANCHES`, `WARDEN_MAX_WRITES_PER_HOUR`, `WARDEN_ALLOWED_PROJECTS`).
+> `WARDEN_*` env var (`WARDEN_BRANCH_PREFIX` (comma-separated for more than one prefix),
+> `WARDEN_MAX_OPEN_MRS`, `WARDEN_MAX_OPEN_BRANCHES`, `WARDEN_MAX_WRITES_PER_HOUR`,
+> `WARDEN_ALLOWED_PROJECTS`).
 > Set one (non-empty) to **override** `warden.toml` for that single setting; leave it
 > empty/unset to use the file. So a value is read from exactly one place at a time —
 > the env var if present, otherwise the toml.

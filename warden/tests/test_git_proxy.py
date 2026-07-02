@@ -124,7 +124,7 @@ UPSTREAM = "https://gitlab.example"
 def _mode_client(mode: str) -> httpx.AsyncClient:
     """Build an ASGI test client for a warden with the given GITLAB_MODE."""
     cfg = Config(
-        branch_prefix="claude/",
+        branch_prefixes=("claude/",),
         allowed_projects=("group/proj",),
         api_url=f"{UPSTREAM}/api/v4",
         read_token="READ-TOKEN",

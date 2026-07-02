@@ -40,18 +40,22 @@ class EndpointKind(str, Enum):
 
 
 def field_has_prefix(field: str) -> Check:
-    """Factory: deny unless ``req.fields[field]`` carries ``cfg.branch_prefix`` (R2).
+    """Factory: deny unless ``req.fields[field]`` is in the branch namespace (R2).
 
     ``source_branch`` (MR creation) and ``ref`` (pipeline trigger) are the same
-    prefix check under a different field name — one parametrised predicate
-    instead of two near-identical functions.
+    namespace check under a different field name — one parametrised predicate
+    instead of two near-identical functions. The namespace test itself lives
+    in :meth:`Config.in_branch_namespace`, the single source of truth for the
+    ``branch_prefixes`` union — never a direct ``startswith`` here.
     """
 
     def check(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
         value = req.fields.get(field, "")
-        if value.startswith(cfg.branch_prefix):
+        if cfg.in_branch_namespace(value):
             return None
-        return Decision(False, "R2", f"{field} {value!r} without prefix {cfg.branch_prefix!r}")
+        return Decision(
+            False, "R2", f"{field} {value!r} outside allowed prefixes {cfg.branch_prefixes!r}"
+        )
 
     return check
 

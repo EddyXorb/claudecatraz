@@ -7,8 +7,8 @@ from catraz.envfile import load_env, unset_env_keys
 from catraz.policy import (
     _discover_gitlab_projects,
     _resolve_allowed_projects,
+    remove_toml_key,
     set_toml_list,
-    set_toml_scalar,
     validate_project,
 )
 from catraz.ui import Out
@@ -18,13 +18,22 @@ from ._wizard_yes import _VALID_GITLAB_MODES
 
 
 def _read_branch_prefix(env: dict[str, str], warden_toml: Path | None) -> str:
-    """Current branch_prefix: env override wins, else read from warden.toml."""
+    """Current (first) branch prefix, shown as the wizard's default.
+
+    env override wins (first CSV entry), else warden.toml — either the new list
+    form (``branch_prefixes = [...]``) or the legacy scalar (``branch_prefix =
+    "..."``); the wizard only ever prompts for one, but must read whichever form
+    is on disk so the default reflects reality.
+    """
     ov = env.get("WARDEN_BRANCH_PREFIX", "").strip()
     if ov:
-        return ov
+        return ov.split(",")[0].strip()
     if not warden_toml or not warden_toml.exists():
         return "claude/"
     text = warden_toml.read_text(encoding="utf-8")
+    m = re.search(r'branch_prefixes\s*=\s*\[\s*"([^"]*)"', text)
+    if m:
+        return m.group(1)
     m = re.search(r'branch_prefix\s*=\s*"([^"]*)"', text)
     return m.group(1) if m else "claude/"
 
@@ -179,7 +188,10 @@ def _prompt_branch_prefix(
     cur_prefix = _read_branch_prefix(env, warden_toml)
     prefix = out.ask("Branch prefix the agent may push to", cur_prefix or "claude/")
     if warden_toml.exists():
-        set_toml_scalar(warden_toml, "branch_prefix", prefix)
+        set_toml_list(warden_toml, "branch_prefixes", [prefix])
+        # Retire the legacy scalar key so it can't coexist with the list we just
+        # wrote (Config aborts on both being set — one source of truth).
+        remove_toml_key(warden_toml, "branch_prefix")
     unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
 
 

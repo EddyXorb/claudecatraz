@@ -81,7 +81,7 @@ class AppContext:
         mr = resp.json()
         source = mr.get("source_branch", "") or ""
         author_id = (mr.get("author") or {}).get("id")
-        ok = source.startswith(self.cfg.branch_prefix) and sa is not None and author_id == sa
+        ok = self.cfg.in_branch_namespace(source) and sa is not None and author_id == sa
         self._owner_cache[key] = (ok, self._clock() + self._owner_ttl)
         return ok
 
@@ -154,7 +154,7 @@ class AppContext:
         return [
             b["name"]
             for b in branches
-            if b.get("name", "").startswith(self.cfg.branch_prefix)
+            if self.cfg.in_branch_namespace(b.get("name", ""))
         ]
 
     async def _list_claude_mrs(self, pid: str, sa: Optional[int]) -> list[tuple[int, str]]:
@@ -165,5 +165,5 @@ class AppContext:
         return [
             (int(m["iid"]), m.get("state", "opened"))
             for m in mrs
-            if (m.get("source_branch", "") or "").startswith(self.cfg.branch_prefix)
+            if self.cfg.in_branch_namespace(m.get("source_branch", "") or "")
         ]

@@ -159,8 +159,8 @@ services:
         source: ${HOST_GITCONFIG:-/dev/null}
         target: /home/dev/.claude/.ro/.gitconfig
         read_only: true
-      # Non-secret warden policy (branch_prefix, allowed_projects, quotas), read-only.
-      # Lets the agent discover its ACTUAL limits — especially a custom branch_prefix —
+      # Non-secret warden policy (branch_prefixes, allowed_projects, quotas), read-only.
+      # Lets the agent discover its ACTUAL limits — especially custom branch_prefixes —
       # instead of assuming the claude/ default; AGENT.md points the agent here. This is
       # the very file the warden enforces from, so the agent's view can't drift from the
       # rules. The mount is read-only and purely advisory: the warden reads its own copy

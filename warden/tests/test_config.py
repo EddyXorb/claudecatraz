@@ -191,11 +191,61 @@ def test_non_integer_quota_aborts_startup():
 
 def test_empty_branch_prefix_aborts_startup(tmp_path):
     # An empty BRANCH_PREFIX env now means "fall back to the file", so an empty
-    # prefix can only come from the toml — and must still abort.
+    # prefix can only come from the toml (legacy scalar form) — and must still abort.
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefix = ""\n')
     with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
         from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_empty_branch_prefixes_list_aborts_startup(tmp_path):
+    """An empty ``branch_prefixes`` list is fail-closed: it must not mean "no filter"."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text("branch_prefixes = []\n")
+    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_branch_prefixes_list_with_empty_element_aborts_startup(tmp_path):
+    """A blank element (e.g. ``["claude/", ""]``) would allow every branch — reject it."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/", ""]\n')
+    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_branch_prefixes_and_legacy_branch_prefix_both_set_aborts(tmp_path):
+    """Two sources of truth for the same namespace (list + legacy scalar) is an error."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/"]\nbranch_prefix = "claude/"\n')
+    with pytest.raises(ConfigError, match="branch_prefixes.*branch_prefix|branch_prefix.*branch_prefixes"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_branch_prefixes_list_from_toml(tmp_path):
+    """A ``branch_prefixes`` list in warden.toml becomes the tuple as-is."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/", "bot/"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.branch_prefixes == ("claude/", "bot/")
+
+
+def test_legacy_branch_prefix_scalar_becomes_single_element_tuple(tmp_path):
+    """The legacy scalar ``branch_prefix = "..."`` form stays valid as a 1-element list."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefix = "claude/"\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.branch_prefixes == ("claude/",)
+
+
+def test_branch_prefix_env_csv_overrides_toml_list(tmp_path):
+    """BRANCH_PREFIX env accepts CSV for multiple prefixes, and wins over the file."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/"]\n')
+    cfg = from_env(
+        {**_MIN, "BRANCH_PREFIX": "claude/,bot/"}, strict=True, toml_path=str(toml)
+    )
+    assert cfg.branch_prefixes == ("claude/", "bot/")
 
 
 # --- toml source of truth + env override (one source per setting) -------------
@@ -212,7 +262,7 @@ def test_tunables_read_from_toml_when_env_absent(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env({"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w"}, toml_path=str(toml))
-    assert cfg.branch_prefix == "claude/"
+    assert cfg.branch_prefixes == ("claude/",)
     assert (cfg.max_open_mrs, cfg.max_open_branches, cfg.max_writes_per_hour) == (7, 3, 99)
     assert cfg.allowed_projects == ("group/a", "group/b")
 
@@ -230,7 +280,7 @@ def test_env_overrides_toml(tmp_path):
         },
         toml_path=str(toml),
     )
-    assert cfg.branch_prefix == "test/"            # env wins
+    assert cfg.branch_prefixes == ("test/",)        # env wins
     assert cfg.max_open_mrs == 1                    # env wins
     assert cfg.max_open_branches == 3              # not overridden → toml
     assert cfg.allowed_projects == ("group/x", "group/y")
@@ -244,7 +294,7 @@ def test_empty_env_falls_back_to_toml(tmp_path):
         {"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w", "BRANCH_PREFIX": "", "ALLOWED_PROJECTS": ""},
         toml_path=str(toml),
     )
-    assert cfg.branch_prefix == "claude/"
+    assert cfg.branch_prefixes == ("claude/",)
     assert cfg.allowed_projects == ("group/a", "group/b")
 
 

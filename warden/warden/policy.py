@@ -13,8 +13,9 @@ audit log, so the file is self-contained without re-reading the README:
                          ops denied.  Checked before all other rules.
   R1  Read pass-through  REST GET/HEAD/OPTIONS and git upload-pack/info-refs are
                          streamed upstream with the READ token.
-  R2  git write limits   push only to <branch_prefix> branches; no branch
-                         deletes; no tag pushes.
+  R2  git write limits   push only to branches under an allowed <branch_prefix>
+                         (the namespace is the union of ``branch_prefixes``); no
+                         branch deletes; no tag pushes.
   R3  API write filter   only allowlisted write endpoints, with ownership checks
                          (source_branch prefix; MR authored by the service acct).
   R4  Merge block        merging an MR is never permitted (incl. the
@@ -109,8 +110,10 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
     ref = cmd.ref
     if ref.startswith("refs/heads/"):
         ref = ref[len("refs/heads/") :]
-    if not ref.startswith(cfg.branch_prefix):  # R2
-        return Decision(False, "R2", f"branch {ref!r} without prefix {cfg.branch_prefix!r}")
+    if not cfg.in_branch_namespace(ref):  # R2
+        return Decision(
+            False, "R2", f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}"
+        )
     if cmd.is_delete:  # R2: deleting a branch is never allowed (Q3)
         return Decision(False, "R2", f"deleting branch {ref!r} is forbidden")
     if state.locked:  # §6.11 fail-safe

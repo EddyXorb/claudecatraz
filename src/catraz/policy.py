@@ -178,3 +178,21 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
     else:
         new_text = text.rstrip("\n") + f"\n{key} = {serialized}\n"
     path.write_text(new_text, encoding="utf-8")
+
+
+def remove_toml_key(path: Path, key: str) -> None:
+    """Delete a whole ``key = ...`` assignment line from a TOML file, if present.
+
+    Used to retire a superseded key when a wizard writes its replacement — e.g.
+    the legacy ``branch_prefix`` scalar once ``branch_prefixes`` is written —
+    so the two can never coexist and trip the Warden's "one source of truth"
+    ConfigError on next start. A no-op if the key is absent.
+    """
+    text = path.read_text(encoding="utf-8")
+    pat = re.compile(
+        rf'^\s*{re.escape(key)}\s*=\s*("[^"]*"|\[[^\]]*\])\s*(#.*)?\n?',
+        re.M,
+    )
+    new_text = pat.sub("", text)
+    if new_text != text:
+        path.write_text(new_text, encoding="utf-8")

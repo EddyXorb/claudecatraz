@@ -64,15 +64,16 @@ Your active rules are not hardcoded — they live in **`/etc/catraz/warden.toml`
 read-only for you; the Warden enforces this same file). **Read it** to learn your real
 limits before you push or open MRs:
 
-- **`branch_prefix`** — the prefix your branches **must** carry to be pushable (R2) and to
-  be allowed as an MR `source_branch` (R3). It defaults to `claude/`, **but it is
-  configurable** — a project may set e.g. `bot/` or `agent/`. The examples below use
-  `claude/`; substitute whatever `branch_prefix` your `warden.toml` actually specifies.
+- **`branch_prefixes`** — the list of prefixes your branches **must** carry (at least one) to
+  be pushable (R2) and to be allowed as an MR `source_branch` (R3). It defaults to
+  `["claude/"]`, **but it is configurable** — a project may set e.g. `["bot/", "agent/"]` (a
+  legacy single-value `branch_prefix = "..."` form may also appear). The examples below use
+  `claude/`; substitute whatever prefix your `warden.toml` actually specifies.
 - **`allowed_projects`** — the only projects you may touch at all (R6); anything else is denied.
 - **`max_open_mrs` / `max_open_branches` / `max_writes_per_hour`** — your quotas (R5).
 
 ```bash
-cat /etc/catraz/warden.toml        # your branch_prefix, allowed_projects and quotas
+cat /etc/catraz/warden.toml        # your branch_prefixes, allowed_projects and quotas
 ```
 
 ### GitLab runs through the Warden
@@ -175,7 +176,8 @@ proxy — no manual `--proxy` flag needed.
 
 ### Branch prefix
 
-All your own branches must start with the value set in WARDEN_BRANCH_PREFIX:
+All your own branches must start with one of the prefixes set in WARDEN_BRANCH_PREFIX
+(comma-separated if more than one is configured):
 
 ```bash
 git checkout -b WARDEN_BRANCH_PREFIX/my-feature
