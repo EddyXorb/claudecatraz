@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 # Dependency discipline (§6.7): keep the trust boundary small and pinned.
 dependencies = [
-    "starlette>=0.40,<0.50",
+    "starlette>=1.3.1,<2",
     "httpx>=0.27,<0.29",
     "uvicorn>=0.30,<0.40",
     "pytest-cov>=7.1.0",
@@ -14,8 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.24,<0.30",
+    "pytest>=9.0.3,<10",
+    "pytest-asyncio>=1.0,<2",
     "respx>=0.21,<0.23",
     "ruff>=0.9,<0.12",
     "mypy>=1.13,<2",
