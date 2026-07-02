@@ -13,7 +13,7 @@ from .app import create_admin_app, create_app
 from .audit import AuditLog
 from .config import ConfigError, from_env
 from .context import AppContext
-from .state import State
+from .state import SchemaError, State
 from .upstream import Upstream
 
 
@@ -73,7 +73,10 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except ConfigError as exc:
+    except (ConfigError, SchemaError) as exc:
+        # Both are fail-closed startup aborts (A9): bad config or a state DB
+        # this build cannot understand. Neither should ever surface as a
+        # traceback — a clean message and a non-zero exit is the contract.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

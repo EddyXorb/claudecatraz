@@ -30,10 +30,21 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
    in Entscheidung **und** Forwarding) und B5: `/api/graphql` explizit 403 + Audit.
    Red-Team-Tests dazu (`GET /search?scope=blobs` muss 403 sein;
    `GET /groups/<id>/projects` muss funktionieren; GraphQL muss 403 sein).
-2. **Regel-Registry + Schema-Versionierung** — zentrale Regel-IDs inkl. reserviertem
-   Kernel-Namespace `core.*` (fixt B3, Röst-R7), `schema_version` in Audit-JSONL und
-   State-DB, Kompat-Fenster für Viewer/`observe`. Voraussetzung für claude→agent- und
-   channel→guard-Renames (F11).
+2. ✅ **Regel-Registry + Schema-Versionierung** *(umgesetzt: `warden/rules.py`,
+   `audit.AUDIT_SCHEMA_VERSION`, `state.py` Migrations-Runner)* — zentrale Regel-IDs
+   (R0–R6, je einer Meta-Regel M0–M6 zugeordnet) inkl. reserviertem Kernel-Namespace
+   `core.*` (`rules.qualify`, vorbereitet, noch nicht im Log-Output aktiv — der bleibt
+   unqualifiziert bis Schritt 6). Fixt B3: Tag-Push und Branch-Delete (`policy.check_ref`)
+   loggen jetzt R4 ("irreversible Verben: niemals", M4) statt R2 — eine audit-sichtbare
+   Änderung, deshalb an die neue Schema-Versionierung gekoppelt: Audit-JSONL trägt ein
+   `schema`-Feld (Version 2 = dieser Schritt, Version 1 = das alte, feldlose Format), die
+   State-DB trägt ihre Version in `PRAGMA user_version` (Begründung: kein Bootstrap-Problem,
+   nicht mit der bestehenden `meta`-Tabelle für Anwendungszustand vermischt) plus einem
+   geordneten Migrations-Runner (frische DB → aktuelle Version; bestehende unversionierte
+   DB → ohne Datenverlust angehoben; zu neue Version → harter Fehler, `state.SchemaError`,
+   fail-closed). Viewer und `catraz observe` bleiben kompatibel mit Zeilen ohne `schema`-Feld
+   (Kompat-Fenster, verifiziert + Viewer zeigt „legacy" für Alt-Zeilen). Voraussetzung für
+   claude→agent- und channel→guard-Renames (F11, Schritt 6).
 3. **Capability-Invarianten-Ebene** (§03.4) — fixt B2 kanalübergreifend für alle
    code-bekannten Endpoints; klein, pur, golden-getestet. Voraussetzung für Schritt 4.
 4. **Endpoint-Katalog + Check-Registry + Aktivierungs-Config** (§04.1–04.3) — der

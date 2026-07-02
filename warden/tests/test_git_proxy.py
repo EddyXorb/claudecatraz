@@ -85,10 +85,11 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
 
 
 async def test_push_delete_rejected(client, respx_router):
+    # B3 fix: branch delete is an irreversible verb (M4) — reported as R4, not R2.
     body = make_push([(SHA1, ZERO, "refs/heads/claude/feature")])
     resp = await client.post(RECV, content=body)
     assert b"ng refs/heads/claude/feature" in resp.content
-    assert b"warden: R2" in resp.content
+    assert b"warden: R4" in resp.content
 
 
 async def test_advertise_denied_for_project_outside_allowlist(client, respx_router):

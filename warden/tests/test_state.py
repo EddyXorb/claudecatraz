@@ -11,7 +11,13 @@ import sqlite3
 
 import pytest
 
-from warden.state import WINDOW_SECONDS, State
+from warden.state import (
+    BASE_SCHEMA_VERSION,
+    CURRENT_SCHEMA_VERSION,
+    WINDOW_SECONDS,
+    SchemaError,
+    State,
+)
 
 
 def _clocked(start=1000.0):
@@ -99,3 +105,79 @@ def test_view_reflects_all_counters_once_reconciled():
     st.record_write("git", "push", "claude/a")
     v = st.view()
     assert (v.open_branches, v.open_mrs, v.writes_last_hour, v.locked) == (1, 1, 1, False)
+
+
+# --- schema versioning (§06-migration.md Schritt 2, F11 precondition) ----------
+
+
+def test_fresh_db_is_created_at_current_schema_version():
+    st = State(":memory:")
+    assert st.schema_version() == CURRENT_SCHEMA_VERSION
+
+
+def test_migrations_span_exactly_base_to_current():
+    from warden.state import MIGRATIONS
+
+    versions = [m.version for m in MIGRATIONS]
+    assert versions == sorted(versions), "migrations must be listed in order"
+    assert versions[0] == BASE_SCHEMA_VERSION + 1
+    assert versions[-1] == CURRENT_SCHEMA_VERSION
+
+
+def test_legacy_unversioned_db_is_migrated_without_data_loss(tmp_path):
+    """A pre-existing DB (the old, unversioned shape: tables present, no
+    ``user_version`` marker) is lifted to :data:`CURRENT_SCHEMA_VERSION` in
+    place — no table recreated from scratch, no row dropped."""
+    path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(str(path))
+    raw.executescript(
+        """
+        CREATE TABLE writes (
+          id INTEGER PRIMARY KEY, ts REAL NOT NULL,
+          channel TEXT NOT NULL, kind TEXT NOT NULL, ref_or_iid TEXT
+        );
+        CREATE TABLE claude_branches (project TEXT, ref TEXT, created REAL,
+                                       PRIMARY KEY (project, ref));
+        CREATE TABLE claude_mrs (project TEXT, iid INTEGER, state TEXT, created REAL,
+                                  PRIMARY KEY (project, iid));
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        """
+    )
+    raw.execute(
+        "INSERT INTO claude_branches (project, ref, created) VALUES (?, ?, ?)",
+        ("group/proj", "claude/legacy", 1000.0),
+    )
+    raw.execute("INSERT INTO meta (key, value) VALUES ('last_reconcile', '1000.0')")
+    raw.commit()
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == 0  # sanity: truly unversioned
+    raw.close()
+
+    st = State(str(path))
+    assert st.schema_version() == CURRENT_SCHEMA_VERSION
+    assert st.open_branches() == 1  # the pre-existing row survived the lift
+    assert st.is_reconciled() is True  # so did the reconcile marker
+    st.close()
+
+
+def test_future_schema_version_fails_closed(tmp_path):
+    """An unrecognised (too new) schema version must abort, never run anyway (A9)."""
+    path = tmp_path / "future.db"
+    raw = sqlite3.connect(str(path))
+    raw.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION + 1}")
+    raw.commit()
+    raw.close()
+
+    with pytest.raises(SchemaError):
+        State(str(path))
+
+
+def test_reopening_a_current_db_is_idempotent(tmp_path):
+    path = tmp_path / "state.db"
+    st1 = State(str(path))
+    st1.mark_reconciled()
+    st1.close()
+
+    st2 = State(str(path))
+    assert st2.schema_version() == CURRENT_SCHEMA_VERSION
+    assert st2.is_reconciled() is True  # data from the first open survived reopening
+    st2.close()

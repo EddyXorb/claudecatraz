@@ -22,6 +22,7 @@ from .errors import deny_json, git_reject_response
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .pktline import RefCommand, capabilities, parse_commands, read_until_flush
 from .policy import check_ref, decide, project_gate
+from .rules import R0
 from .upstream import stream_upstream
 
 
@@ -52,7 +53,7 @@ async def advertise(request: Request) -> Response:
 
     # R0: deny all git ops when GitLab is intentionally disabled (off mode).
     if not ctx.cfg.gitlab_enabled:
-        return deny_json(Decision(False, "R0", "GitLab disabled (GITLAB_MODE=off)"))
+        return deny_json(Decision(False, R0, "GitLab disabled (GITLAB_MODE=off)"))
 
     denied = project_gate(project, ctx.cfg)
     if denied is not None:
@@ -62,7 +63,7 @@ async def advertise(request: Request) -> Response:
     # be sent upstream even for the info/refs phase of git-receive-pack.
     if _service_token(service) == TokenKind.WRITE and not ctx.cfg.writes_enabled:
         return deny_json(
-            Decision(False, "R0", f"writes disabled (GITLAB_MODE={ctx.cfg.gitlab_mode})")
+            Decision(False, R0, f"writes disabled (GITLAB_MODE={ctx.cfg.gitlab_mode})")
         )
 
     resp = await ctx.upstream.git_get(
@@ -91,7 +92,7 @@ async def upload_pack(request: Request) -> Response:
 
     # R0: deny all git ops when GitLab is intentionally disabled (off mode).
     if not ctx.cfg.gitlab_enabled:
-        return deny_json(Decision(False, "R0", "GitLab disabled (GITLAB_MODE=off)"))
+        return deny_json(Decision(False, R0, "GitLab disabled (GITLAB_MODE=off)"))
 
     denied = project_gate(project, ctx.cfg)
     if denied is not None:

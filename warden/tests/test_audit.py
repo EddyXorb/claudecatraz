@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from warden.audit import _ALLOWED_FIELDS, AuditLog, build_event, redact
+from warden.audit import _ALLOWED_FIELDS, AUDIT_SCHEMA_VERSION, AuditLog, build_event, redact
 from warden.model import Decision, StateView
 
 
@@ -91,6 +91,7 @@ def test_build_event_api_channel_has_exactly_the_expected_fields():
         kind="mr",
     )
     assert set(event) == {
+        "schema",
         "channel",
         "correlation_id",
         "method",
@@ -107,6 +108,7 @@ def test_build_event_api_channel_has_exactly_the_expected_fields():
         "writes_last_hour",
     }
     assert set(event) <= _ALLOWED_FIELDS | {"ts"}  # every field survives redact()
+    assert event["schema"] == AUDIT_SCHEMA_VERSION
     assert event["channel"] == "api"
     assert event["decision"] == "allow"
     assert event["rule"] == "R3"
@@ -127,6 +129,7 @@ def test_build_event_git_channel_has_exactly_the_expected_fields():
         refs=["aaaaaaaa→bbbbbbbb refs/heads/claude/x"],
     )
     assert set(event) == {
+        "schema",
         "channel",
         "correlation_id",
         "method",
@@ -142,6 +145,7 @@ def test_build_event_git_channel_has_exactly_the_expected_fields():
         "writes_last_hour",
     }
     assert set(event) <= _ALLOWED_FIELDS | {"ts"}  # every field survives redact()
+    assert event["schema"] == AUDIT_SCHEMA_VERSION
     assert event["channel"] == "git"
     assert event["decision"] == "deny"
     assert event["rule"] == "R2"

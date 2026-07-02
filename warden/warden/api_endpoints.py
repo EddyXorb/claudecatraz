@@ -21,6 +21,7 @@ from typing import Callable, Optional
 from .config import Config
 from .model import Decision, ProxyRequest, StateView
 from .path_template import compile_template
+from .rules import R2, R3, R4
 
 # A check inspects an already-parsed request and returns a deny Decision, or
 # None if the request passes (same shape as policy.project_gate / quota checks).
@@ -55,7 +56,7 @@ def field_has_prefix(field: str) -> Check:
         if cfg.in_branch_namespace(value):
             return None
         return Decision(
-            False, "R2", f"{field} {value!r} outside allowed prefixes {cfg.branch_prefixes!r}"
+            False, R2, f"{field} {value!r} outside allowed prefixes {cfg.branch_prefixes!r}"
         )
 
     return check
@@ -65,18 +66,18 @@ def mr_owned_by_claude(req: ProxyRequest, state: StateView, cfg: Config) -> Opti
     if req.mr_owner_ok is True:
         return None
     if req.mr_owner_ok is None:
-        return Decision(False, "R3", "MR ownership could not be verified")
-    return Decision(False, "R3", "MR not owned by the service account")
+        return Decision(False, R3, "MR ownership could not be verified")
+    return Decision(False, R3, "MR not owned by the service account")
 
 
 def not_merge_intent(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
     if req.fields.get("state_event") == "merge":
-        return Decision(False, "R4", "state_event=merge is a merge alias")
+        return Decision(False, R4, "state_event=merge is a merge alias")
     return None
 
 
 def always_deny(req: ProxyRequest, state: StateView, cfg: Config) -> Optional[Decision]:
-    return Decision(False, "R4", "merge is never permitted")
+    return Decision(False, R4, "merge is never permitted")
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
     # Merge an MR into its target branch. ALWAYS forbidden (R4) — the agent may
     # never merge. Listed first so no later, looser row can ever shadow it.
     WriteEndpoint(
-        "PUT", "/projects/{id}/merge_requests/{iid}/merge", (always_deny,), "R4", EndpointKind.MERGE
+        "PUT", "/projects/{id}/merge_requests/{iid}/merge", (always_deny,), R4, EndpointKind.MERGE
     ),
     # Open a new merge request. Allowed only when its source_branch carries the
     # claude/ prefix (R2/R3) — the agent can only propose its own branches.
@@ -105,7 +106,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "POST",
         "/projects/{id}/merge_requests",
         (field_has_prefix("source_branch"),),
-        "R3",
+        R3,
         EndpointKind.MR,
     ),
     # Post a top-level comment ("note") on an MR. Allowed only on an MR the
@@ -114,7 +115,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "POST",
         "/projects/{id}/merge_requests/{iid}/notes",
         (mr_owned_by_claude,),
-        "R3",
+        R3,
         EndpointKind.NOTE,
     ),
     # Start a new discussion thread on an MR — including an *inline diff comment*
@@ -124,7 +125,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "POST",
         "/projects/{id}/merge_requests/{iid}/discussions",
         (mr_owned_by_claude,),
-        "R3",
+        R3,
         EndpointKind.NOTE,
     ),
     # Reply to an existing discussion thread on an MR (add a note under a given
@@ -134,7 +135,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "POST",
         "/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes",
         (mr_owned_by_claude,),
-        "R3",
+        R3,
         EndpointKind.NOTE,
     ),
     # Edit an MR — change title/description/labels, or close it (state_event).
@@ -144,7 +145,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "PUT",
         "/projects/{id}/merge_requests/{iid}",
         (mr_owned_by_claude, not_merge_intent),
-        "R3",
+        R3,
         EndpointKind.MR_UPDATE,
     ),
     # Trigger a CI pipeline. Allowed only for a ref carrying the claude/ prefix
@@ -153,7 +154,7 @@ WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (
         "POST",
         "/projects/{id}/pipeline",
         (field_has_prefix("ref"),),
-        "R3",
+        R3,
         EndpointKind.PIPELINE,
     ),
 )

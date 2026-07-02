@@ -24,6 +24,7 @@ from .context import AppContext
 from .errors import deny_json
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .policy import decide
+from .rules import R6
 from .upstream import stream_upstream
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
@@ -223,7 +224,7 @@ async def deny_graphql(request: Request) -> Response:
     ctx: AppContext = request.app.state.ctx
     correlation_id = str(uuid.uuid4())
     started = time.monotonic()
-    decision = Decision(False, "R6", "GraphQL is not permitted — unmodelled channel")
+    decision = Decision(False, R6, "GraphQL is not permitted — unmodelled channel")
     state = ctx.state.view()
     ctx.audit.log(
         build_event(

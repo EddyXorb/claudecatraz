@@ -33,7 +33,7 @@ class Channel(str, Enum):
 @dataclass(frozen=True)
 class Decision:
     allow: bool
-    rule: str  # "R1".."R6" — for the audit log
+    rule: str  # bare rule id ("R1".."R6") — sourced from warden.rules, for the audit log
     reason: str
     token: TokenKind = TokenKind.NONE  # which upstream token, if allow
 

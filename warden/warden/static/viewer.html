@@ -26,6 +26,8 @@ td{padding:4px 8px;vertical-align:top}
 .path{word-break:break-all;max-width:280px;color:#9cdcfe}
 .proj{color:#ce9178}
 .rsn{color:#aaa;max-width:220px;word-break:break-word}
+.sch{color:#666;text-align:center}
+.sch.legacy{font-style:italic}
 #err{color:#f48771;padding:8px 16px}
 </style>
 </head>
@@ -41,7 +43,7 @@ td{padding:4px 8px;vertical-align:top}
 </div>
 <div id="err"></div>
 <table>
-<thead><tr><th>Time</th><th>Channel</th><th>Method</th><th>Decision</th><th>Rule</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
+<thead><tr><th>Time</th><th>Schema</th><th>Channel</th><th>Method</th><th>Decision</th><th>Rule</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
 <tbody id="tb"></tbody>
 </table>
 <script>
@@ -77,7 +79,12 @@ function render(){
     const cls=r.decision==='deny'&&ru==='R4'?'r4':r.decision==='deny'&&ru==='R5'?'r5':'';
     const tr=document.createElement('tr');
     if(cls)tr.className=cls;
-    tr.innerHTML=`<td class="ts">${fmt(r.ts)}</td><td>${esc(r.channel)}</td><td>${esc(r.method)}</td>`+
+    // Compat window (§06-migration.md Schritt 2): pre-schema lines (v1) carry no
+    // `schema` field at all — shown as "legacy" rather than blank/broken.
+    const schemaCell=r.schema!=null?`v${esc(r.schema)}`:'legacy';
+    const schemaCls=r.schema!=null?'sch':'sch legacy';
+    tr.innerHTML=`<td class="ts">${fmt(r.ts)}</td><td class="${schemaCls}">${schemaCell}</td>`+
+      `<td>${esc(r.channel)}</td><td>${esc(r.method)}</td>`+
       `<td class="${r.decision==='deny'?'deny':'allow'}">${esc(r.decision)}</td>`+
       `<td class="rule">${esc(r.rule)}</td><td class="proj">${esc(r.project)}</td>`+
       `<td class="path">${esc(r.path)}</td><td class="rsn">${esc(r.reason)}</td>`+

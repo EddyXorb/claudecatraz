@@ -30,6 +30,7 @@ from typing import Callable, Optional
 
 from .model import Decision, ProxyRequest, TokenKind
 from .path_template import compile_template
+from .rules import R1, R6
 
 # A read-table row decides outright — unlike api_endpoints.Check (None ⇒
 # "still passing"), a read row must always return the terminal Decision: the
@@ -48,13 +49,13 @@ _METADATA_SEARCH_SCOPES = frozenset({"projects", "issues", "merge_requests", "mi
 
 def _allow_metadata(req: ProxyRequest) -> Decision:
     """Category 2 (B1): projectless names/metadata — always readable."""
-    return Decision(True, "R1", "read pass-through (projectless metadata)", TokenKind.READ)
+    return Decision(True, R1, "read pass-through (projectless metadata)", TokenKind.READ)
 
 
 def _deny_snippets(req: ProxyRequest) -> Decision:
     """Category 3 (B1): snippets are repository content with no project scope."""
     return Decision(
-        False, "R6", f"projectless snippet content is not permitted: {req.method} {req.path}"
+        False, R6, f"projectless snippet content is not permitted: {req.method} {req.path}"
     )
 
 
@@ -68,10 +69,10 @@ def _search_scope_gate(req: ProxyRequest) -> Decision:
     """
     scope = req.fields.get("scope")
     if scope in _METADATA_SEARCH_SCOPES:
-        return Decision(True, "R1", f"read pass-through (search scope={scope!r})", TokenKind.READ)
+        return Decision(True, R1, f"read pass-through (search scope={scope!r})", TokenKind.READ)
     return Decision(
         False,
-        "R6",
+        R6,
         f"projectless search with scope {scope!r} may return repository content: "
         f"{req.method} {req.path}",
     )

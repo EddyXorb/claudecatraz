@@ -14,14 +14,24 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Final, Optional
 
 from .model import Decision, StateView
+
+# Audit-JSONL schema version (§06-migration.md Schritt 2, F11 precondition).
+# 1 = the historical, unversioned format (no `schema` field at all — every
+#     line written before this step). 2 = this step: adds the `schema` field
+#     and the B3 rename of tag-push/branch-delete from R2 to R4 (an
+#     audit-visible change, which is exactly why it is gated on a schema bump).
+# A reader (viewer, `catraz observe`) must keep accepting *both*: a missing
+# `schema` field means version 1, by construction (compat window, §06.1).
+AUDIT_SCHEMA_VERSION: Final[int] = 2
 
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
 # is dropped by construction.
 _ALLOWED_FIELDS = {
     "ts",
+    "schema",
     "channel",
     "correlation_id",
     "method",
@@ -64,8 +74,14 @@ def build_event(
     latency, quota snapshot); only the channel-specific fields differ (api:
     ``path``/``kind``; git: ``refs``), passed in via ``channel_fields``. One
     definition keeps the JSONL schema identical across callers.
+
+    Every event stamps :data:`AUDIT_SCHEMA_VERSION` — the compat marker a
+    reader (viewer, ``catraz observe``) can use to tell this shape apart from
+    the historical, unversioned lines that predate it (§06-migration.md
+    Schritt 2).
     """
     return {
+        "schema": AUDIT_SCHEMA_VERSION,
         "channel": channel,
         "correlation_id": correlation_id,
         "method": method,

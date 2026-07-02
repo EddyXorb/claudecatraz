@@ -22,12 +22,14 @@ audit log, so the file is self-contained without re-reading the README:
                          with a content `scope`, `/snippets`) is denied, and an
                          unlisted projectless path is denied by default (R6).
   R2  git write limits   push only to branches under an allowed <branch_prefix>
-                         (the namespace is the union of ``branch_prefixes``); no
-                         branch deletes; no tag pushes.
+                         (the namespace is the union of ``branch_prefixes``).
   R3  API write filter   only allowlisted write endpoints, with ownership checks
                          (source_branch prefix; MR authored by the service acct).
-  R4  Merge block        merging an MR is never permitted (incl. the
-                         state_event=merge alias).
+  R4  Irreversible verbs merging an MR (incl. the state_event=merge alias),
+                         pushing a tag, or deleting a branch is never permitted
+                         (B3: tag push / branch delete used to log as R2 — they
+                         are "never" capabilities like merge, not namespace
+                         checks, see ``rules.R4``).
   R5  Quota & rate       max open branches/MRs, max writes/hour; a locked
                          (unreconciled) state denies (fail-safe, §6.11).
   R6  Project boundary   the project must be in ALLOWED_PROJECTS; the agent
@@ -35,6 +37,9 @@ audit log, so the file is self-contained without re-reading the README:
                          projectless-read denials above (content-capable or
                          unlisted): both are, at bottom, "no allowlisted
                          project backs this read".
+
+Rule ids referenced here are :mod:`rules` constants (B3/F5) — never bare
+string literals — so every id in this file traces back to the one registry.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ from .config import Config
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .pktline import RefCommand
 from .read_endpoints import match_read
+from .rules import R0, R1, R2, R3, R4, R5, R6
 
 
 def project_gate(project: str, cfg: Config) -> Optional[Decision]:
@@ -58,7 +64,7 @@ def project_gate(project: str, cfg: Config) -> Optional[Decision]:
     routes without a project id in the path are gated elsewhere.
     """
     if project and not cfg.project_allowed(project):
-        return Decision(False, "R6", f"project {project!r} not in allowlist")
+        return Decision(False, R6, f"project {project!r} not in allowlist")
     return None
 
 
@@ -66,7 +72,7 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     """Default-deny. Every allow path is explicit (W5)."""
     # R0: deny all ops when GitLab is intentionally disabled.
     if not cfg.gitlab_enabled:
-        return Decision(False, "R0", "GitLab disabled (GITLAB_MODE=off)")
+        return Decision(False, R0, "GitLab disabled (GITLAB_MODE=off)")
 
     if req.channel == Channel.GIT:
         # git always targets a concrete project — it must be allowlisted (R6).
@@ -81,11 +87,11 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
             return denied
         d = _decide_api(req, state, cfg)
     else:
-        return Decision(False, "R6", f"unknown channel {req.channel!r}")
+        return Decision(False, R6, f"unknown channel {req.channel!r}")
 
     # R0: deny write operations when writes are not enabled (read-only mode).
     if d.allow and d.token == TokenKind.WRITE and not cfg.writes_enabled:
-        return Decision(False, "R0", f"writes disabled (GITLAB_MODE={cfg.gitlab_mode})")
+        return Decision(False, R0, f"writes disabled (GITLAB_MODE={cfg.gitlab_mode})")
 
     return d
 
@@ -98,7 +104,7 @@ def _decide_git(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     other, so N creates against ``max_open_branches - 1`` must reject.
     """
     if not req.ref_commands:
-        return Decision(False, "R2", "no ref commands in push")
+        return Decision(False, R2, "no ref commands in push")
     pending_branches = 0
     pending_writes = 0
     for cmd in req.ref_commands:
@@ -113,28 +119,29 @@ def _decide_git(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
         pending_writes += 1
         if cmd.is_create:
             pending_branches += 1
-    return Decision(True, "R2", "ok", TokenKind.WRITE)
+    return Decision(True, R2, "ok", TokenKind.WRITE)
 
 
 def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
     if cmd.ref.startswith("refs/tags/"):  # tags are never claude/* branches
-        return Decision(False, "R2", "tag pushes are not permitted")
+        # B3 fix: an irreversible verb ("never" capability, M4) — R4, not R2.
+        return Decision(False, R4, "tag pushes are not permitted")
     ref = cmd.ref
     if ref.startswith("refs/heads/"):
         ref = ref[len("refs/heads/") :]
     if not cfg.in_branch_namespace(ref):  # R2
         return Decision(
-            False, "R2", f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}"
+            False, R2, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}"
         )
-    if cmd.is_delete:  # R2: deleting a branch is never allowed (Q3)
-        return Decision(False, "R2", f"deleting branch {ref!r} is forbidden")
+    if cmd.is_delete:  # B3 fix: irreversible verb (M4) — R4, not R2 (Q3).
+        return Decision(False, R4, f"deleting branch {ref!r} is forbidden")
     if state.locked:  # §6.11 fail-safe
-        return Decision(False, "R5", "state locked (fail-safe) — reconcile pending")
+        return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if cmd.is_create and state.open_branches >= cfg.max_open_branches:  # R5
-        return Decision(False, "R5", f"max open branches reached ({cfg.max_open_branches})")
+        return Decision(False, R5, f"max open branches reached ({cfg.max_open_branches})")
     if state.writes_last_hour >= cfg.max_writes_per_hour:  # R5
-        return Decision(False, "R5", f"rate limit reached ({cfg.max_writes_per_hour}/h)")
-    return Decision(True, "R2", "ok", TokenKind.WRITE)
+        return Decision(False, R5, f"rate limit reached ({cfg.max_writes_per_hour}/h)")
+    return Decision(True, R2, "ok", TokenKind.WRITE)
 
 
 def _decide_read(req: ProxyRequest) -> Decision:
@@ -149,11 +156,11 @@ def _decide_read(req: ProxyRequest) -> Decision:
     metadata passes (R1), content-capable or unlisted paths are denied (R6).
     """
     if req.project:
-        return Decision(True, "R1", "read pass-through", TokenKind.READ)
+        return Decision(True, R1, "read pass-through", TokenKind.READ)
     ep = match_read(req.path)
     if ep is None:
         return Decision(
-            False, "R6", f"projectless read endpoint not in allowlist: {req.method} {req.path}"
+            False, R6, f"projectless read endpoint not in allowlist: {req.method} {req.path}"
         )
     return ep.decide(req)
 
@@ -166,7 +173,7 @@ def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     # Write methods: endpoint must be in the allowlist (default-deny otherwise).
     ep = req.endpoint or match_endpoint(req.method, req.path)
     if ep is None:
-        return Decision(False, "R3", f"write endpoint not in allowlist: {req.method} {req.path}")
+        return Decision(False, R3, f"write endpoint not in allowlist: {req.method} {req.path}")
 
     for check in ep.checks:
         denied = check(req, state, cfg)
@@ -183,9 +190,9 @@ def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
 
 def _quota_check(ep: WriteEndpoint, state: StateView, cfg: Config) -> Optional[Decision]:
     if state.locked:  # §6.11 fail-safe: never "empty = free"
-        return Decision(False, "R5", "state locked (fail-safe) — reconcile pending")
+        return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if state.writes_last_hour >= cfg.max_writes_per_hour:
-        return Decision(False, "R5", f"rate limit reached ({cfg.max_writes_per_hour}/h)")
+        return Decision(False, R5, f"rate limit reached ({cfg.max_writes_per_hour}/h)")
     if ep.kind == EndpointKind.MR and state.open_mrs >= cfg.max_open_mrs:
-        return Decision(False, "R5", f"max open MRs reached ({cfg.max_open_mrs})")
+        return Decision(False, R5, f"max open MRs reached ({cfg.max_open_mrs})")
     return None

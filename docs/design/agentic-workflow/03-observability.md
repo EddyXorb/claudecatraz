@@ -52,10 +52,12 @@ ohne Zusatz-Container. Implementiert in `warden/warden/app.py`:
 
 ## O.3 Warden-Log-Format (verbindlich, §6.8)
 
-- **JSONL als Quelle der Wahrheit** — ein JSON-Objekt pro Zeile. Felder: `ts`, `channel`
-  (`api`|`git`), `correlation_id`, `decision` (`allow`|`deny`), `rule` (R1–R6), `project`,
-  methoden-/ref-spezifische Felder, `upstream_status`, `latency_ms`, `bytes`, Quoten-Stand
-  (`open_mrs`, `open_branches`, `writes_last_hour`).
+- **JSONL als Quelle der Wahrheit** — ein JSON-Objekt pro Zeile. Felder: `ts`, `schema`
+  (Audit-Schema-Version, ab §06-migration.md Schritt 2; fehlt das Feld, ist die Zeile
+  Version 1, das historische unversionierte Format — siehe O.6), `channel` (`api`|`git`),
+  `correlation_id`, `decision` (`allow`|`deny`), `rule` (R0–R6, zentral in `warden/rules.py`
+  definiert), `project`, methoden-/ref-spezifische Felder, `upstream_status`, `latency_ms`,
+  `bytes`, Quoten-Stand (`open_mrs`, `open_branches`, `writes_last_hour`).
 - **Redaction per Feld-Allowlist** (nicht Blocklist): `Authorization`-Header und Token-Werte
   werden **nie** geloggt — alles außerhalb der Allowlist fällt by construction weg.
 
@@ -86,3 +88,18 @@ Squid (`access.log`) hat denselben Einzel-Schreiber-Charakter; Rotation per
       offen, additiv; betrifft nur den Writer, nicht den Viewer.
 
 Verworfen: `.txt`-Render, Loki/Grafana (siehe O.0).
+
+---
+
+## O.6 Schema-Versionierung & Kompat-Fenster (§06-migration.md Schritt 2)
+
+- **`schema` (int) im Audit-Event** (`audit.AUDIT_SCHEMA_VERSION`, aktuell `2`): Version 1
+  ist das historische Format ohne dieses Feld; Version 2 fügt es hinzu und ist zugleich der
+  Schritt, der Tag-Push/Branch-Delete von R2 auf R4 umzieht (B3) — eine audit-sichtbare
+  Änderung, deshalb an den Schema-Bump gekoppelt.
+- **Kompat-Fenster:** Der Stufe-1-Viewer (`warden/warden/static/viewer.html`) zeigt sowohl
+  Zeilen mit als auch ohne `schema`-Feld an — eine fehlende Version wird als „legacy"
+  dargestellt statt zu brechen. `catraz observe --audit` (`src/catraz/commands/observe.py`)
+  tailt die Datei roh (kein JSON-Parsing) und ist von Feldänderungen ohnehin unberührt.
+- Jeder künftige Rename (claude→agent, channel→guard, §06 Schritt 6/F11) muss den
+  Schema-Wert erneut erhöhen — kein Rename ohne Versions-Bump (Anti-Ziel, §06.2).

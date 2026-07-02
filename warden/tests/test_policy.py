@@ -263,8 +263,9 @@ def test_git_push_outside_all_prefixes_denied(multi_prefix_cfg):
 
 
 def test_git_branch_delete_denied(cfg):
+    # B3 fix: a branch delete is an irreversible verb (M4) — R4, not R2.
     d = decide(_git((SHA, ZERO, "refs/heads/claude/feature")), StateView(), cfg)
-    assert not d.allow and d.rule == "R2"
+    assert not d.allow and d.rule == "R4"
 
 
 def test_git_atomic_reject_on_one_bad_ref(cfg):
@@ -313,8 +314,9 @@ def test_git_multiref_quota_accounts_within_batch(cfg):
 
 
 def test_git_tag_push_rejected_with_tag_message(cfg):
+    # B3 fix: a tag push is an irreversible verb (M4) — R4, not R2.
     d = check_ref(RefCommand(ZERO, SHA, "refs/tags/claude/v1"), StateView(), cfg)
-    assert not d.allow and d.rule == "R2" and "tag" in d.reason
+    assert not d.allow and d.rule == "R4" and "tag" in d.reason
 
 
 def test_git_project_not_allowlisted_denied(cfg):

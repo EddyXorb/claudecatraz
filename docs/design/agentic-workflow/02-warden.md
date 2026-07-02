@@ -17,6 +17,7 @@ warden/
 │   ├── app.py                  # Starlette-App, Routing API vs. git
 │   ├── config.py               # Env → typisiertes Config-Objekt, harte Validierung
 │   ├── model.py                # Policy-Datentypen (pure)
+│   ├── rules.py                # zentrale Regel-Registry R0–R6 + Meta-Regel-Zuordnung (B3, F11)  ← pure
 │   ├── policy.py               # decide(request, state, cfg) → Decision  ← pure
 │   ├── api_endpoints.py        # datengetriebene Write-Endpoint-Tabelle  ← pure
 │   ├── read_endpoints.py       # datengetriebene Read-Endpoint-Tabelle (B1)  ← pure
@@ -24,17 +25,19 @@ warden/
 │   ├── api_proxy.py            # REST-Reverse-Proxy (GET-Passthrough + Write-Filter)
 │   ├── git_proxy.py            # G1: 4 Smart-HTTP-Routen, Stream-Handling
 │   ├── pktline.py              # pkt-line-Parser (receive-pack-Kommandos)  ← pure
-│   ├── state.py                # SQLite-Zugriff: Quoten, Rate, Reconcile
+│   ├── state.py                # SQLite-Zugriff: Quoten, Rate, Reconcile, Schema-Versionierung
 │   ├── context.py              # Runtime-Ctx + Reconcile-Logik
 │   ├── upstream.py             # httpx-Client, Token-Injektion
-│   ├── audit.py                # JSONL-Logger, ein Schreiber, Redaction
+│   ├── audit.py                # JSONL-Logger, ein Schreiber, Redaction, `schema`-Feld
 │   └── errors.py               # Deny-/git-Fehler-Antworten
 └── tests/
-    ├── test_policy.py          # Unit (parametrisiert, jede Regel R1–R6)
+    ├── test_rules.py           # Registry + "jede geloggte ID ist registriert"
+    ├── test_policy.py          # Unit (parametrisiert, jede Regel R0–R6)
     ├── test_pktline.py         # aufgezeichnete receive-pack-Bodies
     ├── test_api_proxy.py       # respx/MockTransport
     ├── test_git_e2e.py         # echtes git push gegen Wegwerf-Upstream
     ├── test_quota.py           # Fake-Clock, Sliding-Window
+    ├── test_state.py           # inkl. Schema-Migration (frisch/legacy/zu neu)
     └── redteam/                # docker-compose-basiert (→ 03-testing-redteam.md)
 ```
 
@@ -90,13 +93,41 @@ GraphQL wird nie an den Upstream durchgereicht (B5, `docs/design/architecture-ge
 
 ---
 
+## Regel-Registry (`rules.py`)
+
+Seit §06-migration.md Schritt 2 (B3, F11) sind R0–R6 in `rules.py` zentral definiert —
+ID, zugeordnete Meta-Regel (M0–M6, §01-grundregeln.md B) und Kurzbeschreibung. `policy.py`,
+`api_endpoints.py`, `read_endpoints.py`, `api_proxy.py` und `git_proxy.py` referenzieren
+diese Konstanten statt Streuliteralen. Ein reservierter Kernel-Namespace (`core.*`, neben
+`gitlab.*` für diesen Guard) ist als Helfer (`rules.qualify`) vorbereitet, aber noch nicht
+aktiv — geloggt wird weiterhin die unqualifizierte Form (`"R4"`), bis der
+channel→guard-Rename (F11) landet und ein zweiter Guard (§06 Schritt 9) unqualifizierte
+IDs mehrdeutig macht.
+
+| Regel | Meta | Bedeutung |
+| ----- | ---- | --------- |
+| R0 | M0 | Mode-Gate — GitLab aus oder Writes aus |
+| R1 | M1 | Read-Passthrough mit dem Read-Token |
+| R2 | M2 | Write nur im eigenen Branch-Namensraum |
+| R3 | M3 | Write nur auf eigenen (selbst erstellten) Objekten |
+| R4 | M4 | Irreversibler Verb, niemals: Merge, Tag-Push, Branch-Delete |
+| R5 | M5 | Quote/Rate-Limit, fail-safe bei ungeklärtem State |
+| R6 | M6 | Ressourcen-Allowlist-Grenze (Projekt/Credential-Scope) |
+
+**B3-Fix:** Tag-Push und Branch-Delete liefen zuvor unter R2 (Branch-Namensraum), obwohl sie
+konzeptionell „irreversible Verben: niemals" (M4) sind — dieselbe Kategorie wie der
+Merge-Block. Beide loggen jetzt R4 (`policy.check_ref`). Das ist eine audit-sichtbare
+Änderung, deshalb an die Schema-Versionierung dieses Schritts gekoppelt (`audit.AUDIT_SCHEMA_VERSION`).
+
+---
+
 ## Policy (`policy.py`)
 
 ```python
 @dataclass(frozen=True)
 class Decision:
     allow: bool
-    rule: str            # "R1".."R6" — fürs Audit-Log
+    rule: str            # bare rule id ("R1".."R6"), Quelle: rules.py — fürs Audit-Log
     reason: str
     token: TokenKind     # READ | WRITE | NONE
 
@@ -105,7 +136,8 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision: ...
 
 **Default-deny.** Reihenfolge:
 1. Projekt in `ALLOWED_PROJECTS`? sonst `Deny(R6)`.
-2. git receive-pack: je Ref-Kommando Präfix / Delete-Block / Branch-Quota / Rate.
+2. git receive-pack: je Ref-Kommando Präfix (`R2`) / Tag-Push- und Delete-Block (`R4`) /
+   Branch-Quota / Rate (`R5`).
 3. API GET: Projekt im Pfad → `Allow(R1, token=READ)` wie bisher; **kein** Projekt im
    Pfad → Tabellen-Match gegen `read_endpoints.py` (B1, „Inhalt, nicht Sichtbarkeit"):
    Metadaten (Projekt-/Gruppennamen, `/users`, `/version`, …) → `Allow(R1)`; inhaltsfähige
@@ -142,8 +174,9 @@ POST git-receive-pack:
   1. Stream lesen bis flush-pkt (0000)  →  Kommando-Sektion (KB, nicht MB)
   2. pkt-line parsen → RefCommand-Liste
   3. decide() für jede Ref:
+     - ref ist ein Tag (refs/tags/…)? → sofort deny    (R4, irreversibler Verb)
      - refname beginnt mit BRANCH_PREFIX?              (R2)
-     - new-oid ≠ all-zeros (kein Branch-Delete)?       (R2)
+     - new-oid ≠ all-zeros (kein Branch-Delete)?       (R4, irreversibler Verb; B3-Fix, vormals R2)
      - open_branches < max_branches?                   (R5)
      - writes_last_hour < max_writes_per_hour?         (R5)
   4. Alle allow → State schreiben + Body (Kopf + PACK-Rest) upstream streamen
@@ -176,6 +209,28 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- 'last_reconcile'
 - **Fail-safe:** leer oder korrupt → „Limit erreicht", Writes verweigert bis Reconcile. Niemals „leer = 0 frei".
 - **Reconcile beim Start** (`__main__.py`): offene Claude-MRs/Branches per API zählen, bevor Port 8080 öffnet.
 - Periodischer Reconcile (alle 5 min): gleicht lokale Zähler gegen GitLab-Wahrheit ab.
+
+### Schema-Versionierung (§06-migration.md Schritt 2)
+
+Die DB trägt ihre Schema-Version in SQLite's eigenem `PRAGMA user_version` — ein von
+SQLite reservierter Integer-Slot, immer vorhanden (Default 0), braucht keine eigene
+Bootstrap-Tabelle. Die bereits existierende `meta`-Tabelle bleibt für *Anwendungs*-Zustand
+(`last_reconcile`); die Schema-Version ist eine *strukturelle* Tatsache, die vor jedem
+Tabellenzugriff geprüft wird — dafür ist `PRAGMA user_version` der richtige Ort, eine
+Vermischung mit `meta` würde beides verwischen.
+
+Ein kleiner Migrations-Runner (`state.MIGRATIONS`, geordnete `Migration`-Liste mit
+benannter Apply-Funktion) hebt eine DB Version für Version an:
+
+- **Version 1** (implizit): das historische, unversionierte Schema — `claude_branches`/
+  `claude_mrs` existieren bereits, aber kein Versions-Marker.
+- **Version 2** (dieser Schritt): führt nur den Versions-Marker selbst ein — keine
+  Tabellen-Umbenennung (die kommt in Schritt 6, claude→agent/F11), der Runner trägt aber
+  bereits die Form, die eine solche Migration braucht.
+- Eine frische DB wird direkt auf der aktuellen Version angelegt; eine bestehende
+  unversionierte DB wird ohne Datenverlust hochgezogen; eine **zu neue** Version (aus einer
+  neueren Warden-Version) führt zu einem harten Fehler beim Start (`state.SchemaError`,
+  fail-closed, A9) — kein stilles Weiterlaufen mit unbekanntem Schema.
 
 ---
 
