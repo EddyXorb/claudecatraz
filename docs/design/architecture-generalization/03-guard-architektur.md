@@ -32,6 +32,15 @@ Ressourcen-Allowlist (M6) zuerst, dann **Capability-Invarianten (03.4)**, dann G
 Audit auf *jedem* Ausgang; `record` vor `forward`; `forward` nur nach `decision.allow`
 erreichbar. Guards können die Sequenz nicht falsch bauen — sie sehen sie gar nicht.
 
+Präzisierung zum Mode-Gate (Röst-Runde 2): nur `off` ist ein echtes „zuerst"-Gate. Die
+`read-only`-Sperre braucht die Write-Klassifikation des Requests — heute läuft sie deshalb
+*nach* `decide` (`policy.py:73–75`, am Decision-Token festgemacht). Im Zielbild deklariert
+der **Intent** selbst, ob er schreibt (`intent.writes`, vom Parser abgeleitet, nicht von der
+Decision), sodass der Kernel `read-only` direkt nach `parse` und *vor* jeder Allow-Logik
+erzwingen kann — und das Write-Credential nachweislich nie angefasst wird, wie es der
+heutige Code an zwei Stellen manuell sicherstellen muss (`api_proxy.py:102`,
+`git_proxy.py:62`).
+
 ## 03.3 Modul-Layout und die richtige Schnittlinie
 
 ```
@@ -82,8 +91,11 @@ Intent→Capability-Abbildung pro Guard. Vergisst ein Guard zu deklarieren, dass
 Release-Call einen Tag erzeugt, feuert die Invariante nicht. Diese Abbildung ist aber
 kleiner, purer, testbarer Code (Golden-Tests: bekannte Requests → erwartete Capabilities) —
 ein viel kleinerer trust-kritischer Kern als die heutige Streuung über fünf Module. Für
-git-Refs ist die Abbildung trivial und exakt; für REST-Endpoints ist sie Teil der
-(eingebauten oder Registry-) Tabellenzeile, nie der Nutzer-Config.
+git-Refs ist die Abbildung trivial und exakt; für REST-Endpoints lebt sie im
+**Endpoint-Katalog** (§04.2) — deklariert vom Katalog-Autor im Code, golden-getestet,
+**nie vom Endnutzer in der Config** (Röst-Runde 2 hat gezeigt, dass ein nutzerdeklariertes
+Capability-Feld genau für neue Endpoints wertlos wäre). Nutzer-Config kann Katalog-Einträge
+nur aktivieren und verengen.
 
 ## 03.5 Forge-Abstraktion: GitLab → GitHub/Gitea
 

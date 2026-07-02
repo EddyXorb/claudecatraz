@@ -25,7 +25,13 @@ Eine verbotene Capability ist auf **allen** Kanälen verboten, nicht nur auf dem
 zuerst auffiel. Der heutige Code verletzt das: das Tag- und Branch-Delete-Verbot lebt
 ausschließlich im git-Pfad (`check_ref`); die REST-Seite kennt es nicht (→ Befund B2).
 Konsequenz: Invarianten werden auf einem **normalisierten Intent** durchgesetzt
-(Capability-Ebene, §03), nicht pro Kanal nachgebaut.
+(Capability-Ebene, §03), nicht pro Kanal nachgebaut. Ehrlicher Geltungsbereich (Röst-Runde
+2): Capabilities modellieren *Wirkungen*, also Write-artiges; Reads werden nicht auf
+Capabilities abgebildet, sondern von M1/M6 plus Response-Scoping (Befund B1) regiert. Und:
+ein Kanal, der gar nicht modelliert ist, bleibt **komplett zu** — GitLabs GraphQL
+(`/api/graphql`) ist heute nur zufällig nicht geroutet und darf nie „aus Bequemlichkeit"
+durchgereicht werden, bevor er ein eigener Guard mit eigener Capability-Ableitung ist
+(Befund B5).
 
 ### A4 — Purer Kern, unreine Ränder
 `decide(intent, state, policy) → Decision` bleibt eine pure Funktion ohne I/O. Alles Unreine
@@ -48,7 +54,10 @@ Disziplin — ab dem zweiten credential-haltenden Guard gilt deshalb Prozess-Tre
 
 ### A7 — Jede Entscheidung trägt eine Regel-ID und wird auditiert
 `Decision` referenziert eine Regel aus einem enumerierbaren, dokumentierten Vokabular. Kein
-anonymer Allow/Deny. Bei mehreren Guards werden Regel-IDs namespaced (`gitlab.R4`, `db.R4`).
+anonymer Allow/Deny. Bei mehreren Guards werden Regel-IDs namespaced (`gitlab.R4`, `db.R4`);
+für kernel-erzwungene Entscheidungen (Mode-Gate, Ressourcen-Allowlist, Capability-Invarianten)
+ist ein eigener Namespace reserviert (`core.mode`, `core.allowlist`, `core.capability`) —
+ein Capability-Deny als `gitlab.R4` zu loggen wäre ab dem zweiten Guard kategorial falsch.
 Die IDs müssen die Meta-Regeln sauber partitionieren — heute tun sie das nicht (Befund B3).
 
 ### A8 — Auflistbarkeit schlägt Ausdrucksmächtigkeit
@@ -88,8 +97,8 @@ nicht alle. Nach Röst-Runde 1 ehrlich zweigeteilt:
 | Meta | Prinzip | GitLab-Instanz (heute) | Postgres-Instanz (später) |
 | ---- | ------- | ---------------------- | ------------------------- |
 | **M0** | Mode-Gate: `off` \| `read-only` \| `read-write` pro Ressource | `GITLAB_MODE` (R0) | `DB_MODE` |
-| **M5** | Quoten + Rate-Limits, fail-safe bei ungeklärtem State (A9) | max MRs/Branches/Writes-pro-h (R5) | Statements/h, max Rows pro Write |
-| **M6** | Credential- & Netz-Isolation + Ressourcen-Allowlist | kein Token im Agenten, `allowed_projects` (R6) | kein DB-Credential im Agenten, `allowed_databases` |
+| **M5** | Quoten + Rate-Limits, fail-safe bei ungeklärtem State (A9) | max MRs/Branches/Writes-pro-h (R5); als Erweiterung ein **Read-Volumen-Budget** (Bytes/h, distinct Projekte/h) gegen Massen-Exfiltration durch erlaubte Reads | Statements/h, max Rows pro Write |
+| **M6** | Credential- & Netz-Isolation + Ressourcen-Allowlist | kein Token im Agenten, `allowed_projects` (R6) — *für Reads erst nach dem B1-Fix wahr, siehe Befund B1* | kein DB-Credential im Agenten, `allowed_databases` |
 | **MA** | Vollständiges Audit mit Regel-ID (A7) | JSONL-Audit | Statement-Log |
 
 ### B.2 Plattformabhängig (generalisiert nur, wo die Plattform mitspielt)

@@ -76,6 +76,53 @@ Annahmen/Ablehnungen sind hier festgehalten, damit die Begründungen nicht verlo
   (das räumt der Review selbst ein). Festgehalten als verbindlicher Plan *ab* dem zweiten
   Guard, bis dahin als dokumentierte Grenze des Monoliths.
 
-### Runde 2
+### Runde 2 — angenommen
 
-*(folgt nach dem zweiten Röst-Lauf)*
+- **Nutzerdeklariertes `capabilities`-Feld gekippt** (R2-Röstung 1+2, Faktencheck A): §03.4
+  („Capability-Abbildung nie aus Nutzer-Config") und §04.2 (Pflichtfeld in Nutzer-TOML)
+  widersprachen sich; für genuin neue Endpoints wäre die Nutzer-Deklaration die einzige
+  Schutzschicht gewesen — und der Normalfall ist Unwissen, nicht Bosheit. → **Katalog-Ansatz**:
+  Code liefert einen geprüften Endpoint-Katalog (Capabilities, Checks, Deny-Sonden), Config
+  aktiviert per ID und darf nur verengen. Sicherer *und* anwenderfreundlicher; §04 neu
+  geschrieben, Anti-Ziel „keine freien Endpoint-Zeilen" ergänzt.
+- **B1-Fix war workflow-blind** (Faktencheck B, Röstung 4): `AGENT.md` verlangt
+  `GET /groups/<id>/projects` (projektloser Read); ein naives default-deny bricht die
+  dokumentierte Discovery. → zweiteiliger Fix: kategorisierte Read-Tabelle +
+  **Response-seitige Projekt-Filterung** der Listen-Endpoints (Roaster-Idee I1), plus
+  Read-Volumen-Budget als M5-Erweiterung (Idee I2).
+- **GraphQL unmodelliert** (Röstung 5): `/api/graphql` ist heute nur zufällig nicht geroutet;
+  eine Mutation könnte die gesamte Write-Policy umgehen. → Befund B5, aktives 403 + Audit,
+  Anti-Ziel; A3 ehrlich auf Wirkungen (Write-artiges) eingegrenzt.
+- **Query-Param-Inkonsistenz** (Faktencheck C): Entscheidung liest Query-Felder, Forward
+  verwirft den Querystring — heute zufällig fail-closed, Footgun für den Katalog. → Befund
+  F12; Katalog-Einträge deklarieren Feld-Lage (Body/Query).
+- **Mode-Gate-Reihenfolge unterspezifiziert** (Faktencheck D): `read-only` braucht die
+  Write-Klassifikation; „M0 zuerst" gilt strikt nur für `off`. → §03.2 präzisiert:
+  `intent.writes` kommt vom Parser, das read-only-Gate läuft nach `parse`, vor jeder
+  Allow-Logik.
+- **Kernel-Regel-Namespace** (Röstung 7): Capability-/Mode-/Allowlist-Denials sind nicht
+  guard-spezifisch. → reservierter Namespace `core.*` in der Regel-Registry (A7, Schritt 2).
+- **Adapter-Vertrag unvollständig** (Röstung 6): Env-Injektion und der Inhalt (nicht nur
+  Ort) der Instruktionsdatei fehlten; die heutige `AGENT.md` ist nicht agent-neutral. →
+  `environ()` + `render_instructions()` im Protokoll, Forge-REST-Basis als expliziter Input.
+- **Migrations-Ehrlichkeit** (Röstung 8): Startgate/Deny-Sonden gehören in Schritt 4 (nicht
+  erst 8), Schritt 1 als minimale Read-Tabelle ohne Rework, Prozess-Trennung als eigener
+  Schritt 10 statt Beifang von 9.
+- **Adapter-Conformance-Harness** (Roaster-Idee I3) übernommen (§05.5): macht A11 pro
+  Adapter/Fork zu einem rot/grün-Signal.
+- **Policy-by-Example ehrlich herabgestuft** (Röstung 3): UX-Zucker über dem Katalog, kein
+  Sicherheitsmechanismus für unbekannte Endpoints; Deny-Sonden leben beim Katalog-Eintrag
+  (ein Korpus, ein Eigentümer).
+
+### Runde 2 — abgelehnt / modifiziert
+
+- **„A3 auf ‚alle Write-Kanäle' einschränken" (Röstung 5, Teilvorschlag): modifiziert statt
+  übernommen.** A3 bleibt als Prinzip über *Wirkungen* (Capabilities) formuliert — die
+  bessere Einschränkung ist nicht „nur Write-Kanäle", sondern: unmodellierte Kanäle bleiben
+  komplett zu (GraphQL-403), und Reads werden von M1/M6 + Response-Scoping regiert. So
+  bleibt das Axiom scharf, ohne Unerfülltes zu versprechen.
+- **Kein Experten-Escape-Hatch für freie Endpoint-Zeilen ergänzt** (naheliegende
+  Abschwächung des Katalog-Ansatzes, die der Review nicht forderte, aber Nutzer fordern
+  werden): bewusst nicht aufgenommen. Jede „ich weiß, was ich tue"-Variante stellt genau
+  die Vertrauens-Verlagerung wieder her, die Runde 2 als Kernproblem identifiziert hat;
+  der Katalog-PR ist klein genug, um der einzige Weg zu bleiben.

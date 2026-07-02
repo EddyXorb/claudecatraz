@@ -27,8 +27,14 @@ Der Entrypoint zerfällt in zwei Teile mit definiertem Vertrag:
 - **Agent-Adapter (pro Agent, Code im Repo — nie aus `.catraz/` geladen, A2):**
   `prepare_home(home: Path, secrets: Secrets) -> None` (Credential-Dateien und
   Settings-Layout schreiben), `command(argv: list[str]) -> list[str]`,
-  `instructions_target() -> Path` (wo AGENT.md hin muss), optional
-  `remote_command() -> list[str] | None`.
+  `environ(secrets: Secrets) -> dict[str, str]` (viele CLIs lesen Key *und* Base-URL/Org
+  aus Env — ein einzelnes `api_key_env` reicht nicht, Röst-Runde 2),
+  `render_instructions(ctx: InstructionContext) -> tuple[Path, str]` (Ziel **und Inhalt**:
+  die heutige `AGENT.md` ist nicht agent-neutral — Namespace-Präfix, Warden-REST-Basis-URL
+  und curl-Beispiele müssen pro Agent gerendert werden, nicht nur platziert), optional
+  `remote_command() -> list[str] | None`. Der `InstructionContext` trägt u.a. die
+  Forge-REST-Basis (`http://gitlab-warden:8080/api/v4`) als expliziten Input — der
+  REST-Draht des Agenten ist Teil des Vertrags, nicht Prosa-Zufall.
 
 Adapter sind **mitgelieferte Python-Module** (`src/catraz/assets/agents/<name>/adapter.py`),
 keine Config: sie brauchen echte Logik (Settings-Migrationen!), und A2 verbietet, Logik aus
@@ -76,7 +82,21 @@ genau der Ort, an dem sich `evil.com` einnistet. Deshalb:
 - Profile außerhalb der mitgelieferten Assets (Fork/eigener Adapter) erfordern bei `init`
   eine explizite Bestätigung mit Diff der Egress-Domains.
 
-## 05.5 Was pro Agent ehrlich offen bleibt
+## 05.5 Adapter-Conformance-Harness — macht A11 überprüfbar
+
+*Aus Röst-Runde 2 (Roaster-Idee I3).* Ein Protokoll allein prüft nichts. Eine ausführbare
+Harness fährt pro Adapter den Container hoch und assertet den Sicherheitskontrakt:
+
+- kein Forge-Credential und kein fremdes Modell-Credential im Agent-Prozess/-Home,
+- Egress zu nicht-allowlisteten Domains geblockt,
+- git-`insteadOf` zeigt auf den Warden (kein direkter Forge-Weg),
+- `modes.remote=false` verweigert den Remote-Modus sauber (fail-closed statt kaputtem Daemon).
+
+Damit wird „der Agent ist untrusted Nutzlast" (A11) für jeden neuen Adapter und jeden Fork
+ein rot/grün-Signal statt eines Versprechens. Sie erweitert die bestehende
+Red-Team-Suite (`tests/redteam/`) um die Agent-Dimension.
+
+## 05.6 Was pro Agent ehrlich offen bleibt
 
 - **Credential-Refresh:** der Adapter deklariert, ob Refresh-Persistenz nötig ist; das
   heutige „tmpfs verwirft Refresh, `catraz sync` heilt" ist Claude-Verhalten und darf nicht

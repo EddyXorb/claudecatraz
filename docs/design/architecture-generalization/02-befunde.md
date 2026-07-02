@@ -16,11 +16,28 @@ Read-Token durch (R1-Pass-through). Die tatsächliche Exfiltrations-/Lese-Grenze
 **Token-Scope**, nicht `allowed_projects` — im Widerspruch zur Doku („least privilege,
 Read-Oberfläche klein", §6.10) und zu M6.
 
-**Fix-Richtung:** Reads ohne Projekt-Scope nicht pauschal durchlassen. Entweder
-default-deny für projektlose Pfade plus eine kleine, eingebaute Read-Allowlist der wirklich
-nötigen globalen Endpoints (`/user` für Identität, `/version`, …) — oder, symmetrisch zur
-Write-Tabelle, eine explizite Read-Endpoint-Tabelle. Das ist eine Invariante an der
-Vertrauensgrenze im Sinn von A1/A2 und gehört als **Migrationsschritt 1** umgesetzt (§06).
+**Fix-Richtung — zweiteilig (präzisiert in Röst-Runde 2):** Ein naives „projektlose Pfade
+default-deny + winzige Allowlist" bricht den dokumentierten Betrieb: `AGENT.md` weist den
+Agenten explizit an, `GET /groups/<id>/projects` für die Projekt-Discovery zu nutzen — ein
+projektloser Read, der zugleich genau die Enumerations-Fläche ist. Die ehrliche Read-Allowlist
+wird also nicht winzig, und einige ihrer Einträge sind selbst Exfil-Vektoren. Deshalb:
+
+1. **Request-seitig** eine eingebaute Read-Endpoint-Tabelle mit Kategorien statt binärem
+   Gate: projekt-gebunden (Gate wie heute), global-harmlos (`/user`, `/version`),
+   listend (→ 2.), Rest default-deny.
+2. **Response-seitig** Projekt-Scoping auf den Listen-Endpoints (`/projects`,
+   `/groups/:id/projects`, Suche): Einträge außerhalb `allowed_projects` werden aus der
+   JSON-Antwort entfernt. Das erzwingt die Allowlist endlich auch auf dem Read-Pfad und
+   erhält den Discovery-Workflow — Sicherheit *bei* Anwenderfreundlichkeit.
+   Ehrliche Kosten: Listen-Responses müssen dafür gebuffert werden (Bruch mit dem
+   Streaming-Prinzip, begrenzt auf Listen-Endpoints), Paginierungs-Header müssen
+   mitkorrigiert werden, und die Filterung ist forge-spezifische Logik im jeweiligen Guard.
+
+Ergänzend als Defense-in-depth: ein **Read-Volumen-Budget** (M5-Erweiterung, §01) macht
+Massen-Exfiltration durch *erlaubte* Reads sichtbar und deckelbar. Das Ganze ist eine
+Invariante an der Vertrauensgrenze im Sinn von A1/A2 und gehört als **Migrationsschritt 1**
+umgesetzt (§06) — von Anfang an als (minimale) Read-Tabelle gebaut, die Schritt 4 nur
+erweitert, nicht ersetzt.
 
 ### B2 — Verbotene Capabilities sind nicht kanalübergreifend **[HOCH, latent]**
 
@@ -54,6 +71,18 @@ Reconcile behandelt jeden Eintrag als konkretes Projekt und fail-closed bei Grup
 der Präfix-Zweig ist größtenteils toter, defensiver Code, kein akutes Loch. Trotzdem: nach
 A8 exakt matchen (nach Normalisierung), toten Zweig entfernen, Test dazu.
 
+### B5 — GraphQL ist nur zufällig zu **[NIEDRIG heute, HOCH sobald geroutet]**
+
+Der Agent-Port routet ausschließlich `/api/v4/{rest}` und die drei git-Routen (`app.py:22–30`).
+GitLabs GraphQL-API liegt unter `/api/graphql` — sie ist heute schlicht nicht erreichbar,
+also *zufällig* sicher, nicht *entworfen* sicher. Eine einzige GraphQL-Mutation kann alles,
+was der REST-Write-Filter verbietet (Tag erzeugen, MR mergen). Sollte je jemand GraphQL
+„für bessere Reads" durchrouten, fällt die gesamte Write-Policy.
+
+**Fix-Richtung:** GraphQL als explizites Anti-Ziel dokumentieren (§06.2) und im Warden
+aktiv mit 403 + Audit beantworten (statt 404), damit die Absicht im Code steht. Ein
+GraphQL-Durchlass wäre nur als eigener Guard mit eigener Capability-Ableitung zulässig (A3).
+
 ## F. Code-Findings (verhaltenserhaltend behebbar)
 
 1. **Pipeline zweimal von Hand** — `api_proxy.handle` (`api_proxy.py:76–125`) und
@@ -83,3 +112,12 @@ A8 exakt matchen (nach Normalisierung), toten Zweig entfernen, Test dazu.
     aus dem JSONL. Jeder Rename (claude→agent, channel→guard) ist eine Schema-Migration mit
     Kompatibilitätsfenster, kein Suchen-und-Ersetzen. → expliziter Versionierungs-Schritt
     vor allen Renames (§06 Schritt 2).
+12. **(neu, aus Röst-Runde 2) Query-Parameter fließen in die Entscheidung ein, werden aber
+    nicht weitergeleitet** — `api_proxy.py:42` schneidet den Querystring vom Pfad ab, doch
+    `_extract_fields` (`api_proxy.py:60`) nimmt `request.query_params` in die
+    Entscheidungsfelder auf; `open_rest` forwarded den querylosen Pfad. Heute zufällig
+    fail-closed (der Wert erreicht GitLab nie), aber ein Footgun für konfigurierbare
+    Endpoints: ein Scoping-Check könnte auf einem Query-Feld „passen", das der Upstream nie
+    sieht. → Katalog-Einträge (§04) deklarieren pro Feld, ob es in Body oder Query lebt, und
+    das Forwarding muss konsistent sein: entweder Query mitschicken oder Query-Felder aus
+    der Entscheidung ausschließen.
