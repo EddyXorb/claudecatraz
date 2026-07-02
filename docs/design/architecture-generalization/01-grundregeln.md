@@ -107,7 +107,7 @@ nicht alle. Nach Röst-Runde 1 ehrlich zweigeteilt:
 | Meta | Prinzip | Voraussetzung an die Plattform | GitLab | Postgres |
 | ---- | ------- | ------------------------------ | ------ | -------- |
 | **M1** | Reads mit Least-Privilege-**Read-Credential** | natives Read-only-Credential existiert | Read-Token (R1) — *aber siehe Befund B1: die Allowlist greift auf dem Read-Pfad nicht überall* | read-only DB-Rolle (stark) |
-| **M2** | Writes nur im **eigenen Namensraum** | Namensraum-Begriff existiert (Branches, Schemas) | `branch_prefix` (R2) | Grants nur auf Schema `agent_*` |
+| **M2** | Writes nur im **eigenen Namensraum** | Namensraum-Begriff existiert (Branches, Schemas) | `branch_prefixes` — Liste erlaubter Präfixe, der Namensraum ist ihre Vereinigung (R2) | Grants nur auf Schema `agent_*` |
 | **M3** | Aktionen nur auf **eigenen Objekten** | Server trackt Autorschaft | MR-`author.id` (R3) | **keine Instanz** — Postgres kennt kein „created_by" pro Row; nur via RLS/Schema-Design des bewachten Systems |
 | **M4** | Irreversible/privilegienerhöhende **Capabilities: niemals** | Capability aus dem Request ableitbar | Merge, Tag-Erzeugung, Branch-Delete | `DROP`, `TRUNCATE`, `GRANT`, `ALTER ROLE` |
 

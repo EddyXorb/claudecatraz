@@ -18,6 +18,12 @@ Leitplanke für alles: das Projektziel **Sicherheit bei Anwenderfreundlichkeit**
 Generalisierung ist nur dann eine Verbesserung, wenn sie das Sicherheitsmodell strukturell
 erhält — nicht per Konvention, sondern so, dass man es gar nicht verletzen *kann*.
 
+Zweite Leitplanke (Maintainer-Entscheid): **Clean Code steht ganz oben.** Single
+Responsibility, keine Duplikation, kleine Funktionen und Module, die je genau einer
+Abstraktionsschicht zugeordnet sind. Saubere Struktur ist kein Selbstzweck, sondern die
+Voraussetzung dafür, die richtigen Generalisierungslinien überhaupt zu *sehen* —
+Refactorings dürfen und sollen den Feature-Schritten vorausgehen.
+
 ## Dokumentkarte
 
 | Dokument | Inhalt |
@@ -136,3 +142,7 @@ Annahmen/Ablehnungen sind hier festgehalten, damit die Begründungen nicht verlo
   Buffering-Tradeoff; stattdessen kategorisierte Read-Tabelle mit Deny der projektlosen
   inhaltsfähigen Endpoints (v.a. globale Blob-/Commit-Suche). Details: Befund B1,
   Migrationsschritt 1.
+- **Branch-Namensraum als Liste.** `branch_prefix` wird zu `branch_prefixes` — eine Liste
+  erlaubter Präfixe (ein Eintrag = heutiges Verhalten; leer bleibt verboten). Der
+  M2-Namensraum ist die Vereinigung der Präfixe; alle R2/R3-Checks und der Reconcile
+  prüfen gegen die Liste.

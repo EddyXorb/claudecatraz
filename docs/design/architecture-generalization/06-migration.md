@@ -8,6 +8,18 @@ dann Nutzerwert und Refactorings. Jeder Schritt ist einzeln shipbar; die bestehe
 sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-workflow/`
 (die kanonische Design-Doku, deren W-/R-Referenzen im Code stehen) mit.
 
+**Vorarbeiten (vor bzw. parallel zu Schritt 1, Maintainer-Entscheid Clean Code):**
+
+- **Clean-Code-Refactor des Warden**, verhaltenserhaltend: Audit-Event-Bau vereinheitlichen
+  (F6, ohne die JSONL-Feldnamen zu ändern — das wäre Schritt 2), Viewer-HTML als
+  Package-Asset (F7), Präfix-Checks deduplizieren (F10), `project_allowed` exakt matchen
+  (B4), `api_proxy.handle` in kleine, einer Abstraktionsschicht zugeordnete Funktionen
+  zerlegen (SRP).
+- **`branch_prefixes` als Liste** (Maintainer-Entscheid): Config akzeptiert eine Liste
+  erlaubter Präfixe (legacy `branch_prefix` als Ein-Element-Liste weiter gültig); ein
+  einziger Namespace-Helper im Code, den R2/R3-Checks und Reconcile nutzen — keine
+  verstreuten `startswith`-Aufrufe.
+
 1. **B1 fixen: Read-Pfad scopen** — Schutzlinie „Inhalt, nicht Sichtbarkeit"
    (Maintainer-Entscheid): als **minimale Read-Tabelle** gebaut mit vier Kategorien
    (projekt-gebunden → Gate wie heute; projektlose Metadaten → pass; projektlose
