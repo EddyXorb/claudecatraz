@@ -12,7 +12,15 @@ audit log, so the file is self-contained without re-reading the README:
                          or writes are disabled (GITLAB_MODE=read-only) — write
                          ops denied.  Checked before all other rules.
   R1  Read pass-through  REST GET/HEAD/OPTIONS and git upload-pack/info-refs are
-                         streamed upstream with the READ token.
+                         streamed upstream with the READ token. For REST this is
+                         "content, not visibility" (B1): a path with a project id
+                         is gated by R6 exactly like a write; a *projectless*
+                         path (no project id to gate) is checked against the
+                         read-endpoint table (`read_endpoints.py`) — metadata
+                         (project/group names, users, …) passes, anything that
+                         can return repository content (global/group search
+                         with a content `scope`, `/snippets`) is denied, and an
+                         unlisted projectless path is denied by default (R6).
   R2  git write limits   push only to branches under an allowed <branch_prefix>
                          (the namespace is the union of ``branch_prefixes``); no
                          branch deletes; no tag pushes.
@@ -23,7 +31,10 @@ audit log, so the file is self-contained without re-reading the README:
   R5  Quota & rate       max open branches/MRs, max writes/hour; a locked
                          (unreconciled) state denies (fail-safe, §6.11).
   R6  Project boundary   the project must be in ALLOWED_PROJECTS; the agent
-                         itself holds no GitLab token.
+                         itself holds no GitLab token. Also used for the two
+                         projectless-read denials above (content-capable or
+                         unlisted): both are, at bottom, "no allowlisted
+                         project backs this read".
 """
 
 from __future__ import annotations
@@ -35,6 +46,7 @@ from .api_endpoints import EndpointKind, WriteEndpoint, match_endpoint
 from .config import Config
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .pktline import RefCommand
+from .read_endpoints import match_read
 
 
 def project_gate(project: str, cfg: Config) -> Optional[Decision]:
@@ -125,10 +137,31 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
     return Decision(True, "R2", "ok", TokenKind.WRITE)
 
 
-def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
-    # GET / read → pass-through with READ token (R1).
-    if req.method.upper() in ("GET", "HEAD", "OPTIONS"):
+def _decide_read(req: ProxyRequest) -> Decision:
+    """R1/R6 for REST reads (B1): project-bound paths pass, projectless paths
+    are looked up in the read-endpoint table.
+
+    A project id in the path already cleared :func:`project_gate` (called by
+    :func:`decide` before this is reached) — that gate covers repository
+    content (files, diffs, wiki, …) under a project, so a project-bound read is
+    unconditionally allowed here, exactly as before B1. A *projectless* path
+    (no project id for R6 to gate) is matched against ``read_endpoints`` —
+    metadata passes (R1), content-capable or unlisted paths are denied (R6).
+    """
+    if req.project:
         return Decision(True, "R1", "read pass-through", TokenKind.READ)
+    ep = match_read(req.path)
+    if ep is None:
+        return Decision(
+            False, "R6", f"projectless read endpoint not in allowlist: {req.method} {req.path}"
+        )
+    return ep.decide(req)
+
+
+def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
+    # GET / read (R1/R6, B1 "content, not visibility"):
+    if req.method.upper() in ("GET", "HEAD", "OPTIONS"):
+        return _decide_read(req)
 
     # Write methods: endpoint must be in the allowlist (default-deny otherwise).
     ep = req.endpoint or match_endpoint(req.method, req.path)

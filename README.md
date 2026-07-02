@@ -68,6 +68,20 @@ allowlist — anything not listed is default-denied (`warden/warden/api_endpoint
 > `start_sha` from the MR's `diff_refs`, plus `new_path` + `new_line`). The Warden only
 > checks ownership and forwards the body untouched.
 
+### Read scoping
+
+The security line on reads is **content, not visibility** (`warden/warden/read_endpoints.py`).
+A path with a project id (`/projects/{id}/…`) is gated by `allowed_projects` exactly like a
+write — repository content (files, diffs, wiki, commits) of a project outside the allowlist is
+already 403 today. A *projectless* path has no project id to gate, so it goes through a small,
+data-driven table instead: project/group **metadata** (names, descriptions — e.g.
+`/projects`, `/groups/<id>/projects`, `/users`, `/version`) is always readable, but anything that
+can return **repository content across every visible project** — global/group search with
+`scope=blobs|commits|wiki_blobs|notes`, and `/snippets` — is denied, as is any projectless path
+the table doesn't recognise (fail-closed default-deny). GitLab's **GraphQL** API (`/api/graphql`)
+is never proxied at all — it answers `403` unconditionally, because a single mutation there could
+express everything the REST write filter blocks (merge an MR, create a tag).
+
 ## Architecture
 
 ```text

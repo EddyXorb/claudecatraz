@@ -19,6 +19,8 @@ warden/
 │   ├── model.py                # Policy-Datentypen (pure)
 │   ├── policy.py               # decide(request, state, cfg) → Decision  ← pure
 │   ├── api_endpoints.py        # datengetriebene Write-Endpoint-Tabelle  ← pure
+│   ├── read_endpoints.py       # datengetriebene Read-Endpoint-Tabelle (B1)  ← pure
+│   ├── path_template.py        # {platzhalter}-Pfad → Regex, von beiden Tabellen genutzt  ← pure
 │   ├── api_proxy.py            # REST-Reverse-Proxy (GET-Passthrough + Write-Filter)
 │   ├── git_proxy.py            # G1: 4 Smart-HTTP-Routen, Stream-Handling
 │   ├── pktline.py              # pkt-line-Parser (receive-pack-Kommandos)  ← pure
@@ -36,7 +38,7 @@ warden/
     └── redteam/                # docker-compose-basiert (→ 03-testing-redteam.md)
 ```
 
-`policy.py`, `pktline.py`, `model.py`, `api_endpoints.py` sind transport-frei und rein — direkt unit-testbar.
+`policy.py`, `pktline.py`, `model.py`, `api_endpoints.py`, `read_endpoints.py`, `path_template.py` sind transport-frei und rein — direkt unit-testbar.
 
 ---
 
@@ -80,8 +82,11 @@ Der Agent hält **kein** GitLab-Token. Kein `.netrc`.
 /git/{project:path}/git-upload-pack     → git_proxy (POST, lesen R1)
 /git/{project:path}/git-receive-pack    → git_proxy (POST, prüfen!)
 /api/v4/{rest:path}                     → api_proxy (alle Methoden)
+/api/graphql, /api/graphql/{rest:path}  → api_proxy.deny_graphql (immer 403, B5)
 /healthz                                → (nur Port 9090)
 ```
+
+GraphQL wird nie an den Upstream durchgereicht (B5, `docs/design/architecture-generalization/02-befunde.md`): eine einzige Mutation dort könnte alles, was der REST-Schreibfilter verbietet.
 
 ---
 
@@ -101,7 +106,11 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision: ...
 **Default-deny.** Reihenfolge:
 1. Projekt in `ALLOWED_PROJECTS`? sonst `Deny(R6)`.
 2. git receive-pack: je Ref-Kommando Präfix / Delete-Block / Branch-Quota / Rate.
-3. API GET: `Allow(R1, token=READ)`.
+3. API GET: Projekt im Pfad → `Allow(R1, token=READ)` wie bisher; **kein** Projekt im
+   Pfad → Tabellen-Match gegen `read_endpoints.py` (B1, „Inhalt, nicht Sichtbarkeit"):
+   Metadaten (Projekt-/Gruppennamen, `/users`, `/version`, …) → `Allow(R1)`; inhaltsfähige
+   projektlose Endpoints (globale/Gruppen-Suche mit `scope=blobs|commits|wiki_blobs|notes`,
+   `/snippets`) und unbekannte projektlose Pfade → `Deny(R6)`.
 4. API Write: Endpoint-Match in Allowlist → Ownership-Check → Quota.
 
 ---

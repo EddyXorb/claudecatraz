@@ -36,6 +36,11 @@ def _raw_rest_path(request: Request) -> str:
     ASGI servers decode ``scope["path"]`` — which would turn ``group%2Fproj`` into
     a two-segment ``group/proj`` and break id extraction and forwarding. We read
     ``raw_path`` to preserve the encoding all the way to gitlab.com.
+
+    Deliberately query-less: path matching/decision (``match_endpoint``,
+    ``read_endpoints.match_read``) operate on the path alone. The query string
+    is extracted separately (:func:`_raw_query`) and reattached only when
+    forwarding (F12) — never folded back into this path.
     """
     raw = request.scope.get("raw_path")
     full = raw.decode("latin-1") if raw else request.url.path
@@ -43,6 +48,19 @@ def _raw_rest_path(request: Request) -> str:
     if full.startswith(_API_PREFIX):
         full = full[len(_API_PREFIX) :]
     return full or "/"
+
+
+def _raw_query(request: Request) -> str:
+    """Raw query string (percent-encoding intact), for the upstream URL only (F12).
+
+    The *decision* reads decoded fields via ``request.query_params`` (folded
+    into ``req.fields`` by :func:`_extract_fields`); this instead preserves the
+    exact wire bytes GitLab must see (e.g. ``scope=blobs``, ``state=opened``) —
+    without it, a query-dependent decision (:mod:`read_endpoints`) could pass on
+    a value the upstream request never actually carries.
+    """
+    raw: bytes = request.scope.get("query_string", b"")
+    return raw.decode("latin-1")
 
 
 def _project_from_path(path: str) -> str:
@@ -75,9 +93,14 @@ async def _extract_fields(request: Request, body: bytes) -> dict[str, Any]:
     return fields
 
 
-async def _parse_request(request: Request) -> tuple[ProxyRequest, bytes, Optional[int]]:
-    """Parse method/path/project/fields/body into the decision intent (W6, §6.9)."""
+async def _parse_request(request: Request) -> tuple[ProxyRequest, bytes, Optional[int], str]:
+    """Parse method/path/project/fields/body into the decision intent (W6, §6.9).
+
+    Returns the raw query string too (F12) — kept out of ``ProxyRequest.path``
+    (matching stays query-less) but needed by the caller to forward it.
+    """
     rest_path = _raw_rest_path(request)
+    raw_query = _raw_query(request)
     method = request.method.upper()
     project = _project_from_path(rest_path)
 
@@ -94,7 +117,7 @@ async def _parse_request(request: Request) -> tuple[ProxyRequest, bytes, Optiona
         endpoint=ep,
         fields=fields,
     )
-    return req, body, iid
+    return req, body, iid, raw_query
 
 
 async def _resolve_ownership(ctx: AppContext, req: ProxyRequest, iid: Optional[int]) -> None:
@@ -120,11 +143,19 @@ def _record_write(
 
 
 async def _forward(
-    ctx: AppContext, request: Request, req: ProxyRequest, body: bytes, decision: Decision
+    ctx: AppContext,
+    request: Request,
+    req: ProxyRequest,
+    body: bytes,
+    decision: Decision,
+    raw_query: str,
 ) -> httpx.Response:
+    # F12: the raw query is reattached here, at the transport boundary, never
+    # folded into req.path — matching/decision stay query-less throughout.
+    path = f"{req.path}?{raw_query}" if raw_query else req.path
     return await ctx.upstream.open_rest(
         req.method,
-        req.path,
+        path,
         headers=dict(request.headers),
         content=body or None,
         token=decision.token,
@@ -136,7 +167,7 @@ async def handle(request: Request) -> Response:
     correlation_id = str(uuid.uuid4())
     started = time.monotonic()
 
-    req, body, iid = await _parse_request(request)
+    req, body, iid, raw_query = await _parse_request(request)
     await _resolve_ownership(ctx, req, iid)
 
     state = ctx.state.view()
@@ -148,7 +179,7 @@ async def handle(request: Request) -> Response:
 
     _record_write(ctx, req, decision, iid)
 
-    resp = await _forward(ctx, request, req, body, decision)
+    resp = await _forward(ctx, request, req, body, decision, raw_query)
     _audit(ctx, req, decision, correlation_id, state, started, upstream_status=resp.status_code)
     return stream_upstream(resp)
 
@@ -177,3 +208,35 @@ def _audit(
             kind=req.endpoint.kind if req.endpoint else None,
         )
     )
+
+
+async def deny_graphql(request: Request) -> Response:
+    """`/api/graphql` — always 403, always audited, never contacts upstream (B5).
+
+    GitLab's GraphQL API can express every write the REST filter blocks (create
+    a tag, merge an MR) in a single mutation; routing it would silently bypass
+    R2–R4. This handler makes the refusal *designed*, not merely "not wired up"
+    (§06-migration.md Anti-Ziele) — the app's routes point every `/api/graphql`
+    method here instead of proxying, so the deny is intentional and logged like
+    any other decision.
+    """
+    ctx: AppContext = request.app.state.ctx
+    correlation_id = str(uuid.uuid4())
+    started = time.monotonic()
+    decision = Decision(False, "R6", "GraphQL is not permitted — unmodelled channel")
+    state = ctx.state.view()
+    ctx.audit.log(
+        build_event(
+            channel="api",
+            correlation_id=correlation_id,
+            method=request.method,
+            project="",
+            decision=decision,
+            state=state,
+            started=started,
+            upstream_status=None,
+            path=request.url.path,
+            kind=None,
+        )
+    )
+    return deny_json(decision)

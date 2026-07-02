@@ -49,6 +49,76 @@ def test_r1_get_without_project_allowed(cfg):
     assert d.allow and d.token == TokenKind.READ
 
 
+# --- B1: projectless read-endpoint table ("content, not visibility") -----------
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/projects",
+        "/users",
+        "/users/7",
+        "/user",
+        "/user/keys",
+        "/version",
+        "/metadata",
+        "/groups",
+        "/groups/1",
+        "/groups/1/projects",  # AGENT.md discovery flow — must keep working
+        "/groups/1/subgroups",
+        "/groups/1/descendant_groups",
+        "/merge_requests",
+        "/issues",
+        "/events",
+        "/broadcast_messages",
+    ],
+)
+def test_b1_projectless_metadata_endpoints_allowed(cfg, path):
+    d = decide(_api("GET", path), StateView(), cfg)
+    assert d.allow and d.rule == "R1" and d.token == TokenKind.READ
+
+
+@pytest.mark.parametrize("scope", ["blobs", "commits", "wiki_blobs", "notes"])
+def test_b1_global_search_content_scope_denied(cfg, scope):
+    d = decide(_api("GET", "/search", scope=scope), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_global_search_without_scope_denied_fail_closed(cfg):
+    d = decide(_api("GET", "/search"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_global_search_unknown_scope_denied_fail_closed(cfg):
+    d = decide(_api("GET", "/search", scope="commit_titles_or_whatever"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+@pytest.mark.parametrize("scope", ["projects", "issues", "merge_requests", "milestones", "users"])
+def test_b1_global_search_metadata_scope_allowed(cfg, scope):
+    d = decide(_api("GET", "/search", scope=scope), StateView(), cfg)
+    assert d.allow and d.rule == "R1" and d.token == TokenKind.READ
+
+
+def test_b1_group_search_content_scope_denied(cfg):
+    d = decide(_api("GET", "/groups/1/search", scope="blobs"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_snippets_denied(cfg):
+    d = decide(_api("GET", "/snippets"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_snippet_subpath_denied(cfg):
+    d = decide(_api("GET", "/snippets/1/raw"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_unknown_projectless_endpoint_default_denied(cfg):
+    d = decide(_api("GET", "/admin/ci/variables"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+    assert "not in allowlist" in d.reason
+
+
 def test_r6_project_not_in_allowlist_denied(cfg):
     req = ProxyRequest(channel="api", project="other/secret", method="GET", path="/projects/other%2Fsecret")
     d = decide(req, StateView(), cfg)

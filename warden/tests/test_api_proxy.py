@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
+import pytest
 
 from warden.api_proxy import _iid_from_path, _project_from_path
+from warden.audit import AuditLog
 
 PROJ = "group%2Fproj"
 
@@ -182,3 +186,142 @@ async def test_malformed_json_body_is_denied_not_crashed(client, respx_router):
     )
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R2"
+
+
+# --- B1: projectless read scoping ("content, not visibility") -----------------
+@pytest.mark.parametrize(
+    "path", ["/projects", "/groups/1/projects", "/user", "/version", "/groups/1"]
+)
+async def test_projectless_metadata_endpoint_passed_through(client, respx_router, path):
+    route = respx_router.route(method="GET", url__regex=r".*").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    resp = await client.get(f"/api/v4{path}")
+    assert resp.status_code == 200
+    assert route.calls.last.request.headers["private-token"] == "READ-TOKEN"
+
+
+@pytest.mark.parametrize("scope", ["blobs", "commits", "wiki_blobs", "notes"])
+async def test_global_search_content_scope_denied(client, respx_router, scope):
+    resp = await client.get(f"/api/v4/search?scope={scope}")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_global_search_without_scope_denied(client, respx_router):
+    resp = await client.get("/api/v4/search")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_global_search_unknown_scope_denied(client, respx_router):
+    resp = await client.get("/api/v4/search?scope=bogus")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_global_search_metadata_scope_allowed(client, respx_router):
+    respx_router.route(method="GET", url__regex=r".*/search.*").mock(
+        return_value=httpx.Response(200, json=[{"id": 1}])
+    )
+    resp = await client.get("/api/v4/search?scope=projects")
+    assert resp.status_code == 200
+
+
+async def test_group_search_content_scope_denied(client, respx_router):
+    resp = await client.get("/api/v4/groups/1/search?scope=blobs")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_snippets_denied(client, respx_router):
+    resp = await client.get("/api/v4/snippets")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_unknown_projectless_endpoint_denied(client, respx_router):
+    resp = await client.get("/api/v4/admin/ci/variables")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+# --- F12: the query string reaches the upstream request, not just the decision -
+async def test_query_string_is_forwarded_upstream(client, respx_router):
+    route = respx_router.route(
+        method="GET", url__regex=r".*/merge_requests.*"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    resp = await client.get(f"/api/v4/projects/{PROJ}/merge_requests?state=opened&per_page=50")
+    assert resp.status_code == 200
+    sent_url = route.calls.last.request.url
+    assert sent_url.params["state"] == "opened"
+    assert sent_url.params["per_page"] == "50"
+
+
+async def test_search_scope_query_is_forwarded_when_allowed(client, respx_router):
+    # F12 also matters for the allow path: the scope that made the decision
+    # pass must be the same scope GitLab receives.
+    route = respx_router.route(method="GET", url__regex=r".*/search.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    resp = await client.get("/api/v4/search?scope=issues&search=foo")
+    assert resp.status_code == 200
+    sent_url = route.calls.last.request.url
+    assert sent_url.params["scope"] == "issues"
+    assert sent_url.params["search"] == "foo"
+
+
+# --- B5: GraphQL is a designed dead end, never proxied -------------------------
+async def test_graphql_post_denied_no_upstream_call(client, respx_router):
+    resp = await client.post("/api/graphql", json={"query": "{ currentUser { id } }"})
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_graphql_get_denied(client, respx_router):
+    resp = await client.get("/api/graphql")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+async def test_graphql_subpath_denied(client, respx_router):
+    resp = await client.post("/api/graphql/whatever")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R6"
+
+
+# --- audit coverage: every new deny lands in the log ---------------------------
+async def _read_audit_lines(ctx, tmp_path, make_request):
+    logf = tmp_path / "audit.jsonl"
+    ctx.audit = AuditLog(str(logf))
+    ctx.audit.start()
+    await make_request()
+    await ctx.audit.stop()
+    return [json.loads(line) for line in logf.read_text().splitlines()]
+
+
+async def test_snippets_deny_is_audited(client, ctx, tmp_path):
+    records = await _read_audit_lines(ctx, tmp_path, lambda: client.get("/api/v4/snippets"))
+    assert len(records) == 1
+    assert records[0]["decision"] == "deny"
+    assert records[0]["rule"] == "R6"
+    assert records[0]["path"] == "/snippets"
+
+
+async def test_search_content_scope_deny_is_audited(client, ctx, tmp_path):
+    records = await _read_audit_lines(
+        ctx, tmp_path, lambda: client.get("/api/v4/search?scope=blobs")
+    )
+    assert len(records) == 1
+    assert records[0]["decision"] == "deny"
+    assert records[0]["rule"] == "R6"
+
+
+async def test_graphql_deny_is_audited(client, ctx, tmp_path):
+    records = await _read_audit_lines(
+        ctx, tmp_path, lambda: client.post("/api/graphql", json={"query": "{}"})
+    )
+    assert len(records) == 1
+    assert records[0]["decision"] == "deny"
+    assert records[0]["rule"] == "R6"
+    assert "graphql" in records[0]["path"]

@@ -33,6 +33,18 @@ def create_app(ctx: AppContext) -> Starlette:
             api_proxy.handle,
             methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
         ),
+        # GraphQL is a deliberate dead end (B5): never proxied, always 403 + audited
+        # — see api_proxy.deny_graphql and §06-migration.md's Anti-Ziele.
+        Route(
+            "/api/graphql",
+            api_proxy.deny_graphql,
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+        ),
+        Route(
+            "/api/graphql/{rest:path}",
+            api_proxy.deny_graphql,
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+        ),
         Route("/healthz", _healthz, methods=["GET"]),
     ]
     app = Starlette(routes=routes)

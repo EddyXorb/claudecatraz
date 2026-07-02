@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 from .config import Config
 from .model import Decision, ProxyRequest, StateView
+from .path_template import compile_template
 
 # A check inspects an already-parsed request and returns a deny Decision, or
 # None if the request passes (same shape as policy.project_gate / quota checks).
@@ -88,14 +89,8 @@ class WriteEndpoint:
 
     @functools.cached_property
     def regex(self) -> re.Pattern[str]:
-        # {id}/{iid} → one non-slash, URL-encoded path segment.
-        segments = []
-        for seg in self.template.split("/"):
-            if seg.startswith("{") and seg.endswith("}"):
-                segments.append("[^/]+")
-            else:
-                segments.append(re.escape(seg))
-        return re.compile("/".join(segments))
+        # {id}/{iid} → one non-slash, URL-encoded path segment (path_template).
+        return compile_template(self.template)
 
 
 WRITE_ENDPOINTS: tuple[WriteEndpoint, ...] = (

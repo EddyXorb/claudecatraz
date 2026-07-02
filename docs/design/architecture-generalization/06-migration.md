@@ -8,7 +8,7 @@ dann Nutzerwert und Refactorings. Jeder Schritt ist einzeln shipbar; die bestehe
 sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-workflow/`
 (die kanonische Design-Doku, deren W-/R-Referenzen im Code stehen) mit.
 
-**Vorarbeiten (vor bzw. parallel zu Schritt 1, Maintainer-Entscheid Clean Code):**
+**Vorarbeiten (vor bzw. parallel zu Schritt 1, Maintainer-Entscheid Clean Code): ✅ umgesetzt**
 
 - **Clean-Code-Refactor des Warden**, verhaltenserhaltend: Audit-Event-Bau vereinheitlichen
   (F6, ohne die JSONL-Feldnamen zu ändern — das wäre Schritt 2), Viewer-HTML als
@@ -20,7 +20,8 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
   einziger Namespace-Helper im Code, den R2/R3-Checks und Reconcile nutzen — keine
   verstreuten `startswith`-Aufrufe.
 
-1. **B1 fixen: Read-Pfad scopen** — Schutzlinie „Inhalt, nicht Sichtbarkeit"
+1. ✅ **B1 fixen: Read-Pfad scopen** *(umgesetzt: `warden/read_endpoints.py`,
+   Query-Forwarding in `api_proxy`, GraphQL-403-Route)* — Schutzlinie „Inhalt, nicht Sichtbarkeit"
    (Maintainer-Entscheid): als **minimale Read-Tabelle** gebaut mit vier Kategorien
    (projekt-gebunden → Gate wie heute; projektlose Metadaten → pass; projektlose
    inhaltsfähige Endpoints wie globale/Gruppen-Blob- und Commit-Suche und `/snippets` →

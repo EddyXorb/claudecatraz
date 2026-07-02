@@ -38,6 +38,52 @@ async def test_cross_project_read_blocked(client, respx_router):
     assert resp.status_code == 403 and resp.json()["rule"] == "R6"
 
 
+# --- B1: "content, not visibility" — projectless content-capable reads must
+# stay blocked no matter how they're dressed up, even though the token can
+# technically see every project. ---
+async def test_global_blob_search_cannot_harvest_code_across_projects(client, respx_router):
+    # The whole point of B1: global search with scope=blobs returns code content
+    # from *every* project visible to the token, bypassing allowed_projects.
+    resp = await client.get("/api/v4/search?scope=blobs&search=password")
+    assert resp.status_code == 403 and resp.json()["rule"] == "R6"
+
+
+async def test_group_commit_search_cannot_harvest_content(client, respx_router):
+    resp = await client.get("/api/v4/groups/1/search?scope=commits&search=secret")
+    assert resp.status_code == 403 and resp.json()["rule"] == "R6"
+
+
+async def test_snippets_cannot_be_read_projectless(client, respx_router):
+    resp = await client.get("/api/v4/snippets")
+    assert resp.status_code == 403 and resp.json()["rule"] == "R6"
+
+
+async def test_group_discovery_still_works_despite_b1(client, respx_router):
+    # B1 must not regress the AGENT.md-documented discovery flow: names/metadata
+    # stay readable, only content is scoped.
+    respx_router.route(method="GET", url__regex=r".*/groups/.*/projects$").mock(
+        return_value=httpx.Response(200, json=[{"name": "proj"}])
+    )
+    resp = await client.get("/api/v4/groups/1/projects")
+    assert resp.status_code == 200
+
+
+# --- B5: GraphQL must never become a policy bypass -----------------------------
+async def test_graphql_mutation_cannot_bypass_merge_block(client, respx_router):
+    # A GraphQL mutation could merge an MR in one call, bypassing R4 entirely —
+    # the warden must refuse before any upstream contact, not rely on GitLab.
+    resp = await client.post(
+        "/api/graphql",
+        json={"query": "mutation { mergeRequestAccept(input: {}) { errors } }"},
+    )
+    assert resp.status_code == 403 and resp.json()["rule"] == "R6"
+
+
+async def test_graphql_read_query_also_denied(client, respx_router):
+    resp = await client.get("/api/graphql")
+    assert resp.status_code == 403 and resp.json()["rule"] == "R6"
+
+
 async def test_api_branch_creation_default_denied(client, respx_router):
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/repository/branches",
