@@ -136,6 +136,12 @@ Verifikation: `cd warden && uv run pytest -q` grün, `ruff check`, `mypy` grün.
 **Fertig-Kriterium.** `core/state_migrations.py` ist weg, `State` stampt und prüft
 die Version selbst, kein Migrationslauf mehr, Tests grün.
 
+> **✅ ERLEDIGT** (Commit `refactor(state): Punkt 2`). `state_migrations.py`
+> gelöscht; `StateStore._check_and_stamp_schema_version()` liest/stampt
+> `PRAGMA user_version` gegen `CURRENT_SCHEMA_VERSION=1`, fail-closed via
+> `SchemaError` (jetzt in `state.py`). Migrationstests entfernt, Version-Stamp-/
+> Fail-closed-/Zieltabellen-Tests behalten. pytest/ruff/format/mypy grün.
+
 ---
 
 ## 3. Betriebs-Logging: `print(…, file=sys.stderr)` → `logging.Logger` in Datei
