@@ -18,6 +18,7 @@ from warden.guards.git.intent import GitIntent
 from warden.guards.git.pktline import RefCommand
 from warden.guards.git.policy import check_ref
 from warden.guards.gitlab_api import policy as api_policy
+from warden.guards.gitlab_api.catalog.activation import build_effective_table
 from warden.guards.gitlab_api.intent import ApiIntent
 
 ZERO = "0" * 40
@@ -143,6 +144,21 @@ def test_r6_project_not_in_allowlist_denied(cfg):
     assert not d.allow and d.rule == "R6"
 
 
+def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
+    # issue.create ships with checks=() (§04.2) — this pins down that the
+    # project boundary (R6, a kernel gate run before any entry-specific
+    # check) still applies to an entry that checks nothing of its own.
+    effective = build_effective_table(cfg, ("issue.create",))
+    req = ApiIntent(
+        _project="other/secret",
+        _method="POST",
+        path="/projects/other%2Fsecret/issues",
+        fields={"title": "x"},
+    )
+    d = api_policy.full_decide(req, StateView(), cfg, effective)
+    assert not d.allow and d.rule == "R6"
+
+
 # --- R3 create / ownership -----------------------------------------------------
 def test_r3_create_mr_with_prefix_allowed(cfg):
     d = decide(
@@ -212,6 +228,19 @@ def test_r4_state_event_merge_alias_denied(cfg):
     req.mr_owner_ok = True
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
+
+
+def test_r3_mr_update_requires_ownership(cfg):
+    # mr.update's OWNED_BY_AGENT check (§04.2): editing an MR whose ownership
+    # can't be verified is denied — same check as mr.note/mr.discussion, but
+    # exercised on the update endpoint itself, not just the note endpoint.
+    req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="x")
+    req.mr_owner_ok = False
+    d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R3"
+    req.mr_owner_ok = None  # unverifiable → default-deny
+    d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R3"
 
 
 def test_default_deny_unknown_write_endpoint(cfg):

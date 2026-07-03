@@ -14,12 +14,3 @@ class CatalogConfigError(ValueError):
     that widens instead of narrows, an override for an endpoint that is not
     enabled, or an attempt to enable an entry whose capabilities intersect
     ``FORBIDDEN`` (no scoping-check taming mechanism exists yet)."""
-
-
-class StartgateFailure(RuntimeError):
-    """A catalog deny-probe was ALLOWED by the effective policy.
-
-    The warden refuses to start rather than serve a policy that fails its own
-    curated examples — this only catches a code or config mistake before it
-    reaches a real request.
-    """

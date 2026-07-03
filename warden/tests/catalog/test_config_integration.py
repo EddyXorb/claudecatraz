@@ -52,7 +52,7 @@ def test_from_env_with_unknown_catalog_id_is_only_caught_when_the_table_is_built
     toml.write_text('[api.endpoints]\nenable = ["no.such.entry"]\n')
     # Malformed *shape* is caught by from_env itself (below); an unknown *id*
     # is only caught when the effective table is actually built — the same
-    # deferred check the startgate and ApiGuard.__init__ rely on at boot.
+    # deferred check ApiGuard.__init__ relies on at boot.
     cfg = from_env(_MIN_ENV, strict=True, toml_path=str(toml))
     with pytest.raises(CatalogConfigError):
         build_effective_table(cfg, cfg.endpoint_enable)

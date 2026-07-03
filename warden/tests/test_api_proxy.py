@@ -143,6 +143,18 @@ async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
     assert reply.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
+async def test_discussion_reply_ownership_violation_denied(client, respx_router):
+    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
+    )
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests/7/discussions/abc123/notes",
+        json={"body": "done"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R3"
+
+
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"}

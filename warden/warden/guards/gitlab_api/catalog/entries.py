@@ -6,8 +6,7 @@ Extra entries (``branch.create``, ``issue.create``) are catalogued and tested bu
 only reachable when explicitly enabled via ``warden.toml``.
 
 The merge endpoint is deliberately **not** here — it is a built-in deny invariant
-(``builtin.py``), not an activatable row. Each row's deny-probes live in ``probes.py``,
-keyed by entry id, so this table stays a legible one-row-per-endpoint list.
+(``builtin.py``), not an activatable row.
 """
 
 from __future__ import annotations

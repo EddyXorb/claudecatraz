@@ -76,8 +76,8 @@ def kernel_gates(
 
     One definition: :meth:`Guard.handle` runs this on every pipeline request,
     and each guard's ``full_decide`` composes it with the guard's pure
-    ``decide`` so the startgate and unit tests exercise exactly the effective
-    order — never a re-derived copy of it.
+    ``decide`` so unit tests exercise exactly the effective order — never a
+    re-derived copy of it.
     """
     denied = mode_gate_off(cfg)
     if denied is None and intent.writes:

@@ -16,12 +16,7 @@ from .core.config import ConfigError
 from .core.config_load import from_env
 from .core.state import SchemaError, State
 from .guards.gitlab.upstream import Upstream
-from .guards.gitlab_api.catalog import (
-    CatalogConfigError,
-    StartgateFailure,
-    build_effective_table,
-    run_startgate,
-)
+from .guards.gitlab_api.catalog import CatalogConfigError
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:
@@ -38,15 +33,6 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
 # TODO: tidy up this function and split it into smaller functions.
 async def _serve() -> None:
     cfg = from_env()
-
-    # Build the effective endpoint table (raises ConfigError on any fail-closed
-    # activation-config problem) and run its startgate — every activated entry's
-    # deny-probes, plus built-in invariants' global probes — before anything else.
-    # Pure, offline, no state DB / upstream: earliest possible fail-closed abort point.
-    # TODO: this should not be here, as it is an implementation detail of the gitlab
-    # guard. Will however be omitted once the startgate is gone
-    table = build_effective_table(cfg, cfg.endpoint_enable)
-    run_startgate(cfg, table)
 
     if cfg.gitlab_enabled and not cfg.allowed_projects:
         print(
@@ -103,12 +89,11 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except (ConfigError, CatalogConfigError, SchemaError, StartgateFailure) as exc:
-        # All four are fail-closed startup aborts: bad config (shape or
-        # catalog-activation), a state DB this build cannot understand, or a
-        # catalog deny-probe that would have been allowed. None should ever
-        # surface as a traceback — a clean message and a non-zero exit is
-        # the contract.
+    except (ConfigError, CatalogConfigError, SchemaError) as exc:
+        # All three are fail-closed startup aborts: bad config (shape or
+        # catalog-activation), or a state DB this build cannot understand.
+        # None should ever surface as a traceback — a clean message and a
+        # non-zero exit is the contract.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

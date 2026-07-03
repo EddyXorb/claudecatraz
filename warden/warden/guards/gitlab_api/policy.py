@@ -123,8 +123,7 @@ def full_decide(
 ) -> Decision:
     """Compose kernel gates with guard-specific decide for callers outside Guard.handle.
 
-    For endpoint-catalog startgate, tests: the whole effective decision, not just this
-    module's slice. Probes fail against capability invariant, not just guard's own checks.
+    Used by tests exercising the whole effective decision, not just this module's slice.
 
     ``effective`` and ``project_allowed`` default to the real values for free.
     """

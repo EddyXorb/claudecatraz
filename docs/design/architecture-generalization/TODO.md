@@ -87,15 +87,25 @@ Erledigt (Fortsetzung):
   effektive Tabelle vom `ApiGuard` (`self._effective`) besessen und durch
   Policy/Startgate gefädelt statt via `cfg.__dict__`-Hack.
 
-Offen (Reihenfolge: die zwei neuen Vereinfachungs-Schritte H2, I):
+Offen (Reihenfolge: I):
 
 - ✅ **G** — Docstring-Pass. Drei Haiku-Subagenten mit disjunkten Datei-Scopes
   (core/+top-level, git/+gitlab/, gitlab_api/+catalog/), parallel gelaufen.
   34 Dateien geändert, ~190 Zeilen netto entfernt (§/Schritt/Röst-Runde-Zitate
   und Migrations-Erzählung raus, Invarianten und Rule-Id-Tags behalten).
   348 Tests grün, ruff/mypy clean.
-- ⬜ **H2** — Startgate abbauen (neu, siehe unten). Nach H ist sein einzig
-  nicht-redundanter Wert (Deployment-Config validieren) weg.
+- ✅ **H2** — Startgate abbauen. Ein Sonnet-Subagent: `startgate.py`,
+  `probes.py`, `DenyProbe`, `BUILTIN_DENY_PROBES`, `PROBE_PROJECT`/
+  `OTHER_PROJECT`, `StartgateFailure` gelöscht; `is_builtin_merge_endpoint`
+  blieb (Laufzeit-Policy). Config-Validierung läuft weiter fail-closed über
+  `ApiGuard.__init__` → `build_effective_table` (`__main__.py`s separater
+  Pre-Check war redundant dazu). Drei entry-spezifische Deny-Probe-Szenarien
+  ohne bestehende Testabdeckung (mr.discussion_reply-Ownership, mr.update-
+  Ownership, R6-Projektgrenze bei `checks=()`) als normale pytest-Fälle in
+  `test_policy.py`/`test_api_proxy.py` migriert; der Rest war bereits
+  redundant zu bestehenden Tests. 344 Tests grün (348 − 6 gelöschter
+  Startgate-Tests − 1 gelöschter Startgate-Failure-Test + 3 neue), ruff/mypy
+  clean.
 - ⬜ **I** — Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen
   (neu, siehe unten). Reads und Writes fallen unter *ein* Modell.
 

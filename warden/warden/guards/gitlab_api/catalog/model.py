@@ -1,32 +1,23 @@
 """Catalog data model: pure dataclasses a catalog entry is built from.
 
 No policy logic lives here — see ``checks.py`` for the Check registry,
-``entries.py`` for the table itself, and ``activation.py``/``startgate.py``
-for how config turns a subset into what is matched against.
+``entries.py`` for the table itself, and ``activation.py`` for how config
+turns a subset into what is matched against.
 """
 
 from __future__ import annotations
 
 import functools
 import re
-import urllib.parse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Final, Mapping, Optional
+from typing import Callable, Optional
 
 from ....core.capabilities import Capability
 from ....core.config import Config
 from ....core.model import Decision, StateView
 from ....core.path_template import compile_template
 from ..intent import ApiIntent
-
-# Synthetic projects the startgate uses to build probe requests: one always
-# allowlisted (so an entry's own checks are exercised, not R6), and one
-# deliberately never allowlisted (to prove the project boundary applies everywhere).
-PROBE_PROJECT: Final[str] = "probe/project"
-PROBE_PROJECT_PATH: Final[str] = urllib.parse.quote(PROBE_PROJECT, safe="")
-OTHER_PROJECT: Final[str] = "other/project"
-OTHER_PROJECT_PATH: Final[str] = urllib.parse.quote(OTHER_PROJECT, safe="")
 
 
 class EndpointKind(str, Enum):
@@ -80,28 +71,6 @@ class RegisteredCheck:
 
     def __call__(self, intent: ApiIntent, state: StateView, cfg: Config) -> Optional[Decision]:
         return self.fn(intent, state, cfg)
-
-
-@dataclass(frozen=True)
-class DenyProbe:
-    """A must-deny example the catalog entry ships with itself.
-
-    Owned by the catalog: the startgate runs every activated entry's probes
-    against the effective policy at startup, and a probe that would be *allowed*
-    aborts the boot.
-
-    ``fields`` mirrors the entry's own body/query split loosely — the startgate
-    builds an :class:`~warden.guards.gitlab_api.intent.ApiIntent` directly
-    (no HTTP parsing), so it does not need to distinguish location: it sets
-    ``intent.fields`` verbatim. ``mr_owner_ok`` covers probes for ownership-gated
-    entries, where the datum is the out-of-band ownership lookup, not a wire field.
-    """
-
-    description: str
-    method: str
-    path: str
-    fields: Mapping[str, object] = field(default_factory=dict)
-    mr_owner_ok: Optional[bool] = None
 
 
 @dataclass(frozen=True)
