@@ -87,7 +87,7 @@ Erledigt (Fortsetzung):
   effektive Tabelle vom `ApiGuard` (`self._effective`) besessen und durch
   Policy/Startgate gefädelt statt via `cfg.__dict__`-Hack.
 
-Offen (Reihenfolge: I):
+Erledigt (Abschluss der Migrationsschritte):
 
 - ✅ **G** — Docstring-Pass. Drei Haiku-Subagenten mit disjunkten Datei-Scopes
   (core/+top-level, git/+gitlab/, gitlab_api/+catalog/), parallel gelaufen.
@@ -106,8 +106,11 @@ Offen (Reihenfolge: I):
   redundant zu bestehenden Tests. 344 Tests grün (348 − 6 gelöschter
   Startgate-Tests − 1 gelöschter Startgate-Failure-Test + 3 neue), ruff/mypy
   clean.
-- ⬜ **I** — Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen
-  (neu, siehe unten). Reads und Writes fallen unter *ein* Modell.
+
+> **Verschoben:** Der frühere Schritt **I** (Katalog auf
+> `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen) ist kein reiner
+> Migrationsschritt, sondern eine Konsolidierung, und lebt jetzt — angepasst um
+> die Ownership-Lockerung — in `07-offene-verbesserungen.md`, Schritt 7.
 
 Arbeitsmodus bisher: pro Schritt ein Sonnet-Subagent (Prompt aus dem Plan-Abschnitt
 unten plus betroffene Dateien plus Verifikation: `cd warden && uv run pytest -q`,
@@ -121,9 +124,10 @@ Verhaltensnetz. A ist frei; B → C → D; E braucht D (Guard-Basisklasse als Au
 für Guard-State); H (Entfetten) nach C jederzeit; F (Dataclass-Config) braucht H
 (Overrides weg ⇒ Schema statisch typbar) und profitiert von D (Guard-eigene
 Config-Sektion); G (Docstrings) zuletzt, weil vorher noch Code bewegt wird.
-Ausführungsreihenfolge: A, B, C, D, E, H, F, G, **H2, I** (die letzten zwei
-sind die 2026-07-03 entschiedenen Vereinfachungs-Schritte: es ist insgesamt zu
-viel Ballast im System — siehe unten).
+Ausführungsreihenfolge: A, B, C, D, E, H, F, G, **H2** (der 2026-07-03
+entschiedene Vereinfachungs-Schritt: es ist insgesamt zu viel Ballast im System —
+siehe unten). Der ehemalige Schritt **I** ist nach `07-offene-verbesserungen.md`
+verschoben.
 
 ### A. `api_endpoints.py` ersatzlos löschen
 
@@ -284,37 +288,10 @@ Vorgehen:
   `__main__.py`.
 - `is_builtin_merge_endpoint` bleibt (das ist Laufzeit-Policy, kein Probe-Ding).
 
-### I. Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen (entschieden 2026-07-03)
-
-Die halbe Idee existiert schon: `core/capabilities.py` **ist** die globale,
-geschlossene Capability-Registry am Wurzel — jeder Guard mappt seinen Intent
-dorthin (`git_ref_capabilities`, `api_capabilities`), der Kernel prüft gegen
-`FORBIDDEN`. Der Umbau ersetzt die Trias `template` + `decision_fields` +
-`checks`-Tupel pro Katalog-Eintrag durch *einen* Recognizer, der (a) match/kein
-Match sagt und (b) bei Match die immer gebrauchten Zusatzinfos (Scope:
-Branchname, iid, „braucht Owner-Lookup") normalisiert zurückgibt.
-
-Beobachtung aus dem Durchmappen: **jeder** heutige Write-Check reduziert sich auf
-⟨Capability-Set + Branch-Scope-Feld + Ownership-Scope⟩. `mr.create` →
-`branch=source_branch`; `mr.note/discussion/reply` → `owner(iid)`; `mr.update` →
-`owner(iid)` + Merge-Alias (schon Capability `MERGES`, der `field_not_equals`
-ist redundant); `pipeline.trigger` → `branch=ref`; `branch.create` →
-`branch=branch` + `CREATES_REF`; `issue.create` → nur Projekt-Grenze+Quota. Der
-Scope-Raum ist winzig und geschlossen: `branch-namespace`, `mr-ownership`,
-`quota-by-kind`, plus `content-exposure` auf der Read-Seite. Damit **vereinen
-sich die zwei parallelen Policy-Mechanismen** (Read-Tabelle liefert terminale
-Decision, Write-Katalog liefert `Optional[Decision]`) zu einem: Recognizer →
-⟨cap, scope⟩ → *eine* generische `decide`.
-
-Drei Dinge dürfen dabei NICHT verloren gehen (sonst hat man die Checks nur in
-Matcher umbenannt): (1) Capabilities bleiben geschlossenes Core-Vokabular; (2)
-Scope bleibt ein kleiner, geschlossener Satz normalisierter Felder, den *eine*
-`decide` konsumiert — keine Ad-hoc-Logik pro Eintrag; (3) Feld-Extraktion bleibt
-geteilt (F12: Body/Query nie blind mergen). Der Recognizer ist eine **Dataclass
-mit Metadaten** (id/method/template) + schmaler match/extract-Funktion, keine
-beliebige Funktion — sonst stirbt die `/policy`-Introspektion und die generische
-fail-closed-Validierung. Der Umbau fasst §04 komplett an (dieselben Dateien wie
-F); erst nach G angehen, wenn H/F den Katalog schon geschlankt haben.
+> **Schritt I verschoben.** Die Katalog-Vereinheitlichung
+> (`Recognizer → ⟨Capability, Scope⟩`) lebt jetzt in
+> `07-offene-verbesserungen.md`, Schritt 7 — dort um die Ownership-Lockerung
+> angepasst (kein autorbasiertes `mr-ownership`-Scope mehr).
 
 ## Beobachtungen ohne eigenen Schritt (bei Gelegenheit)
 
