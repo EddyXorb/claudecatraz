@@ -20,6 +20,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Iterator
 import pytest
 
@@ -39,8 +40,6 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 # ── T2 — baseline: tmpfs ordering guarantee (gating test) ────────────────────
-
-from pathlib import Path
 
 
 def test_t2_tmpfs_overdeck_ordering(tmp_path: Path) -> None:
