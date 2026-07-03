@@ -51,6 +51,41 @@
    Tabelle". Das Zielbild „Core liefert DB-Verwaltung + Persistenz-Werkzeug, Domäne
    versteckt ihr Schema" trägt trotzdem.
 
+## Stand der Umsetzung (2026-07-03, Branch claude/migration-steps-2-8-2e4aas)
+
+Erledigt und einzeln committet:
+
+- ✅ **A** — `api_endpoints.py` gelöscht (Commit `b4d97ba`).
+- ✅ **B** — Guard-Protocol → ABC, `run_guarded` ist jetzt Template-Methode
+  `Guard.handle`; Guards kriegen `cfg`/`state`/`audit` im ABC-Konstruktor
+  (Commit `1d1a251`).
+- ✅ **C** — alles läuft durch die Pipeline: `GitReadGuard` (advertise/upload-pack,
+  Push-Discovery setzt `writes=True`), `GraphqlGuard` (unconditional deny).
+  git-Reads werden jetzt auditiert; Deny-Reihenfolge überall off → writes → project
+  (R0 statt R6 in zwei Randfällen, in Tests dokumentiert). 344 Tests grün
+  (Commit `c194d46`).
+
+Offen (Reihenfolge: D, E, H, F, G):
+
+- ⬜ **D** — AppContext zerlegen. Vorgehen pro Subagent war: Forge-Schicht
+  `guards/gitlab/` (Upstream + Service-Account + Owner-Cache + Reconcile als
+  `GitlabForge`, beiden Guards injiziert), Root-`warden/context.py` ohne Logik,
+  Guard-Lifecycle-Hooks (`startup`/`reconcile`), langlebige Guards + `routes()`
+  statt freier Handler in `app.py`. Harte Anforderung beachten: Config-Mutation
+  in `reconcile()` beenden — numerische Projekt-Id-Aliase werden Forge-State
+  (fail-closed), `allowed_project_ids` fliegt aus `Config`, `project_allowed`
+  wird überschreibbarer Guard-Hook.
+- ⬜ **E** — Persistenz: Forge-Tabellen raus aus `core/state.py`, `StateStore`-Werkzeug.
+- ⬜ **H** — Entfetten: Override-Mechanismus löschen, Deny-Probes auslagern,
+  `git_reject_response` in den git-Guard.
+- ⬜ **F** — Dataclass-Config + generischer TOML-Decoder (braucht H).
+- ⬜ **G** — Docstring-Pass (zuletzt).
+
+Arbeitsmodus bisher: pro Schritt ein Sonnet-Subagent (Prompt aus dem Plan-Abschnitt
+unten plus betroffene Dateien plus Verifikation: `cd warden && uv run pytest -q`,
+`ruff check .`, `mypy warden`), danach Diff-Review und einzelner Commit. Working
+Tree ist sauber, alle Commits auf dem Branch.
+
 ## Plan: Architektur-Ausbesserung
 
 Reihenfolge nach Abhängigkeit; jeder Schritt einzeln shipbar, bestehende Tests als
