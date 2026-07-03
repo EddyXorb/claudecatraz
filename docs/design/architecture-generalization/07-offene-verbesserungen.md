@@ -272,6 +272,15 @@ Grenznutzen und kostete ein ganzes Konzept (Service-Account-Identität).
 Autor bearbeiten; Service-Account-Identität existiert nicht mehr als Konzept;
 Merge bleibt blockiert; Tests grün.
 
+> **✅ ERLEDIGT** (Commit `feat(forge): Punkt 4`). `mr_owned_by_agent` →
+> `mr_source_in_namespace` (nur noch `in_branch_namespace(source)`, Tristate
+> bleibt). Service-Account-Maschinerie komplett entfernt: `resolve_service_account`,
+> `service_account_id`, `GET /user`, `author_id`-Filter in `_list_agent_mrs`,
+> `ApiGuard.startup`. `intent.mr_owner_ok` → `mr_source_ok`; Check
+> `OWNED_BY_AGENT` → `MR_SOURCE_IN_NAMESPACE`. `field_not_equals("merge")`
+> bewusst belassen (Schritt 7). Redteam: Nicht-Namespace-MR bleibt R3-Deny,
+> Merge bleibt R4-Deny. 341 passed, ruff/format/mypy grün.
+
 ---
 
 ## 5. `__main__._serve` entflechten: generische Runtime vs. Composition Root
