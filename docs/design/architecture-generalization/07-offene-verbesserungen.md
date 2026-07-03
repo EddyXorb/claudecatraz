@@ -338,6 +338,14 @@ Ein Test, der den Lifecycle bis „Port offen" simuliert, muss grün bleiben.
 `_run_servers` gekapselt; die vier Code-TODOs sind entweder umgesetzt (Upstream),
 an H2 delegiert (Startgate) oder bewusst als won't-do vermerkt (reconcile-in-Guard).
 
+> **✅ ERLEDIGT** (Commit `refactor(main): Punkt 5`). `build_context(cfg, state,
+> audit)` konstruiert `Upstream` selbst; `AppContext` hält `upstream` + neue
+> `aclose()` (bündelt upstream/audit/state-Teardown). `__main__` importiert
+> `Upstream` nicht mehr; Uvicorn-Block in `_run_servers(ctx)` extrahiert, `_serve`
+> linear. TODO „tidy up" + „leaks from gitlab_api" weg; reconcile-in-Guard-TODO
+> durch Won't-do-Kommentar ersetzt. Startgate (5.3) war durch H2 bereits weg —
+> No-op. 341 passed, ruff/format/mypy grün.
+
 ---
 
 ## 6. Guard-Unabhängigkeit: git-Guard eigenständig, Transport entkoppelt, `GitForge` auflösen
