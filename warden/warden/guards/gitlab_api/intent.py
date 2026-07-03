@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
+from warden.core.model import Intent
+
 if TYPE_CHECKING:  # only for the annotation; avoids a load cycle (catalog imports this module)
     from .catalog.model import CatalogEntry
 
@@ -16,11 +18,12 @@ _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 
 
 @dataclass
-class ApiIntent:
+class ApiIntent(Intent):
     """The parsed, decision-relevant shape of one REST request (§6.9)."""
 
-    project: str
-    method: str
+    _project: str
+    _method: str
+    
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
     endpoint: Optional["CatalogEntry"] = None  # matched catalog entry (writes only)
     fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
@@ -34,3 +37,11 @@ class ApiIntent:
     def writes(self) -> bool:
         # §03.2: derived by the parser, never by a Decision.
         return self.method.upper() not in _READ_METHODS
+    
+    @property
+    def project(self) -> str:
+        return self._project
+    
+    @property
+    def method(self) -> str:
+        return self._method

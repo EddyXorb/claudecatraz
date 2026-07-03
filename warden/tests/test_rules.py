@@ -92,7 +92,7 @@ def cfg() -> Config:
 
 def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ApiIntent(project=project, method=method, path=path, fields=fields)
+    return ApiIntent(_project=project, _method=method, path=path, fields=fields)
 
 
 # One representative request per rule id the policy can emit — a smoke test
@@ -122,7 +122,7 @@ def _api(method, path, **fields) -> ApiIntent:
             cfg,
         ),
         lambda cfg: decide(
-            ApiIntent(project="other/x", method="GET", path="/projects/other%2Fx"),
+            ApiIntent(_project="other/x", _method="GET", path="/projects/other%2Fx"),
             StateView(),
             cfg,
         ),

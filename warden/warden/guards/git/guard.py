@@ -138,7 +138,7 @@ class GitGuard(Guard[GitPushIntent]):
         caps = capabilities(head)
         sideband = "side-band-64k" in caps or "side-band" in caps
         return GitPushIntent(
-            project=project,
+            _project=project,
             ref_commands=commands,
             head=head,
             rest=rest,

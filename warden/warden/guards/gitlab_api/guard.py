@@ -74,8 +74,8 @@ class ApiGuard(Guard[ApiIntent]):
         fields = extract_fields(request, body, ep)
 
         return ApiIntent(
-            project=project,
-            method=method,
+            _project=project,
+            _method=method,
             path=rest_path,
             endpoint=ep,
             fields=fields,

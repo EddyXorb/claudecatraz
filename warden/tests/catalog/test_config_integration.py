@@ -61,7 +61,7 @@ def test_from_env_parses_overrides(tmp_path: Path):
     from warden.guards.gitlab_api.intent import ApiIntent
 
     req = ApiIntent(
-        project="group/proj", method="POST",
+        _project="group/proj", _method="POST",
         path="/projects/group%2Fproj/repository/branches",
         fields={"branch": "claude/x-thing"},
     )

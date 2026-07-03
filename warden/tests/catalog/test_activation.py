@@ -123,14 +123,14 @@ def test_override_that_narrows_is_applied_and_enforced(cfg):
     from warden.guards.gitlab_api.intent import ApiIntent
 
     req_ok = ApiIntent(
-        project="group/proj", method="POST",
+        _project="group/proj", _method="POST",
         path="/projects/group%2Fproj/repository/branches",
         fields={"branch": "claude/only-this-x"},
     )
     assert check(req_ok, StateView(), cfg) is None  # narrower prefix satisfied
 
     req_too_wide = ApiIntent(
-        project="group/proj", method="POST",
+        _project="group/proj", _method="POST",
         path="/projects/group%2Fproj/repository/branches",
         fields={"branch": "claude/other"},  # inside the general namespace, NOT the override
     )

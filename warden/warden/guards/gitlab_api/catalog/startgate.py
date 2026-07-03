@@ -69,8 +69,8 @@ def _probe_config(cfg: Config, table: EffectiveTable) -> Config:
 def _probe_intent(probe: DenyProbe) -> ApiIntent:
     project = _project_from_probe_path(probe.path)
     return ApiIntent(
-        project=project,
-        method=probe.method,
+        _project=project,
+        _method=probe.method,
         path=probe.path,
         fields=dict(probe.fields),
         mr_owner_ok=probe.mr_owner_ok,

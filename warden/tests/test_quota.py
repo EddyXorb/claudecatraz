@@ -21,8 +21,8 @@ class FakeClock:
 
 def _mr(cfg) -> ApiIntent:
     return ApiIntent(
-        project="group/proj",
-        method="POST",
+        _project="group/proj",
+        _method="POST",
         path="/projects/group%2Fproj/merge_requests",
         fields={"source_branch": "claude/x"},
     )

@@ -14,12 +14,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
 
+from warden.core.model import Intent
+
 from .pktline import RefCommand
 
 
 @dataclass
-class GitPushIntent:
-    project: str
+class GitPushIntent(Intent):
+    _project: str
+    # Audit-facing verb (§03.2 core.model.Intent) — not an HTTP method; kept
+    # as the pre-Schritt-5 literal ("push") for byte-compatible JSONL.
+    _method: str = "push"
     ref_commands: list[RefCommand] = field(default_factory=list)
     # Plumbing `forward` needs to stream the *unchanged* body upstream
     # (SHA-preserving, W7.3) — not decision-relevant, just carried along.
@@ -28,12 +33,17 @@ class GitPushIntent:
     content_type: str = "application/x-git-receive-pack-request"
     extra_headers: dict[str, str] = field(default_factory=dict)
     sideband: bool = False
-    # Audit-facing verb (§03.2 core.model.Intent) — not an HTTP method; kept
-    # as the pre-Schritt-5 literal ("push") for byte-compatible JSONL.
-    method: str = "push"
 
     @property
     def writes(self) -> bool:
         # The only intent this guard's kernel pipeline ever parses is a
         # receive-pack push — always a write by construction.
         return True
+
+    @property
+    def project(self) -> str:
+        return self._project
+
+    @property
+    def method(self) -> str:
+        return self._method

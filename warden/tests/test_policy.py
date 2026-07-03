@@ -53,7 +53,7 @@ def multi_prefix_cfg() -> Config:
 
 def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ApiIntent(project=project, method=method, path=path, fields=fields)
+    return ApiIntent(_project=project, _method=method, path=path, fields=fields)
 
 
 # --- R1 / R6 -------------------------------------------------------------------
@@ -138,7 +138,7 @@ def test_b1_unknown_projectless_endpoint_default_denied(cfg):
 
 
 def test_r6_project_not_in_allowlist_denied(cfg):
-    req = ApiIntent(project="other/secret", method="GET", path="/projects/other%2Fsecret")
+    req = ApiIntent(_project="other/secret", _method="GET", path="/projects/other%2Fsecret")
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R6"
 
@@ -253,7 +253,7 @@ def test_locked_state_denies_all_writes(cfg):
 # --- git guard (R2/R5) ---------------------------------------------------------
 def _git(*cmds) -> GitPushIntent:
     return GitPushIntent(
-        project="group/proj.git",
+        _project="group/proj.git",
         ref_commands=[RefCommand(*c) for c in cmds],
     )
 
@@ -338,7 +338,7 @@ def test_git_tag_push_rejected_with_tag_message(cfg):
 
 def test_git_project_not_allowlisted_denied(cfg):
     req = GitPushIntent(
-        project="other/x.git",
+        _project="other/x.git",
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
     d = decide(req, StateView(), cfg)
@@ -391,7 +391,7 @@ def test_off_denies_reads_and_writes():
     # git push
     d = decide(
         GitPushIntent(
-            project="group/proj",
+            _project="group/proj",
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),
@@ -423,7 +423,7 @@ def test_read_only_denies_writes_allows_reads():
     # git push: denied R0
     d = decide(
         GitPushIntent(
-            project="group/proj",
+            _project="group/proj",
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),

@@ -47,7 +47,7 @@ def cfg() -> Config:
 
 def _api(method: str, path: str, **fields: object) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ApiIntent(project=project, method=method, path=path, fields=dict(fields))
+    return ApiIntent(_project=project, _method=method, path=path, fields=dict(fields))
 
 
 # --- the vocabulary itself ------------------------------------------------
@@ -281,7 +281,7 @@ def test_is_builtin_merge_endpoint(method, path, expected):
 
 def test_e2e_git_tag_push_denied_r4(cfg):
     req = GitPushIntent(
-        project="group/proj",
+        _project="group/proj",
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
@@ -290,7 +290,7 @@ def test_e2e_git_tag_push_denied_r4(cfg):
 
 def test_e2e_git_branch_delete_denied_r4(cfg):
     req = GitPushIntent(
-        project="group/proj",
+        _project="group/proj",
         ref_commands=[RefCommand(SHA, ZERO, "refs/heads/claude/feature")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
@@ -341,7 +341,7 @@ def test_e2e_capability_layer_denies_git_even_if_check_ref_logic_is_bypassed(cfg
     independent of whatever ``check_ref`` itself would separately decide.
     """
     req = GitPushIntent(
-        project="group/proj",
+        _project="group/proj",
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
