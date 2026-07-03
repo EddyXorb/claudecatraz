@@ -1,31 +1,14 @@
-"""Durable, fail-safe quota state (W8, §6.11): the generic writes counter and
-the reconcile lock, plus :class:`StateStore` — the connection owner every
-domain builds its own tables on.
+"""Durable, fail-safe quota state: generic writes counter, reconcile lock, StateStore.
 
-SQLite with WAL + ``synchronous=FULL``; every write-record commits *before*
-the upstream call so a crash never loses the hourly counter. If the state
-cannot be reconstructed, the view is **locked** ("limit reached") until a
-reconcile succeeds — never "empty = 0 used = all free".
+SQLite with WAL + ``synchronous=FULL``: every write-record commits *before* the upstream call.
+State view is **locked** until a reconcile succeeds (never "empty = all free").
 
-Kernel-owned (§03.3): the counters and their fail-safe locking are a
-resource-agnostic concept (M5) any guard's quotas can share, keyed by the
-``guard``/``kind`` strings a guard passes to :meth:`State.record_write` — this
-module has no forge vocabulary of its own (no branch/MR tables; those live in
-the forge domain's own :class:`~warden.guards.gitlab.state.ForgeState`, built
-on the :class:`StateStore` this module exposes).
+Kernel-owned: counters and fail-safe locking are resource-agnostic (M5), keyed by
+``guard``/``kind`` strings. Module has no forge vocabulary (branch/MR tables live
+in forge's own :class:`~warden.guards.gitlab.state.ForgeState`).
 
-**Schema versioning** (§06-migration.md Schritt 2, F11): the DB carries its
-schema version in SQLite's own ``PRAGMA user_version`` — a single integer slot
-SQLite reserves exactly for this, always present (defaults to 0), so it needs
-no bootstrap table of its own and survives even a database that predates this
-concept. A small ``meta`` key/value table already exists here for
-``last_reconcile``, but that is *application* state written mid-session; the
-schema version is a *structural* fact checked once at connect time before any
-table is touched, which is what ``user_version`` is for — reusing ``meta``
-would conflate the two. The versioned migrations themselves (including the
-Schritt-6 claude→agent/channel→guard rename) live in
-:mod:`warden.core.state_migrations`, re-exported below for callers that only
-need the version constants/exception, not the migration internals.
+Schema versioning via SQLite's ``PRAGMA user_version``. Migrations in
+:mod:`warden.core.state_migrations`.
 """
 
 from __future__ import annotations

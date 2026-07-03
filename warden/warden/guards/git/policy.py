@@ -1,26 +1,12 @@
-"""git guard policy (§03.2/03.3): pure, per-ref rules for a receive-pack push.
+"""git guard policy: pure, per-ref rules for a receive-pack push.
 
-Split out of the old channel-union ``policy.py`` (§06-migration.md Schritt 5,
-F1/F3) — this module knows nothing about REST/GitLab endpoints, only git
-ref-update semantics, matching §03.3's "git-Protokoll-Guard (generisch)" split.
-The mode gate (R0), resource allowlist (R6) and capability invariants (R4,
-§03.4) that used to live in the channel-union ``policy.decide`` are now the
-kernel's job (:mod:`warden.core.guard`) — everything below is what remains
-genuinely git-specific: branch namespace, delete/tag defense-in-depth, quotas.
+Branch namespace, delete/tag defense-in-depth, quotas — everything genuinely git-specific.
+Mode gate (R0), resource allowlist (R6), and capability invariants (R4) are the kernel's job.
 
-Rules enforced — every :class:`~warden.core.model.Decision` here is tagged
-with one of these for the audit log:
-
-  R2  git write limits   push only to branches under an allowed <branch_prefix>
-                         (the namespace is the union of ``branch_prefixes``).
-  R4  Irreversible verbs pushing a tag or deleting a branch is never permitted
-                         (B3: these used to log as R2 — they are "never"
-                         capabilities, not namespace checks, see ``core.rules.R4``).
-                         Caught structurally by the kernel's capability gate
-                         (:func:`capability_gate` below) *and* kept here as
-                         defense-in-depth (A10).
-  R5  Quota & rate       max open branches, max writes/hour; a locked
-                         (unreconciled) state denies (fail-safe, §6.11).
+Rules enforced:
+  R2  git write limits   push only to branches under allowed <branch_prefix>.
+  R4  Irreversible verbs tag pushes and branch deletes never permitted.
+  R5  Quota & rate       max open branches, max writes/hour; locked state denies (fail-safe).
 """
 
 from __future__ import annotations
@@ -38,23 +24,15 @@ from .pktline import RefCommand
 
 
 def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
-    """Map one git ref-command to capabilities — trivial and exact (§03.4).
+    """Map one git ref-command to capabilities — trivial and exact.
 
-    Mirrors, but does not replace, the special cases in :func:`check_ref`
-    (kept as defense-in-depth, A10): this mapping alone must be enough to
-    trigger :func:`~warden.core.capabilities.forbidden_check`, independent of
-    ``check_ref``'s own logic.
+    Mirrors the special cases in :func:`check_ref` (defense-in-depth):
+    this mapping must be enough to trigger :func:`~warden.core.capabilities.forbidden_check`.
 
-    * A delete (``new`` is all-zero) is ``deletes_ref`` regardless of ref
-      type — a tag delete is a delete, not additionally a tag *creation*.
-    * A non-deleting push to ``refs/tags/*`` is ``creates_tag``.
-    * Anything else is a branch write: ``creates_ref`` when it creates a new
-      branch, plus ``writes_outside_namespace`` when the (heads-prefix
-      stripped) ref name is outside ``cfg.branch_prefixes`` (M2) — not
-      forbidden by itself (see ``core.capabilities.FORBIDDEN``'s docstring),
-      but part of the shared vocabulary so a future consumer (e.g. an audit
-      report) can ask "did this write leave the namespace" without
-      re-deriving it.
+    * Delete (all-zero) is ``deletes_ref`` regardless of ref type.
+    * Non-delete push to ``refs/tags/*`` is ``creates_tag``.
+    * Branch write: ``creates_ref`` when creating new branch, plus ``writes_outside_namespace``
+      when outside ``cfg.branch_prefixes``.
     """
     if cmd.is_delete:
         return frozenset({Capability.DELETES_REF})
@@ -68,13 +46,9 @@ def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
 
 
 def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
-    """§03.4 kernel hook (``core.guard.Guard.capability_gate``).
+    """Kernel hook: check capabilities per ref command, atomic across push.
 
-    Checked per ref command, first hit denies — atomic (Q10): a single
-    forbidden command denies the whole push, matching :func:`decide`'s own
-    batch atomicity (and matching the pre-Schritt-5 per-command loop in
-    ``policy._decide_git``, including its deny reason naming only the
-    triggering command's capabilities).
+    First hit denies the whole push, matching :func:`decide`'s batch atomicity.
     """
     for cmd in intent.ref_commands:
         denied = forbidden_check(git_ref_capabilities(cmd, cfg))
@@ -96,7 +70,7 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
         )
     if cmd.is_delete:  # B3 fix: irreversible verb (M4) — R4, not R2 (Q3).
         return Decision(False, R4, f"deleting branch {ref!r} is forbidden")
-    if state.locked:  # §6.11 fail-safe
+    if state.locked:  # Fail-safe
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if cmd.is_create and state.open_branches >= cfg.max_open_branches:  # R5
         return Decision(False, R5, f"max open branches reached ({cfg.max_open_branches})")
@@ -106,13 +80,10 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
 
 
 def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
-    """Per ref-command: prefix / delete / create-count / rate (W7.2).
+    """Per ref-command: prefix / delete / create-count / rate.
 
-    Atomic: a single forbidden command rejects the whole push (Q10). Quotas are
-    accounted *within* the batch — the commands in one push are not free of
-    each other, so N creates against ``max_open_branches - 1`` must reject.
-    Mode/project/capability gates already ran in the kernel by the time this
-    is reached (§03.2) — this only holds what is genuinely git-specific.
+    Atomic: a single forbidden command rejects the whole push. Quotas are accounted
+    within the batch — N creates against ``max_open_branches - 1`` must reject.
     """
     if not intent.ref_commands:
         return Decision(False, R2, "no ref commands in push")

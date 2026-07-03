@@ -1,32 +1,13 @@
-"""JSONL audit log (W11, §6.8; F6, docs/design/architecture-generalization,
-§02-befunde.md F6/F11, §06-migration.md Schritt 5/6): typed events, one
-writer, O_APPEND, redaction-by-allowlist.
+"""JSONL audit log: typed events, one writer, O_APPEND, redaction-by-allowlist.
 
-**F6 fix.** Every guard used to build its own near-identical dict by hand
-(``git_proxy._audit``/``api_proxy._audit``). :class:`AuditEvent` is the one
-typed constructor now — :meth:`core.guard.Guard.handle` builds exactly one on
-every pipeline exit (allow or deny) from the envelope fields every guard
-shares, plus whatever guard-specific extras :meth:`Guard.audit_fields`
-supplies (F6: "Aufrufer konstruieren das Event typisiert").
+:class:`AuditEvent` is the one typed constructor — :meth:`core.guard.Guard.handle`
+builds exactly one on every pipeline exit from shared envelope fields plus guard-specific extras.
 
-**JSONL schema version history** (independent of the state DB's own
-``user_version`` counter in :mod:`warden.core.state_migrations` — the two
-schemas evolve on unrelated axes and unrelated numbers):
+**JSONL schema version history** (independent of state DB's own counter):
 
-* **1** — the historical, feldlose format: no ``schema`` field on the line at
-  all (every line written before Schritt 2).
-* **2** (§06-migration.md Schritt 2) — introduces the ``schema`` field itself,
-  gating the B3 fix (tag-push/branch-delete relogged from R2 to R4 — an
-  audit-visible change to an *existing* field's value).
-* **3** (§06-migration.md Schritt 6, F11) — the ``channel`` field is renamed
-  to ``guard`` (values unchanged: still ``"git"``/``"api"``); paired with the
-  state DB's own claude→agent table rename in the same migration step (both
-  are one vocabulary shift, §03-guard-architektur.md §03.5). ``extra`` is
-  still spread into the serialised dict exactly as the old
-  ``**channel_fields``/``**guard_fields`` kwarg was: a guard that never passes
-  a key (e.g. git never passes ``path``) leaves that key absent from the line
-  entirely, while a guard that passes ``None`` explicitly (e.g. the REST
-  guard's ``kind`` for an unmatched endpoint) serialises it as JSON ``null``.
+* **1** — no ``schema`` field.
+* **2** — introduces ``schema`` field; tag-push/branch-delete relogged from R2 to R4.
+* **3** — ``channel`` field renamed to ``guard`` (values unchanged: ``"git"``/``"api"``).
 """
 
 from __future__ import annotations
@@ -42,11 +23,9 @@ from typing import Any, Final, Mapping, Optional
 
 from .model import Decision, StateView
 
-# Audit-JSONL schema version — see the module docstring for the full version
-# history (1 = feldlos, 2 = `schema` field + R2→R4, 3 = channel→guard).
-# A reader (viewer, `catraz observe`) must keep accepting all of them: a
-# missing `schema` field means version 1, and a `channel` field with no
-# `guard` field means version <3 (compat window, §06.1).
+# Audit-JSONL schema version — see module docstring for version history.
+# A reader (viewer, `catraz observe`) must keep accepting all of them:
+# missing `schema` field means version 1, `channel` without `guard` means version <3.
 AUDIT_SCHEMA_VERSION: Final[int] = 3
 
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
@@ -69,16 +48,9 @@ _ALLOWED_FIELDS = {
     "open_mrs",
     "open_branches",
     "writes_last_hour",
-    # §04.3 (docs/design/architecture-generalization/04-policy-erweiterbarkeit.md):
-    # marks a decision made against a catalog entry a deployment's warden.toml
-    # activated beyond the shipped default set (e.g. "config:branch.create").
-    # Additive and optional — most events never carry it — so no
-    # AUDIT_SCHEMA_VERSION bump: unlike the R2→R4 rename that earned version 2
-    # (an audit-visible change to an *existing* field's value), a new,
-    # absent-by-default field is exactly the kind of extension the
-    # field-allowlist redaction was designed to admit without a version bump —
-    # every existing reader (viewer.html, `catraz observe`) already renders
-    # unknown/missing fields defensively.
+    # Marks a decision against a catalog entry activated beyond the default set.
+    # Additive and optional; no AUDIT_SCHEMA_VERSION bump needed (field-allowlist
+    # redaction was designed to admit extensions without version bump).
     "enabled_via",
 }
 

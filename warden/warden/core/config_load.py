@@ -46,12 +46,11 @@ def _split_csv(value: str) -> tuple[str, ...]:
 
 
 def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ...]]:
-    """Parse ``[api.endpoints].enable`` (§04.2/04.3). Deferred import — the
-    gitlab_api guard package owns the ``[api.endpoints]`` schema; core stays
-    guard-agnostic at module-load time, only threading the parsed value
-    through to ``Config.endpoint_enable``. Malformed shape ⇒ ``ConfigError``
-    (fail-closed startup abort, raised directly by the decoder), the same
-    treatment as a malformed ``warden.toml`` overall.
+    """Parse ``[api.endpoints].enable``.
+
+    Deferred import: gitlab_api guard owns the schema; core stays guard-agnostic,
+    only threading the parsed value through to ``Config.endpoint_enable``.
+    Malformed shape raises ``ConfigError`` (fail-closed startup abort).
     """
     from ..guards.gitlab_api.catalog.config_parse import parse_api_endpoints
 

@@ -1,12 +1,8 @@
-"""Core policy data types (W5): the pure values shared by the kernel and every
-guard (§03.2/03.3, docs/design/architecture-generalization/03-guard-architektur.md).
+"""Core policy data types: pure values shared by kernel and every guard.
 
-Kept guard-agnostic on purpose (§03.3: "Kernel kennt keine GitLab-Begriffe") —
-no forge vocabulary (MR, ``iid``, ref) lives here, only what the kernel's
-pipeline (:mod:`core.guard`) and the audit/state layers need from *any*
-intent, regardless of which guard produced it. Guard-specific intent shapes
-(``guards.git.intent.GitIntent``, ``guards.gitlab_api.intent.ApiIntent``)
-live with their guard and only need to satisfy :class:`Intent` structurally.
+Kept guard-agnostic on purpose: no forge vocabulary (MR, ``iid``, ref) lives here,
+only what the kernel pipeline and audit/state layers need from *any* intent.
+Guard-specific intent shapes live with their guard and satisfy :class:`Intent` structurally.
 """
 
 from __future__ import annotations
@@ -32,7 +28,7 @@ class Decision:
 
 @dataclass(frozen=True)
 class StateView:
-    """Snapshot of the quota counters (W5). ``locked`` ⇒ fail-safe deny (§6.11)."""
+    """Snapshot of quota counters. ``locked`` ⇒ fail-safe deny."""
 
     open_mrs: int = 0
     open_branches: int = 0
@@ -41,26 +37,16 @@ class StateView:
 
 
 class Intent(Protocol):
-    """What every guard's parsed request must expose to the kernel (§03.2/03.3).
+    """What every guard's parsed request must expose to the kernel.
 
-    Deliberately minimal (all read-only properties, satisfied structurally by
-    a plain dataclass field or a computed property alike):
+    Deliberately minimal (read-only properties):
 
-    * ``writes`` — derived by the guard's own parser (F3: "vom Parser
-      abgeleitet, NICHT von der Decision"), never computed from a
-      :class:`Decision`. This is what lets :meth:`core.guard.Guard.handle`
-      enforce the read-only mode-gate *before* ``enrich`` runs, so a write
-      credential is structurally unreachable in read-only/off mode.
-    * ``project`` — what the resource-allowlist gate (M6,
-      :func:`core.guard.project_gate`) needs.
-    * ``method`` — the audit envelope's verb. For a REST guard this is the
-      literal HTTP method; a non-REST guard (git) uses whatever short label
-      its own audit trail used before this split (``"push"``) — the kernel
-      never interprets this value, only logs it.
+    * ``writes`` — derived by the guard's parser, never from a :class:`Decision`.
+      Allows read-only mode-gate to run *before* ``enrich``, keeping credentials unreachable.
+    * ``project`` — what the resource-allowlist gate needs.
+    * ``method`` — the audit envelope's verb (HTTP method for REST, ``"push"`` for git).
 
-    Everything guard-specific (git's ``ref_commands``, the REST guard's
-    ``path``/``fields``/``endpoint``) lives on the concrete Intent dataclass
-    in that guard's own package — the kernel never reaches for those fields.
+    Guard-specific fields live on the concrete Intent dataclass in that guard's package.
     """
 
     @property

@@ -1,14 +1,8 @@
-"""The root application context (§03.5/03.6) — logic-free on purpose.
+"""The root application context — logic-free on purpose.
 
-:class:`AppContext` is a plain bag of the long-lived collaborators every
-guard is assembled from, plus the assembled guards themselves; it holds no
-behaviour of its own (that lives in :class:`~warden.guards.gitlab.forge.GitlabForge`
-and in each :class:`~warden.core.guard.Guard`). :func:`build_context` is the
-composition root: the ONE place that imports the concrete guard classes
-(:class:`~warden.guards.git.guard.GitGuard`,
-:class:`~warden.guards.gitlab_api.guard.ApiGuard`/:class:`~warden.guards.gitlab_api.guard.GraphqlGuard`)
-and wires them up — keeping ``app.py``/``__main__.py`` free of guard-policy
-internals; they only ever see ``ctx.guards`` (generic ``Guard`` instances).
+Plain bag of long-lived collaborators every guard is assembled from, plus guards themselves.
+Composition root: the ONE place that imports and wires concrete guard classes,
+keeping app.py/__main__.py free of guard-policy internals.
 """
 
 from __future__ import annotations

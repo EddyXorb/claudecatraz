@@ -1,4 +1,4 @@
-"""uvicorn bootstrap with reconcile-before-open and periodic reconcile (W8.2)."""
+"""Uvicorn bootstrap with reconcile-before-open and periodic reconcile."""
 
 from __future__ import annotations
 
@@ -38,11 +38,10 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
 async def _serve() -> None:
     cfg = from_env()
 
-    # §04.3/04.4: build the effective endpoint table (raises ConfigError on
-    # any fail-closed activation-config problem) and run its startgate — every
-    # activated catalog entry's deny-probes, plus the built-in invariants'
-    # global probes — before anything else. Pure, offline, no state DB / no
-    # upstream: this is the earliest possible fail-closed abort point.
+    # Build the effective endpoint table (raises ConfigError on any fail-closed
+    # activation-config problem) and run its startgate — every activated entry's
+    # deny-probes, plus built-in invariants' global probes — before anything else.
+    # Pure, offline, no state DB / upstream: earliest possible fail-closed abort point.
     table = build_effective_table(cfg, cfg.endpoint_enable)
     run_startgate(cfg, table)
 
@@ -59,7 +58,7 @@ async def _serve() -> None:
     audit.start()
     ctx = build_context(cfg, upstream, state, audit)
 
-    # Reconcile BEFORE opening the agent port (§6.11): GitLab truth dominates.
+    # Reconcile BEFORE opening the agent port: GitLab truth dominates.
     for g in ctx.guards:
         await g.startup()
     ok = True

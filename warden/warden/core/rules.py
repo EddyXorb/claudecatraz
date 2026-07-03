@@ -1,25 +1,12 @@
-"""Central rule registry (B3, F11; docs/design/architecture-generalization,
-§01-grundregeln.md B, §02-befunde.md B3, §06-migration.md Schritt 2).
+"""Central rule registry: one place for rule ids, preventing string literal drift.
 
 Every :class:`~warden.core.model.Decision` carries a bare rule id ("R0".."R6")
-for the audit log. Before this module those ids were string literals scattered
-across every guard — one place could drift from another with no compiler
-check. This module is the *one* definition: callers import :data:`R0`..:data:`R6`
-instead of writing string literals, and :func:`rule` is the single lookup that
-resolves a bare id back to its definition (meta-rule + human summary), so a
-typo'd or unregistered id fails loudly instead of silently reaching the audit
-log.
+for the audit log. Callers import :data:`R0`..:data:`R6` instead of literals,
+and :func:`rule` resolves a bare id to its definition (meta-rule + summary),
+so typos fail loudly instead of silently reaching the audit log.
 
-**Kernel namespace (prepared, not yet active).** A7 reserves a ``core.*``
-namespace for kernel-enforced decisions (mode gate, resource allowlist,
-capability invariants) once a second guard exists and rule ids must be
-namespaced (``gitlab.R4`` vs. ``core.R5``) to stay unambiguous. This step only
-prepares the concept — :func:`qualify` can build a namespaced id — the audit
-log and viewer keep logging/reading the *bare* id (``"R4"``, not
-``"gitlab.R4"``) until a second guard (§06 Schritt 9) makes bare ids
-ambiguous; the channel→guard rename (F11, §06 Schritt 6) is a different,
-already-landed change (the JSONL field the rule id sits next to, not the
-rule id itself).
+**Kernel namespace (prepared, not yet active).** Reserve ``core.*`` namespace
+for kernel-enforced decisions once a second guard makes bare ids ambiguous.
 """
 
 from __future__ import annotations
@@ -30,12 +17,10 @@ from typing import Final, Mapping
 
 
 class MetaRule(str, Enum):
-    """Resource-agnostic meta-rules that R0..R6 instantiate (§01-grundregeln.md B).
+    """Resource-agnostic meta-rules that R0..R6 instantiate.
 
-    Partitioning the concrete rule ids by meta-rule is the fix for B3: before
-    this registry, two conceptually different things (branch namespace vs.
-    "never" capabilities) were both logged as ``R2`` (see :data:`R4`'s
-    docstring below for the concrete case).
+    Partitioning concrete rule ids by meta-rule prevents different concepts
+    from sharing the same id (branch namespace vs. "never" capabilities).
     """
 
     M0 = "M0"  # Mode gate: off | read-only | read-write, per resource.
@@ -96,7 +81,7 @@ def rule(rule_id: str) -> RuleDef:
     return RULES[rule_id]
 
 
-# --- kernel namespace (prepared for §06 Schritt 6, not yet emitted) ------------
+# --- kernel namespace (prepared, not yet emitted) -----
 
 KERNEL_NAMESPACE: Final = "core"
 GITLAB_NAMESPACE: Final = "gitlab"

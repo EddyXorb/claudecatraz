@@ -1,40 +1,17 @@
-"""REST guard policy (§03.2/03.3): pure decide for GitLab API requests — split
-out of the old channel-union ``policy.py`` (§06-migration.md Schritt 5, F1/F3).
-Knows GitLab REST concepts (MR, endpoint catalog) on purpose — this is the one
-guard §03.3 allows to. The mode gate (R0) and resource allowlist (R6) that
-used to live in the channel-union ``policy.decide`` are now the kernel's job
-(:mod:`warden.core.guard`); the capability invariant (R4, §03.4) is exposed
-here as :func:`capability_gate` for the kernel to call, but is not
-re-checked inside :func:`decide` itself (one definition per concept).
+"""REST guard policy: pure decide for GitLab API requests.
 
-Rules enforced — every :class:`~warden.core.model.Decision` here is tagged
-with one of these for the audit log:
+Knows GitLab REST concepts (MR, endpoint catalog) on purpose. Mode gate (R0) and
+resource allowlist (R6) are now the kernel's job; capability invariant (R4) is
+exposed here as :func:`capability_gate` for the kernel, not re-checked in :func:`decide`.
 
-  R1  Read pass-through  REST GET/HEAD/OPTIONS is streamed upstream with the
-                         READ token. This is "content, not visibility" (B1): a
-                         path with a project id is gated by R6 (the kernel's
-                         resource allowlist) exactly like a write; a
-                         *projectless* path (no project id to gate) is
-                         checked against the read-endpoint table
-                         (``read_endpoints.py``): metadata (project/group
-                         names, users, …) passes, anything that can return
-                         repository content (global/group search with a
-                         content `scope`, `/snippets`) is denied, and an
-                         unlisted projectless path is denied by default (R6).
-  R3  API write filter   only allowlisted write endpoints, with ownership
-                         checks (source_branch prefix; MR authored by the
-                         service acct).
-  R4  Irreversible verbs merging an MR (incl. the state_event=merge alias) is
-                         never permitted — caught by :func:`capability_gate`
-                         before this module's own checks ever run.
-  R5  Quota & rate       max open MRs, max writes/hour; a locked
-                         (unreconciled) state denies (fail-safe, §6.11).
-  R6  Project boundary   also used for the two projectless-read denials above
-                         (content-capable or unlisted): both are, at bottom,
-                         "no allowlisted project backs this read".
+Rules enforced:
+  R1  Read pass-through  GET/HEAD/OPTIONS upstream with READ token; reads are "content, not visibility".
+  R3  API write filter   allowlisted write endpoints with ownership checks.
+  R4  Irreversible verbs merge never permitted (caught by capability_gate first).
+  R5  Quota & rate       max open MRs, max writes/hour; locked state denies (fail-safe).
+  R6  Project boundary   applies to projectless-reads too (content-capable or unlisted).
 
-Rule ids referenced here are :mod:`core.rules` constants (B3/F5) — never bare
-string literals — so every id in this file traces back to the one registry.
+Rule ids are :mod:`core.rules` constants, never bare literals.
 """
 
 from __future__ import annotations
@@ -62,15 +39,10 @@ from .read_endpoints import match_read
 def capability_gate(
     intent: ApiIntent, cfg: Config, effective: EffectiveTable
 ) -> Optional[Decision]:
-    """§03.4 kernel hook (``core.guard.Guard.capability_gate``).
+    """Kernel hook: check capabilities before guard-specific logic.
 
-    Reads sit here trivially (``intent.writes`` is False, so this returns
-    ``None`` immediately — an empty capability set never intersects
-    ``FORBIDDEN`` anyway, but skipping the lookup keeps this cheap on the hot
-    read path). The merge endpoint's built-in invariant (§04.2/04.3 — never a
-    catalog row) is folded in here too, ahead of :func:`decide`'s own R3
-    "unknown endpoint" default, exactly like the pre-Schritt-5 channel-union
-    ``policy._decide_api`` ordered it.
+    Reads return ``None`` trivially. The merge endpoint's built-in invariant
+    (never a catalog row) is checked here, ahead of :func:`decide`'s R3 default.
     """
     if not intent.writes:
         return None
@@ -105,19 +77,12 @@ def _decide_read(intent: ApiIntent) -> Decision:
 
 
 def decide(intent: ApiIntent, state: StateView, cfg: Config, effective: EffectiveTable) -> Decision:
-    """Default-deny (W5). Mode/project/capability gates already ran in the
-    kernel (§03.2) by the time this is reached — this only holds what is
-    genuinely guard-specific: reads vs. the write allowlist, ownership,
-    quotas.
-    """
+    """Default-deny guard-specific logic after kernel gates (reads vs. allowlist, ownership, quotas)."""
     if intent.method.upper() in ("GET", "HEAD", "OPTIONS"):
         return _decide_read(intent)
 
-    # Write methods: endpoint must be in the *effective* table (§04.3) —
-    # built once from Catalog × config, never the catalog itself —
-    # default-deny otherwise. The merge endpoint never reaches here
-    # (capability_gate denies it first); an unmatched write (including a
-    # hypothetical bypass of that gate) still default-denies R3.
+    # Write methods: endpoint must be in the effective table (Catalog × config),
+    # default-deny otherwise. Merge endpoint never reaches here (capability_gate denies first).
     ep = intent.endpoint or match_endpoint(effective.entries, intent.method, intent.path)
     if ep is None:
         return Decision(
@@ -138,7 +103,7 @@ def decide(intent: ApiIntent, state: StateView, cfg: Config, effective: Effectiv
 
 
 def _quota_check(ep: CatalogEntry, state: StateView, cfg: Config) -> Optional[Decision]:
-    if state.locked:  # §6.11 fail-safe: never "empty = free"
+    if state.locked:  # Fail-safe: never "empty = free"
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if state.writes_last_hour >= cfg.max_writes_per_hour:
         return Decision(False, R5, f"rate limit reached ({cfg.max_writes_per_hour}/h)")
@@ -154,18 +119,12 @@ def full_decide(
     effective: Optional[EffectiveTable] = None,
     project_allowed: Optional[Callable[[str], bool]] = None,
 ) -> Decision:
-    """Compose the kernel gates with this guard's pure ``decide`` for callers
-    outside :meth:`core.guard.Guard.handle` (the endpoint-catalog startgate,
-    §04.4; tests) that need the *whole* effective decision, not just this
-    module's slice — probes must also fail against the capability invariant,
-    not just this guard's own checks, exactly as a real request would.
+    """Compose kernel gates with guard-specific decide for callers outside Guard.handle.
 
-    ``effective`` defaults to the table built fresh from ``cfg.endpoint_enable``
-    so a caller without a live ``ApiGuard`` (the startgate, most tests) still
-    gets the real effective table for free. ``project_allowed`` defaults to
-    ``cfg.project_allowed`` (the path-form allowlist) — the same default a
-    caller without a live ``ApiGuard``/forge (the startgate, most tests) gets
-    for free.
+    For endpoint-catalog startgate, tests: the whole effective decision, not just this
+    module's slice. Probes fail against capability invariant, not just guard's own checks.
+
+    ``effective`` and ``project_allowed`` default to the real values for free.
     """
     if effective is None:
         effective = build_effective_table(cfg, cfg.endpoint_enable)

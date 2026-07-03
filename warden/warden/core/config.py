@@ -84,10 +84,7 @@ class Config:
     def in_branch_namespace(self, name: str) -> bool:
         """True iff ``name`` starts with any configured branch prefix (M2).
 
-        The single source of truth for the branch namespace: the git guard's
-        R2/R3 checks and the reconcile filters all call this instead of
-        comparing against ``branch_prefixes`` themselves — one namespace
-        union, no scattered ``startswith`` calls to drift out of sync (Clean
-        Code vorarbeiten, ``docs/design/architecture-generalization/06-migration.md``).
+        Single source of truth for the branch namespace: git guard's R2/R3 checks
+        and reconcile filters call this instead of comparing directly.
         """
         return any(name.startswith(prefix) for prefix in self.branch_prefixes)

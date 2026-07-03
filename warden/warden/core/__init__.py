@@ -1,17 +1,10 @@
-"""The kernel (§03.2/03.3; docs/design/architecture-generalization,
-§03-guard-architektur.md, §06-migration.md Schritt 5).
+"""The kernel: pipeline template, policy types, rule registry, audit, quota state, config.
 
-Everything a guard needs from the trust boundary that is *not itself*
-GitLab/git-specific: the pipeline template method (:meth:`core.guard.Guard.handle`)
-that guarantees A5's sequencing regardless of which guard runs, the shared
-policy value types (:mod:`core.model`), the rule registry, the capability
-vocabulary + ``FORBIDDEN`` invariant (§03.4), the typed audit event, durable
-quota state, and the config value type.
+Everything a guard needs from the trust boundary that is *not itself* GitLab/git-specific:
+the pipeline template method (:meth:`core.guard.Guard.handle`), shared policy value types
+(:mod:`core.model`), the rule registry, capability vocabulary, typed audit event, durable quota state.
 
-No GitLab/git vocabulary lives here (§03.3: "Kernel kennt keine
-GitLab-Begriffe") — ``core.config.Config`` is the one deliberate, documented
-exception (see its module docstring): splitting the GitLab-specific fields out
-of it is explicitly out of scope for this migration step.
+No GitLab/git vocabulary lives here (``core.config.Config`` is the one documented exception).
 """
 
 from __future__ import annotations

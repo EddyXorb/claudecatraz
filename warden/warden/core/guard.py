@@ -1,41 +1,24 @@
-"""Kernel pipeline template method (§03.2, F1; docs/design/architecture-generalization,
-§03-guard-architektur.md §03.2, §06-migration.md Schritt 5).
+"""Kernel pipeline: template method for the deny-short-circuit / record-before-forward / audit sequence.
 
 :class:`Guard` is the ABC every guard subclasses; :meth:`Guard.handle` is the
-one place the deny-short-circuit / record-before-forward / audit-on-every-path
-sequence is built — a guard supplies the parts (the abstract hooks below), the
-kernel owns the order, and a guard cannot reorder or skip a step because it
+one place the sequence is built — a guard supplies the parts (abstract hooks),
+the kernel owns the order, and a guard cannot reorder or skip a step because it
 never sees the sequence, only its own hooks.
 
 Sequence ``Guard.handle`` guarantees, in this order:
 
-1. ``guard.parse`` — transport → an :class:`~warden.core.model.Intent`. No
-   credential is used yet; this is just shaping the already-received request.
-2. :func:`kernel_gates` — the guard-agnostic deny gates, one definition:
-   a. Mode-gate ``off`` (M0) — GitLab-disabled denies everything, first.
-   b. Mode-gate ``read-only`` (M0), decided from ``intent.writes`` alone —
-      set by the guard's own parser, never derived from a
-      :class:`~warden.core.model.Decision` (§03.2's precisification). This
-      runs *before* ``enrich`` so an unpure, credential-using lookup (MR
-      ownership, service-account resolution) is structurally unreachable in
-      read-only/off mode — replacing the two manual ``writes_enabled``
-      guards the pre-Schritt-5 code carried (``api_proxy.py:102``,
-      ``git_proxy.py:62``).
-   c. Resource allowlist (M6, :func:`project_gate`) — enforced once here
-      instead of duplicated per guard, and also before ``enrich``: no lookup
-      ever runs for a resource outside the allowlist.
-3. ``guard.enrich`` — the unpure lookups a check declared it needs.
-4. Capability invariants (§03.4, ``core.capabilities.FORBIDDEN``) via
-   :meth:`Guard.capability_gate` — the guard's pure intent→capability mapping
-   checked against the compiled-in deny set, before any allow-logic.
+1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
+2. :func:`kernel_gates` — guard-agnostic deny gates:
+   a. Mode-gate ``off`` (M0) — GitLab-disabled denies everything.
+   b. Mode-gate ``read-only`` (M0) — set by parser, never by :class:`~warden.core.model.Decision`.
+      Runs *before* ``enrich`` so credential-using lookups are unreachable in read-only/off mode.
+   c. Resource allowlist (M6) — enforced once, not per-guard, before ``enrich``.
+3. ``guard.enrich`` — unpure lookups a check declared it needs.
+4. Capability invariants (``core.capabilities.FORBIDDEN``) via :meth:`Guard.capability_gate`.
 5. ``guard.decide`` — pure, guard-specific, default-deny.
-6. Audit — logged on *every* exit above, allow or deny (A7).
-7. ``guard.record`` before ``guard.forward`` — a write is durably counted
-   before the upstream call ever happens (§6.11), never the other way round.
-8. ``guard.forward`` only reachable once ``decision.allow`` — a deny instead
-   calls ``guard.deny_response``, which gets the raw :class:`Decision` (and,
-   for git's per-ref rejection shape, the quota snapshot) because a single
-   status code is not enough to build every guard's error response.
+6. Audit — logged on *every* exit (allow or deny).
+7. ``guard.record`` before ``guard.forward`` — write durably counted before upstream call.
+8. ``guard.forward`` only reachable once ``decision.allow`` — deny calls ``guard.deny_response``.
 """
 
 from __future__ import annotations
@@ -73,15 +56,12 @@ def mode_gate_writes(cfg: Config) -> Optional[Decision]:
 def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Optional[Decision]:
     """M6 resource allowlist — the single source of truth, shared by every guard.
 
-    An empty ``project`` passes: an intent that carries no project at all
-    (e.g. a projectless REST read) is gated elsewhere, by that guard's own
-    ``decide`` (see ``guards.gitlab_api.read_endpoints``) — matching the
-    pre-Schritt-5 ``policy.project_gate`` behaviour exactly.
+    An empty ``project`` passes; projectless requests are gated by the guard's
+    own ``decide`` (see ``guards.gitlab_api.read_endpoints``).
 
-    ``project_allowed`` is a callable, not the raw ``Config``, so a guard
-    whose forge resolves numeric-id aliases (§03.5/03.6, ``ApiGuard``) can
-    widen the check beyond ``cfg.project_allowed``'s path-only match without
-    the kernel knowing anything about that forge concept.
+    ``project_allowed`` is a callable, not raw ``Config``, so a guard
+    whose forge resolves numeric-id aliases can widen the check beyond
+    ``cfg.project_allowed``'s path-only match.
     """
     if project and not project_allowed(project):
         return Decision(False, R6, f"project {project!r} not in allowlist")
@@ -110,14 +90,11 @@ IntentT = TypeVar("IntentT", bound=Intent)
 
 
 class Guard(ABC, Generic[IntentT]):
-    """The parts a guard supplies to :meth:`handle` (§03.2/03.3).
+    """The parts a guard supplies to :meth:`handle`.
 
-    ``name`` is the audit ``guard`` value (§06-migration.md Schritt 6, F11:
-    the JSONL field used to be called ``channel``; the bare string values —
-    ``"git"``/``"api"`` — are unchanged). Every hook below either does I/O
-    (parse/enrich/record/forward/deny_response) or is pure
-    (capability_gate/decide) — only the pure half is what §03.4's capability
-    invariant and default-deny guarantees rest on.
+    ``name`` is the audit ``guard`` value (bare strings: ``"git"``/``"api"``).
+    Each hook either does I/O (parse/enrich/record/forward/deny_response) or is pure
+    (capability_gate/decide) — only the pure half carries capability invariant and default-deny guarantees.
     """
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog) -> None:
@@ -155,10 +132,10 @@ class Guard(ABC, Generic[IntentT]):
 
     @abstractmethod
     def routes(self) -> list[Route]:
-        """The Starlette routes this guard serves (§03.5/03.6): the guard owns
-        its own paths so ``app.py`` can stay generic assembly (``[r for g in
-        ctx.guards for r in g.routes()]``) instead of hand-listing every
-        guard's endpoints.
+        """The Starlette routes this guard serves.
+
+        The guard owns its own paths so ``app.py`` stays generic assembly
+        instead of hand-listing every guard's endpoints.
         """
         ...
 
@@ -177,27 +154,24 @@ class Guard(ABC, Generic[IntentT]):
         return self.state.view()
 
     async def startup(self) -> None:
-        """One-time, pre-serve setup (§03.5/03.6) — e.g. resolving the
-        service-account id. Default no-op; a guard overrides only if it needs
-        this hook.
+        """One-time, pre-serve setup (e.g. resolving service-account id).
+
+        Default no-op; a guard overrides only if needed.
         """
         return None
 
     async def reconcile(self) -> bool:
-        """Rebuild this guard's quota/allowlist state from upstream truth
-        (§03.5/03.6, W8.2) — run once before the agent port opens and then
-        periodically. Default no-op, returns True (nothing to reconcile).
+        """Rebuild this guard's quota/allowlist state from upstream truth.
+
+        Run once before agent port opens, then periodically. Default no-op, returns True.
         """
         return True
 
     async def handle(self, request: Request) -> Response:
-        """The kernel (§03.2): guarantees the pipeline order regardless of guard.
+        """The kernel: guarantees the pipeline order regardless of guard.
 
-        Uses only ``self.cfg``/``self.state``/``self.audit`` — the resource-
-        agnostic collaborators (M0/M6 gates read ``cfg``; quota fail-safety
-        reads ``state``; A7 needs ``audit``), never a guard's own I/O clients
-        (upstream credentials, ownership caches, …), which stay encapsulated
-        in the guard subclass itself.
+        Uses only resource-agnostic collaborators (``cfg``/``state``/``audit``),
+        never a guard's own I/O clients, which stay encapsulated in the subclass.
         """
         correlation_id = str(uuid.uuid4())
         started = time.monotonic()

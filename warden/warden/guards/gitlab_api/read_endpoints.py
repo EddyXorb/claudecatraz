@@ -1,24 +1,13 @@
-"""Data-driven REST read-endpoint table (B1, §02-befunde.md, §06-migration.md
-Schritt 1): the security line is **content, not visibility**.
+"""Data-driven REST read-endpoint table: security line is **content, not visibility**.
 
-Project-bound paths (``/projects/{id}/…``) are gated by the project allowlist
-(R6) exactly as before — this table plays no role there,
-``guards.gitlab_api.policy._decide_read`` never even calls it in that case.
-This table governs *projectless* GET/HEAD/OPTIONS paths, where there is no
-project id in the path for R6 to gate:
+Project-bound paths are gated by the project allowlist (R6); this table governs
+*projectless* GET/HEAD/OPTIONS paths:
 
-* Project and group names/metadata may be read freely (R1) — the documented
-  discovery flow (``GET /groups/<id>/projects`` in ``AGENT.md``) stays
-  unrestricted.
-* Repository *content* — blobs, commits, wiki, snippets, diffs — must never
-  leak across the ``allowed_projects`` boundary through a projectless
-  endpoint, so those are denied (R6), even though the token can technically
-  see them.
-* Anything not in the table is default-denied (A1) — a new metadata endpoint
-  is a deliberate table edit, never an accidental pass-through.
+* Project/group metadata (R1) — documented discovery flow stays unrestricted.
+* Repository content — blobs, commits, wiki — denied (R6) to prevent boundary leaks.
+* Anything not in table is default-denied — new metadata endpoints are deliberate edits.
 
-This is a *minimal* table (the four categories from B1); the endpoint
-catalogue (§04) only extends it, never replaces it.
+The endpoint catalog only extends this, never replaces it.
 """
 
 from __future__ import annotations

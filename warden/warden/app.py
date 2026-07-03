@@ -1,11 +1,9 @@
-"""Starlette app + routing: agent port vs. admin port (W3, W4).
+"""Starlette app + routing: agent port vs. admin port.
 
-Generic assembly only (§03.3/03.5: ``app.py`` stays at the top of the package,
-free of guard internals) — each guard in ``ctx.guards`` supplies its own
-routes (:meth:`~warden.core.guard.Guard.routes`); this module never imports a
-concrete guard class, only :mod:`warden.context`'s guard-agnostic
-:class:`~warden.context.AppContext`. The pipeline every route runs through
-lives in :mod:`warden.core.guard`.
+Generic assembly only: stays at the top of the package, free of guard internals.
+Each guard in ``ctx.guards`` supplies its own routes (:meth:`~warden.core.guard.Guard.routes`);
+this module never imports a concrete guard class, only :mod:`warden.context`'s guard-agnostic
+:class:`~warden.context.AppContext`. The pipeline every route runs through lives in :mod:`warden.core.guard`.
 """
 
 from __future__ import annotations
@@ -26,11 +24,11 @@ _VIEWER_HTML = _VIEWER_HTML_PATH.read_text(encoding="utf-8")
 
 
 def create_app(ctx: AppContext) -> Starlette:
-    """Agent-facing app on port 8080: API proxy + git Smart-HTTP (W4).
+    """Agent-facing app on port 8080: API proxy + git Smart-HTTP.
 
-    Generic assembly (§03.5/03.6): every guard supplies its own routes
-    (:meth:`~warden.core.guard.Guard.routes`) — this module never lists a
-    guard's endpoints itself, so it stays free of guard-policy internals.
+    Generic assembly: every guard supplies its own routes
+    (:meth:`~warden.core.guard.Guard.routes`); this module never lists
+    guard endpoints, staying free of guard-policy internals.
     """
     # The /git/ prefix is load-bearing: it separates git Smart-HTTP routes from
     # /api/v4/… on the same port. Repos keep their canonical remote URL
@@ -45,7 +43,7 @@ def create_app(ctx: AppContext) -> Starlette:
 
 
 def create_admin_app(ctx: AppContext) -> Starlette:
-    """Admin app on port 9090: healthz + read-only log tail + viewer (W3, §6.8, O.4)."""
+    """Admin app on port 9090: healthz + read-only log tail + viewer."""
     routes = [
         Route("/healthz", _healthz, methods=["GET"]),
         Route("/audit", _audit_tail, methods=["GET"]),
@@ -81,12 +79,10 @@ async def _audit_tail(request: Request) -> Response:
 
 
 async def _policy(request: Request) -> JSONResponse:
-    """Read-only summary of the effective endpoint catalog (§04.3, admin net
-    only): every catalog entry, whether it's part of the default set, and
-    whether this deployment actually activated it. ``catraz doctor``/
-    ``catraz allow-endpoint`` are the CLI front for this route — it is how
-    the CLI learns catalog ids and activation state without shipping (or
-    running) a copy of the warden's Python.
+    """Read-only summary of the effective endpoint catalog (admin net only).
+
+    Every entry: whether part of the default set, whether activated.
+    ``catraz doctor``/``catraz allow-endpoint`` use this to show catalog ids and state.
     """
     ctx: AppContext = request.app.state.ctx
     return JSONResponse(endpoint_table_report(ctx.cfg))
