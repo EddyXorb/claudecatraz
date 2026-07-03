@@ -49,9 +49,7 @@ def _sync_mode(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── _auto_sync_if_needed ───────────────────────────────────────────────────────
 
 
-def test_missing_seed_syncs_loud(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_seed_syncs_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_env(tmp_path)
     calls: dict[str, object] = {}
     monkeypatch.setattr(setup_sync, "_run_sync", lambda root, out, **k: calls.update(k))
@@ -61,9 +59,7 @@ def test_missing_seed_syncs_loud(
     assert any(t == "info" for t, _ in out.msgs)
 
 
-def test_present_seed_refreshes_silently(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_present_seed_refreshes_silently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_env(tmp_path)
     _make_seed_cred(tmp_path)
     calls: dict[str, object] = {}
@@ -74,9 +70,7 @@ def test_present_seed_refreshes_silently(
     assert out.msgs == []  # … and emits nothing
 
 
-def test_present_seed_failure_does_not_nag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_present_seed_failure_does_not_nag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_env(tmp_path)
     _make_seed_cred(tmp_path)
 
@@ -89,9 +83,7 @@ def test_present_seed_failure_does_not_nag(
     assert all(t != "warn" for t, _ in out.msgs)  # existing seed still works → silent
 
 
-def test_missing_seed_failure_warns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_seed_failure_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_env(tmp_path)
 
     def boom(root: object, out: object, **k: object) -> None:
@@ -100,17 +92,13 @@ def test_missing_seed_failure_warns(
     monkeypatch.setattr(setup_sync, "_run_sync", boom)
     out = _Out()
     setup._auto_sync_if_needed(tmp_path, cast(Out, out))
-    assert any(
-        t == "warn" for t, _ in out.msgs
-    )  # absent seed + failure is a real problem
+    assert any(t == "warn" for t, _ in out.msgs)  # absent seed + failure is a real problem
 
 
 def test_api_key_mode_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_env(tmp_path, mode="api_key")
     called: dict[str, int] = {"n": 0}
-    monkeypatch.setattr(
-        setup_sync, "_run_sync", lambda *a, **k: called.update(n=called["n"] + 1)
-    )
+    monkeypatch.setattr(setup_sync, "_run_sync", lambda *a, **k: called.update(n=called["n"] + 1))
     setup._auto_sync_if_needed(tmp_path, cast(Out, _Out()))
     assert called["n"] == 0
 
@@ -129,9 +117,7 @@ def test_run_sync_quiet_suppresses_adapter_stdout(
         def sync_from_host(self, source: object, home: object) -> None:
             print("Credentials synced into somewhere")
 
-    monkeypatch.setattr(
-        setup_sync, "load_adapter_module", lambda profile: _PrintingAdapter()
-    )
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: _PrintingAdapter())
     setup._run_sync(tmp_path, cast(Out, _Out()), quiet=True)
     assert "Credentials synced" not in capsys.readouterr().out
     setup._run_sync(tmp_path, cast(Out, _Out()), quiet=False)
@@ -156,9 +142,7 @@ class TestPersistentModeSkipsSync:
     def test_auto_sync_is_noop_for_persistent_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _seed_env(
-            tmp_path
-        )  # AUTH_MODE=subscription, no AGENT_PROFILE override -> default "claude"
+        _seed_env(tmp_path)  # AUTH_MODE=subscription, no AGENT_PROFILE override -> default "claude"
         called: dict[str, int] = {"n": 0}
         monkeypatch.setattr(
             setup_sync, "_run_sync", lambda *a, **k: called.update(n=called["n"] + 1)

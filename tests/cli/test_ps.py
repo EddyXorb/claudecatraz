@@ -20,9 +20,7 @@ def _out() -> Out:
 def _patch_ps(monkeypatch: pytest.MonkeyPatch, rows: object) -> dict[str, typing.Any]:
     """Stub compose.prepare + compose.compose_ps; return the recorded ps kwargs."""
     recorded: dict[str, typing.Any] = {}
-    monkeypatch.setattr(
-        compose, "prepare", lambda root, *, render, extra_env=None: ["c"]
-    )
+    monkeypatch.setattr(compose, "prepare", lambda root, *, render, extra_env=None: ["c"])
 
     def fake_ps(root: object, *, prefix: object = None, all: bool = False) -> object:
         recorded["all"] = all
@@ -33,15 +31,11 @@ def _patch_ps(monkeypatch: pytest.MonkeyPatch, rows: object) -> dict[str, typing
     return recorded
 
 
-def test_cmd_ps_passes_all_true(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_ps_passes_all_true(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Regression guard: cmd_ps must query with all=True or one-offs are invisible."""
     rows = [{"Service": "claude-dev-env", "Name": "agent-1", "State": "running"}]
     recorded = _patch_ps(monkeypatch, rows)
-    rc = observe.cmd_ps(
-        tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out()
-    )
+    rc = observe.cmd_ps(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out())
     assert rc == EXIT_OK
     assert recorded["all"] is True
 
@@ -60,9 +54,7 @@ def test_cmd_ps_filters_to_agent(
         },
     ]
     _patch_ps(monkeypatch, rows)
-    rc = observe.cmd_ps(
-        tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out()
-    )
+    rc = observe.cmd_ps(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out())
     assert rc == EXIT_OK
     out = capsys.readouterr().out
     assert "agent-1" in out
@@ -86,9 +78,7 @@ def test_cmd_ps_lists_daemon_and_oneoff(
         },
     ]
     _patch_ps(monkeypatch, rows)
-    rc = observe.cmd_ps(
-        tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out()
-    )
+    rc = observe.cmd_ps(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out())
     assert rc == EXIT_OK
     out = capsys.readouterr().out
     assert "proj-claude-dev-env-1" in out
@@ -100,9 +90,7 @@ def test_cmd_ps_no_agents(
 ) -> None:
     rows = [{"Service": "gitlab-warden", "Name": "w", "State": "running"}]
     _patch_ps(monkeypatch, rows)
-    rc = observe.cmd_ps(
-        tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out()
-    )
+    rc = observe.cmd_ps(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace()), _out())
     assert rc == EXIT_OK
     assert "No active agent containers." in capsys.readouterr().out
 
@@ -110,9 +98,7 @@ def test_cmd_ps_no_agents(
 # ── compose_ps -a plumbing ────────────────────────────────────────────────────
 
 
-def test_compose_ps_all_adds_dash_a(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_compose_ps_all_adds_dash_a(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorded: dict[str, typing.Any] = {}
 
     def fake_run(
@@ -132,9 +118,7 @@ def test_compose_ps_all_adds_dash_a(
     assert "-a" in recorded["args"]
 
 
-def test_compose_ps_default_no_dash_a(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_compose_ps_default_no_dash_a(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorded: dict[str, typing.Any] = {}
 
     def fake_run(

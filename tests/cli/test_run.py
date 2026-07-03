@@ -19,9 +19,7 @@ def test_oneoff_args_tty_omits_T_and_empty_workdir() -> None:
     assert a[a.index("run", 1) :] == ["run", "--"]
 
 
-def test_run_fails_closed_without_catraz(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_fails_closed_without_catraz(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)  # no .catraz here
     from catraz import paths, errors
 

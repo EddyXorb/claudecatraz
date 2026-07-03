@@ -112,9 +112,7 @@ def check_docker(f: Findings) -> None:
                 "docker",
                 f"Docker Engine {r.stdout.strip()} (≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]} ✔)",
             )
-    r = subprocess.run(
-        ["docker", "compose", "version", "--short"], capture_output=True, text=True
-    )
+    r = subprocess.run(["docker", "compose", "version", "--short"], capture_output=True, text=True)
     if r.returncode != 0:
         f.bad("docker", "Compose v2 missing", "install the `docker compose` plugin")
     else:
@@ -454,8 +452,7 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
     if inactive:
         f.ok(
             "endpoints",
-            f"{len(inactive)} in catalog but not enabled: "
-            f"{', '.join(r['id'] for r in inactive)}",
+            f"{len(inactive)} in catalog but not enabled: {', '.join(r['id'] for r in inactive)}",
         )
 
 
@@ -546,15 +543,11 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
     # present-but-invalid value is an error.
     mode = env.get("AUTH_MODE") or "subscription"
     if mode not in ("subscription", "api_key"):
-        f.bad(
-            "auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"
-        )
+        f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env")
         return
     cred = paths.claude_home(root) / ".credentials.json"
     # api_key: key is in .catraz/secrets/anthropic_api_key (compose secret); bare env var is fallback.
-    api_key = _read_secret_file(root, "anthropic_api_key") or env.get(
-        "ANTHROPIC_API_KEY", ""
-    )
+    api_key = _read_secret_file(root, "anthropic_api_key") or env.get("ANTHROPIC_API_KEY", "")
     if mode == "subscription":
         if api_key:
             f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
@@ -619,9 +612,7 @@ def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
         )
 
 
-def run_doctor(
-    root: Path, only: list[str] | None = None, fix: bool = False
-) -> Findings:
+def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> Findings:
     env: dict[str, str] = load_env(root / ".catraz" / ".env")
     f = Findings()
     sections = only or DOCTOR_SECTIONS

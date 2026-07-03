@@ -35,9 +35,7 @@ def test_check_gitlab_url_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_secrets(
-    tmp_path: Path, *, read_token: str = "", write_token: str = ""
-) -> Path:
+def _make_secrets(tmp_path: Path, *, read_token: str = "", write_token: str = "") -> Path:
     """Write token files under tmp_path/.catraz/secrets/."""
     secrets_dir = tmp_path / ".catraz" / "secrets"
     secrets_dir.mkdir(parents=True, exist_ok=True)
@@ -98,9 +96,7 @@ class TestGitLabModeOff:
         f = doctor.Findings()
         doctor.check_policy(tmp_path, {"GITLAB_MODE": "off"}, f)
         assert not any(i[0] == doctor.BAD for i in f.items)
-        assert any(
-            i[0] == doctor.OK and "allowlist not required" in i[2] for i in f.items
-        )
+        assert any(i[0] == doctor.OK and "allowlist not required" in i[2] for i in f.items)
 
 
 # ---------------------------------------------------------------------------
@@ -111,9 +107,7 @@ class TestGitLabModeOff:
 class TestGitLabModeReadOnly:
     """read-only mode: read token required, write token optional (ignored if present)."""
 
-    def test_read_token_set_no_bad(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_read_token_set_no_bad(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_secrets(tmp_path, read_token="glpat-readtoken", write_token="")
         # Offline: probe will hit a URLError → warn, not bad.
         monkeypatch.setattr(doctor, "_gitlab_get", _raise_url_error)
@@ -131,18 +125,14 @@ class TestGitLabModeReadOnly:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A write token that is set when mode=read-only must emit a warn."""
-        _make_secrets(
-            tmp_path, read_token="glpat-readtoken", write_token="glpat-writetoken"
-        )
+        _make_secrets(tmp_path, read_token="glpat-readtoken", write_token="glpat-writetoken")
         monkeypatch.setattr(doctor, "_gitlab_get", _raise_url_error)
         f = doctor.Findings()
         doctor.check_tokens(tmp_path, {"GITLAB_MODE": "read-only"}, f)
         assert any(i[0] == doctor.WARN and "read-only" in i[2] for i in f.items)
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_probe_only_read_token(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_probe_only_read_token(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """In read-only mode only the read token is probed."""
         _make_secrets(tmp_path, read_token="glpat-readtoken", write_token="")
         probed: list[str] = []
@@ -202,14 +192,10 @@ class TestGitLabModeReadWrite:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """In read-write mode, _probe_gitlab_tokens is called with both token pairs."""
-        _make_secrets(
-            tmp_path, read_token="glpat-readtoken", write_token="glpat-writetoken"
-        )
+        _make_secrets(tmp_path, read_token="glpat-readtoken", write_token="glpat-writetoken")
         probe_calls: list[Any] = []
 
-        def _fake_probe(
-            root: Path, env: dict[str, str], f: Any, tokens: Any = None
-        ) -> None:
+        def _fake_probe(root: Path, env: dict[str, str], f: Any, tokens: Any = None) -> None:
             probe_calls.append(tokens)
 
         monkeypatch.setattr(doctor, "_probe_gitlab_tokens", _fake_probe)
@@ -230,9 +216,7 @@ class TestGitLabModeReadWrite:
         doctor.check_tokens(tmp_path, {}, f)
         assert any(i[0] == doctor.BAD for i in f.items)
 
-    def test_empty_allowlist_warns(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_allowlist_warns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """read-write: empty allowlist warns (deny-all) — not bad, the stack boots."""
         _mock_allowlist(tmp_path, monkeypatch, [])
         f = doctor.Findings()
@@ -295,48 +279,36 @@ class TestProbeWriteUserRead:
     the warden can't resolve its service account → comments/MR-edits denied (R3).
     The probe must surface this as bad at setup time."""
 
-    def test_user_read_403_is_bad(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_user_read_403_is_bad(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_secrets(tmp_path, write_token="glpat-writetoken")
         monkeypatch.setattr(doctor, "_gitlab_get", _http_error(403))
         f = doctor.Findings()
         doctor._probe_write_user_read(tmp_path, {}, f)
         assert any(i[0] == doctor.BAD and "GET /user" in i[2] for i in f.items)
 
-    def test_user_read_401_is_bad(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_user_read_401_is_bad(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_secrets(tmp_path, write_token="glpat-writetoken")
         monkeypatch.setattr(doctor, "_gitlab_get", _http_error(401))
         f = doctor.Findings()
         doctor._probe_write_user_read(tmp_path, {}, f)
         assert any(i[0] == doctor.BAD for i in f.items)
 
-    def test_user_read_ok(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_user_read_ok(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_secrets(tmp_path, write_token="glpat-writetoken")
-        monkeypatch.setattr(
-            doctor, "_gitlab_get", lambda *a, **kw: {"id": 42, "username": "bot"}
-        )
+        monkeypatch.setattr(doctor, "_gitlab_get", lambda *a, **kw: {"id": 42, "username": "bot"})
         f = doctor.Findings()
         doctor._probe_write_user_read(tmp_path, {}, f)
         assert any(i[0] == doctor.OK and "service account" in i[2] for i in f.items)
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_user_read_offline_skips(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_user_read_offline_skips(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_secrets(tmp_path, write_token="glpat-writetoken")
         monkeypatch.setattr(doctor, "_gitlab_get", _raise_url_error)
         f = doctor.Findings()
         doctor._probe_write_user_read(tmp_path, {}, f)
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_no_token_no_op(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_token_no_op(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_secrets(tmp_path, write_token="")
         monkeypatch.setattr(
             doctor,
@@ -348,9 +320,7 @@ class TestProbeWriteUserRead:
         assert f.items == []
 
 
-def _mock_allowlist(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, projects: list[str]
-) -> None:
+def _mock_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, projects: list[str]) -> None:
     """Patch _resolve_allowed_projects to return the given list."""
     import catraz.policy as policy_mod
 

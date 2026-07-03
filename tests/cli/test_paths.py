@@ -55,9 +55,7 @@ def test_asset_cache_refreshes_on_source_change(
     src = src_root / "src/catraz/assets/compose/docker-compose.yml"
     orig = src.stat().st_mtime
     try:
-        new_mtime = (
-            orig + 100000
-        )  # large offset so it's definitely newer than all other assets
+        new_mtime = orig + 100000  # large offset so it's definitely newer than all other assets
         os.utime(src, (new_mtime, new_mtime))  # source "changed" → newer mtime
         paths.asset_root()  # second resolution must re-extract
         sig2 = (root / ".extracted").read_text()
@@ -66,9 +64,7 @@ def test_asset_cache_refreshes_on_source_change(
         os.utime(src, (orig, orig))  # leave the working tree mtimes intact
 
 
-def test_asset_cache_stable_without_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_asset_cache_stable_without_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("CATRAZ_CACHE_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
@@ -77,9 +73,7 @@ def test_asset_cache_stable_without_change(
     assert sig1 == sig2  # no churn when source is unchanged
 
 
-def test_catraz_cache_dir_overrides_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_catraz_cache_dir_overrides_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CATRAZ_CACHE_DIR → <dir>/catraz/<v>."""
     cache_dir = tmp_path / "custom_cache"
     cache_dir.mkdir()
@@ -89,9 +83,7 @@ def test_catraz_cache_dir_overrides_home(
     assert root == cache_dir / "catraz" / __version__
 
 
-def test_xdg_cache_home_overrides_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_xdg_cache_home_overrides_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """XDG_CACHE_HOME set (no CATRAZ_CACHE_DIR) → <xdg>/catraz/<v>."""
     xdg_dir = tmp_path / "xdg_cache"
     xdg_dir.mkdir()

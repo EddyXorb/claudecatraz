@@ -32,10 +32,7 @@ def test_render_instructions_embeds_forge_base_and_prefix(
     assert dest == tmp_path / ".claude" / "CLAUDE.md"
     assert "http://gitlab-warden:8080/api/v4" in content
     assert "claude/" in content
-    assert (
-        "__FORGE_REST_BASE__" not in content
-        and "__BRANCH_PREFIX_EXAMPLE__" not in content
-    )
+    assert "__FORGE_REST_BASE__" not in content and "__BRANCH_PREFIX_EXAMPLE__" not in content
 
 
 def test_render_instructions_uses_first_configured_prefix(
@@ -43,9 +40,7 @@ def test_render_instructions_uses_first_configured_prefix(
 ) -> None:
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     adapter = ep._load_adapter()
-    _, content = adapter.render_instructions(
-        _ctx(ep, branch_prefixes=("bot/", "agent/"))
-    )
+    _, content = adapter.render_instructions(_ctx(ep, branch_prefixes=("bot/", "agent/")))
     assert "bot/" in content
 
 

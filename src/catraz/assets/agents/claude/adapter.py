@@ -131,9 +131,7 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
     data["bypassPermissionsModeAccepted"] = True
     if secrets.remote:
         data["remoteDialogSeen"] = True
-    data.setdefault("projects", {}).setdefault("/workspace", {})[
-        "hasTrustDialogAccepted"
-    ] = True
+    data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
     (home / "settings.json").write_text(
         json.dumps(
@@ -229,9 +227,7 @@ def sync_from_host(source: Path | None, home: Path) -> None:
     ).expanduser()
     cred = src_dir / ".credentials.json"
     if not cred.exists():
-        sys.exit(
-            f"error: {cred} not found — authenticate with `claude` on the host first"
-        )
+        sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
     import shutil
 
     home.mkdir(parents=True, exist_ok=True)

@@ -49,8 +49,7 @@ def _make_root(tmp_path: Path) -> Path:
     else:
         # Fallback for environments where assets aren't extracted yet
         dst.write_text(
-            'branch_prefix       = "claude/"          # R2: comment\n'
-            'allowed_projects    = [""]\n'
+            'branch_prefix       = "claude/"          # R2: comment\nallowed_projects    = [""]\n'
         )
     (cat / ".env").write_text("DEV_UID=1000\nAUTH_MODE=subscription\n")
     return root
@@ -103,16 +102,12 @@ class TestYesGitLabModeInference:
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
         assert setup._yes_gitlab_mode({}) == "read-only"
 
-    def test_both_tokens_infers_read_write(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_both_tokens_infers_read_write(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
         monkeypatch.setenv("GITLAB_WRITE_TOKEN", "glpat-write")
         assert setup._yes_gitlab_mode({}) == "read-write"
 
-    def test_explicit_env_wins_over_inferred(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_explicit_env_wins_over_inferred(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GITLAB_MODE", "off")
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
         monkeypatch.setenv("GITLAB_WRITE_TOKEN", "glpat-write")
@@ -161,9 +156,7 @@ class TestYesModeOff:
 class TestYesModeReadOnly:
     """--yes with read token only → GITLAB_MODE=read-only."""
 
-    def test_gitlab_mode_written(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_gitlab_mode_written(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
@@ -171,9 +164,7 @@ class TestYesModeReadOnly:
         env = load_env(root / ".catraz" / ".env")
         assert env.get("GITLAB_MODE") == "read-only"
 
-    def test_read_token_written(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_read_token_written(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
@@ -195,9 +186,7 @@ class TestYesModeReadOnly:
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         # Existing write token must survive
-        assert (
-            secrets_dir / "gitlab_write_token"
-        ).read_text() == "glpat-existing-write"
+        assert (secrets_dir / "gitlab_write_token").read_text() == "glpat-existing-write"
 
     def test_warden_projects_from_env_written_to_toml(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -224,18 +213,14 @@ class TestYesModeReadOnly:
         setup.cmd_init(root, _yes_args(), Out(color=False))
         toml = root / ".catraz" / "config" / "warden.toml"
         text = toml.read_text()
-        assert re.search(
-            r'branch_prefixes\s*=\s*\[\s*"claude/"\s*,\s*"bot/"\s*\]', text
-        )
+        assert re.search(r'branch_prefixes\s*=\s*\[\s*"claude/"\s*,\s*"bot/"\s*\]', text)
         assert not re.search(r"^\s*branch_prefix\s*=", text, re.M)
 
 
 class TestYesModeReadWrite:
     """--yes with both tokens → GITLAB_MODE=read-write."""
 
-    def test_gitlab_mode_written(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_gitlab_mode_written(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
@@ -244,9 +229,7 @@ class TestYesModeReadWrite:
         env = load_env(root / ".catraz" / ".env")
         assert env.get("GITLAB_MODE") == "read-write"
 
-    def test_both_tokens_written(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_both_tokens_written(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
@@ -260,16 +243,13 @@ class TestYesModeReadWrite:
 class TestYesMigration:
     """Stale WARDEN_* keys in .env must be removed after init writes to toml."""
 
-    def test_stale_env_key_removed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_stale_env_key_removed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"
         # Simulate old cmd_init writing WARDEN_ALLOWED_PROJECTS into .env
         env_path.write_text(
-            "DEV_UID=1000\nAUTH_MODE=subscription\n"
-            "WARDEN_ALLOWED_PROJECTS=group/old-proj\n"
+            "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
         )
         monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/new-proj")
         setup.cmd_init(root, _yes_args(), Out(color=False))
@@ -282,9 +262,7 @@ class TestYesMigration:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"
-        env_path.write_text(
-            "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_BRANCH_PREFIX=old/\n"
-        )
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_BRANCH_PREFIX=old/\n")
         monkeypatch.setenv("WARDEN_BRANCH_PREFIX", "new/")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         env = load_env(env_path)
@@ -340,9 +318,7 @@ class TestInteractiveModeOff:
         setup.cmd_init(root, _interactive_args(), Out(color=False))
         return root
 
-    def test_gitlab_mode_off_in_env(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_gitlab_mode_off_in_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = self._run(tmp_path, monkeypatch)
         env = load_env(root / ".catraz" / ".env")
         assert env.get("GITLAB_MODE") == "off"
@@ -355,9 +331,7 @@ class TestInteractiveModeOff:
         for fname in ("gitlab_read_token", "gitlab_write_token"):
             assert (secrets_dir / fname).exists()
 
-    def test_warden_toml_unchanged(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_warden_toml_unchanged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         original = (root / ".catraz" / "config" / "warden.toml").read_text()
@@ -371,9 +345,7 @@ class TestInteractiveModeOff:
 class TestInteractiveModeReadOnly:
     """Choosing 'read-only' prompts only the read token; write token file ensured."""
 
-    def test_read_only_wizard(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_read_only_wizard(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
 
@@ -407,9 +379,7 @@ class TestInteractiveModeReadOnly:
         assert env.get("GITLAB_MODE") == "read-only"
 
         secrets_dir = root / ".catraz" / "secrets"
-        assert (
-            secrets_dir / "gitlab_read_token"
-        ).read_text().strip() == "glpat-readtoken"
+        assert (secrets_dir / "gitlab_read_token").read_text().strip() == "glpat-readtoken"
 
         # Write token: ensured (empty) but not prompted
         assert (secrets_dir / "gitlab_write_token").exists()
@@ -457,9 +427,7 @@ class TestInteractiveModeReadOnly:
 class TestInteractiveModeReadWrite:
     """Choosing 'read-write' prompts both tokens."""
 
-    def test_read_write_wizard(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_read_write_wizard(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
 
@@ -474,12 +442,8 @@ class TestInteractiveModeReadWrite:
         assert env.get("GITLAB_MODE") == "read-write"
 
         secrets_dir = root / ".catraz" / "secrets"
-        assert (
-            secrets_dir / "gitlab_read_token"
-        ).read_text().strip() == "glpat-readtoken"
-        assert (
-            secrets_dir / "gitlab_write_token"
-        ).read_text().strip() == "glpat-writetoken"
+        assert (secrets_dir / "gitlab_read_token").read_text().strip() == "glpat-readtoken"
+        assert (secrets_dir / "gitlab_write_token").read_text().strip() == "glpat-writetoken"
 
     def test_enter_on_default_selects_read_write(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -608,9 +572,7 @@ class TestTomlSetters:
 class TestUnsetEnvKeys:
     def test_removes_active_key(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            "DEV_UID=1000\nWARDEN_ALLOWED_PROJECTS=group/proj\nAUTH_MODE=sub\n"
-        )
+        env_file.write_text("DEV_UID=1000\nWARDEN_ALLOWED_PROJECTS=group/proj\nAUTH_MODE=sub\n")
         unset_env_keys(env_file, ["WARDEN_ALLOWED_PROJECTS"])
         env = load_env(env_file)
         assert "WARDEN_ALLOWED_PROJECTS" not in env
@@ -618,9 +580,7 @@ class TestUnsetEnvKeys:
 
     def test_leaves_comments_untouched(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            "# WARDEN_ALLOWED_PROJECTS=\nWARDEN_ALLOWED_PROJECTS=group/proj\n"
-        )
+        env_file.write_text("# WARDEN_ALLOWED_PROJECTS=\nWARDEN_ALLOWED_PROJECTS=group/proj\n")
         unset_env_keys(env_file, ["WARDEN_ALLOWED_PROJECTS"])
         text = env_file.read_text()
         assert "# WARDEN_ALLOWED_PROJECTS=" in text
@@ -639,9 +599,7 @@ class TestUnsetEnvKeys:
 
     def test_removes_multiple_keys(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            "A=1\nWARDEN_ALLOWED_PROJECTS=g/p\nWARDEN_BRANCH_PREFIX=claude/\nB=2\n"
-        )
+        env_file.write_text("A=1\nWARDEN_ALLOWED_PROJECTS=g/p\nWARDEN_BRANCH_PREFIX=claude/\nB=2\n")
         unset_env_keys(env_file, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
         env = load_env(env_file)
         assert "WARDEN_ALLOWED_PROJECTS" not in env
@@ -718,9 +676,7 @@ class TestBaseImageWizard:
         """BASE_IMAGE already in .env must be preserved (wizard doesn't touch it)."""
         root = _make_root(tmp_path)
         env_path = root / ".catraz" / ".env"
-        env_path.write_text(
-            "DEV_UID=1000\nAUTH_MODE=subscription\nBASE_IMAGE=python:3.11\n"
-        )
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_IMAGE=python:3.11\n")
         env = self._run_interactive(root, monkeypatch, ["3"], force=False)
         assert env.get("BASE_IMAGE") == "python:3.11"
 
@@ -728,9 +684,7 @@ class TestBaseImageWizard:
     # --yes mode tests (BASE_* env override still supported)
     # ------------------------------------------------------------------
 
-    def test_yes_base_image_from_env(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_yes_base_image_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--yes with BASE_IMAGE env var writes BASE_IMAGE to .env."""
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
@@ -757,9 +711,7 @@ class TestBaseImageWizard:
         root = _make_root(tmp_path)
         env_path = root / ".catraz" / ".env"
         # Pre-populate BASE_DOCKERFILE in .env to test removal
-        env_path.write_text(
-            "DEV_UID=1000\nAUTH_MODE=subscription\nBASE_DOCKERFILE=./Dockerfile\n"
-        )
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nBASE_DOCKERFILE=./Dockerfile\n")
         _patch_common(monkeypatch)
         monkeypatch.setenv("BASE_IMAGE", "img:1")
         monkeypatch.setenv("BASE_DOCKERFILE", "./Dockerfile")

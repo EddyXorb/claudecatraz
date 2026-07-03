@@ -102,9 +102,7 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     )
 
     # `run claude-remote` starts the Remote-Control daemon (item 07 of cli-worklist).
-    subprocess.run(
-        [*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True
-    )
+    subprocess.run([*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True)
     yield root
     subprocess.run([*catraz, "-C", str(root), "stop"], env=env, check=False)
 

@@ -20,9 +20,7 @@ from catraz.endpoints import (
 # ── validate_endpoint_id_shape ────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "good", ["mr.create", "branch.create", "a.b", "mr.discussion_reply"]
-)
+@pytest.mark.parametrize("good", ["mr.create", "branch.create", "a.b", "mr.discussion_reply"])
 def test_valid_shapes_pass(good: str) -> None:
     assert validate_endpoint_id_shape(good) is None
 
@@ -117,8 +115,6 @@ def test_write_enable_list_replaces_existing_in_place(tmp_path: Path) -> None:
 
 def test_write_enable_list_refuses_section_without_enable_key(tmp_path: Path) -> None:
     p = tmp_path / "warden.toml"
-    p.write_text(
-        '[api.endpoints.overrides."branch.create"]\nbranch_prefix = "claude/x-"\n'
-    )
+    p.write_text('[api.endpoints.overrides."branch.create"]\nbranch_prefix = "claude/x-"\n')
     with pytest.raises(ValueError, match="enable"):
         write_enable_list(p, ["branch.create"])

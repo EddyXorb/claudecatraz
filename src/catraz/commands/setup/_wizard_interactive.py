@@ -113,9 +113,7 @@ def _prompt_gitlab_tokens(
                 existing_read = p_read.read_text(encoding="utf-8").strip()
             except OSError:
                 pass
-        val = out.secret(
-            "GitLab READ token (read_api, read_repository)", current=existing_read
-        )
+        val = out.secret("GitLab READ token (read_api, read_repository)", current=existing_read)
         _write_secret_value(secrets_dir, "gitlab_read_token", val)
         if not val:
             out.warn("gitlab_read_token left empty — doctor will flag it")
@@ -141,9 +139,7 @@ def _prompt_gitlab_tokens(
         _ensure_secret(secrets_dir, "gitlab_write_token")
 
 
-def _prompt_secret_keep_or_replace(
-    secrets_dir: Path, filename: str, label: str, out: Out
-) -> None:
+def _prompt_secret_keep_or_replace(secrets_dir: Path, filename: str, label: str, out: Out) -> None:
     """Offer "keep inherited (hidden)" / "enter new" without ever echoing the value."""
     import getpass
 
@@ -176,9 +172,7 @@ def _prompt_allowed_projects(
     discovered = _discover_gitlab_projects(root, gitlab_url)
     default = ", ".join(discovered) if discovered else ""
     if discovered:
-        out.info(
-            "  Detected GitLab project(s) from git remotes: " + ", ".join(discovered)
-        )
+        out.info("  Detected GitLab project(s) from git remotes: " + ", ".join(discovered))
     raw = out.ask("projects (group/sub/project,...)", default)
     projects = [p.strip() for p in raw.split(",") if p.strip()]
     valid: list[str] = []
@@ -199,9 +193,7 @@ def _prompt_allowed_projects(
         )
 
 
-def _prompt_branch_prefix(
-    env: dict[str, str], warden_toml: Path, env_path: Path, out: Out
-) -> None:
+def _prompt_branch_prefix(env: dict[str, str], warden_toml: Path, env_path: Path, out: Out) -> None:
     cur_prefix = _read_branch_prefix(env, warden_toml)
     prefix = out.ask("Branch prefix the agent may push to", cur_prefix or "claude/")
     if warden_toml.exists():
@@ -287,9 +279,7 @@ def _wizard_interactive(
 
     proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
     url_part = (
-        f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}"
-        if mode != "off"
-        else ""
+        f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}" if mode != "off" else ""
     )
     proj_part = f"  projects={len(proj_count)}" if mode != "off" else ""
     out.info(

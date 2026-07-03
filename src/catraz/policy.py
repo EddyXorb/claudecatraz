@@ -25,9 +25,7 @@ def validate_project(p: str) -> str | None:
 
 def _resolve_allowed_projects(root: Path, env: dict[str, str]) -> tuple[list[str], str]:
     """Env override wins over warden.toml (README §11 precedence)."""
-    ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get(
-        "WARDEN_ALLOWED_PROJECTS", ""
-    )
+    ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
     if ov.strip():
         return [p.strip() for p in ov.split(",") if p.strip()], ".env override"
     toml = root / ".catraz" / "config" / "warden.toml"
@@ -57,9 +55,7 @@ def _host_of(s: str) -> str:
     return (urllib.parse.urlsplit(s).hostname or "").lower()
 
 
-def _project_from_remote_url(
-    url: str, gitlab_url: str = "https://gitlab.com"
-) -> str | None:
+def _project_from_remote_url(url: str, gitlab_url: str = "https://gitlab.com") -> str | None:
     """Derive a GitLab project path (group/sub/project) from a git remote URL,
     iff its host matches *gitlab_url*'s host. Else (or on an invalid path) None.
 
@@ -157,9 +153,7 @@ def set_toml_scalar(path: Path, key: str, value: str) -> None:
         re.M,
     )
     if pat.search(text):
-        new_text = pat.sub(
-            lambda m: m.group("pre") + serialized + m.group("post"), text
-        )
+        new_text = pat.sub(lambda m: m.group("pre") + serialized + m.group("post"), text)
     else:
         new_text = text.rstrip("\n") + f"\n{key} = {serialized}\n"
     path.write_text(new_text, encoding="utf-8")
@@ -182,9 +176,7 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
         re.M,
     )
     if pat.search(text):
-        new_text = pat.sub(
-            lambda m: m.group("pre") + serialized + m.group("post"), text
-        )
+        new_text = pat.sub(lambda m: m.group("pre") + serialized + m.group("post"), text)
     else:
         new_text = text.rstrip("\n") + f"\n{key} = {serialized}\n"
     path.write_text(new_text, encoding="utf-8")

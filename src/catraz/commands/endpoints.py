@@ -67,12 +67,8 @@ def cmd_allow_endpoint(root: Path, args: argparse.Namespace, out: Out) -> int:
     return EXIT_OK
 
 
-def _allow_endpoint_offline(
-    warden_toml: Path, requested: list[str], reason: str, out: Out
-) -> int:
-    out.warn(
-        f"could not reach the running warden ({reason}) — catalog ids not verified"
-    )
+def _allow_endpoint_offline(warden_toml: Path, requested: list[str], reason: str, out: Out) -> int:
+    out.warn(f"could not reach the running warden ({reason}) — catalog ids not verified")
     existing = read_enable_list(warden_toml)
     if existing is not None:
         # warden.toml already has an explicit [api.endpoints].enable — that

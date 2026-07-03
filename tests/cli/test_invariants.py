@@ -56,16 +56,12 @@ def test_invariants_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
         lambda c: c["services"]["claude-dev-env"].__setitem__("security_opt", []),
         # tmpfs mode wrong (0o755 == 493, not 0o700 == 448)
-        lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].__setitem__(
-            "mode", 493
-        ),
+        lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].__setitem__("mode", 493),
         # tmpfs size missing
         lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].pop("size"),
     ],
 )
-def test_invariants_fail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mut: Any
-) -> None:
+def test_invariants_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mut: Any) -> None:
     bad = copy.deepcopy(GOOD)
     mut(bad)
     _patch(monkeypatch, bad)

@@ -8,9 +8,7 @@ from typing import Any
 import pytest
 
 
-def test_remote_command_defaults(
-    claude_adapter: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_remote_command_defaults(claude_adapter: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """No env set → argv equals today's literal list (regression guard)."""
     monkeypatch.delenv("CLAUDE_RC_SPAWN", raising=False)
     monkeypatch.delenv("CLAUDE_RC_DEBUG_FILE", raising=False)
@@ -28,9 +26,7 @@ def test_remote_command_defaults(
     assert "--debug-file" in argv
 
 
-def test_remote_command_env_driven(
-    claude_adapter: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_remote_command_env_driven(claude_adapter: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLAUDE_RC_SPAWN and CLAUDE_RC_EXTRA_ARGS override the defaults."""
     monkeypatch.setenv("CLAUDE_RC_SPAWN", "project-dir")
     monkeypatch.setenv("CLAUDE_RC_EXTRA_ARGS", "--foo bar")
@@ -80,17 +76,13 @@ def test_api_key_file_wins_over_bare_env(claude_adapter: Any, tmp_path: Path) ->
     key_file = tmp_path / "anthropic_api_key"
     key_file.write_text("sk-from-file\n")
     env = claude_adapter.environ(
-        _secrets(
-            claude_adapter, api_key_file=key_file, api_key_env_fallback="sk-from-env"
-        )
+        _secrets(claude_adapter, api_key_file=key_file, api_key_env_fallback="sk-from-env")
     )
     assert env == {"ANTHROPIC_API_KEY": "sk-from-file"}
 
 
 def test_api_key_falls_back_to_bare_env(claude_adapter: Any) -> None:
-    env = claude_adapter.environ(
-        _secrets(claude_adapter, api_key_env_fallback="sk-bare")
-    )
+    env = claude_adapter.environ(_secrets(claude_adapter, api_key_env_fallback="sk-bare"))
     assert env == {"ANTHROPIC_API_KEY": "sk-bare"}
 
 

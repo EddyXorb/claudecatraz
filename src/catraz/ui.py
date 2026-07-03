@@ -11,9 +11,7 @@ class Out:
     """ANSI styling that quietly disables itself for non-TTYs / --no-color."""
 
     def __init__(self, color: bool = True) -> None:
-        self.color = (
-            color and sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
-        )
+        self.color = color and sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
     def _c(self, code: str, s: str) -> str:
         return f"\033[{code}m{s}\033[0m" if self.color else s
@@ -57,9 +55,7 @@ class Out:
             return default or ""
         return raw or (default or "")
 
-    def choice(
-        self, prompt: str, options: list[tuple[Any, str]], default: int = 0
-    ) -> Any:
+    def choice(self, prompt: str, options: list[tuple[Any, str]], default: int = 0) -> Any:
         """Pick one of N labelled options; bounded to 3 tries then falls back to default.
 
         options: list[(value, label)]; returns the chosen value.

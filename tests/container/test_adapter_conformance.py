@@ -102,17 +102,13 @@ def test_environ_carries_no_forge_credential(adapter: Any) -> None:
     env = adapter.environ(_secrets_for(adapter))
     for key, value in env.items():
         for marker in FORBIDDEN_CREDENTIAL_MARKERS:
-            assert marker not in key.upper(), (
-                f"environ() leaked a Forge credential key: {key}"
-            )
+            assert marker not in key.upper(), f"environ() leaked a Forge credential key: {key}"
             assert marker not in str(value).upper(), (
                 f"environ() leaked a Forge credential value via {key}"
             )
 
 
-def test_environ_only_uses_manifests_own_api_key_env(
-    profile: str, adapter: Any
-) -> None:
+def test_environ_only_uses_manifests_own_api_key_env(profile: str, adapter: Any) -> None:
     manifest = load_manifest(profile)
     env = adapter.environ(_secrets_for(adapter))
     for key in env:
@@ -139,9 +135,7 @@ def test_prepare_home_writes_no_forge_credential(
         except OSError:
             continue
         for marker in FORBIDDEN_CREDENTIAL_MARKERS:
-            assert marker not in text.upper(), (
-                f"{p} written by prepare_home() contains {marker}"
-            )
+            assert marker not in text.upper(), f"{p} written by prepare_home() contains {marker}"
 
 
 def test_remote_false_denies_fail_closed(

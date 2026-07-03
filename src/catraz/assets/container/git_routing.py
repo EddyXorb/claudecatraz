@@ -55,15 +55,12 @@ def configure_git_warden() -> None:
     """
     gitlab_mode = os.environ.get("GITLAB_MODE", "read-write")
     if gitlab_mode == "off":
-        print(
-            "GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden"
-        )
+        print("GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden")
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
         return
     gitlab_url = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/")
     warden_git = (
-        os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/")
-        + "/"
+        os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/") + "/"
     )
     host = urlsplit(gitlab_url).hostname or "gitlab.com"
     ssh_user = os.environ.get("GITLAB_SSH_USER", "git")

@@ -55,9 +55,7 @@ def test_allow_endpoint_command_token() -> None:
 def test_allow_endpoint_accepts_multiple_ids() -> None:
     from catraz.cli import build_parser
 
-    args = build_parser().parse_args(
-        ["allow-endpoint", "branch.create", "issue.create"]
-    )
+    args = build_parser().parse_args(["allow-endpoint", "branch.create", "issue.create"])
     assert args.endpoint_ids == ["branch.create", "issue.create"]
 
 
@@ -85,13 +83,9 @@ def test_all_malformed_ids_is_nothing_to_enable(tmp_path: Path) -> None:
 # ── live (reachable admin socket) path ──────────────────────────────────────
 
 
-def test_live_unknown_catalog_id_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_live_unknown_catalog_id_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     warden = _seed(tmp_path)
-    monkeypatch.setattr(
-        endpoints_cmd, "fetch_policy_report", lambda root: _DEFAULT_CATALOG_REPORT
-    )
+    monkeypatch.setattr(endpoints_cmd, "fetch_policy_report", lambda root: _DEFAULT_CATALOG_REPORT)
     rc = endpoints_cmd.cmd_allow_endpoint(
         tmp_path, cast(argparse.Namespace, _ns(["no.such.entry"])), _out()
     )
@@ -103,9 +97,7 @@ def test_live_activates_a_known_extra_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     warden = _seed(tmp_path)
-    monkeypatch.setattr(
-        endpoints_cmd, "fetch_policy_report", lambda root: _DEFAULT_CATALOG_REPORT
-    )
+    monkeypatch.setattr(endpoints_cmd, "fetch_policy_report", lambda root: _DEFAULT_CATALOG_REPORT)
     rc = endpoints_cmd.cmd_allow_endpoint(
         tmp_path, cast(argparse.Namespace, _ns(["branch.create"])), _out()
     )
@@ -117,9 +109,7 @@ def test_live_idempotent_when_already_active(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed(tmp_path)
-    monkeypatch.setattr(
-        endpoints_cmd, "fetch_policy_report", lambda root: _DEFAULT_CATALOG_REPORT
-    )
+    monkeypatch.setattr(endpoints_cmd, "fetch_policy_report", lambda root: _DEFAULT_CATALOG_REPORT)
     rc = endpoints_cmd.cmd_allow_endpoint(
         tmp_path, cast(argparse.Namespace, _ns(["mr.create"])), _out()
     )

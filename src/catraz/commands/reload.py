@@ -54,9 +54,7 @@ def stale_services(
             continue
         changed: list[Path] = []
         for p in _config_paths(root, service):
-            mtime = datetime.datetime.fromtimestamp(
-                p.stat().st_mtime, tz=datetime.timezone.utc
-            )
+            mtime = datetime.datetime.fromtimestamp(p.stat().st_mtime, tz=datetime.timezone.utc)
             if mtime > start:
                 changed.append(p)
         if changed:

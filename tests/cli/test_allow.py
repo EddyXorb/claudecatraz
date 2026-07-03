@@ -23,9 +23,7 @@ def _out() -> Out:
 
 
 def test_remote_https_with_git_suffix() -> None:
-    assert (
-        policy._project_from_remote_url("https://gitlab.com/grp/proj.git") == "grp/proj"
-    )
+    assert policy._project_from_remote_url("https://gitlab.com/grp/proj.git") == "grp/proj"
 
 
 def test_remote_https_without_git_suffix() -> None:
@@ -37,10 +35,7 @@ def test_remote_ssh_scp_form() -> None:
 
 
 def test_remote_nested_path() -> None:
-    assert (
-        policy._project_from_remote_url("https://gitlab.com/grp/sub/proj.git")
-        == "grp/sub/proj"
-    )
+    assert policy._project_from_remote_url("https://gitlab.com/grp/sub/proj.git") == "grp/sub/proj"
 
 
 def test_remote_non_matching_host() -> None:
@@ -49,9 +44,7 @@ def test_remote_non_matching_host() -> None:
 
 def test_remote_self_hosted_host_match() -> None:
     url = "https://gitlab.example.com/grp/proj.git"
-    assert (
-        policy._project_from_remote_url(url, "https://gitlab.example.com") == "grp/proj"
-    )
+    assert policy._project_from_remote_url(url, "https://gitlab.example.com") == "grp/proj"
     # host-only compare ignores port
     assert policy._project_from_remote_url(url, "gitlab.example.com:8443") == "grp/proj"
 
@@ -108,18 +101,14 @@ def test_cmd_allow_defensive_empty_string_default(tmp_path: Path) -> None:
 
 def test_cmd_allow_rejects_wildcard_writes_valid(tmp_path: Path) -> None:
     warden = _seed(tmp_path)
-    rc = setup.cmd_allow(
-        tmp_path, cast(argparse.Namespace, _ns(["grp/*", "grp/ok"])), _out()
-    )
+    rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/*", "grp/ok"])), _out())
     assert rc == EXIT_OK
     assert policy._read_toml_allowed_projects(warden) == ["grp/ok"]
 
 
 def test_cmd_allow_all_invalid_is_config_error(tmp_path: Path) -> None:
     _seed(tmp_path)
-    rc = setup.cmd_allow(
-        tmp_path, cast(argparse.Namespace, _ns(["leaf", "grp/*"])), _out()
-    )
+    rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["leaf", "grp/*"])), _out())
     assert rc == EXIT_CONFIG
 
 
@@ -135,9 +124,7 @@ def test_cmd_allow_not_set_up(tmp_path: Path) -> None:
         setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
 
 
-def test_cmd_allow_warns_on_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cmd_allow_warns_on_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     warden = _seed(tmp_path)
     monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "other/proj")
     msgs: list[str] = []
@@ -180,6 +167,4 @@ def test_discover_gitlab_projects(tmp_path: Path) -> None:
         ],
         check=True,
     )
-    assert policy._discover_gitlab_projects(tmp_path, "https://gitlab.com") == [
-        "grp/proj"
-    ]
+    assert policy._discover_gitlab_projects(tmp_path, "https://gitlab.com") == ["grp/proj"]
