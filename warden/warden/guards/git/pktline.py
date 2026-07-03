@@ -1,8 +1,7 @@
-"""pkt-line parsing for the git Smart-HTTP `receive-pack` command section (W7.2).
+"""pkt-line parsing for the git Smart-HTTP receive-pack command section.
 
 Transport-free and pure: turns the bytes that precede the PACK payload into a
-list of :class:`RefCommand`. This is one of the pure modules (alongside the
-git/REST guard policies) the whole test- and audit-strategy rests on (W2).
+list of :class:`RefCommand`. One of the pure modules the test and audit strategy rests on.
 """
 
 from __future__ import annotations
@@ -42,11 +41,10 @@ def _is_zero(oid: str) -> bool:
 
 
 def decompress_if_gzip(head: bytes) -> bytes:
-    """Decompress the buffered head only if it is gzip-framed (W7.4).
+    """Decompress the buffered head only if gzip-framed.
 
-    `receive-pack` PACK bodies are usually not gzip-coded; this is defensive so
-    the command section can still be parsed. The original body is forwarded
-    untouched — only the copy we parse here is decompressed.
+    Defensive: PACK bodies usually aren't gzip-coded. Only this parse copy is
+    decompressed; the original body is forwarded untouched.
     """
     if head[:2] == b"\x1f\x8b":
         return gzip.decompress(head)
@@ -122,12 +120,11 @@ def _find_command_end(buf: bytes | bytearray) -> Optional[int]:
 async def read_until_flush(
     stream: AsyncIterator[bytes],
 ) -> tuple[bytes, AsyncIterator[bytes]]:
-    """Buffer the request body only up to the command-section flush.
+    """Buffer request body only up to the command-section flush.
 
-    Returns ``(head, rest)`` where ``head`` covers the pkt-line command section
-    (KB-sized) and ``rest`` is an async generator that re-yields the buffered
-    remainder followed by the untouched PACK stream — so the body is forwarded
-    byte-for-byte (SHA-preserving, W7.3) without ever buffering the packfile.
+    Returns (head, rest) where head covers the pkt-line command section (KB-sized)
+    and rest re-yields the buffered remainder and untouched PACK stream — body
+    is forwarded byte-for-byte without buffering the packfile.
     """
     buf = bytearray()
     boundary: Optional[int] = None

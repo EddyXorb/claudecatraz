@@ -61,7 +61,7 @@ def redact(entry: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class AuditEvent:
-    """One decision, typed (F6). The envelope every guard shares is a typed
+    """One decision, fully typed. The envelope every guard shares is a typed
     attribute; ``extra`` carries whatever additional fields a specific guard
     supplies (REST: ``path``/``kind``/``enabled_via``; git: ``refs``) — see
     the module docstring for why this stays a passthrough mapping rather than
@@ -111,11 +111,9 @@ def build_event(
     upstream_status: Optional[int],
     **guard_fields: Any,
 ) -> dict[str, Any]:
-    """Thin, dict-returning compatibility facade over :class:`AuditEvent` (F6:
-    "build_event darf zur dünnen Fassade werden"). New code constructs an
-    :class:`AuditEvent` directly (:meth:`core.guard.Guard.handle` does); this
-    remains for callers that still want the plain-dict shape (and for the
-    tests pinning that shape down byte for byte).
+    """Dict-returning compatibility facade over :class:`AuditEvent`. New code
+    constructs an :class:`AuditEvent` directly; this remains for callers that
+    still want the plain-dict shape.
     """
     return AuditEvent(
         guard=guard,

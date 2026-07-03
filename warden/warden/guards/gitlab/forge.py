@@ -1,15 +1,10 @@
-"""The GitLab forge: credentials, service-account, MR-ownership and reconcile
-(W6.2, W8.2, §6.11).
+"""The GitLab forge: credentials, service-account, MR-ownership, and reconcile.
 
-:class:`GitForge` holds the long-lived collaborators (config, upstream,
-state, audit) plus the service-account id, the short-lived MR-ownership
-cache, and the numeric project-id aliases reconcile resolves. Reconcile
-rebuilds the quota counters from GitLab truth — at startup (before the agent
-port opens) and periodically as the backstop. Shared by both the git guard
-and the REST-API guard (§03.5/03.6): each of them owns its own
-:class:`~warden.core.guard.Guard` instance, but both need this same forge
-state (credentials, ownership, reconcile) — that is what makes it a separate,
-guard-agnostic collaborator instead of living inside either guard.
+:class:`GitForge` holds long-lived collaborators (config, upstream, state, audit),
+service-account id, MR-ownership cache, and project-id aliases. Reconcile rebuilds
+quota counters from GitLab truth at startup and periodically. Shared by git and
+REST-API guards; each owns its own Guard instance but both need this same forge
+state, making it a guard-agnostic collaborator.
 """
 
 from __future__ import annotations
@@ -48,18 +43,17 @@ class GitForge:
         # (project, iid) -> (ok, expires_at). Performance only, never security.
         self._owner_cache: dict[tuple[str, int], tuple[bool, float]] = {}
         self._owner_ttl = 30.0
-        # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile (M6).
-        # Forge state, not Config — Config stays immutable for the life of the
-        # process; only the forge's view of "which ids currently alias an
-        # allowlisted project" is ever refreshed.
+        # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
+        # Forge state, not Config — Config stays immutable; only the forge's
+        # view of "which ids currently alias an allowlisted project" is refreshed.
         self.project_id_aliases: set[str] = set()
 
     # --- service account -------------------------------------------------------
     async def resolve_service_account(self) -> Optional[int]:
-        """Resolve and cache the write-token's user id once (W6.2).
+        """Resolve and cache the write-token's user id once.
 
-        Returns None immediately when writes are disabled — the (possibly empty)
-        write token must never be sent upstream in off/read-only mode.
+        Returns None immediately when writes are disabled to prevent sending
+        the write token upstream in off/read-only mode.
         """
         if not self.cfg.writes_enabled:
             return None
@@ -75,7 +69,7 @@ class GitForge:
             )
         return self.service_account_id
 
-    # --- ownership (W6.2) ------------------------------------------------------
+    # --- ownership ---------------------------------------------------------------
     async def mr_owned_by_agent(self, project: str, iid: int) -> Optional[bool]:
         """True iff the MR is prefixed AND authored by the service account.
 
@@ -105,11 +99,10 @@ class GitForge:
         project, resolved by the last successful :meth:`reconcile`."""
         return normalize_project(project) in self.project_id_aliases
 
-    # --- state view (§E) ---------------------------------------------------------
+    # --- state view -------------------------------------------------------
     def state_view(self) -> StateView:
-        """Combined snapshot: core's fail-safe lock/writes counter plus this
-        domain's branch/MR counts — what :class:`~warden.core.guard.Guard`
-        subclasses that depend on this forge (git, REST) pass to ``decide``."""
+        """Combined snapshot: core's fail-safe lock/writes counter plus
+        domain's branch/MR counts passed to ``decide`` by Guard subclasses."""
         if not self.state.is_reconciled():
             return StateView(locked=True)
         return StateView(

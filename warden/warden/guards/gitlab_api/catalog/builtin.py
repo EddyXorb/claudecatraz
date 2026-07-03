@@ -1,21 +1,16 @@
-"""The merge endpoint: a built-in deny invariant, not a catalog row (§04.2,
-§04.3; docs/design/architecture-generalization/04-policy-erweiterbarkeit.md
-§04.2: "Die Merge-Zeile … ist kein aktivierbarer Eintrag, sondern eine
-eingebaute Deny-Invariante").
+"""The merge endpoint: a built-in deny invariant, not a catalog row.
 
 ``PUT /projects/{id}/merge_requests/{iid}/merge`` must deny regardless of
 which catalog entries a deployment activates — including a hypothetical
 ``enable = []`` that turns off every optional entry. Putting it in
 ``entries.CATALOG`` would make it *just another row*, activatable and
-therefore (by construction) also deactivatable; keeping it here means
+therefore also deactivatable; keeping it here means
 ``guards.gitlab_api.policy.capability_gate`` checks it before ever consulting
 the effective table.
 
 The FORBIDDEN capability layer (``core.capabilities``) is a second,
 independent reason this endpoint can never be allowed even if this match were
-somehow bypassed (defense-in-depth, A10) — see ``test_capabilities.py``'s
-proof that a hypothetical catalog row shaped like this one is still denied by
-the capability layer alone.
+somehow bypassed — defense-in-depth.
 """
 
 from __future__ import annotations
@@ -33,10 +28,8 @@ def is_builtin_merge_endpoint(method: str, path: str) -> bool:
     return method.upper() == MERGE_METHOD and bool(_MERGE_REGEX.fullmatch(path.rstrip("/")))
 
 
-# Global deny-probes (§04.4) for the built-in invariants — run by the
-# startgate unconditionally, independent of which catalog entries are
-# activated (unlike a catalog entry's own ``deny_probes``, which only run
-# when that entry is enabled).
+# Global deny-probes for the built-in invariants — run by the startgate
+# unconditionally, independent of which catalog entries are activated.
 BUILTIN_DENY_PROBES: tuple[DenyProbe, ...] = (
     DenyProbe(
         description="the merge endpoint is a built-in invariant, never activatable",

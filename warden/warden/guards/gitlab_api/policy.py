@@ -56,16 +56,16 @@ def capability_gate(
 
 
 def _decide_read(intent: ApiIntent) -> Decision:
-    """R1/R6 for REST reads (B1): project-bound paths pass, projectless paths
+    """R1/R6 for REST reads: project-bound paths pass, projectless paths
     are looked up in the read-endpoint table.
 
     A project id in the path already cleared the kernel's resource-allowlist
     gate (:func:`core.guard.project_gate`, run before ``decide`` is ever
     reached) — that gate covers repository content (files, diffs, wiki, …)
-    under a project, so a project-bound read is unconditionally allowed here,
-    exactly as before B1. A *projectless* path (no project id for R6 to gate)
-    is matched against ``read_endpoints`` — metadata passes (R1),
-    content-capable or unlisted paths are denied (R6).
+    under a project, so a project-bound read is unconditionally allowed.
+    A *projectless* path (no project id for R6 to gate) is matched against
+    ``read_endpoints`` — metadata passes (R1), content-capable or unlisted
+    paths are denied (R6).
     """
     if intent.project:
         return Decision(True, R1, "read pass-through", TokenKind.READ)

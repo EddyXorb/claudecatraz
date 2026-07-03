@@ -1,16 +1,11 @@
-"""Parse ``[api.endpoints]`` out of the raw ``warden.toml`` dict (§04.2/04.3;
-docs/design/architecture-generalization/04-policy-erweiterbarkeit.md §04.2).
+"""Parse ``[api.endpoints]`` out of the raw ``warden.toml`` dict.
 
 :class:`ApiEndpointsConfig` is the schema — decoded generically by
 :func:`warden.core.toml_codec.decode` rather than a hand-rolled parser.
-Malformed shapes raise :class:`warden.core.config.ConfigError` directly (the
-same exception the decoder itself raises), so callers no longer need to
-catch and re-wrap a catalog-local error at this boundary.
+Malformed shapes raise :class:`warden.core.config.ConfigError` directly.
 
 This module only parses *shape* (is ``enable`` a list of strings?). Whether
-an id actually exists in the catalog is checked later against the catalog
-itself — see ``activation.build_effective_table`` — because that check needs
-the catalog, which this module may not depend on.
+an id actually exists in the catalog is checked later in ``activation.build_effective_table``.
 """
 
 from __future__ import annotations
@@ -26,12 +21,9 @@ from ....core.config import ConfigError
 class ApiEndpointsConfig:
     """Raw, catalog-agnostic shape of the ``[api.endpoints]`` config.
 
-    ``enable`` is ``None`` when the section (or the whole file) is absent —
-    the caller (``activation.build_effective_table``) then falls back to the
-    catalog's default set, never an empty list. An *explicit* ``enable = []``
-    and an *absent* section must stay distinguishable, or a bare
-    ``[api.endpoints]`` table would silently disable every default entry
-    (§04.3 behaviour preservation).
+    ``enable`` is ``None`` when the section (or the whole file) is absent — the caller
+    then falls back to the catalog's default set, never an empty list.
+    An *explicit* ``enable = []`` and an *absent* section must stay distinguishable.
     """
 
     enable: Optional[tuple[str, ...]] = None

@@ -1,18 +1,13 @@
-"""The endpoint catalog (§04.2; docs/design/architecture-generalization,
-§04-policy-erweiterbarkeit.md §04.2, §06-migration.md Schritt 4).
+"""The endpoint catalog: every GitLab REST write endpoint the warden knows how to guard.
 
-Code liefert, Config aktiviert: this table holds every GitLab REST write
-endpoint the warden *knows how to guard*, whether or not a given deployment
-turns it on. ``DEFAULT_ENABLED`` is exactly today's behaviour (Schritt
-3's six rows) — a deployment with no ``[api.endpoints]`` section at all gets
-precisely this set, unchanged. Anything else (``branch.create``,
-``issue.create``) is honestly catalogued and golden-tested, but only becomes
-reachable when a ``warden.toml`` explicitly enables it (``activation.py``).
+Code defines the catalog; config activates entries. ``DEFAULT_ENABLED`` is the
+default set — a deployment with no ``[api.endpoints]`` section gets precisely this.
+Extra entries (``branch.create``, ``issue.create``) are catalogued and tested but
+only reachable when explicitly enabled via ``warden.toml``.
 
-The merge endpoint is deliberately **not** here — it is a built-in deny
-invariant (``builtin.py``), not an activatable row. Each row's deny-probes
-live in ``probes.py``, keyed by entry id, so this table stays a legible
-one-row-per-endpoint list.
+The merge endpoint is deliberately **not** here — it is a built-in deny invariant
+(``builtin.py``), not an activatable row. Each row's deny-probes live in ``probes.py``,
+keyed by entry id, so this table stays a legible one-row-per-endpoint list.
 """
 
 from __future__ import annotations
@@ -25,7 +20,7 @@ from .checks import OWNED_BY_AGENT, field_has_prefix, field_not_equals
 from .model import CatalogEntry, EndpointKind, FieldSpec, Location
 
 CATALOG: tuple[CatalogEntry, ...] = (
-    # --- default set (Schritt 3 behaviour, unchanged) ----------------------
+    # --- default set -----
     CatalogEntry(
         id="mr.create",
         method="POST",
@@ -118,16 +113,14 @@ DEFAULT_ENABLED: frozenset[str] = frozenset(
 
 
 def api_capabilities(ep: CatalogEntry, fields: Mapping[str, object]) -> frozenset[Capability]:
-    """Endpoint capabilities plus the one field-dependent addition (§03.4, B2).
+    """Endpoint capabilities plus field-dependent additions.
 
     Every row's capabilities are static — declared on the table, independent
     of the request — with one exception: ``PUT .../merge_requests/{iid}``
-    only merges when the caller also sets ``state_event=merge`` (the same
-    alias :data:`~warden.guards.gitlab_api.catalog.checks.OWNED_BY_AGENT`'s
-    sibling check already guards against, W6.2). A static ``{merges}`` on
-    that row would forbid the row outright (it is also the only way to edit
-    an MR's title/description); a static empty set would miss the alias
-    entirely.
+    only merges when the caller also sets ``state_event=merge``. A static
+    ``{merges}`` on that row would forbid the row outright (it is also the
+    only way to edit an MR's title/description); a static empty set would miss
+    the alias entirely.
     """
     caps = set(ep.capabilities)
     if fields.get("state_event") == "merge":
@@ -140,10 +133,8 @@ def match_endpoint(
 ) -> Optional[CatalogEntry]:
     """Return the first entry in ``entries`` matching ``method``/``path``.
 
-    ``entries`` is normally an
-    :class:`~warden.guards.gitlab_api.catalog.activation.EffectiveTable`'s
-    ``.entries`` — the activated subset — never :data:`CATALOG` directly
-    (§04.2/04.3: only the effective table may decide a real request).
+    ``entries`` is normally an EffectiveTable's ``.entries`` — the activated
+    subset — never :data:`CATALOG` directly.
     """
     path = path.rstrip("/")
     for ep in entries:

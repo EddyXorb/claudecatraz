@@ -1,7 +1,5 @@
-"""git Smart-HTTP reject responses (W13): a correctly framed
-``report-status`` over the side-band so ``git push`` shows a clear
-``! [remote rejected] … (warden: R2 …)``.
-"""
+"""git Smart-HTTP reject responses: a correctly framed ``report-status``
+over the side-band so ``git push`` shows a clear ``! [remote rejected] … (warden: R2 …)``."""
 
 from __future__ import annotations
 

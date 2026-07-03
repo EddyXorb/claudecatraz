@@ -30,7 +30,7 @@ class MetaRule(str, Enum):
     M4 = "M4"  # Irreversible / privilege-escalating capabilities: never.
     M5 = "M5"  # Quotas + rate limits, fail-safe on unresolved state.
     M6 = "M6"  # Credential/network isolation + resource allowlist.
-    MA = "MA"  # Full audit with a rule id on every decision (A7) — cross-cutting.
+    MA = "MA"  # Full audit with a rule id on every decision — cross-cutting.
 
 
 @dataclass(frozen=True)
@@ -60,8 +60,6 @@ _DEFS: tuple[RuleDef, ...] = (
     RuleDef(
         R4,
         MetaRule.M4,
-        # B3 fix: tag pushes and branch deletes are irreversible verbs, same
-        # category as the merge block — previously misfiled under R2/M2.
         "Irreversible verb, never permitted: merge, tag push, branch delete",
     ),
     RuleDef(R5, MetaRule.M5, "Quota / rate limit, fail-safe while state is unresolved"),

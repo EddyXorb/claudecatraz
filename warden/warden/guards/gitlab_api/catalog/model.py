@@ -1,11 +1,8 @@
-"""Catalog data model (§04.2, docs/design/architecture-generalization,
-§04-policy-erweiterbarkeit.md §04.1/04.2): the pure dataclasses a catalog
-entry is built from.
+"""Catalog data model: pure dataclasses a catalog entry is built from.
 
-No policy logic lives here — see ``checks.py`` for the Check registry (§04.1),
+No policy logic lives here — see ``checks.py`` for the Check registry,
 ``entries.py`` for the table itself, and ``activation.py``/``startgate.py``
-for how config turns a subset of this table into what a request is actually
-matched against.
+for how config turns a subset into what is matched against.
 """
 
 from __future__ import annotations
@@ -23,11 +20,9 @@ from ....core.model import Decision, StateView
 from ....core.path_template import compile_template
 from ..intent import ApiIntent
 
-# Synthetic projects the startgate (§04.4) uses to build probe requests: one
-# that the probe's Config always allowlists (so an entry's *own* checks are
-# exercised, not R6), and one that is deliberately never allowlisted (so a
-# probe can prove the project boundary itself still applies to every entry,
-# including ones with no checks of their own — e.g. ``issue.create``).
+# Synthetic projects the startgate uses to build probe requests: one always
+# allowlisted (so an entry's own checks are exercised, not R6), and one
+# deliberately never allowlisted (to prove the project boundary applies everywhere).
 PROBE_PROJECT: Final[str] = "probe/project"
 PROBE_PROJECT_PATH: Final[str] = urllib.parse.quote(PROBE_PROJECT, safe="")
 OTHER_PROJECT: Final[str] = "other/project"
@@ -47,7 +42,7 @@ class EndpointKind(str, Enum):
 
 
 class Location(str, Enum):
-    """Where a decision field lives on the wire (F12, §04.2)."""
+    """Where a decision field lives on the wire."""
 
     BODY = "body"
     QUERY = "query"
@@ -57,12 +52,10 @@ class Location(str, Enum):
 class FieldSpec:
     """One field a catalog entry's decision depends on, and where to read it.
 
-    F12 fix: the guard extracts *only* the fields an entry declares here,
-    each from its declared location (body or query) — never a blind merge of
-    both. A field declared ``BODY`` that only shows up in the query string (or
-    vice versa) is simply absent from the decision, exactly as if the caller
-    never sent it — closing the footgun where a scoping check could "pass" on
-    a value the upstream request never actually carried.
+    The guard extracts *only* the fields an entry declares here, each from its
+    declared location (body or query) — never a blind merge. A field declared
+    ``BODY`` that only shows up in the query string is simply absent from the
+    decision, exactly as if the caller never sent it.
     """
 
     name: str
@@ -74,13 +67,11 @@ CheckFn = Callable[[ApiIntent, StateView, Config], Optional[Decision]]
 
 @dataclass(frozen=True)
 class RegisteredCheck:
-    """A named, parametrised check-registry entry (§04.1, F2/F10).
+    """A named, parametrised check-registry entry.
 
     ``needs`` declares the check's data dependency — e.g. ``{"mr_owner"}`` for
-    an ownership check — so a caller (``guards.gitlab_api.guard.ApiGuard.enrich``)
-    can decide whether to run an unpure lookup *by declared need*, not by
-    comparing function identity against a hardcoded predicate (F2's actual
-    complaint: ``mr_owned_by_claude in ep.checks``).
+    an ownership check — so a caller can decide whether to run an unpure lookup
+    *by declared need*, not by comparing function identity against hardcoded predicates.
     """
 
     name: str
@@ -93,19 +84,17 @@ class RegisteredCheck:
 
 @dataclass(frozen=True)
 class DenyProbe:
-    """A must-deny example the catalog entry ships with itself (§04.4).
+    """A must-deny example the catalog entry ships with itself.
 
-    Owned by the catalog, not a herderless seed directory (Röst-Runde 2): the
-    startgate runs every activated entry's probes against the effective
-    policy at startup, and a probe that would be *allowed* aborts the boot.
+    Owned by the catalog: the startgate runs every activated entry's probes
+    against the effective policy at startup, and a probe that would be *allowed*
+    aborts the boot.
 
-    ``fields`` mirrors the entry's own body/query split loosely — the
-    startgate builds an :class:`~warden.guards.gitlab_api.intent.ApiIntent`
-    directly (no HTTP parsing involved), so it does not need to distinguish
-    location: it sets ``intent.fields`` verbatim. ``mr_owner_ok`` covers
-    probes for ownership-gated entries, where the datum being probed is not a
-    wire field at all but the out-of-band ownership lookup (``None`` —
-    unverifiable — is itself already a natural deny case for those entries).
+    ``fields`` mirrors the entry's own body/query split loosely — the startgate
+    builds an :class:`~warden.guards.gitlab_api.intent.ApiIntent` directly
+    (no HTTP parsing), so it does not need to distinguish location: it sets
+    ``intent.fields`` verbatim. ``mr_owner_ok`` covers probes for ownership-gated
+    entries, where the datum is the out-of-band ownership lookup, not a wire field.
     """
 
     description: str
@@ -117,14 +106,11 @@ class DenyProbe:
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    """One row of the endpoint catalog (§04.2) — the unit a catalog PR adds.
+    """One row of the endpoint catalog — the unit a catalog PR adds.
 
-    ``id`` is the stable name the activation config and the CLI address this
-    entry by (``mr.create``, ``branch.create``, …). It defaults to ``""``
-    only so ad-hoc rows built directly in tests (pre-dating the catalog, e.g.
-    a hypothetical row proving the capability layer is structural) keep
-    working without naming a real entry; every row in ``entries.CATALOG``
-    sets it.
+    ``id`` is the stable name the activation config and CLI use (``mr.create``,
+    ``branch.create``, …). It defaults to ``""`` only so ad-hoc rows built
+    directly in tests keep working; every row in ``entries.CATALOG`` sets it.
     """
 
     method: str

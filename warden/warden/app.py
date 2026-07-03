@@ -19,7 +19,7 @@ from starlette.routing import Route
 from .context import AppContext
 from .guards.gitlab_api.catalog import endpoint_table_report
 
-# Static log-viewer page (O.4) — a package asset, not routing code (F7).
+# Static log-viewer page — a package asset, not routing code.
 _VIEWER_HTML_PATH = Path(__file__).parent / "static" / "viewer.html"
 _VIEWER_HTML = _VIEWER_HTML_PATH.read_text(encoding="utf-8")
 
@@ -35,7 +35,7 @@ def create_app(ctx: AppContext) -> Starlette:
     # /api/v4/… on the same port. Repos keep their canonical remote URL
     # (https://gitlab.com/…); the entrypoint injects a global git insteadOf rewrite
     # (https://gitlab.com/ → http://gitlab-warden:8080/git/) so the prefix is added
-    # transparently at transport time without touching .git/config. See W3.1.
+    # transparently at transport time without touching .git/config.
     routes = [r for g in ctx.guards for r in g.routes()]
     routes.append(Route("/healthz", _healthz, methods=["GET"]))
     app = Starlette(routes=routes)
@@ -90,5 +90,5 @@ async def _policy(request: Request) -> JSONResponse:
 
 
 async def _viewer(request: Request) -> HTMLResponse:
-    """Static log viewer (O.4): filters JSONL by guard/rule/decision/project."""
+    """Static log viewer: filters JSONL by guard/rule/decision/project."""
     return HTMLResponse(_VIEWER_HTML)

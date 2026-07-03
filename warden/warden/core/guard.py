@@ -10,10 +10,10 @@ Sequence ``Guard.handle`` guarantees, in this order:
 
 1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
 2. :func:`kernel_gates` — guard-agnostic deny gates:
-   a. Mode-gate ``off`` (M0) — GitLab-disabled denies everything.
-   b. Mode-gate ``read-only`` (M0) — set by parser, never by :class:`~warden.core.model.Decision`.
+   a. Mode-gate ``off`` — GitLab-disabled denies everything.
+   b. Mode-gate ``read-only`` — set by parser, never by :class:`~warden.core.model.Decision`.
       Runs *before* ``enrich`` so credential-using lookups are unreachable in read-only/off mode.
-   c. Resource allowlist (M6) — enforced once, not per-guard, before ``enrich``.
+   c. Resource allowlist — enforced once, not per-guard, before ``enrich``.
 3. ``guard.enrich`` — unpure lookups a check declared it needs.
 4. Capability invariants (``core.capabilities.FORBIDDEN``) via :meth:`Guard.capability_gate`.
 5. ``guard.decide`` — pure, guard-specific, default-deny.
@@ -55,7 +55,7 @@ def mode_gate_writes(cfg: Config) -> Optional[Decision]:
 
 
 def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Optional[Decision]:
-    """M6 resource allowlist — the single source of truth, shared by every guard.
+    """Resource allowlist — the single source of truth, shared by every guard.
 
     An empty ``project`` passes; projectless requests are gated by the guard's
     own ``decide`` (see ``guards.gitlab_api.read_endpoints``).

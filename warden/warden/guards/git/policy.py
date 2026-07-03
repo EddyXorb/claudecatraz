@@ -59,7 +59,7 @@ def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
 
 def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
     if cmd.ref.startswith("refs/tags/"):  # tags are never namespace branches
-        # B3 fix: an irreversible verb ("never" capability, M4) — R4, not R2.
+        # Irreversible verb ("never" capability) — R4, not R2.
         return Decision(False, R4, "tag pushes are not permitted")
     ref = cmd.ref
     if ref.startswith("refs/heads/"):
@@ -68,7 +68,7 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
         return Decision(
             False, R2, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}"
         )
-    if cmd.is_delete:  # B3 fix: irreversible verb (M4) — R4, not R2 (Q3).
+    if cmd.is_delete:  # Irreversible verb — R4, not R2.
         return Decision(False, R4, f"deleting branch {ref!r} is forbidden")
     if state.locked:  # Fail-safe
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")

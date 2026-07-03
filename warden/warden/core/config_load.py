@@ -1,4 +1,4 @@
-"""Env + warden.toml → :class:`~warden.core.config.Config` (W10).
+"""Env + warden.toml → :class:`~warden.core.config.Config`.
 
 The loading half of the config layer: :mod:`warden.core.config` holds the pure,
 frozen :class:`~warden.core.config.Config` value (what the policy consumes);
