@@ -354,15 +354,60 @@ F); erst nach G angehen, wenn H/F den Katalog schon geschlankt haben.
 
 ## Beobachtungen ohne eigenen Schritt (bei Gelegenheit)
 
+- die State-Migrations sind unnötig, weil das Projekt noch komplett neu ist - weg damit
 - **Zwei parallele Policy-Mechanismen:** die Read-Tabelle (`read_endpoints.py`,
   `ReadCheck` liefert immer eine terminale Decision) und der Write-Catalog
   (Checks liefern `Optional[Decision]`) haben unterschiedliche Formen — verteidigbar
   (Reads haben keinen „denied unless proven"-Default pro Zeile), aber man muss zwei
-  Systeme lernen. Kandidat für Vereinheitlichung, wenn der zweite Guard kommt.
+  Systeme lernen. Kandidat für Vereinheitlichung.
+  
+  Es wäre schön, wenn man die ReadEndpoints vereinfachen könnte.
+  Das Problem ist aktuell, dass sich die API ja ändern kann und man dann sie immer spiegeln muss für die sachen, die man erlauben will.
+  Wenn man immer wüsste, dass es nur ein READ ist eine Anfrage, könntem man sich darauf verlassen, dass das read-only token gefährliche anfragen blockt.
+  Natürlich bräuchte man dann einen zuverlässigen check, ob das token wirklich readonly ist.
+  Dann könnte man folgendes machen: statt zuerst zu schauen ob etwas read ist, match man gleich die write endpoints. Wenn es keiner davon ist, geht man davon aus, dass es entweder 
+  ein unzulässiger write ist oder ein readonly. Man könnte den unzulässigen write dann einfach mit dem readonlytoken durchlassen; er würde ja scheitern.
+  Um es noch etwas sicherer zu machen, kann man zusätzlich alle POST/PUT header filtern, die nicht den WriteEndpoint-Check passieren.
+  Was übrig bleibt wird einfach durchgelassen. Das würde auch zukünftige Erweiterungen sehr vereinfachen, denn dann gäbe es gar keine explizitne Readendpoints mehr. Damit 
+  wäre die oben genannten "Vereinheitlichung zwischen read/write endpoints" automatisch erfüllt.
+  Das ganze steht und fällt mit dem check ob es wirklich nur ein READONLY-token ist. Man könnte natürlich darauf vertrauen, dass nur GET Anfragen schon nichts ändern, aber das ist nicht sicher.
+  Eventuell nur eine Liste mit gefährlichen GETs führen, gegen die dann gecheckt wird wenn man im Read-only branch ist. Mir ist klar,dass das die sicherheit auch nicht garantiert; wenn die api sich erweitert ist man aufgeschmissen. Alles natürlich unter der voraussetzung das eigentliche read-only token ist keins. Auf projektebene kann ja immer noch gefiltert werden entsprechend
+  der allowed projects wie bisher vor allen weiteren decisions; das schränkt zumindest den potenziellen zerstörungskreis ein.
+
 - **Logging per `print(..., file=sys.stderr)`** in `context.py`/`__main__.py` statt
   eines Loggers — für eine Trust-Boundary-Komponente dünn; ein `logging`-Logger mit
-  festem Format wäre angemessen (kein neues Dependency nötig).
+  festem Format wäre angemessen (kein neues Dependency nötig). Das könnte dann auch in eine .catraz/log/warden.log datei geschrieben werden.
 - **`startgate.py` dupliziert die Projekt-Regex** aus `parsing.py`, um einen
   Import-Zyklus zu vermeiden — Symptom dafür, dass `parsing.py` zu viel vom Catalog
   weiß (importiert ihn für `CatalogEntry`/`Location`). Entzerrt sich womöglich mit
   F/H; danach prüfen, ob die Duplikation fallen kann.
+- ein globales formatierungstool sollte alle dateien in der CI formatieren/prüfen. ruff format sollte das machen.
+- Wichtige neue wünschenswerte Regel/Eigenschaft der Architektur: jeder Guard soll für sich stehen und keine Abhängigkeiten zu anderen Guards haben, wie das aktuell
+  zwischen git und gitlab ist. Dies bedeutet, dass man für git ohne gitlab/github eigene sicherheitsregeln aufstellen muss, die dann unabhängig von der existenz eines gitlabs befolgt werden müssen. Es könnte ja auch sein, dass man einen privaten git-server betreibt, der kein Forge ist, dann muss der Guard auch funktionieren. Für die Regeln reicht es vermutlich zu fordern:
+  1. Nicht mehr als X branches gleichzeitig auf dem remote die ein gewissen anzugebendes präfix haben
+  2. auf andere branches als solche die das präfix haben dürfen erst gar nicht gepusht werden
+  3. mehr als X commits pro Stunde sind verboten
+  4. commits die größer sind als X sind verboten (in Kilobyte)
+  5. Löschen von branches, tags etc. ist grundsätzlich verboten
+  6. wenn gewünscht, kann der warden beliebigen text an den commit anhängen/voranstellen um kenntlich zu machen, dass es durch den warden ging
+
+  Intern könnte das so gelöst werden, dass man nach einem fetch ganz simpel per git commands die branches zählt die relevant sind (präfixbranches), sich die anzahl commits anschaut anhand ihres Zeitstempels um zu entscheiden ob wieder committet werden darf (vergleich mit aktueller zeit) und weiters bei jedem push die größe des http-bodys ganz simpel bestimmen und wenn sie über
+  der konfigurierten größe ist ablehnen. Damit spart man sich einen extra state. Wenn sich das als zu langsam/unpraktisch herausstellt, kann man immer noch eine weitere datenbanktabelle einführen in der selben sqlite-tabelle.
+
+  Der Gitlab-Guard operiert wie gewohnt, ohne Fähigkeiten von git zu benötigen. So kann man sich den GitForge sparen und dessen funktionalität sauber in den GitlabGuard integrieren (bzw. hilfsfunktionen können gern als helper in anderen files sein, damit die eine datei nicht zu groß wird).
+
+  Das Grundziel dieser Trennung ist Klarheit und Einfachheit, was wieder Sicherheit erhöht.
+
+- durch die Trennung der Guards ist es prinzipiell möglich mehrere Warden-container, je einen pro guard, zu haben. Weiterhin sollte es möglich sein, dass git/gitlab mehrere Targets haben kann. Wenn ich zwei verschiedene git-server in einem catraz-ordner habe, soll es doch gehen beide zu bedienen. Das fehlt noch grundsätzlich im aktuellen design. Eine mögliche Lösung scheint nichttrivial, da brauchen wir noch ideen. Eventuell kann man den insteadof-trick weiterverwenden für git um je nach git-instanz zwar auf den warden umzuleiten, allerdings die domain wieder zu integrieren als ersten pfadparameter und das dem warden so klar machen. Dazu müssen sie zusammenarbeiten, was bisher auch der fall ist, aber nicht optimal. Grundsätzlich könntem man ja im warden.toml eine sektion haben wie
+    [git.urls]
+    gitlab.com
+    my-gitlab.de
+    personal-gitserver.it
+    github.com
+  die dann per insteadof im entrypoint abgearbeitet wird so dass z.b. personal-gitserver.it/myrepo.git -> warden:8080/personal-gitserver.it/myrepo.git umgeleitet wird, und der warden macht 
+  es dann wieder zu der ursprünglichen adresse im upstream. Muss man durchdenken.
+  Die Frage ist dann noch, wie man es z.b. bei mehreren gitlab-endpoints für die API macht. Vielleicht geht es auch so, dass man nicht in der warden.toml diese einstellungen vornimmt, sondern im .env die liste der erlaubten urls für den warden angibt, dann kann der nämlich alles auf sich umleiten per dns-einstellung im docker-compose und aus dem http-header wenn er version 1.1 ist 
+  lesen was das eigentliche ziel war. Mir würde es im warden.toml aber besser gefallen, da dann alles beisammen ist. Das geht vermutlich sogar, wenn der entrypoint dns-einstellungen manipuliert.
+  Ziel sollte es grundsätzlich sein bei der sache, dass man im container die interfaces gti/gitlab-api etc so nutzen kann wie man das außerhalb tun würde
+
+

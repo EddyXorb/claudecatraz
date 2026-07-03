@@ -35,13 +35,16 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
             print(f"warden: periodic reconcile error: {exc}", file=sys.stderr)
 
 
+#TODO: tidy up this function and split it into smaller functions. 
 async def _serve() -> None:
     cfg = from_env()
+
 
     # Build the effective endpoint table (raises ConfigError on any fail-closed
     # activation-config problem) and run its startgate — every activated entry's
     # deny-probes, plus built-in invariants' global probes — before anything else.
     # Pure, offline, no state DB / upstream: earliest possible fail-closed abort point.
+    # TODO: this should not be here, as it is an implementation detail of the gitlab guard. Will however be omitted once the startgate is gone
     table = build_effective_table(cfg, cfg.endpoint_enable)
     run_startgate(cfg, table)
 
@@ -52,6 +55,8 @@ async def _serve() -> None:
             "The dev-env still starts for offline work.",
             file=sys.stderr,
         )
+    # TODO: this leaks from gitlab_api, should not be here. If is is really needed it can persist in the Guards that the build-context creates, but as part of the their 
+    # initialization (make it a member of the guard class) without the context builder needing to know about it.
     upstream = Upstream(cfg)
     state = State(cfg.state_db_path)
     audit = AuditLog(cfg.audit_log_path)
@@ -59,6 +64,8 @@ async def _serve() -> None:
     ctx = build_context(cfg, upstream, state, audit)
 
     # Reconcile BEFORE opening the agent port: GitLab truth dominates.
+    # TODO: consider moving this into the Gitlab-Guard directly.
+    # The fact the the context holds all guards alive (and they are no one-shot objects anymore) makes this possible
     for g in ctx.guards:
         await g.startup()
     ok = True
