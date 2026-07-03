@@ -40,6 +40,15 @@ audit log, so the file is self-contained without re-reading the README:
 
 Rule ids referenced here are :mod:`rules` constants (B3/F5) — never bare
 string literals — so every id in this file traces back to the one registry.
+
+**Capability-invariant layer** (§03.4, B2, ``capabilities.py``): before either
+channel's own allow-logic runs, ``_decide_git``/``_decide_api`` derive the
+intent's :class:`~warden.capabilities.Capability` set and check it against the
+compiled-in ``FORBIDDEN`` set. A hit denies with R4 regardless of what the
+channel-specific checks below it would have decided — this is what makes "no
+tags / no merges / no branch deletes" a cross-channel property instead of a
+git-only line in :func:`check_ref` (B2's actual complaint: the REST channel
+did not know about the git-only bans).
 """
 
 from __future__ import annotations
@@ -47,7 +56,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Optional
 
-from .api_endpoints import EndpointKind, WriteEndpoint, match_endpoint
+from .api_endpoints import EndpointKind, WriteEndpoint, api_capabilities, match_endpoint
+from .capabilities import forbidden_check, git_ref_capabilities
 from .config import Config
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .pktline import RefCommand
@@ -105,6 +115,16 @@ def _decide_git(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     """
     if not req.ref_commands:
         return Decision(False, R2, "no ref commands in push")
+    # Capability-invariant layer (§03.4, B2): checked for every command before
+    # any allow-logic below runs — a hit here denies regardless of what
+    # check_ref would otherwise decide, so the "never" capabilities hold even
+    # if check_ref's own tag/delete special cases (kept as defense-in-depth,
+    # A10) were ever removed or a new one added without a matching check_ref
+    # branch.
+    for cmd in req.ref_commands:
+        denied = forbidden_check(git_ref_capabilities(cmd, cfg))
+        if denied is not None:
+            return denied
     pending_branches = 0
     pending_writes = 0
     for cmd in req.ref_commands:
@@ -174,6 +194,13 @@ def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     ep = req.endpoint or match_endpoint(req.method, req.path)
     if ep is None:
         return Decision(False, R3, f"write endpoint not in allowlist: {req.method} {req.path}")
+
+    # Capability-invariant layer (§03.4, B2): checked before the endpoint's own
+    # checks — a hit here denies even if the matched row's checks (or a future
+    # row someone adds without thinking through B2) would otherwise pass it.
+    denied = forbidden_check(api_capabilities(ep, req.fields))
+    if denied is not None:
+        return denied
 
     for check in ep.checks:
         denied = check(req, state, cfg)

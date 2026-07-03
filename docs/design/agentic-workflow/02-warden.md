@@ -18,6 +18,7 @@ warden/
 │   ├── config.py               # Env → typisiertes Config-Objekt, harte Validierung
 │   ├── model.py                # Policy-Datentypen (pure)
 │   ├── rules.py                # zentrale Regel-Registry R0–R6 + Meta-Regel-Zuordnung (B3, F11)  ← pure
+│   ├── capabilities.py         # Capability-Vokabular + FORBIDDEN + forbidden_check (§03.4, B2)  ← pure
 │   ├── policy.py               # decide(request, state, cfg) → Decision  ← pure
 │   ├── api_endpoints.py        # datengetriebene Write-Endpoint-Tabelle  ← pure
 │   ├── read_endpoints.py       # datengetriebene Read-Endpoint-Tabelle (B1)  ← pure
@@ -32,6 +33,7 @@ warden/
 │   └── errors.py               # Deny-/git-Fehler-Antworten
 └── tests/
     ├── test_rules.py           # Registry + "jede geloggte ID ist registriert"
+    ├── test_capabilities.py    # Golden-Tests: Intent → Capability-Menge, FORBIDDEN-Invariante
     ├── test_policy.py          # Unit (parametrisiert, jede Regel R0–R6)
     ├── test_pktline.py         # aufgezeichnete receive-pack-Bodies
     ├── test_api_proxy.py       # respx/MockTransport
@@ -41,7 +43,7 @@ warden/
     └── redteam/                # docker-compose-basiert (→ 03-testing-redteam.md)
 ```
 
-`policy.py`, `pktline.py`, `model.py`, `api_endpoints.py`, `read_endpoints.py`, `path_template.py` sind transport-frei und rein — direkt unit-testbar.
+`policy.py`, `pktline.py`, `model.py`, `capabilities.py`, `api_endpoints.py`, `read_endpoints.py`, `path_template.py` sind transport-frei und rein — direkt unit-testbar.
 
 ---
 
@@ -121,6 +123,50 @@ Merge-Block. Beide loggen jetzt R4 (`policy.check_ref`). Das ist eine audit-sich
 
 ---
 
+## Capability-Invarianten-Ebene (`capabilities.py`)
+
+Seit §06-migration.md Schritt 3 (§03.4, B2). Jeder Kanal normalisiert seinen bereits
+geparsten Intent zusätzlich auf ein kleines, **geschlossenes** Capability-Vokabular —
+was der Request *bewirken würde*, unabhängig davon, wie er es sagt:
+
+```
+creates_ref · deletes_ref · creates_tag · merges · escalates_privilege ·
+writes_outside_namespace · destroys_data
+```
+
+Eine einzige einkompilierte `FORBIDDEN`-Menge (`deletes_ref`, `creates_tag`, `merges`,
+`escalates_privilege`, `destroys_data`) wird von `forbidden_check` geprüft — **niemals
+konfigurierbar** (§06.2). `creates_ref` fehlt bewusst (Normalfall des Agenten);
+`writes_outside_namespace` fehlt bewusst (der Namensraum ist `Config.branch_prefixes`,
+pro Deployment konfigurierbar — R2/R3 bändigen das per Request, keyed auf die jeweils
+konfigurierten Präfixe; ein kompiliertes Pauschalverbot würde diesen Check bekämpfen
+statt ergänzen). `escalates_privilege`/`destroys_data` haben heute noch keinen
+Erzeuger (kein DROP-TABLE-artiger GitLab-Call) — vorbereitet für §03.7 (Postgres-Guard:
+DDL/GRANT).
+
+**Intent→Capability-Abbildung pro Kanal:**
+- **git** (`capabilities.git_ref_capabilities`): trivial und exakt aus `RefCommand`
+  abgeleitet — Delete (jeder Ref-Typ) ⇒ `deletes_ref`; nicht-löschender Push auf
+  `refs/tags/*` ⇒ `creates_tag`; sonst Branch-Write: `creates_ref` bei Create, plus
+  `writes_outside_namespace` außerhalb `branch_prefixes`.
+- **REST** (`api_endpoints.api_capabilities`): jede `WriteEndpoint`-Zeile deklariert
+  statische `capabilities` (vom Katalog-Autor im Code, nie vom Nutzer, §06.2). Die eine
+  Ausnahme ist feld-abhängig: `PUT .../merge_requests/{iid}` trägt statisch die leere
+  Menge (die Zeile editiert auch Titel/Beschreibung), aber `api_capabilities` fügt
+  `merges` hinzu, sobald `fields["state_event"] == "merge"` — derselbe Alias, den
+  `not_merge_intent` bereits prüft, jetzt zusätzlich strukturell in der Capability-Ebene
+  verankert.
+
+**Reihenfolge in `policy.decide`:** in `_decide_git`/`_decide_api` wird die Capability-
+Menge des Intents **vor** den Endpoint-/Ref-Checks gegen `FORBIDDEN` geprüft — ein Treffer
+denied sofort mit R4, unabhängig davon, was die kanalspezifischen Checks darunter
+entschieden hätten. Die bestehenden Spezialfälle (`always_deny` in der Merge-Zeile,
+Tag-/Delete-Checks in `check_ref`) bleiben als Defense-in-depth (A10) bestehen — die
+Invariante muss aber auch ohne sie greifen (golden-getestet in `test_capabilities.py`,
+u. a. mit einer hypothetischen Endpoint-Zeile ganz ohne Checks).
+
+---
+
 ## Policy (`policy.py`)
 
 ```python
@@ -136,28 +182,33 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision: ...
 
 **Default-deny.** Reihenfolge:
 1. Projekt in `ALLOWED_PROJECTS`? sonst `Deny(R6)`.
-2. git receive-pack: je Ref-Kommando Präfix (`R2`) / Tag-Push- und Delete-Block (`R4`) /
+2. git receive-pack: je Ref-Kommando **Capability-Invariante** (`FORBIDDEN`-Schnitt, R4,
+   §03.4) zuerst, dann Präfix (`R2`) / Tag-Push- und Delete-Block (`R4`, Defense-in-depth) /
    Branch-Quota / Rate (`R5`).
 3. API GET: Projekt im Pfad → `Allow(R1, token=READ)` wie bisher; **kein** Projekt im
    Pfad → Tabellen-Match gegen `read_endpoints.py` (B1, „Inhalt, nicht Sichtbarkeit"):
    Metadaten (Projekt-/Gruppennamen, `/users`, `/version`, …) → `Allow(R1)`; inhaltsfähige
    projektlose Endpoints (globale/Gruppen-Suche mit `scope=blobs|commits|wiki_blobs|notes`,
    `/snippets`) und unbekannte projektlose Pfade → `Deny(R6)`.
-4. API Write: Endpoint-Match in Allowlist → Ownership-Check → Quota.
+4. API Write: Endpoint-Match in Allowlist → **Capability-Invariante** (`FORBIDDEN`-Schnitt,
+   R4, §03.4) → Ownership-Check → Quota.
 
 ---
 
 ## API-Filter
 
-Write-Endpoints als **Tabelle** in `api_endpoints.py` (Anpassung = Config-Edit, kein Logikumbau):
+Write-Endpoints als **Tabelle** in `api_endpoints.py` (Anpassung = Config-Edit, kein Logikumbau).
+Jede Zeile trägt zusätzlich ihre statischen `capabilities` (§03.4, siehe oben):
 
-| Methode | Pfad-Template | Checks | Regel |
-| ------- | ------------- | ------ | ----- |
-| POST | `/projects/{id}/merge_requests` | `src_branch_prefix` | R3 |
-| POST | `/projects/{id}/merge_requests/{iid}/notes` | `mr_owned_by_claude` | R3 |
-| PUT | `/projects/{id}/merge_requests/{iid}` | `mr_owned_by_claude`, `not_merge_intent` | R3 |
-| POST | `/projects/{id}/pipeline` | `ref_prefix` | R3 |
-| PUT | `/projects/{id}/merge_requests/{iid}/merge` | `ALWAYS_DENY` | **R4** |
+| Methode | Pfad-Template | Checks | Regel | Capabilities |
+| ------- | ------------- | ------ | ----- | ------------ |
+| POST | `/projects/{id}/merge_requests` | `src_branch_prefix` | R3 | ∅ (kein Git-Ref) |
+| POST | `/projects/{id}/merge_requests/{iid}/notes` | `mr_owned_by_claude` | R3 | ∅ |
+| POST | `/projects/{id}/merge_requests/{iid}/discussions` | `mr_owned_by_claude` | R3 | ∅ |
+| POST | `/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes` | `mr_owned_by_claude` | R3 | ∅ |
+| PUT | `/projects/{id}/merge_requests/{iid}` | `mr_owned_by_claude`, `not_merge_intent` | R3 | ∅ statisch, `+merges` bei `state_event=merge` (feld-abhängig) |
+| POST | `/projects/{id}/pipeline` | `ref_prefix` | R3 | ∅ |
+| PUT | `/projects/{id}/merge_requests/{iid}/merge` | `ALWAYS_DENY` | **R4** | `{merges}` |
 
 Alles nicht explizit Erlaubte → default-deny + Audit. Lese-GETs werden mit Read-Token durchgereicht (R1).
 

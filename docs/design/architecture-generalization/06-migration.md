@@ -45,8 +45,27 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
    fail-closed). Viewer und `catraz observe` bleiben kompatibel mit Zeilen ohne `schema`-Feld
    (Kompat-Fenster, verifiziert + Viewer zeigt „legacy" für Alt-Zeilen). Voraussetzung für
    claude→agent- und channel→guard-Renames (F11, Schritt 6).
-3. **Capability-Invarianten-Ebene** (§03.4) — fixt B2 kanalübergreifend für alle
-   code-bekannten Endpoints; klein, pur, golden-getestet. Voraussetzung für Schritt 4.
+3. ✅ **Capability-Invarianten-Ebene** (§03.4) *(umgesetzt: `warden/capabilities.py`,
+   `WriteEndpoint.capabilities` + `api_endpoints.api_capabilities` in `api_endpoints.py`,
+   Integration in `policy._decide_git`/`_decide_api`)* — fixt B2 kanalübergreifend für alle
+   code-bekannten Endpoints; klein, pur, golden-getestet. Das geschlossene Vokabular
+   (`creates_ref · deletes_ref · creates_tag · merges · escalates_privilege ·
+   writes_outside_namespace · destroys_data`) und die einkompilierte `FORBIDDEN`-Menge
+   (`deletes_ref, creates_tag, merges, escalates_privilege, destroys_data`) leben in
+   `capabilities.py`; `creates_ref` (Normalfall des Agenten) und
+   `writes_outside_namespace` (per-Deployment-Namensraum, von R2/R3 bereits gebändigt)
+   bleiben bewusst außerhalb der Verbotsmenge, dokumentiert im Modul-Docstring.
+   Intent→Capability-Abbildung: git trivial und exakt aus `RefCommand` (`git_ref_capabilities`);
+   REST als statisches Feld pro `WriteEndpoint`-Zeile, ergänzt um die eine feld-abhängige
+   Ausnahme (`api_capabilities`: `state_event=merge` auf der MR-Update-Zeile ⇒ zusätzlich
+   `merges`, sonst würde eine statische Zeilen-Capability entweder das legitime Editieren
+   verbieten oder den Merge-Alias verpassen). `policy._decide_git`/`_decide_api` prüfen die
+   Capability-Menge gegen `FORBIDDEN` **vor** den kanalspezifischen Checks/Quoten — ein
+   Treffer denied sofort mit R4, unabhängig davon, was `check_ref` oder eine Endpoint-Zeile
+   sonst entschieden hätten. Die bestehenden Spezialfälle (`always_deny`, Tag-/Delete-Checks
+   in `check_ref`) bleiben als Defense-in-depth (A10) bestehen; `test_capabilities.py` belegt
+   golden-getestet, dass die Invariante auch ohne sie greift (u. a. eine hypothetische
+   Endpoint-Zeile ganz ohne Checks, die trotzdem R4-denied wird). Voraussetzung für Schritt 4.
 4. **Endpoint-Katalog + Check-Registry + Aktivierungs-Config** (§04.1–04.3) — der
    nutzersichtbare Gewinn. Jeder Katalog-Eintrag bringt seine Deny-Sonden mit (§04.4), und
    das Startgate, das sie ausführt, ist **Teil dieses Schritts** — nicht ein späterer
