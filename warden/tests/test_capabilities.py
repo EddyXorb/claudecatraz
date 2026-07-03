@@ -21,7 +21,7 @@ from warden.core.capabilities import FORBIDDEN, Capability, forbidden_check
 from warden.core.config import Config
 from warden.core.model import StateView
 from warden.guards.git import policy as git_policy
-from warden.guards.git.intent import GitPushIntent
+from warden.guards.git.intent import GitIntent
 from warden.guards.git.pktline import RefCommand
 from warden.guards.git.policy import git_ref_capabilities
 from warden.guards.gitlab_api.catalog import (
@@ -280,8 +280,11 @@ def test_is_builtin_merge_endpoint(method, path, expected):
 
 
 def test_e2e_git_tag_push_denied_r4(cfg):
-    req = GitPushIntent(
+    req = GitIntent(
         _project="group/proj",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
@@ -289,8 +292,11 @@ def test_e2e_git_tag_push_denied_r4(cfg):
 
 
 def test_e2e_git_branch_delete_denied_r4(cfg):
-    req = GitPushIntent(
+    req = GitIntent(
         _project="group/proj",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(SHA, ZERO, "refs/heads/claude/feature")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
@@ -340,8 +346,11 @@ def test_e2e_capability_layer_denies_git_even_if_check_ref_logic_is_bypassed(cfg
     sequence, §03.2), so a tag push is denied at that first pass —
     independent of whatever ``check_ref`` itself would separately decide.
     """
-    req = GitPushIntent(
+    req = GitIntent(
         _project="group/proj",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)

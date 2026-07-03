@@ -33,7 +33,7 @@ from ...core.config import Config
 from ...core.guard import kernel_gates
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R2, R4, R5
-from .intent import GitPushIntent
+from .intent import GitIntent
 from .pktline import RefCommand
 
 
@@ -67,7 +67,7 @@ def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
     return frozenset(caps)
 
 
-def capability_gate(intent: GitPushIntent, cfg: Config) -> Optional[Decision]:
+def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
     """§03.4 kernel hook (``core.guard.Guard.capability_gate``).
 
     Checked per ref command, first hit denies — atomic (Q10): a single
@@ -105,7 +105,7 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
     return Decision(True, R2, "ok", TokenKind.WRITE)
 
 
-def decide(intent: GitPushIntent, state: StateView, cfg: Config) -> Decision:
+def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     """Per ref-command: prefix / delete / create-count / rate (W7.2).
 
     Atomic: a single forbidden command rejects the whole push (Q10). Quotas are
@@ -133,7 +133,7 @@ def decide(intent: GitPushIntent, state: StateView, cfg: Config) -> Decision:
     return Decision(True, R2, "ok", TokenKind.WRITE)
 
 
-def full_decide(intent: GitPushIntent, state: StateView, cfg: Config) -> Decision:
+def full_decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
     outside :meth:`core.guard.Guard.handle` (tests, and any offline "what would
     happen to this push" evaluator) that need the *whole* effective decision,

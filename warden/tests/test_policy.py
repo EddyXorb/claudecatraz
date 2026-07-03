@@ -14,7 +14,7 @@ import pytest
 from warden.core.config import Config
 from warden.core.model import Decision, StateView, TokenKind
 from warden.guards.git import policy as git_policy
-from warden.guards.git.intent import GitPushIntent
+from warden.guards.git.intent import GitIntent
 from warden.guards.git.pktline import RefCommand
 from warden.guards.git.policy import check_ref
 from warden.guards.gitlab_api import policy as api_policy
@@ -24,9 +24,9 @@ ZERO = "0" * 40
 SHA = "a" * 40
 
 
-def decide(intent: ApiIntent | GitPushIntent, state: StateView, cfg: Config) -> Decision:
+def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Decision:
     """Dispatch to the owning guard's full decision (kernel gates + guard decide)."""
-    if isinstance(intent, GitPushIntent):
+    if isinstance(intent, GitIntent):
         return git_policy.full_decide(intent, state, cfg)
     return api_policy.full_decide(intent, state, cfg)
 
@@ -251,9 +251,12 @@ def test_locked_state_denies_all_writes(cfg):
 
 
 # --- git guard (R2/R5) ---------------------------------------------------------
-def _git(*cmds) -> GitPushIntent:
-    return GitPushIntent(
+def _git(*cmds) -> GitIntent:
+    return GitIntent(
         _project="group/proj.git",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(*c) for c in cmds],
     )
 
@@ -337,8 +340,11 @@ def test_git_tag_push_rejected_with_tag_message(cfg):
 
 
 def test_git_project_not_allowlisted_denied(cfg):
-    req = GitPushIntent(
+    req = GitIntent(
         _project="other/x.git",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
     d = decide(req, StateView(), cfg)
@@ -390,8 +396,11 @@ def test_off_denies_reads_and_writes():
 
     # git push
     d = decide(
-        GitPushIntent(
+        GitIntent(
             _project="group/proj",
+            operation="receive-pack",
+            _method="push",
+            _writes=True,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),
@@ -422,8 +431,11 @@ def test_read_only_denies_writes_allows_reads():
 
     # git push: denied R0
     d = decide(
-        GitPushIntent(
+        GitIntent(
             _project="group/proj",
+            operation="receive-pack",
+            _method="push",
+            _writes=True,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),

@@ -5,7 +5,7 @@ Kept guard-agnostic on purpose (ยง03.3: "Kernel kennt keine GitLab-Begriffe") โ€
 no forge vocabulary (MR, ``iid``, ref) lives here, only what the kernel's
 pipeline (:mod:`core.guard`) and the audit/state layers need from *any*
 intent, regardless of which guard produced it. Guard-specific intent shapes
-(``guards.git.intent.GitPushIntent``, ``guards.gitlab_api.intent.ApiIntent``)
+(``guards.git.intent.GitIntent``, ``guards.gitlab_api.intent.ApiIntent``)
 live with their guard and only need to satisfy :class:`Intent` structurally.
 """
 

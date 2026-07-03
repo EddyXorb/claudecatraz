@@ -1,10 +1,11 @@
-"""git Smart-HTTP guard (W7): the receive-pack write pipeline's hooks, plus
-the read pipeline (advertise/upload-pack) — both run through
-:meth:`core.guard.Guard.handle`.
+"""git Smart-HTTP guard (W7): all three operations — advertise (GET
+info/refs), upload-pack (POST git-upload-pack), receive-pack (POST
+git-receive-pack) — run through the single :class:`GitGuard`, dispatching
+per-operation inside its hooks, via :meth:`core.guard.Guard.handle`.
 
 **Honest scope note.** The guard imports ``AppContext``/``Upstream`` from
-``gitlab_api`` because both guards have always shared one context/credential
-holder; splitting that is a separate, later step.
+``gitlab_api`` because the guard has always shared one context/credential
+holder with the REST guard; splitting that is a separate, later step.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from ...errors import deny_json, git_reject_response
 from ..gitlab_api.context import AppContext
 from ..gitlab_api.upstream import stream_upstream
 from . import policy
-from .intent import GitPushIntent, GitReadIntent
+from .intent import GitIntent
 from .pktline import capabilities, parse_commands, read_until_flush
 
 
@@ -35,11 +36,24 @@ def _project(request: Request) -> str:
     return normalize_project(str(request.path_params["project"]))
 
 
-class GitReadGuard(Guard[GitReadIntent]):
-    """advertise/upload-pack (W7.1): read-only, except push discovery, which
-    carries the write token but never a ref write (so ``record`` is a no-op).
+def _forward_encoding(request: Request) -> dict[str, str]:
+    # gzip stays gzip; the body is forwarded untouched (W7.4).
+    enc = request.headers.get("content-encoding")
+    return {"Content-Encoding": enc} if enc else {}
+
+
+class GitGuard(Guard[GitIntent]):
+    """All three git Smart-HTTP operations (§03.2) — used only via
+    :meth:`Guard.handle` from :func:`advertise`/:func:`upload_pack`/
+    :func:`receive_pack` below.
+
+    Reads (advertise/upload-pack) are read-only, except push discovery, which
+    carries the write token but never a ref write (so ``record`` is a no-op
+    for it). receive-pack is always a write.
     """
 
+    # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
+    # field used to be called ``channel``; the value itself is unchanged).
     @property
     def name(self) -> str:
         return "git"
@@ -48,40 +62,78 @@ class GitReadGuard(Guard[GitReadIntent]):
         super().__init__(ctx.cfg, ctx.state, ctx.audit)
         self.ctx = ctx
 
-    async def parse(self, request: Request) -> GitReadIntent:
+    async def parse(self, request: Request) -> GitIntent:
+        """Buffer only the pkt-line command section (KB-sized) for
+        receive-pack — the untouched PACK payload streams through
+        :attr:`GitIntent.rest` (W7.3).
+        """
         project = _project(request)
         if request.method == "GET":
             service = request.query_params.get("service", "git-upload-pack")
-            return GitReadIntent(
+            return GitIntent(
                 _project=project,
-                _method=request.method,
                 operation="advertise",
+                _method="GET",
                 service=service,
                 _writes=(service == "git-receive-pack"),
             )
-        return GitReadIntent(
+        if request.url.path.endswith("git-receive-pack"):
+            head, rest = await read_until_flush(request.stream())
+            commands = parse_commands(head)
+            caps = capabilities(head)
+            sideband = "side-band-64k" in caps or "side-band" in caps
+            return GitIntent(
+                _project=project,
+                operation="receive-pack",
+                _method="push",
+                _writes=True,
+                ref_commands=commands,
+                head=head,
+                rest=rest,
+                content_type=request.headers.get(
+                    "content-type", "application/x-git-receive-pack-request"
+                ),
+                extra_headers=_forward_encoding(request),
+                sideband=sideband,
+            )
+        return GitIntent(
             _project=project,
-            _method=request.method,
             operation="upload-pack",
+            _method="POST",
         )
 
-    async def enrich(self, intent: GitReadIntent) -> GitReadIntent:
+    async def enrich(self, intent: GitIntent) -> GitIntent:
+        # git needs no unpure lookups before deciding (A10: unlike the REST
+        # guard's MR-ownership check, no credential-backed lookup happens here).
         return intent
 
-    def capability_gate(self, intent: GitReadIntent, cfg: Config) -> Optional[Decision]:
+    def capability_gate(self, intent: GitIntent, cfg: Config) -> Optional[Decision]:
+        if intent.operation == "receive-pack":
+            return policy.capability_gate(intent, cfg)
         return None
 
-    def decide(self, intent: GitReadIntent, state: StateView, cfg: Config) -> Decision:
+    def decide(self, intent: GitIntent, state: StateView, cfg: Config) -> Decision:
+        if intent.operation == "receive-pack":
+            return policy.decide(intent, state, cfg)
         if intent.writes:
             return Decision(True, R1, "push discovery", TokenKind.WRITE)
         return Decision(True, R1, "read pass-through", TokenKind.READ)
 
-    def record(self, intent: GitReadIntent, decision: Decision) -> None:
-        # Reads and push discovery never count against the write quota.
-        pass
+    def record(self, intent: GitIntent, decision: Decision) -> None:
+        """Record every ref write *before* the upstream call (§6.11).
+
+        Reads and push discovery never count against the write quota.
+        """
+        if intent.operation != "receive-pack":
+            return
+        for cmd in intent.ref_commands:
+            ref = cmd.ref.removeprefix("refs/heads/")
+            self.ctx.state.record_write("git", "push", ref)
+            if cmd.is_create:
+                self.ctx.state.add_branch(intent.project, ref)
 
     async def forward(
-        self, request: Request, intent: GitReadIntent, decision: Decision
+        self, request: Request, intent: GitIntent, decision: Decision
     ) -> Response:
         if intent.operation == "advertise":
             resp = await self.ctx.upstream.git_get(
@@ -96,109 +148,18 @@ class GitReadGuard(Guard[GitReadIntent]):
                 headers=self.ctx.upstream.response_headers(resp),
                 media_type=resp.headers.get("content-type"),
             )
-        resp = await self.ctx.upstream.git_post_stream(
-            intent.project,
-            "git-upload-pack",
-            body=request.stream(),
-            content_type=request.headers.get(
-                "content-type", "application/x-git-upload-pack-request"
-            ),
-            token=decision.token,
-        )
-        return stream_upstream(resp)
+        if intent.operation == "upload-pack":
+            resp = await self.ctx.upstream.git_post_stream(
+                intent.project,
+                "git-upload-pack",
+                body=request.stream(),
+                content_type=request.headers.get(
+                    "content-type", "application/x-git-upload-pack-request"
+                ),
+                token=decision.token,
+            )
+            return stream_upstream(resp)
 
-    def deny_response(
-        self, intent: GitReadIntent, decision: Decision, state: StateView
-    ) -> Response:
-        return deny_json(decision)
-
-    def audit_fields(self, intent: GitReadIntent) -> Mapping[str, Any]:
-        return {"op": intent.operation, "service": intent.service}
-
-
-async def advertise(request: Request) -> Response:
-    """GET …/info/refs?service=… — ref advertisement (W7.1).
-
-    Discovery phase for every git operation: ``git clone``, ``git fetch``, and
-    ``git push`` all start here.
-    """
-    ctx: AppContext = request.app.state.ctx
-    return await GitReadGuard(ctx).handle(request)
-
-
-async def upload_pack(request: Request) -> Response:
-    """POST …/git-upload-pack — fetch, passed through with read-token (R1).
-
-    Data phase of ``git clone`` and ``git fetch``: the client negotiates which
-    objects it needs (want/have lines) and the server streams back a packfile.
-    """
-    ctx: AppContext = request.app.state.ctx
-    return await GitReadGuard(ctx).handle(request)
-
-
-def _forward_encoding(request: Request) -> dict[str, str]:
-    # gzip stays gzip; the body is forwarded untouched (W7.4).
-    enc = request.headers.get("content-encoding")
-    return {"Content-Encoding": enc} if enc else {}
-
-
-class GitGuard(Guard[GitPushIntent]):
-    """The receive-pack write pipeline's hooks (§03.2) — used only via
-    :meth:`Guard.handle` from :func:`receive_pack` below."""
-
-    # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
-    # field used to be called ``channel``; the value itself is unchanged).
-    @property
-    def name(self) -> str:
-        return "git"
-
-    def __init__(self, ctx: AppContext) -> None:
-        super().__init__(ctx.cfg, ctx.state, ctx.audit)
-        self.ctx = ctx
-
-    async def parse(self, request: Request) -> GitPushIntent:
-        """Buffer only the pkt-line command section (KB-sized) — the untouched
-        PACK payload streams through :attr:`GitPushIntent.rest` (W7.3).
-        """
-        project = _project(request)
-        head, rest = await read_until_flush(request.stream())
-        commands = parse_commands(head)
-        caps = capabilities(head)
-        sideband = "side-band-64k" in caps or "side-band" in caps
-        return GitPushIntent(
-            _project=project,
-            ref_commands=commands,
-            head=head,
-            rest=rest,
-            content_type=request.headers.get(
-                "content-type", "application/x-git-receive-pack-request"
-            ),
-            extra_headers=_forward_encoding(request),
-            sideband=sideband,
-        )
-
-    async def enrich(self, intent: GitPushIntent) -> GitPushIntent:
-        # git needs no unpure lookups before deciding (A10: unlike the REST
-        # guard's MR-ownership check, no credential-backed lookup happens here).
-        return intent
-
-    def capability_gate(self, intent: GitPushIntent, cfg: Config) -> Optional[Decision]:
-        return policy.capability_gate(intent, cfg)
-
-    def decide(self, intent: GitPushIntent, state: StateView, cfg: Config) -> Decision:
-        return policy.decide(intent, state, cfg)
-
-    def record(self, intent: GitPushIntent, decision: Decision) -> None:
-        """Record every ref write *before* the upstream call (§6.11)."""
-        for cmd in intent.ref_commands:
-            ref = cmd.ref.removeprefix("refs/heads/")
-            self.ctx.state.record_write("git", "push", ref)
-            if cmd.is_create:
-                self.ctx.state.add_branch(intent.project, ref)
-
-    async def forward(
-        self, request: Request, intent: GitPushIntent, decision: Decision
-    ) -> Response:
         async def body() -> AsyncIterator[bytes]:
             yield intent.head
             assert intent.rest is not None  # set by parse(); receive-pack always has a body
@@ -216,9 +177,10 @@ class GitGuard(Guard[GitPushIntent]):
         return stream_upstream(resp)
 
     def deny_response(
-        self, intent: GitPushIntent, decision: Decision, state: StateView
+        self, intent: GitIntent, decision: Decision, state: StateView
     ) -> Response:
-        """Per-ref rejection (W7.3): the client sees which ref failed and why.
+        """Per-ref rejection for receive-pack (W7.3): the client sees which
+        ref failed and why.
 
         Refs that individually pass :func:`policy.check_ref` but were denied
         at the whole-push level (e.g. R6 project, or the aggregated §03.4
@@ -226,7 +188,12 @@ class GitGuard(Guard[GitPushIntent]):
         "ok" — mirrors the pre-Schritt-5 ``git_proxy.receive_pack`` logic
         exactly, just relocated behind this hook so the kernel can call it
         without building a git-shaped response itself.
+
+        advertise/upload-pack denials get a plain JSON body instead — there
+        is no per-ref shape for a read.
         """
+        if intent.operation != "receive-pack":
+            return deny_json(decision)
         refs = [c.ref for c in intent.ref_commands]
         per_ref = []
         for cmd in intent.ref_commands:
@@ -235,8 +202,30 @@ class GitGuard(Guard[GitPushIntent]):
         per_ref = per_ref or [decision]
         return git_reject_response(per_ref, refs or [""], sideband=intent.sideband)
 
-    def audit_fields(self, intent: GitPushIntent) -> Mapping[str, Any]:
-        return {"refs": [f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in intent.ref_commands]}
+    def audit_fields(self, intent: GitIntent) -> Mapping[str, Any]:
+        if intent.operation == "receive-pack":
+            return {"refs": [f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in intent.ref_commands]}
+        return {"op": intent.operation, "service": intent.service}
+
+
+async def advertise(request: Request) -> Response:
+    """GET …/info/refs?service=… — ref advertisement (W7.1).
+
+    Discovery phase for every git operation: ``git clone``, ``git fetch``, and
+    ``git push`` all start here.
+    """
+    ctx: AppContext = request.app.state.ctx
+    return await GitGuard(ctx).handle(request)
+
+
+async def upload_pack(request: Request) -> Response:
+    """POST …/git-upload-pack — fetch, passed through with read-token (R1).
+
+    Data phase of ``git clone`` and ``git fetch``: the client negotiates which
+    objects it needs (want/have lines) and the server streams back a packfile.
+    """
+    ctx: AppContext = request.app.state.ctx
+    return await GitGuard(ctx).handle(request)
 
 
 async def receive_pack(request: Request) -> Response:
