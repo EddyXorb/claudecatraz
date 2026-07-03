@@ -61,7 +61,7 @@ def _probe_config(cfg: Config, table: EffectiveTable) -> Config:
     correspond to any real ``[api.endpoints]`` config at all (§04.4 — a probe
     must hold however the table was built).
     """
-    probe_cfg = replace(cfg, allowed_projects=(PROBE_PROJECT,), allowed_project_ids=())
+    probe_cfg = replace(cfg, allowed_projects=(PROBE_PROJECT,))
     probe_cfg.__dict__["effective_endpoints"] = table
     return probe_cfg
 

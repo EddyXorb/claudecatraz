@@ -8,12 +8,12 @@ import json
 import httpx
 
 from warden.app import create_app
+from warden.context import build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
 from warden.guards.git.pktline import FLUSH, pkt_line
-from warden.guards.gitlab_api.context import AppContext
-from warden.guards.gitlab_api.upstream import Upstream
+from warden.guards.gitlab.upstream import Upstream
 
 ZERO = "0" * 40
 SHA1 = "1" * 40
@@ -138,8 +138,8 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
     state.mark_reconciled()
     upstream = Upstream(cfg)
     audit = AuditLog("-")
-    ctx = AppContext(cfg, upstream, state, audit)
-    ctx.service_account_id = 42
+    ctx = build_context(cfg, upstream, state, audit)
+    ctx.forge.service_account_id = 42
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://warden")
@@ -183,8 +183,12 @@ async def test_read_only_push_discovery_denied_r0_not_r6_for_unallowed_project()
 
 
 async def _read_audit_lines(ctx, tmp_path, make_request):
+    # Redirect the *existing* AuditLog in place (rather than replacing
+    # ctx.audit with a new instance): the guards were assembled once, at
+    # build_context() time, and each holds its own reference to this exact
+    # object (§03.5/03.6) — reassigning ctx.audit itself would not reach them.
     logf = tmp_path / "audit.jsonl"
-    ctx.audit = AuditLog(str(logf))
+    ctx.audit._path = str(logf)
     ctx.audit.start()
     await make_request()
     await ctx.audit.stop()

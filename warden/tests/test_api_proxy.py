@@ -8,7 +8,6 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from warden.core.audit import AuditLog
 from warden.guards.gitlab_api.catalog import DEFAULT_ENABLED
 from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
 from warden.guards.gitlab_api.catalog.entries import CATALOG
@@ -298,8 +297,12 @@ async def test_graphql_subpath_denied(client, respx_router):
 
 # --- audit coverage: every new deny lands in the log ---------------------------
 async def _read_audit_lines(ctx, tmp_path, make_request):
+    # Redirect the *existing* AuditLog in place (rather than replacing
+    # ctx.audit with a new instance): the guards were assembled once, at
+    # build_context() time, and each holds its own reference to this exact
+    # object (§03.5/03.6) — reassigning ctx.audit itself would not reach them.
     logf = tmp_path / "audit.jsonl"
-    ctx.audit = AuditLog(str(logf))
+    ctx.audit._path = str(logf)
     ctx.audit.start()
     await make_request()
     await ctx.audit.stop()
@@ -377,10 +380,10 @@ def _activated_client_ctx(cfg, respx_router):
     default activation, so this scenario needs its own wiring.
     """
     from warden.app import create_app
+    from warden.context import build_context
     from warden.core.audit import AuditLog
     from warden.core.state import State
-    from warden.guards.gitlab_api.context import AppContext
-    from warden.guards.gitlab_api.upstream import Upstream
+    from warden.guards.gitlab.upstream import Upstream
 
     activated_cfg = replace(
         cfg,
@@ -388,8 +391,8 @@ def _activated_client_ctx(cfg, respx_router):
     )
     state = State(":memory:")
     state.mark_reconciled()
-    ctx = AppContext(activated_cfg, Upstream(activated_cfg), state, AuditLog("-"))
-    ctx.service_account_id = 42
+    ctx = build_context(activated_cfg, Upstream(activated_cfg), state, AuditLog("-"))
+    ctx.forge.service_account_id = 42
     return ctx, create_app(ctx)
 
 
@@ -406,7 +409,7 @@ async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_route
         )
     assert resp.status_code == 201
     assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
-    await ctx.upstream.aclose()
+    await ctx.forge.upstream.aclose()
 
 
 async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
@@ -419,13 +422,15 @@ async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_route
         )
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R2"
-    await ctx.upstream.aclose()
+    await ctx.forge.upstream.aclose()
 
 
 async def test_config_activated_entry_marked_in_audit_default_entry_is_not(cfg, respx_router, tmp_path):
     ctx, app = _activated_client_ctx(cfg, respx_router)
+    # Redirect the existing AuditLog in place — the guards inside `app` were
+    # already assembled (in _activated_client_ctx) around this exact object.
     logf = tmp_path / "audit.jsonl"
-    ctx.audit = AuditLog(str(logf))
+    ctx.audit._path = str(logf)
     ctx.audit.start()
     respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
         return_value=httpx.Response(201, json={"name": "claude/x"})
@@ -449,4 +454,4 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(cfg, 
     mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
     assert branch_event["enabled_via"] == "config:branch.create"
     assert "enabled_via" not in mr_event  # default-activated entry: no marking
-    await ctx.upstream.aclose()
+    await ctx.forge.upstream.aclose()

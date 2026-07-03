@@ -13,18 +13,21 @@ from typing import Any, Mapping, Optional
 import httpx
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.routing import Route
 
+from ...core.audit import AuditLog
 from ...core.config import Config
 from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
+from ...core.state import State
 from ...errors import deny_json
+from ..gitlab.forge import GitlabForge
+from ..gitlab.upstream import stream_upstream
 from .catalog import CatalogEntry, match_endpoint
-from .context import AppContext
 from .intent import ApiIntent, GraphqlIntent
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
 from .policy import capability_gate, decide
-from .upstream import stream_upstream
 
 
 def _needs_mr_owner(ep: CatalogEntry) -> bool:
@@ -36,8 +39,8 @@ def _needs_mr_owner(ep: CatalogEntry) -> bool:
 
 
 class ApiGuard(Guard[ApiIntent]):
-    """The REST write pipeline's hooks (§03.2) — driven by
-    :meth:`Guard.handle` from :func:`handle` below.
+    """The REST write pipeline's hooks (§03.2) — dispatched via
+    :meth:`Guard.handle` from the route :meth:`routes` returns.
     """
 
     # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
@@ -46,9 +49,30 @@ class ApiGuard(Guard[ApiIntent]):
     def name(self) -> str:
         return "api"
 
-    def __init__(self, ctx: AppContext) -> None:
-        super().__init__(ctx.cfg, ctx.state, ctx.audit)
-        self.ctx = ctx
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitlabForge) -> None:
+        super().__init__(cfg, state, audit)
+        self.forge = forge
+
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "/api/v4/{rest:path}",
+                self.handle,
+                methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
+            )
+        ]
+
+    def project_allowed(self, project: str) -> bool:
+        """M6, widened beyond the base path-only match: a request may also
+        name the project by the numeric id the forge's last reconcile
+        resolved (GitLab treats path and id interchangeably)."""
+        return self.cfg.project_allowed(project) or self.forge.project_allowed_by_id(project)
+
+    async def startup(self) -> None:
+        await self.forge.resolve_service_account()
+
+    async def reconcile(self) -> bool:
+        return await self.forge.reconcile()
 
     async def parse(self, request: Request) -> ApiIntent:
         """Parse method/path/project/fields/body into the decision intent
@@ -67,7 +91,7 @@ class ApiGuard(Guard[ApiIntent]):
         ep = (
             None
             if method in ("GET", "HEAD", "OPTIONS")
-            else match_endpoint(self.ctx.cfg.effective_endpoints.entries, method, rest_path)
+            else match_endpoint(self.cfg.effective_endpoints.entries, method, rest_path)
         )
         fields = extract_fields(request, body, ep)
 
@@ -87,14 +111,14 @@ class ApiGuard(Guard[ApiIntent]):
 
         Reachable only once the kernel's read-only gate has already passed
         (§03.2) — the write credential this transitively depends on (via
-        :meth:`AppContext.resolve_service_account`) is therefore never
-        touched in off/read-only mode, replacing the manual
-        ``ctx.cfg.writes_enabled`` guard this method used to carry itself
-        (pre-Schritt-5 ``api_proxy.py:102``).
+        :meth:`~warden.guards.gitlab.forge.GitlabForge.resolve_service_account`)
+        is therefore never touched in off/read-only mode, replacing the
+        manual ``ctx.cfg.writes_enabled`` guard this method used to carry
+        itself (pre-Schritt-5 ``api_proxy.py:102``).
         """
         ep = intent.endpoint
         if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
-            intent.mr_owner_ok = await self.ctx.mr_owned_by_agent(intent.project, intent.iid)
+            intent.mr_owner_ok = await self.forge.mr_owned_by_agent(intent.project, intent.iid)
         return intent
 
     def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:
@@ -106,7 +130,7 @@ class ApiGuard(Guard[ApiIntent]):
     def record(self, intent: ApiIntent, decision: Decision) -> None:
         """Record the write *before* the upstream call (idempotency / fail-safe, §6.11)."""
         if decision.token == TokenKind.WRITE and intent.endpoint is not None:
-            self.ctx.state.record_write(
+            self.state.record_write(
                 "api", intent.endpoint.kind, str(intent.iid or intent.project)
             )
 
@@ -114,7 +138,7 @@ class ApiGuard(Guard[ApiIntent]):
         # F12: the raw query is reattached here, at the transport boundary,
         # never folded into intent.path — matching/decision stay query-less.
         path = f"{intent.path}?{intent.raw_query}" if intent.raw_query else intent.path
-        resp: httpx.Response = await self.ctx.upstream.open_rest(
+        resp: httpx.Response = await self.forge.upstream.open_rest(
             intent.method,
             path,
             headers=dict(request.headers),
@@ -147,13 +171,8 @@ class ApiGuard(Guard[ApiIntent]):
         """
         if intent.endpoint is None:
             return None
-        via = self.ctx.cfg.effective_endpoints.enabled_via.get(intent.endpoint.id)
+        via = self.cfg.effective_endpoints.enabled_via.get(intent.endpoint.id)
         return via if via and via != "default" else None
-
-
-async def handle(request: Request) -> Response:
-    ctx: AppContext = request.app.state.ctx
-    return await ApiGuard(ctx).handle(request)
 
 
 class GraphqlGuard(Guard[GraphqlIntent]):
@@ -161,15 +180,29 @@ class GraphqlGuard(Guard[GraphqlIntent]):
 
     GitLab's GraphQL API can express every write the REST filter blocks (create
     a tag, merge an MR) in a single mutation; routing it would silently bypass
-    R2-R4, so this guard denies unconditionally instead of proxying.
+    R2-R4, so this guard denies unconditionally instead of proxying. A
+    separate guard from :class:`ApiGuard` on purpose: it needs no forge
+    collaborator at all (never contacts upstream), so it stays a plain
+    ``cfg``/``state``/``audit`` guard.
     """
 
     @property
     def name(self) -> str:
         return "api"
 
-    def __init__(self, ctx: AppContext) -> None:
-        super().__init__(ctx.cfg, ctx.state, ctx.audit)
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "/api/graphql",
+                self.handle,
+                methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+            ),
+            Route(
+                "/api/graphql/{rest:path}",
+                self.handle,
+                methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+            ),
+        ]
 
     async def parse(self, request: Request) -> GraphqlIntent:
         return GraphqlIntent(path=request.url.path, _method=request.method)
@@ -198,8 +231,3 @@ class GraphqlGuard(Guard[GraphqlIntent]):
 
     def audit_fields(self, intent: GraphqlIntent) -> Mapping[str, Any]:
         return {"path": intent.path, "kind": None}
-
-
-async def deny_graphql(request: Request) -> Response:
-    ctx: AppContext = request.app.state.ctx
-    return await GraphqlGuard(ctx).handle(request)

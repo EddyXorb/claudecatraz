@@ -39,7 +39,7 @@ string literals — so every id in this file traces back to the one registry.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from ...core.capabilities import forbidden_check
 from ...core.config import Config
@@ -147,14 +147,23 @@ def _quota_check(ep: CatalogEntry, state: StateView, cfg: Config) -> Optional[De
     return None
 
 
-def full_decide(intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
+def full_decide(
+    intent: ApiIntent,
+    state: StateView,
+    cfg: Config,
+    project_allowed: Optional[Callable[[str], bool]] = None,
+) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
     outside :meth:`core.guard.Guard.handle` (the endpoint-catalog startgate,
     §04.4; tests) that need the *whole* effective decision, not just this
     module's slice — probes must also fail against the capability invariant,
     not just this guard's own checks, exactly as a real request would.
+
+    ``project_allowed`` defaults to ``cfg.project_allowed`` (the path-form
+    allowlist) — the same default a caller without a live
+    ``ApiGuard``/forge (the startgate, most tests) gets for free.
     """
-    d = kernel_gates(intent, cfg)
+    d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
     if d is None:
         d = capability_gate(intent, cfg)
     if d is None:

@@ -43,10 +43,11 @@ from __future__ import annotations
 import time
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Mapping, Optional, TypeVar
+from typing import Any, Callable, Generic, Mapping, Optional, TypeVar
 
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.routing import Route
 
 from .audit import AuditEvent, AuditLog
 from .config import Config
@@ -69,20 +70,27 @@ def mode_gate_writes(cfg: Config) -> Optional[Decision]:
     return None
 
 
-def project_gate(project: str, cfg: Config) -> Optional[Decision]:
+def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Optional[Decision]:
     """M6 resource allowlist — the single source of truth, shared by every guard.
 
     An empty ``project`` passes: an intent that carries no project at all
     (e.g. a projectless REST read) is gated elsewhere, by that guard's own
     ``decide`` (see ``guards.gitlab_api.read_endpoints``) — matching the
     pre-Schritt-5 ``policy.project_gate`` behaviour exactly.
+
+    ``project_allowed`` is a callable, not the raw ``Config``, so a guard
+    whose forge resolves numeric-id aliases (§03.5/03.6, ``ApiGuard``) can
+    widen the check beyond ``cfg.project_allowed``'s path-only match without
+    the kernel knowing anything about that forge concept.
     """
-    if project and not cfg.project_allowed(project):
+    if project and not project_allowed(project):
         return Decision(False, R6, f"project {project!r} not in allowlist")
     return None
 
 
-def kernel_gates(intent: Intent, cfg: Config) -> Optional[Decision]:
+def kernel_gates(
+    intent: Intent, cfg: Config, project_allowed: Callable[[str], bool]
+) -> Optional[Decision]:
     """The guard-agnostic deny gates, in kernel order (module docstring, step 2).
 
     One definition: :meth:`Guard.handle` runs this on every pipeline request,
@@ -94,7 +102,7 @@ def kernel_gates(intent: Intent, cfg: Config) -> Optional[Decision]:
     if denied is None and intent.writes:
         denied = mode_gate_writes(cfg)
     if denied is None:
-        denied = project_gate(intent.project, cfg)
+        denied = project_gate(intent.project, project_allowed)
     return denied
 
 
@@ -145,6 +153,36 @@ class Guard(ABC, Generic[IntentT]):
     @abstractmethod
     def audit_fields(self, intent: IntentT) -> Mapping[str, Any]: ...
 
+    @abstractmethod
+    def routes(self) -> list[Route]:
+        """The Starlette routes this guard serves (§03.5/03.6): the guard owns
+        its own paths so ``app.py`` can stay generic assembly (``[r for g in
+        ctx.guards for r in g.routes()]``) instead of hand-listing every
+        guard's endpoints.
+        """
+        ...
+
+    def project_allowed(self, project: str) -> bool:
+        """M6 membership hook. Default: the config allowlist by path
+        (``cfg.project_allowed``). A guard whose forge resolves numeric-id
+        aliases (e.g. ``ApiGuard``) overrides this to also accept those.
+        """
+        return self.cfg.project_allowed(project)
+
+    async def startup(self) -> None:
+        """One-time, pre-serve setup (§03.5/03.6) — e.g. resolving the
+        service-account id. Default no-op; a guard overrides only if it needs
+        this hook.
+        """
+        return None
+
+    async def reconcile(self) -> bool:
+        """Rebuild this guard's quota/allowlist state from upstream truth
+        (§03.5/03.6, W8.2) — run once before the agent port opens and then
+        periodically. Default no-op, returns True (nothing to reconcile).
+        """
+        return True
+
     async def handle(self, request: Request) -> Response:
         """The kernel (§03.2): guarantees the pipeline order regardless of guard.
 
@@ -160,7 +198,7 @@ class Guard(ABC, Generic[IntentT]):
         intent = await self.parse(request)
         view = self.state.view()
 
-        decision = kernel_gates(intent, self.cfg)
+        decision = kernel_gates(intent, self.cfg, self.project_allowed)
         if decision is None:
             intent = await self.enrich(intent)
             decision = self.capability_gate(intent, self.cfg)

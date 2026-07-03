@@ -3,9 +3,12 @@ info/refs), upload-pack (POST git-upload-pack), receive-pack (POST
 git-receive-pack) — run through the single :class:`GitGuard`, dispatching
 per-operation inside its hooks, via :meth:`core.guard.Guard.handle`.
 
-**Honest scope note.** The guard imports ``AppContext``/``Upstream`` from
-``gitlab_api`` because the guard has always shared one context/credential
-holder with the REST guard; splitting that is a separate, later step.
+The guard is forge-agnostic in its own logic (no GitLab vocabulary) but
+depends on :mod:`warden.guards.gitlab` (the forge domain) for the
+credential/transport collaborator (:class:`~warden.guards.gitlab.forge.GitlabForge`)
+it needs to reach an upstream at all — the one honest exception §03.3 leaves
+in place, now an explicit dependency on a shared package instead of a borrow
+from the REST guard's own internals.
 """
 
 from __future__ import annotations
@@ -14,14 +17,17 @@ from typing import Any, AsyncIterator, Mapping, Optional
 
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.routing import Route
 
+from ...core.audit import AuditLog
 from ...core.config import Config, normalize_project
 from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R1
+from ...core.state import State
 from ...errors import deny_json, git_reject_response
-from ..gitlab_api.context import AppContext
-from ..gitlab_api.upstream import stream_upstream
+from ..gitlab.forge import GitlabForge
+from ..gitlab.upstream import stream_upstream
 from . import policy
 from .intent import GitIntent
 from .pktline import capabilities, parse_commands, read_until_flush
@@ -43,9 +49,8 @@ def _forward_encoding(request: Request) -> dict[str, str]:
 
 
 class GitGuard(Guard[GitIntent]):
-    """All three git Smart-HTTP operations (§03.2) — used only via
-    :meth:`Guard.handle` from :func:`advertise`/:func:`upload_pack`/
-    :func:`receive_pack` below.
+    """All three git Smart-HTTP operations (§03.2) — dispatched via
+    :meth:`Guard.handle` from the routes :meth:`routes` returns.
 
     Reads (advertise/upload-pack) are read-only, except push discovery, which
     carries the write token but never a ref write (so ``record`` is a no-op
@@ -58,9 +63,16 @@ class GitGuard(Guard[GitIntent]):
     def name(self) -> str:
         return "git"
 
-    def __init__(self, ctx: AppContext) -> None:
-        super().__init__(ctx.cfg, ctx.state, ctx.audit)
-        self.ctx = ctx
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitlabForge) -> None:
+        super().__init__(cfg, state, audit)
+        self.forge = forge
+
+    def routes(self) -> list[Route]:
+        return [
+            Route("/git/{project:path}/info/refs", self.handle, methods=["GET"]),
+            Route("/git/{project:path}/git-upload-pack", self.handle, methods=["POST"]),
+            Route("/git/{project:path}/git-receive-pack", self.handle, methods=["POST"]),
+        ]
 
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for
@@ -128,15 +140,15 @@ class GitGuard(Guard[GitIntent]):
             return
         for cmd in intent.ref_commands:
             ref = cmd.ref.removeprefix("refs/heads/")
-            self.ctx.state.record_write("git", "push", ref)
+            self.state.record_write("git", "push", ref)
             if cmd.is_create:
-                self.ctx.state.add_branch(intent.project, ref)
+                self.state.add_branch(intent.project, ref)
 
     async def forward(
         self, request: Request, intent: GitIntent, decision: Decision
     ) -> Response:
         if intent.operation == "advertise":
-            resp = await self.ctx.upstream.git_get(
+            resp = await self.forge.upstream.git_get(
                 intent.project,
                 "info/refs",
                 params={"service": intent.service},
@@ -145,11 +157,11 @@ class GitGuard(Guard[GitIntent]):
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
-                headers=self.ctx.upstream.response_headers(resp),
+                headers=self.forge.upstream.response_headers(resp),
                 media_type=resp.headers.get("content-type"),
             )
         if intent.operation == "upload-pack":
-            resp = await self.ctx.upstream.git_post_stream(
+            resp = await self.forge.upstream.git_post_stream(
                 intent.project,
                 "git-upload-pack",
                 body=request.stream(),
@@ -166,7 +178,7 @@ class GitGuard(Guard[GitIntent]):
             async for chunk in intent.rest:
                 yield chunk
 
-        resp = await self.ctx.upstream.git_post_stream(
+        resp = await self.forge.upstream.git_post_stream(
             intent.project,
             "git-receive-pack",
             body=body(),
@@ -197,7 +209,7 @@ class GitGuard(Guard[GitIntent]):
         refs = [c.ref for c in intent.ref_commands]
         per_ref = []
         for cmd in intent.ref_commands:
-            d = policy.check_ref(cmd, state, self.ctx.cfg)
+            d = policy.check_ref(cmd, state, self.cfg)
             per_ref.append(d if not d.allow else decision)
         per_ref = per_ref or [decision]
         return git_reject_response(per_ref, refs or [""], sideband=intent.sideband)
@@ -206,35 +218,3 @@ class GitGuard(Guard[GitIntent]):
         if intent.operation == "receive-pack":
             return {"refs": [f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in intent.ref_commands]}
         return {"op": intent.operation, "service": intent.service}
-
-
-async def advertise(request: Request) -> Response:
-    """GET …/info/refs?service=… — ref advertisement (W7.1).
-
-    Discovery phase for every git operation: ``git clone``, ``git fetch``, and
-    ``git push`` all start here.
-    """
-    ctx: AppContext = request.app.state.ctx
-    return await GitGuard(ctx).handle(request)
-
-
-async def upload_pack(request: Request) -> Response:
-    """POST …/git-upload-pack — fetch, passed through with read-token (R1).
-
-    Data phase of ``git clone`` and ``git fetch``: the client negotiates which
-    objects it needs (want/have lines) and the server streams back a packfile.
-    """
-    ctx: AppContext = request.app.state.ctx
-    return await GitGuard(ctx).handle(request)
-
-
-async def receive_pack(request: Request) -> Response:
-    """POST …/git-receive-pack — parse ref commands, then stream (W7.3).
-
-    Data phase of ``git push``: the client sends ref-update commands followed by
-    a packfile with the new objects. Runs through the kernel pipeline
-    (:meth:`core.guard.Guard.handle`) instead of hand-building the
-    deny/record/forward sequence (F1's actual complaint about this handler).
-    """
-    ctx: AppContext = request.app.state.ctx
-    return await GitGuard(ctx).handle(request)

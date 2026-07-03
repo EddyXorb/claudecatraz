@@ -10,13 +10,13 @@ import sys
 import uvicorn
 
 from .app import create_admin_app, create_app
+from .context import AppContext, build_context
 from .core.audit import AuditLog
 from .core.config import ConfigError
 from .core.config_load import from_env
 from .core.state import SchemaError, State
+from .guards.gitlab.upstream import Upstream
 from .guards.gitlab_api.catalog import StartgateFailure, run_startgate
-from .guards.gitlab_api.context import AppContext
-from .guards.gitlab_api.upstream import Upstream
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:
@@ -24,7 +24,8 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
         await asyncio.sleep(ctx.cfg.reconcile_interval_s)
         try:
             ctx.state.prune()
-            await ctx.reconcile()
+            for g in ctx.guards:
+                await g.reconcile()
         except Exception as exc:  # never crash the loop
             print(f"warden: periodic reconcile error: {exc}", file=sys.stderr)
 
@@ -51,11 +52,15 @@ async def _serve() -> None:
     state = State(cfg.state_db_path)
     audit = AuditLog(cfg.audit_log_path)
     audit.start()
-    ctx = AppContext(cfg, upstream, state, audit)
+    ctx = build_context(cfg, upstream, state, audit)
 
     # Reconcile BEFORE opening the agent port (§6.11): GitLab truth dominates.
-    await ctx.resolve_service_account()
-    if not await ctx.reconcile():
+    for g in ctx.guards:
+        await g.startup()
+    ok = True
+    for g in ctx.guards:
+        ok = (await g.reconcile()) and ok
+    if not ok:
         print("warden: initial reconcile incomplete — state stays locked", file=sys.stderr)
 
     agent = uvicorn.Server(

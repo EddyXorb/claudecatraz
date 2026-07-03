@@ -26,7 +26,7 @@ with one of these for the audit log:
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Optional
+from typing import Callable, Optional
 
 from ...core.capabilities import Capability, forbidden_check
 from ...core.config import Config
@@ -133,14 +133,19 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     return Decision(True, R2, "ok", TokenKind.WRITE)
 
 
-def full_decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
+def full_decide(
+    intent: GitIntent,
+    state: StateView,
+    cfg: Config,
+    project_allowed: Optional[Callable[[str], bool]] = None,
+) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
     outside :meth:`core.guard.Guard.handle` (tests, and any offline "what would
     happen to this push" evaluator) that need the *whole* effective decision,
     not just this module's slice — mirrors
     ``guards.gitlab_api.policy.full_decide``.
     """
-    d = kernel_gates(intent, cfg)
+    d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
     if d is None:
         d = capability_gate(intent, cfg)
     if d is None:

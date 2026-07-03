@@ -10,9 +10,9 @@ not on the loading machinery.
 **Honest layering note (§06-migration.md Schritt 5).** §03.3 asks for a
 guard-agnostic kernel ("Kernel kennt keine GitLab-Begriffe"), but this class
 still carries GitLab/git-guard-specific fields — ``branch_prefixes``,
-``allowed_projects``/``allowed_project_ids``, ``endpoint_activation`` and the
-``effective_endpoints`` derivation are all concepts of the shipped git/GitLab
-guards, not of the kernel. Splitting ``Config`` into a kernel base plus
+``allowed_projects``, ``endpoint_activation`` and the ``effective_endpoints``
+derivation are all concepts of the shipped git/GitLab guards, not of the
+kernel. Splitting ``Config`` into a kernel base plus
 per-guard config fragments is explicitly **not** part of this migration step
 (§06-migration.md: "kein Zwang, Config in diesem Schritt zu zerlegen") — it
 stays one class, one source of truth for now, with this docstring as the
@@ -65,10 +65,6 @@ class Config:
     max_open_branches: int = 10
     max_writes_per_hour: int = 60
     allowed_projects: tuple[str, ...] = ()
-    # Numeric project ids of ``allowed_projects``, resolved at reconcile. GitLab's
-    # ``/projects/:id`` accepts the url-encoded path OR the numeric id, so the
-    # allowlist must know both forms (filled in by AppContext.reconcile).
-    allowed_project_ids: tuple[str, ...] = ()
     api_url: str = "https://gitlab.com/api/v4"
     read_token: str = ""
     write_token: str = ""
@@ -122,17 +118,17 @@ class Config:
         return self.api_url.removesuffix("/api/v4")
 
     def project_allowed(self, project: str) -> bool:
-        """Default-deny match against ``ALLOWED_PROJECTS`` (Q9, A8, B4).
+        """Default-deny match against ``ALLOWED_PROJECTS`` (Q9, A8, B4), path
+        form only.
 
-        A request may name the project by url-encoded path *or* by numeric id
-        (GitLab treats them interchangeably). Match either: the path exactly
-        (after normalisation), or the numeric id against the reconcile-resolved
-        set. No prefix/subpath match — the allowlist names concrete projects,
-        never group prefixes (README doctrine).
+        No prefix/subpath match — the allowlist names concrete projects, never
+        group prefixes (README doctrine). GitLab also accepts a project's
+        numeric id interchangeably with its path; matching that form is a
+        forge concept (the id is only known after reconcile talks to
+        GitLab) — see ``guards.gitlab.forge.GitlabForge.project_allowed_by_id``,
+        not this method.
         """
         project = normalize_project(project)
-        if project in self.allowed_project_ids:
-            return True
         return any(project == allowed.strip("/") for allowed in self.allowed_projects)
 
     def in_branch_namespace(self, name: str) -> bool:

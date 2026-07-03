@@ -1,35 +1,31 @@
-"""Shared runtime context + reconcile logic (W6.2, W8.2, §6.11).
+"""The GitLab forge: credentials, service-account, MR-ownership and reconcile
+(W6.2, W8.2, §6.11).
 
-Holds the long-lived collaborators (config, upstream, state, audit) plus the
-service-account id and the short-lived MR-ownership cache. Reconcile rebuilds
-the quota counters from GitLab truth — at startup (before the agent port opens)
-and periodically as the backstop.
-
-GitLab-specific (§03.3: assigned to ``guards/gitlab_api`` — MR ownership and
-reconcile-against-GitLab-projects are forge concepts). One honest scope note
-for this migration step: the git guard also holds a reference to this same
-context object today, for the collaborators it *does* need (``cfg``,
-``state``, ``upstream``, ``audit``) — turning reconcile into a formal
-per-guard ``Guard`` method (§03.5) and giving each guard its own, narrower
-context is out of scope for Migrationsschritt 5 (kernel extraction +
-intent-split only); it is the explicit subject of §03.5/03.6 (Schritt 9/10).
+:class:`GitlabForge` holds the long-lived collaborators (config, upstream,
+state, audit) plus the service-account id, the short-lived MR-ownership
+cache, and the numeric project-id aliases reconcile resolves. Reconcile
+rebuilds the quota counters from GitLab truth — at startup (before the agent
+port opens) and periodically as the backstop. Shared by both the git guard
+and the REST-API guard (§03.5/03.6): each of them owns its own
+:class:`~warden.core.guard.Guard` instance, but both need this same forge
+state (credentials, ownership, reconcile) — that is what makes it a separate,
+guard-agnostic collaborator instead of living inside either guard.
 """
 
 from __future__ import annotations
 
 import sys
 import time
-from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from ...core.audit import AuditLog
-from ...core.config import Config
+from ...core.config import Config, normalize_project
 from ...core.model import TokenKind
 from ...core.state import State
 from .upstream import Upstream, project_id
 
 
-class AppContext:
+class GitlabForge:
     def __init__(
         self,
         cfg: Config,
@@ -48,6 +44,11 @@ class AppContext:
         # (project, iid) -> (ok, expires_at). Performance only, never security.
         self._owner_cache: dict[tuple[str, int], tuple[bool, float]] = {}
         self._owner_ttl = 30.0
+        # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile (M6).
+        # Forge state, not Config — Config stays immutable for the life of the
+        # process; only the forge's view of "which ids currently alias an
+        # allowlisted project" is ever refreshed.
+        self.project_id_aliases: set[str] = set()
 
     # --- service account -------------------------------------------------------
     async def resolve_service_account(self) -> Optional[int]:
@@ -94,6 +95,12 @@ class AppContext:
         self._owner_cache[key] = (ok, self._clock() + self._owner_ttl)
         return ok
 
+    # --- resource allowlist (M6) ------------------------------------------------
+    def project_allowed_by_id(self, project: str) -> bool:
+        """True iff ``project`` names the numeric-id alias of an allowlisted
+        project, resolved by the last successful :meth:`reconcile`."""
+        return normalize_project(project) in self.project_id_aliases
+
     # --- reconcile (W8.2) ------------------------------------------------------
     async def reconcile(self) -> bool:
         """Rebuild branch/MR counters from GitLab. Returns True on full success.
@@ -127,7 +134,8 @@ class AppContext:
             self.state.replace_mrs(project, mrs)
         # Teach the allowlist the numeric-id alias of each project so requests that
         # address /projects/<id>/… (instead of the path) are not wrongly R6-denied.
-        self.cfg = replace(self.cfg, allowed_project_ids=tuple(resolved_ids))
+        # Forge state (project_id_aliases), never Config — Config is never mutated.
+        self.project_id_aliases = set(resolved_ids)
         if ok:
             self.state.mark_reconciled()
         return ok

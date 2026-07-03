@@ -2,11 +2,11 @@
 
 Read- vs. write-token chosen per :class:`~warden.core.model.Decision`. REST
 uses the ``PRIVATE-TOKEN`` header; git Smart-HTTP uses HTTP-Basic
-``oauth2:<token>``. GitLab-specific (§03.3: "``Upstream`` ist GitLab-spezifisch"
-— a generic streaming client + a per-guard ``CredentialAdapter`` is future
-work, §03.5); the git guard borrows this module today rather than duplicating
-the streaming/header-hygiene logic (documented, honest scope limit of this
-migration step — see ``guards.git.guard``'s module docstring).
+``oauth2:<token>``. Forge domain (§03.3/§03.5: "``Upstream`` ist
+GitLab-spezifisch" — a generic streaming client + a per-guard
+``CredentialAdapter`` is future work); shared by both the git guard and the
+REST guard, which is exactly why it lives in ``guards.gitlab`` rather than in
+either guard package.
 """
 
 from __future__ import annotations

@@ -50,15 +50,6 @@ def test_project_allowed_empty_allowlist_denies_all():
     assert not Config(allowed_projects=()).project_allowed("group/proj")
 
 
-def test_project_allowed_matches_reconciled_numeric_id():
-    # GitLab's /projects/:id accepts the numeric id, not just the path. Reconcile
-    # fills allowed_project_ids; a request naming the id must pass, an unknown id
-    # must still be denied (default-deny).
-    cfg = Config(allowed_projects=("group/proj",), allowed_project_ids=("81882161",))
-    assert cfg.project_allowed("81882161")
-    assert not cfg.project_allowed("99999999")
-
-
 def test_git_base_strips_api_suffix():
     assert Config(api_url="https://gl.example/api/v4").git_base == "https://gl.example"
 

@@ -1,9 +1,11 @@
-"""Starlette app + routing: API vs. git, agent port vs. admin port (W3, W4).
+"""Starlette app + routing: agent port vs. admin port (W3, W4).
 
-Transport wiring only (§03.3: ``app.py`` stays at the top of the package) —
-the handlers it routes to live in the guard packages
-(:mod:`warden.guards.git.guard`, :mod:`warden.guards.gitlab_api.guard`), the
-pipeline they run through in :mod:`warden.core.guard`.
+Generic assembly only (§03.3/03.5: ``app.py`` stays at the top of the package,
+free of guard internals) — each guard in ``ctx.guards`` supplies its own
+routes (:meth:`~warden.core.guard.Guard.routes`); this module never imports a
+concrete guard class, only :mod:`warden.context`'s guard-agnostic
+:class:`~warden.context.AppContext`. The pipeline every route runs through
+lives in :mod:`warden.core.guard`.
 """
 
 from __future__ import annotations
@@ -15,10 +17,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from .guards.git import guard as git_guard
-from .guards.gitlab_api import guard as api_guard
+from .context import AppContext
 from .guards.gitlab_api.catalog import endpoint_table_report
-from .guards.gitlab_api.context import AppContext
 
 # Static log-viewer page (O.4) — a package asset, not routing code (F7).
 _VIEWER_HTML_PATH = Path(__file__).parent / "static" / "viewer.html"
@@ -26,35 +26,19 @@ _VIEWER_HTML = _VIEWER_HTML_PATH.read_text(encoding="utf-8")
 
 
 def create_app(ctx: AppContext) -> Starlette:
-    """Agent-facing app on port 8080: API proxy + git Smart-HTTP (W4)."""
+    """Agent-facing app on port 8080: API proxy + git Smart-HTTP (W4).
+
+    Generic assembly (§03.5/03.6): every guard supplies its own routes
+    (:meth:`~warden.core.guard.Guard.routes`) — this module never lists a
+    guard's endpoints itself, so it stays free of guard-policy internals.
+    """
     # The /git/ prefix is load-bearing: it separates git Smart-HTTP routes from
     # /api/v4/… on the same port. Repos keep their canonical remote URL
     # (https://gitlab.com/…); the entrypoint injects a global git insteadOf rewrite
     # (https://gitlab.com/ → http://gitlab-warden:8080/git/) so the prefix is added
     # transparently at transport time without touching .git/config. See W3.1.
-    routes = [
-        Route("/git/{project:path}/info/refs", git_guard.advertise, methods=["GET"]),
-        Route("/git/{project:path}/git-upload-pack", git_guard.upload_pack, methods=["POST"]),
-        Route("/git/{project:path}/git-receive-pack", git_guard.receive_pack, methods=["POST"]),
-        Route(
-            "/api/v4/{rest:path}",
-            api_guard.handle,
-            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
-        ),
-        # GraphQL is a deliberate dead end (B5): never proxied, always 403 + audited
-        # — see guards.gitlab_api.guard.deny_graphql and §06-migration.md's Anti-Ziele.
-        Route(
-            "/api/graphql",
-            api_guard.deny_graphql,
-            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
-        ),
-        Route(
-            "/api/graphql/{rest:path}",
-            api_guard.deny_graphql,
-            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
-        ),
-        Route("/healthz", _healthz, methods=["GET"]),
-    ]
+    routes = [r for g in ctx.guards for r in g.routes()]
+    routes.append(Route("/healthz", _healthz, methods=["GET"]))
     app = Starlette(routes=routes)
     app.state.ctx = ctx
     return app
@@ -79,7 +63,7 @@ async def _healthz(request: Request) -> JSONResponse:
         {
             "status": "ok",
             "reconciled": ctx.state.is_reconciled(),
-            "service_account_id": ctx.service_account_id,
+            "service_account_id": ctx.forge.service_account_id,
         }
     )
 
