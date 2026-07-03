@@ -1,12 +1,11 @@
-"""The git guard's Intent (§03.3, F3): replaces the old channel-union
-``ProxyRequest`` for git pushes. Forge-agnostic — the only non-primitive field
-is a git-protocol concept (``RefCommand``), never a forge one.
+"""The git guard's Intents: replaces the old channel-union ``ProxyRequest``.
+Forge-agnostic — the only non-primitive field is a git-protocol concept
+(``RefCommand``), never a forge one.
 
-Every :class:`GitPushIntent` the kernel ever sees comes from a
-``git-receive-pack`` request — the discovery/fetch routes (``advertise``,
-``upload_pack``) are reads that never carry ref commands and stay outside the
-kernel pipeline entirely (§03.2's "dünne Handler" carve-out), so ``writes`` is
-unconditionally ``True`` here.
+:class:`GitPushIntent` is a ``git-receive-pack`` request — always a write.
+:class:`GitReadIntent` covers advertise/upload-pack (discovery and fetch);
+``writes`` is normally ``False`` except for push discovery
+(``?service=git-receive-pack``), which must still carry the write token.
 """
 
 from __future__ import annotations
@@ -39,6 +38,32 @@ class GitPushIntent(Intent):
         # The only intent this guard's kernel pipeline ever parses is a
         # receive-pack push — always a write by construction.
         return True
+
+    @property
+    def project(self) -> str:
+        return self._project
+
+    @property
+    def method(self) -> str:
+        return self._method
+
+
+@dataclass
+class GitReadIntent(Intent):
+    """advertise / upload-pack: reads, except push discovery (see ``writes``)."""
+
+    _project: str
+    _method: str
+    operation: str  # "advertise" | "upload-pack"
+    service: str = "git-upload-pack"
+    # Push discovery (advertise with ?service=git-receive-pack) must count as
+    # a write: the write token it needs must never reach upstream in
+    # read-only/off mode. Set by the guard's parse(), never derived here.
+    _writes: bool = False
+
+    @property
+    def writes(self) -> bool:
+        return self._writes
 
     @property
     def project(self) -> str:

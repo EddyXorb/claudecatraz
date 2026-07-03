@@ -1,16 +1,10 @@
-"""git Smart-HTTP guard (§03.3, W7): the receive-pack write pipeline's hooks,
-plus the two thin, read-only handlers (advertise/upload-pack) that stay
-outside that pipeline (§03.2's "dünne Handler" carve-out) — deduplicated via
-the shared core gates instead of re-hand-rolling mode/project checks.
+"""git Smart-HTTP guard (W7): the receive-pack write pipeline's hooks, plus
+the read pipeline (advertise/upload-pack) — both run through
+:meth:`core.guard.Guard.handle`.
 
-**Honest scope note for this migration step.** §03.3 assigns
-``AppContext``/``Upstream`` to ``guards/gitlab_api`` (they hold GitLab
-credentials and reconcile-against-GitLab-projects logic) — yet this
-forge-agnostic guard still imports both from there, because both proxies have
-always shared one context/credential-holder and giving each guard its own is
-the explicit subject of §03.5 (forge abstraction) / §03.6 (process
-boundaries), not this step ("Kernel-Extraktion + Intent-Split"). Documented
-here rather than silently worked around.
+**Honest scope note.** The guard imports ``AppContext``/``Upstream`` from
+``gitlab_api`` because both guards have always shared one context/credential
+holder; splitting that is a separate, later step.
 """
 
 from __future__ import annotations
@@ -21,13 +15,14 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from ...core.config import Config, normalize_project
-from ...core.guard import Guard, mode_gate_off, mode_gate_writes, project_gate
+from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
+from ...core.rules import R1
 from ...errors import deny_json, git_reject_response
 from ..gitlab_api.context import AppContext
 from ..gitlab_api.upstream import stream_upstream
 from . import policy
-from .intent import GitPushIntent
+from .intent import GitPushIntent, GitReadIntent
 from .pktline import capabilities, parse_commands, read_until_flush
 
 
@@ -40,45 +35,95 @@ def _project(request: Request) -> str:
     return normalize_project(str(request.path_params["project"]))
 
 
-def _service_token(service: str) -> TokenKind:
-    return TokenKind.WRITE if service == "git-receive-pack" else TokenKind.READ
+class GitReadGuard(Guard[GitReadIntent]):
+    """advertise/upload-pack (W7.1): read-only, except push discovery, which
+    carries the write token but never a ref write (so ``record`` is a no-op).
+    """
+
+    @property
+    def name(self) -> str:
+        return "git"
+
+    def __init__(self, ctx: AppContext) -> None:
+        super().__init__(ctx.cfg, ctx.state, ctx.audit)
+        self.ctx = ctx
+
+    async def parse(self, request: Request) -> GitReadIntent:
+        project = _project(request)
+        if request.method == "GET":
+            service = request.query_params.get("service", "git-upload-pack")
+            return GitReadIntent(
+                _project=project,
+                _method=request.method,
+                operation="advertise",
+                service=service,
+                _writes=(service == "git-receive-pack"),
+            )
+        return GitReadIntent(
+            _project=project,
+            _method=request.method,
+            operation="upload-pack",
+        )
+
+    async def enrich(self, intent: GitReadIntent) -> GitReadIntent:
+        return intent
+
+    def capability_gate(self, intent: GitReadIntent, cfg: Config) -> Optional[Decision]:
+        return None
+
+    def decide(self, intent: GitReadIntent, state: StateView, cfg: Config) -> Decision:
+        if intent.writes:
+            return Decision(True, R1, "push discovery", TokenKind.WRITE)
+        return Decision(True, R1, "read pass-through", TokenKind.READ)
+
+    def record(self, intent: GitReadIntent, decision: Decision) -> None:
+        # Reads and push discovery never count against the write quota.
+        pass
+
+    async def forward(
+        self, request: Request, intent: GitReadIntent, decision: Decision
+    ) -> Response:
+        if intent.operation == "advertise":
+            resp = await self.ctx.upstream.git_get(
+                intent.project,
+                "info/refs",
+                params={"service": intent.service},
+                token=decision.token,
+            )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=self.ctx.upstream.response_headers(resp),
+                media_type=resp.headers.get("content-type"),
+            )
+        resp = await self.ctx.upstream.git_post_stream(
+            intent.project,
+            "git-upload-pack",
+            body=request.stream(),
+            content_type=request.headers.get(
+                "content-type", "application/x-git-upload-pack-request"
+            ),
+            token=decision.token,
+        )
+        return stream_upstream(resp)
+
+    def deny_response(
+        self, intent: GitReadIntent, decision: Decision, state: StateView
+    ) -> Response:
+        return deny_json(decision)
+
+    def audit_fields(self, intent: GitReadIntent) -> Mapping[str, Any]:
+        return {"op": intent.operation, "service": intent.service}
 
 
 async def advertise(request: Request) -> Response:
-    """GET …/info/refs?service=… — ref advertisement, passed through (W7.1).
+    """GET …/info/refs?service=… — ref advertisement (W7.1).
 
     Discovery phase for every git operation: ``git clone``, ``git fetch``, and
-    ``git push`` all start here. The client sends ``?service=git-upload-pack``
-    (clone/fetch) or ``?service=git-receive-pack`` (push); the server replies with
-    the list of refs it knows about. Outside the kernel pipeline (§03.2): a pure
-    read, gated with the same shared core helpers a write pipeline run uses.
+    ``git push`` all start here.
     """
     ctx: AppContext = request.app.state.ctx
-    project = _project(request)
-    service = request.query_params.get("service", "git-upload-pack")
-
-    denied = mode_gate_off(ctx.cfg)
-    if denied is None:
-        denied = project_gate(project, ctx.cfg)
-    # R0: deny push discovery when writes are disabled — the write token must
-    # not be sent upstream even for the info/refs phase of git-receive-pack.
-    if denied is None and _service_token(service) == TokenKind.WRITE:
-        denied = mode_gate_writes(ctx.cfg)
-    if denied is not None:
-        return deny_json(denied)
-
-    resp = await ctx.upstream.git_get(
-        project,
-        "info/refs",
-        params={"service": service},
-        token=_service_token(service),
-    )
-    return Response(
-        content=resp.content,
-        status_code=resp.status_code,
-        headers=ctx.upstream.response_headers(resp),
-        media_type=resp.headers.get("content-type"),
-    )
+    return await GitReadGuard(ctx).handle(request)
 
 
 async def upload_pack(request: Request) -> Response:
@@ -86,27 +131,9 @@ async def upload_pack(request: Request) -> Response:
 
     Data phase of ``git clone`` and ``git fetch``: the client negotiates which
     objects it needs (want/have lines) and the server streams back a packfile.
-    Read-only; never modifies the remote.
     """
     ctx: AppContext = request.app.state.ctx
-    project = _project(request)
-
-    denied = mode_gate_off(ctx.cfg)
-    if denied is None:
-        denied = project_gate(project, ctx.cfg)
-    if denied is not None:
-        return deny_json(denied)
-
-    resp = await ctx.upstream.git_post_stream(
-        project,
-        "git-upload-pack",
-        body=request.stream(),
-        content_type=request.headers.get(
-            "content-type", "application/x-git-upload-pack-request"
-        ),
-        token=TokenKind.READ,
-    )
-    return stream_upstream(resp)
+    return await GitReadGuard(ctx).handle(request)
 
 
 def _forward_encoding(request: Request) -> dict[str, str]:

@@ -56,12 +56,7 @@ from .state import State
 
 
 def mode_gate_off(cfg: Config) -> Optional[Decision]:
-    """M0: deny every operation while GitLab is intentionally disabled.
-
-    Shared by :func:`kernel_gates` and the thin, outside-the-pipeline read
-    handlers (git advertise/upload-pack, §03.2) so both call the same
-    definition instead of re-testing ``cfg.gitlab_enabled`` inline.
-    """
+    """M0: deny every operation while GitLab is intentionally disabled."""
     if not cfg.gitlab_enabled:
         return Decision(False, R0, "GitLab disabled (GITLAB_MODE=off)")
     return None

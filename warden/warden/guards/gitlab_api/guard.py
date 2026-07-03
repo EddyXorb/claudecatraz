@@ -8,15 +8,12 @@ that never leaks a GitLab response.
 
 from __future__ import annotations
 
-import time
-import uuid
 from typing import Any, Mapping, Optional
 
 import httpx
 from starlette.requests import Request
 from starlette.responses import Response
 
-from ...core.audit import AuditEvent
 from ...core.config import Config
 from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
@@ -24,7 +21,7 @@ from ...core.rules import R6
 from ...errors import deny_json
 from .catalog import CatalogEntry, match_endpoint
 from .context import AppContext
-from .intent import ApiIntent
+from .intent import ApiIntent, GraphqlIntent
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
 from .policy import capability_gate, decide
 from .upstream import stream_upstream
@@ -159,33 +156,50 @@ async def handle(request: Request) -> Response:
     return await ApiGuard(ctx).handle(request)
 
 
-async def deny_graphql(request: Request) -> Response:
-    """`/api/graphql` — always 403, always audited, never contacts upstream (B5).
+class GraphqlGuard(Guard[GraphqlIntent]):
+    """`/api/graphql` — always 403, never contacts upstream (B5).
 
     GitLab's GraphQL API can express every write the REST filter blocks (create
     a tag, merge an MR) in a single mutation; routing it would silently bypass
-    R2–R4. This handler makes the refusal *designed*, not merely "not wired up"
-    (§06-migration.md Anti-Ziele) — the app's routes point every `/api/graphql`
-    method here instead of proxying, so the deny is intentional and logged like
-    any other decision. Outside the kernel pipeline on purpose (§03.2's "dünne
-    Handler" carve-out): there is no Intent to parse, only an unconditional deny.
+    R2-R4, so this guard denies unconditionally instead of proxying.
     """
+
+    @property
+    def name(self) -> str:
+        return "api"
+
+    def __init__(self, ctx: AppContext) -> None:
+        super().__init__(ctx.cfg, ctx.state, ctx.audit)
+
+    async def parse(self, request: Request) -> GraphqlIntent:
+        return GraphqlIntent(path=request.url.path, _method=request.method)
+
+    async def enrich(self, intent: GraphqlIntent) -> GraphqlIntent:
+        return intent
+
+    def capability_gate(self, intent: GraphqlIntent, cfg: Config) -> Optional[Decision]:
+        return None
+
+    def decide(self, intent: GraphqlIntent, state: StateView, cfg: Config) -> Decision:
+        return Decision(False, R6, "GraphQL is not permitted — unmodelled channel")
+
+    def record(self, intent: GraphqlIntent, decision: Decision) -> None:
+        pass
+
+    async def forward(
+        self, request: Request, intent: GraphqlIntent, decision: Decision
+    ) -> Response:
+        raise AssertionError("unreachable — decide() always denies")
+
+    def deny_response(
+        self, intent: GraphqlIntent, decision: Decision, state: StateView
+    ) -> Response:
+        return deny_json(decision)
+
+    def audit_fields(self, intent: GraphqlIntent) -> Mapping[str, Any]:
+        return {"path": intent.path, "kind": None}
+
+
+async def deny_graphql(request: Request) -> Response:
     ctx: AppContext = request.app.state.ctx
-    correlation_id = str(uuid.uuid4())
-    started = time.monotonic()
-    decision = Decision(False, R6, "GraphQL is not permitted — unmodelled channel")
-    state = ctx.state.view()
-    ctx.audit.log(
-        AuditEvent(
-            guard="api",
-            correlation_id=correlation_id,
-            method=request.method,
-            project="",
-            decision=decision,
-            state=state,
-            started=started,
-            upstream_status=None,
-            extra={"path": request.url.path, "kind": None},
-        )
-    )
-    return deny_json(decision)
+    return await GraphqlGuard(ctx).handle(request)

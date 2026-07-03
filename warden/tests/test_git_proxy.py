@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 
@@ -168,6 +169,57 @@ async def test_read_only_advertise_receive_pack_denied_no_upstream():
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R0"
     assert "read-only" in resp.json()["reason"]
+
+
+async def test_read_only_push_discovery_denied_r0_not_r6_for_unallowed_project():
+    # Behaviour change (Schritt C): the kernel checks off -> writes -> project,
+    # so a write-mode denial now preempts the allowlist check. Before, advertise
+    # hand-rolled off -> project -> writes and this case reported R6. Both are
+    # a 403; only the reported rule id changed.
+    async with _mode_client("read-only") as c:
+        resp = await c.get("/git/other/secret.git/info/refs?service=git-receive-pack")
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R0"
+
+
+async def _read_audit_lines(ctx, tmp_path, make_request):
+    logf = tmp_path / "audit.jsonl"
+    ctx.audit = AuditLog(str(logf))
+    ctx.audit.start()
+    await make_request()
+    await ctx.audit.stop()
+    return [json.loads(line) for line in logf.read_text().splitlines()]
+
+
+async def test_advertise_read_is_audited(client, respx_router, ctx, tmp_path):
+    # Behaviour change (Schritt C): git reads now run through the same kernel
+    # pipeline as pushes/API reads, so they show up in the audit log too
+    # (previously git reads were never audited at all).
+    respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
+        return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
+    )
+    records = await _read_audit_lines(
+        ctx,
+        tmp_path,
+        lambda: client.get("/git/group/proj.git/info/refs?service=git-upload-pack"),
+    )
+    assert len(records) == 1
+    assert records[0]["guard"] == "git"
+    assert records[0]["decision"] == "allow"
+
+
+async def test_upload_pack_read_is_audited(client, respx_router, ctx, tmp_path):
+    respx_router.route(method="POST", url__regex=r".*/git-upload-pack$").mock(
+        return_value=httpx.Response(200, content=b"fetched-pack")
+    )
+    records = await _read_audit_lines(
+        ctx,
+        tmp_path,
+        lambda: client.post("/git/group/proj.git/git-upload-pack", content=b"0032want ..."),
+    )
+    assert len(records) == 1
+    assert records[0]["guard"] == "git"
+    assert records[0]["decision"] == "allow"
 
 
 async def test_read_only_advertise_upload_pack_passes_through(respx_router):

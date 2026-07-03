@@ -45,3 +45,23 @@ class ApiIntent(Intent):
     @property
     def method(self) -> str:
         return self._method
+
+
+@dataclass
+class GraphqlIntent(Intent):
+    """`/api/graphql` — always denied; ``project``/``writes`` carry no weight."""
+
+    path: str
+    _method: str
+
+    @property
+    def writes(self) -> bool:
+        return False
+
+    @property
+    def project(self) -> str:
+        return ""
+
+    @property
+    def method(self) -> str:
+        return self._method
