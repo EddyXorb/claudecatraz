@@ -1,5 +1,4 @@
 """Tests for P8: catraz reload — recreate infra services with stale config."""
-
 import argparse
 import datetime
 import os
@@ -32,7 +31,6 @@ def _seed(tmp_path: Path) -> None:
 
 # ── _parse_docker_time ────────────────────────────────────────────────────────
 
-
 def test_parse_docker_time_nanos() -> None:
     dt = compose._parse_docker_time("2026-06-28T10:11:12.123456789Z")
     assert dt is not None
@@ -56,7 +54,6 @@ def test_parse_docker_time_garbage() -> None:
 
 
 # ── stale_services ────────────────────────────────────────────────────────────
-
 
 def test_stale_services_changed_file_listed(tmp_path: Path) -> None:
     """Tight window: file stat'd just after start → service listed (catches tz bug)."""
@@ -86,10 +83,7 @@ def test_stale_services_none_start_listed(tmp_path: Path) -> None:
 
 # ── cmd_reload ────────────────────────────────────────────────────────────────
 
-
-def test_cmd_reload_up_to_date_no_up_call(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_reload_up_to_date_no_up_call(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Nothing stale → EXIT_OK and no `up` compose call."""
     _seed(tmp_path)
     rows = [
@@ -100,22 +94,16 @@ def test_cmd_reload_up_to_date_no_up_call(
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
-    monkeypatch.setattr(
-        compose, "container_started_at", lambda root, name, **kw: future
-    )
-    monkeypatch.setattr(compose, "run", lambda root, args, **kw: calls.append(args))
-    rc = reload_cmd.cmd_reload(
-        tmp_path,
-        typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)),
-        _out(),
-    )
+    monkeypatch.setattr(compose, "container_started_at",
+                        lambda root, name, **kw: future)
+    monkeypatch.setattr(compose, "run",
+                        lambda root, args, **kw: calls.append(args))
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)), _out())
     assert rc == EXIT_OK
     assert not any("up" in c for c in calls)
 
 
-def test_cmd_reload_stale_force_recreates(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_reload_stale_force_recreates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A stale service → `up -d --force-recreate --build <service>` issued."""
     _seed(tmp_path)
     rows = [{"Service": "gitlab-warden", "Name": "c-warden"}]
@@ -123,70 +111,48 @@ def test_cmd_reload_stale_force_recreates(
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
-    monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: old)
-    monkeypatch.setattr(
-        compose,
-        "run",
-        lambda root, args, **kw: calls.append(args)
-        or types.SimpleNamespace(returncode=0),
-    )  # type: ignore[func-returns-value]
-    rc = reload_cmd.cmd_reload(
-        tmp_path,
-        typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)),
-        _out(),
-    )
+    monkeypatch.setattr(compose, "container_started_at",
+                        lambda root, name, **kw: old)
+    def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compose, "run", _mock_compose_run)
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)), _out())
     assert rc == EXIT_OK
     assert calls == [["up", "-d", "--force-recreate", "--build", "gitlab-warden"]]
 
 
-def test_cmd_reload_not_running(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_reload_not_running(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No running containers → EXIT_OK, no up call."""
     _seed(tmp_path)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: [])
-    monkeypatch.setattr(compose, "run", lambda root, args, **kw: calls.append(args))
-    rc = reload_cmd.cmd_reload(
-        tmp_path,
-        typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)),
-        _out(),
-    )
+    monkeypatch.setattr(compose, "run",
+                        lambda root, args, **kw: calls.append(args))
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)), _out())
     assert rc == EXIT_OK
     assert calls == []
 
 
-def test_cmd_reload_force_not_running_rebuilds(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_reload_force_not_running_rebuilds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """--force with the stack down → rebuild + start every infra service anyway."""
     _seed(tmp_path)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: [])
-    monkeypatch.setattr(
-        compose,
-        "run",
-        lambda root, args, **kw: calls.append(args)
-        or types.SimpleNamespace(returncode=0),
-    )  # type: ignore[func-returns-value]
-    rc = reload_cmd.cmd_reload(
-        tmp_path,
-        typing.cast(
-            argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)
-        ),
-        _out(),
-    )
+    def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compose, "run", _mock_compose_run)
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)), _out())
     assert rc == EXIT_OK
-    assert calls == [
-        ["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]
-    ]
+    assert calls == [["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]]
 
 
-def test_cmd_reload_force_running_not_stale(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_reload_force_running_not_stale(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """--force ignores staleness: rebuilds even when config is up to date."""
     _seed(tmp_path)
     rows = [
@@ -197,23 +163,12 @@ def test_cmd_reload_force_running_not_stale(
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
-    monkeypatch.setattr(
-        compose, "container_started_at", lambda root, name, **kw: future
-    )
-    monkeypatch.setattr(
-        compose,
-        "run",
-        lambda root, args, **kw: calls.append(args)
-        or types.SimpleNamespace(returncode=0),
-    )  # type: ignore[func-returns-value]
-    rc = reload_cmd.cmd_reload(
-        tmp_path,
-        typing.cast(
-            argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)
-        ),
-        _out(),
-    )
+    monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: future)
+    def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compose, "run", _mock_compose_run)
+    rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)), _out())
     assert rc == EXIT_OK
-    assert calls == [
-        ["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]
-    ]
+    assert calls == [["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]]
