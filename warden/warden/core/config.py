@@ -41,6 +41,7 @@ class Config:
     reconcile_interval_s: int = 300
     state_db_path: str = "/var/lib/warden/state.db"
     audit_log_path: str = "/var/log/warden/audit.jsonl"
+    log_path: str = "/var/log/warden/warden.log"
     agent_port: int = 8080
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"

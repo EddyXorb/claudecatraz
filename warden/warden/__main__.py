@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import sys
 
@@ -14,9 +15,12 @@ from .context import AppContext, build_context
 from .core.audit import AuditLog
 from .core.config import ConfigError
 from .core.config_load import from_env
+from .core.logging_setup import configure_logging
 from .core.state import SchemaError, State
 from .guards.gitlab.upstream import Upstream
 from .guards.gitlab_api.catalog import CatalogConfigError
+
+log = logging.getLogger("warden")
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:
@@ -27,19 +31,19 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
             for g in ctx.guards:
                 await g.reconcile()
         except Exception as exc:  # never crash the loop
-            print(f"warden: periodic reconcile error: {exc}", file=sys.stderr)
+            log.error("periodic reconcile error: %s", exc)
 
 
 # TODO: tidy up this function and split it into smaller functions.
 async def _serve() -> None:
     cfg = from_env()
+    configure_logging(cfg.log_path)
 
     if cfg.gitlab_enabled and not cfg.allowed_projects:
-        print(
-            "warden: WARNING: allowed_projects is empty — ALL GitLab operations "
-            "will be denied (R-rules) until a project is added to warden.toml. "
-            "The dev-env still starts for offline work.",
-            file=sys.stderr,
+        log.warning(
+            "allowed_projects is empty — ALL GitLab operations will be denied "
+            "(R-rules) until a project is added to warden.toml. The dev-env "
+            "still starts for offline work."
         )
     # TODO: this leaks from gitlab_api, should not be here. If is is really needed it
     # can persist in the Guards that the build-context creates, but as part of the
@@ -61,7 +65,7 @@ async def _serve() -> None:
     for g in ctx.guards:
         ok = (await g.reconcile()) and ok
     if not ok:
-        print("warden: initial reconcile incomplete — state stays locked", file=sys.stderr)
+        log.error("initial reconcile incomplete — state stays locked")
 
     agent = uvicorn.Server(
         uvicorn.Config(create_app(ctx), host="0.0.0.0", port=cfg.agent_port, log_level="info")

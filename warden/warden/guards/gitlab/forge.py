@@ -9,6 +9,7 @@ state, making it a guard-agnostic collaborator.
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from typing import Any, Callable, Optional
@@ -19,6 +20,8 @@ from ...core.model import StateView, TokenKind
 from ...core.state import State
 from .state import ForgeState
 from .upstream import Upstream, project_id
+
+log = logging.getLogger("warden")
 
 
 # Generic Forge class, a forge is git + nice accessors around it, such as gitlab,
@@ -137,7 +140,7 @@ class GitForge:
                 branches = await self._list_agent_branches(pid)
                 mrs = await self._list_agent_mrs(pid, sa)
             except Exception as exc:  # keep state locked on any failure
-                print(f"warden: reconcile failed for {project}: {exc}", file=sys.stderr)
+                log.error("reconcile failed for %s: %s", project, exc)
                 ok = False
                 continue
             resolved_ids.append(numeric_id)
