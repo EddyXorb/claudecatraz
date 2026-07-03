@@ -61,16 +61,20 @@ def test_start_remote_daemon_brings_up_remote_profile(monkeypatch: pytest.Monkey
     monkeypatch.setattr(run_cmd, "_wait_healthy", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "_print_urls", lambda out: None)
     resolve_calls: list[object] = []
-    # the lambdas append for their side effect then return a fake result; mypy flags the
-    # None-returning append used with `or`, which is exactly the intent here.
-    monkeypatch.setattr(
-        image, "resolve_base",
-        lambda root: resolve_calls.append(root) or "catraz-base:test")  # type: ignore[func-returns-value]
+
+    def _mock_resolve(root: object) -> str:
+        resolve_calls.append(root)
+        return "catraz-base:test"
+
+    monkeypatch.setattr(image, "resolve_base", _mock_resolve)
     monkeypatch.setattr(compose_mod, "prepare",
                         lambda root, *, render, extra_env=None: ["docker", "compose"])
-    monkeypatch.setattr(
-        run_cmd, "compose_run",
-        lambda root, args, **k: compose_calls.append(list(args)) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+
+    def _mock_compose_run(root: Path, args: typing.Any, **k: typing.Any) -> types.SimpleNamespace:
+        compose_calls.append(list(args))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_cmd, "compose_run", _mock_compose_run)
     rc = run_cmd.cmd_run(tmp_path, typing.cast(argparse.Namespace, _ns(["claude-remote"])), _out())
     assert rc == 0
     assert compose_calls == [["--profile", "remote", "up", "-d"]]
@@ -100,10 +104,15 @@ def _mock_oneoff(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[s
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
     monkeypatch.setattr(compose_mod, "prepare",
                         lambda root, *, render, extra_env=None: ["docker", "compose"])
-    monkeypatch.setattr(
-        run_cmd, "compose_run",
-        lambda root, args, *, prefix=None, check=True, tee=None, **k:
-        calls.append({"args": list(args), "tee": tee}) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+
+    def _mock_compose_run_oneoff(
+        root: Path, args: typing.Any, *, prefix: typing.Any = None, check: bool = True,
+        tee: typing.Any = None, **k: typing.Any
+    ) -> types.SimpleNamespace:
+        calls.append({"args": list(args), "tee": tee})
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_cmd, "compose_run", _mock_compose_run_oneoff)
     return calls
 
 

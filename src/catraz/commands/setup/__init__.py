@@ -1,4 +1,5 @@
 """Setup and maintenance commands: init, doctor, sync."""
+
 import argparse
 import json
 import os
@@ -33,6 +34,7 @@ __all__ = [
 
 def cmd_doctor(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.doctor import DOCTOR_SECTIONS  # noqa: F401
+
     only = [args.section] if args.section else None
     f = run_doctor(root, only=only, fix=args.fix)
     bad, warn = print_findings(f, out)
@@ -83,11 +85,19 @@ def _init_sync_credentials(
     root: Path, env_path: Path, args: argparse.Namespace, out: Out
 ) -> None:
     from catraz.paths import claude_home
+    from ._sync import _credentials_mode
+
     auth_mode = load_env(env_path).get("AUTH_MODE", "subscription")
     if args.skip_sync:
-        out.info("• --skip-sync: skipping Claude credential import")
+        out.info("• --skip-sync: skipping credential import")
+    elif auth_mode == "subscription" and _credentials_mode(root) == "persistent":
+        out.info(
+            "• this agent profile uses persistent credentials (§05.6) — "
+            "run `claude login` inside the container (`catraz run shell`) once; "
+            "state persists in .catraz/state/<profile>/"
+        )
     elif auth_mode == "subscription":
-        out.info("\n• importing Claude credentials (sync)…")
+        out.info("\n• importing credentials (sync)…")
         try:
             _run_sync(root, out)
         except CliError as e:
@@ -97,8 +107,12 @@ def _init_sync_credentials(
         ch.mkdir(parents=True, exist_ok=True)
         cj = ch / ".claude.json"
         if not cj.exists():
-            cj.write_text(json.dumps(
-                {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2))
+            cj.write_text(
+                json.dumps(
+                    {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
+                    indent=2,
+                )
+            )
         out.info("• api_key mode: provisioned default .claude.json")
 
 
@@ -108,7 +122,9 @@ def _init_preflight(root: Path, out: Out) -> int:
     bad, _ = print_findings(f, out)
     print()
     if bad:
-        out.info(out.yellow("Some checks failed above. Fix them, then:") + "  catraz doctor")
+        out.info(
+            out.yellow("Some checks failed above. Fix them, then:") + "  catraz doctor"
+        )
         return EXIT_DOCTOR
     out.info(out.green("Ready.") + " Next:  " + out.bold("catraz run"))
     return EXIT_OK
@@ -117,6 +133,7 @@ def _init_preflight(root: Path, out: Out) -> int:
 def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.paths import asset_root
     from ._from import load_inherited, stage_inherited
+
     out.head("catraz init — let's get the stack ready\n")
     cat = root / ".catraz"
     env_path = cat / ".env"
@@ -127,6 +144,7 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     inherited = None
     if init_from:
         from pathlib import Path as _P
+
         src_root = _P(init_from).resolve()
         inherited = load_inherited(src_root)  # raises CliError if invalid
         out.info(f"• inheriting from {src_root}/.catraz")
@@ -168,7 +186,9 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     if args.yes:
         _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out, inherited)
     else:
-        _wizard_interactive(root, env, env_path, secrets_dir, warden_toml, updates, args, out, inherited)
+        _wizard_interactive(
+            root, env, env_path, secrets_dir, warden_toml, updates, args, out, inherited
+        )
 
     if updates:
         set_env_values(env_path, updates)
@@ -196,6 +216,7 @@ def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
         set_toml_list,
         validate_project,
     )
+
     warden_toml = root / ".catraz" / "config" / "warden.toml"
     if not warden_toml.exists():
         raise CliError("not set up — run catraz init", EXIT_CONFIG)
@@ -220,8 +241,13 @@ def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
     set_toml_list(warden_toml, "allowed_projects", merged)
     out.info(out.green(f"• allowed_projects now: {', '.join(merged)}"))
 
-    if _resolve_allowed_projects(root, load_env(root / ".catraz" / ".env"))[1] == ".env override":
-        out.warn("the WARDEN_ALLOWED_PROJECTS override (env or .env) currently shadows "
-                 "warden.toml — this change won't take effect until that var is cleared")
+    if (
+        _resolve_allowed_projects(root, load_env(root / ".catraz" / ".env"))[1]
+        == ".env override"
+    ):
+        out.warn(
+            "the WARDEN_ALLOWED_PROJECTS override (env or .env) currently shadows "
+            "warden.toml — this change won't take effect until that var is cleared"
+        )
     out.info("run `catraz reload` to apply to a running stack")
     return EXIT_OK

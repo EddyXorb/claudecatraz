@@ -1,4 +1,5 @@
 """Tests for P1: catraz allow + GitLab-remote auto-discovery in the wizard."""
+
 import argparse
 import shutil
 import subprocess
@@ -20,8 +21,11 @@ def _out() -> Out:
 
 # ── _project_from_remote_url ──────────────────────────────────────────────────
 
+
 def test_remote_https_with_git_suffix() -> None:
-    assert policy._project_from_remote_url("https://gitlab.com/grp/proj.git") == "grp/proj"
+    assert (
+        policy._project_from_remote_url("https://gitlab.com/grp/proj.git") == "grp/proj"
+    )
 
 
 def test_remote_https_without_git_suffix() -> None:
@@ -33,7 +37,10 @@ def test_remote_ssh_scp_form() -> None:
 
 
 def test_remote_nested_path() -> None:
-    assert policy._project_from_remote_url("https://gitlab.com/grp/sub/proj.git") == "grp/sub/proj"
+    assert (
+        policy._project_from_remote_url("https://gitlab.com/grp/sub/proj.git")
+        == "grp/sub/proj"
+    )
 
 
 def test_remote_non_matching_host() -> None:
@@ -42,7 +49,9 @@ def test_remote_non_matching_host() -> None:
 
 def test_remote_self_hosted_host_match() -> None:
     url = "https://gitlab.example.com/grp/proj.git"
-    assert policy._project_from_remote_url(url, "https://gitlab.example.com") == "grp/proj"
+    assert (
+        policy._project_from_remote_url(url, "https://gitlab.example.com") == "grp/proj"
+    )
     # host-only compare ignores port
     assert policy._project_from_remote_url(url, "gitlab.example.com:8443") == "grp/proj"
 
@@ -59,6 +68,7 @@ def test_remote_empty_or_garbage() -> None:
 
 # ── merge_allowed ─────────────────────────────────────────────────────────────
 
+
 def test_merge_allowed_drops_empty_string() -> None:
     assert policy.merge_allowed([""], ["grp/proj"]) == ["grp/proj"]
 
@@ -68,6 +78,7 @@ def test_merge_allowed_dedupes_preserving_order() -> None:
 
 
 # ── cmd_allow ─────────────────────────────────────────────────────────────────
+
 
 def _seed(tmp_path: Path, allowed_line: str = "allowed_projects    = []") -> Path:
     cfg = tmp_path / ".catraz" / "config"
@@ -97,14 +108,18 @@ def test_cmd_allow_defensive_empty_string_default(tmp_path: Path) -> None:
 
 def test_cmd_allow_rejects_wildcard_writes_valid(tmp_path: Path) -> None:
     warden = _seed(tmp_path)
-    rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/*", "grp/ok"])), _out())
+    rc = setup.cmd_allow(
+        tmp_path, cast(argparse.Namespace, _ns(["grp/*", "grp/ok"])), _out()
+    )
     assert rc == EXIT_OK
     assert policy._read_toml_allowed_projects(warden) == ["grp/ok"]
 
 
 def test_cmd_allow_all_invalid_is_config_error(tmp_path: Path) -> None:
     _seed(tmp_path)
-    rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["leaf", "grp/*"])), _out())
+    rc = setup.cmd_allow(
+        tmp_path, cast(argparse.Namespace, _ns(["leaf", "grp/*"])), _out()
+    )
     assert rc == EXIT_CONFIG
 
 
@@ -120,7 +135,9 @@ def test_cmd_allow_not_set_up(tmp_path: Path) -> None:
         setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
 
 
-def test_cmd_allow_warns_on_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_allow_warns_on_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     warden = _seed(tmp_path)
     monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "other/proj")
     msgs: list[str] = []
@@ -135,11 +152,34 @@ def test_cmd_allow_warns_on_env_override(tmp_path: Path, monkeypatch: pytest.Mon
 
 # ── _discover_gitlab_projects ─────────────────────────────────────────────────
 
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 def test_discover_gitlab_projects(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "remote", "add",
-                    "origin", "https://gitlab.com/grp/proj.git"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "remote", "add",
-                    "other", "https://github.com/grp/other.git"], check=True)
-    assert policy._discover_gitlab_projects(tmp_path, "https://gitlab.com") == ["grp/proj"]
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "remote",
+            "add",
+            "origin",
+            "https://gitlab.com/grp/proj.git",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "remote",
+            "add",
+            "other",
+            "https://github.com/grp/other.git",
+        ],
+        check=True,
+    )
+    assert policy._discover_gitlab_projects(tmp_path, "https://gitlab.com") == [
+        "grp/proj"
+    ]

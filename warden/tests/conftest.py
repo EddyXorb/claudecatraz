@@ -7,11 +7,12 @@ import pytest
 import respx
 
 from warden.app import create_app
-from warden.audit import AuditLog
-from warden.config import Config
-from warden.context import AppContext
-from warden.state import State
-from warden.upstream import Upstream
+from warden.context import AppContext, build_context
+from warden.core.audit import AuditLog
+from warden.core.config import Config
+from warden.core.state import State
+from warden.guards.gitlab.forge import GitForge
+from warden.guards.gitlab.upstream import Upstream
 
 UPSTREAM = "https://gitlab.example"
 
@@ -19,7 +20,7 @@ UPSTREAM = "https://gitlab.example"
 @pytest.fixture
 def cfg() -> Config:
     return Config(
-        branch_prefix="claude/",
+        branch_prefixes=("claude/",),
         max_open_mrs=5,
         max_open_branches=10,
         max_writes_per_hour=60,
@@ -39,11 +40,20 @@ def state() -> State:
 
 
 @pytest.fixture
+def forge(cfg, state) -> GitForge:
+    upstream = Upstream(cfg)
+    audit = AuditLog("-")
+    forge = GitForge(cfg, upstream, state, audit)
+    forge.service_account_id = 42
+    return forge
+
+
+@pytest.fixture
 def ctx(cfg, state) -> AppContext:
     upstream = Upstream(cfg)
     audit = AuditLog("-")
-    ctx = AppContext(cfg, upstream, state, audit)
-    ctx.service_account_id = 42
+    ctx = build_context(cfg, upstream, state, audit)
+    ctx.forge.service_account_id = 42
     return ctx
 
 
@@ -59,4 +69,4 @@ async def client(ctx) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
         yield c
-    await ctx.upstream.aclose()
+    await ctx.forge.upstream.aclose()

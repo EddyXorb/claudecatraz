@@ -17,11 +17,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from warden.app import create_app
-from warden.audit import AuditLog
-from warden.config import Config
-from warden.context import AppContext
-from warden.state import State
-from warden.upstream import Upstream
+from warden.context import build_context
+from warden.core.audit import AuditLog
+from warden.core.config import Config
+from warden.core.state import State
+from warden.guards.gitlab.upstream import Upstream
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
@@ -64,9 +64,7 @@ def _make_backend_handler(project_root: str):
                 "REMOTE_USER": "tester",
                 "GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
             }
-            proc = subprocess.run(
-                ["git", "http-backend"], input=body, env=env, capture_output=True
-            )
+            proc = subprocess.run(["git", "http-backend"], input=body, env=env, capture_output=True)
             raw = proc.stdout
             header_blob, _, payload = raw.partition(b"\r\n\r\n")
             status = 200
@@ -143,7 +141,7 @@ def e2e(tmp_path):
 
     # 2. warden in front, pointing at the upstream
     cfg = Config(
-        branch_prefix="claude/",
+        branch_prefixes=("claude/",),
         allowed_projects=("repo",),
         api_url=f"http://127.0.0.1:{backend_port}/api/v4",
         read_token="r",
@@ -152,7 +150,7 @@ def e2e(tmp_path):
     )
     state = State(cfg.state_db_path)
     state.mark_reconciled()
-    ctx = AppContext(cfg, Upstream(cfg), state, AuditLog("-"))
+    ctx = build_context(cfg, Upstream(cfg), state, AuditLog("-"))
     warden_port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(create_app(ctx), host="127.0.0.1", port=warden_port, log_level="error")

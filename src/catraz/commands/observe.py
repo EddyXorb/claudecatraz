@@ -1,4 +1,5 @@
 """Observability commands: logs, audit."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,7 +17,9 @@ from catraz import compose
 from catraz.ui import Out
 
 
-def _tail_files(d: Path, glob: str, label: str, args: argparse.Namespace, out: Out) -> int:
+def _tail_files(
+    d: Path, glob: str, label: str, args: argparse.Namespace, out: Out
+) -> int:
     files = sorted(d.glob(glob)) if d.exists() else []
     if not files:
         out.warn(f"no {label} in {d}")
@@ -34,7 +37,7 @@ def _tail_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
 
 
 class _UdsProxy(socketserver.BaseRequestHandler):
-    sock_path = ""           # per-instance via type(...)
+    sock_path = ""  # per-instance via type(...)
 
     def handle(self) -> None:
         with socket.socket(socket.AF_UNIX) as up:
@@ -42,13 +45,14 @@ class _UdsProxy(socketserver.BaseRequestHandler):
 
             def fwd(a: socket.socket, b: socket.socket) -> None:
                 try:
-                    while (d := a.recv(65536)):
+                    while d := a.recv(65536):
                         b.sendall(d)
                 except OSError:
                     pass
                 finally:
                     with contextlib.suppress(OSError):
                         b.shutdown(socket.SHUT_WR)
+
             t = threading.Thread(target=fwd, args=(self.request, up), daemon=True)
             t.start()
             fwd(up, self.request)
@@ -62,7 +66,9 @@ def cmd_logs(root: Path, args: argparse.Namespace, out: Out) -> int:
     # `docker compose logs` never captures it — tail its file transcripts in
     # .catraz/logs/agent instead (written by non-interactive runs, see run.py).
     if args.service and resolve_service(args.service) == compose.SERVICES["agent"]:
-        return _tail_files(root / ".catraz/logs/agent", "*.log", "agent logs", args, out)
+        return _tail_files(
+            root / ".catraz/logs/agent", "*.log", "agent logs", args, out
+        )
     log_args = ["logs"]
     if args.follow:
         log_args.append("-f")
@@ -98,12 +104,12 @@ def cmd_ps(root: Path, args: argparse.Namespace, out: Out) -> int:
 def cmd_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
     sock = root / ".catraz/state/warden/run/admin.sock"
     if not args.web:
-        return _tail_audit(root, args, out)            # existing JSONL tail
+        return _tail_audit(root, args, out)  # existing JSONL tail
     if not sock.exists():
         out.err("audit socket not found — run `catraz run` first")
         return EXIT_GENERAL
     handler = type("H", (_UdsProxy,), {"sock_path": str(sock)})
-    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)   # ephemeral port
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)  # ephemeral port
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     out.info(f"audit viewer: {url}  (Ctrl-C to stop)")
     webbrowser.open(url)

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from warden.config import Config, ConfigError, from_env
+from warden.core.config import Config, ConfigError
+from warden.core.config_load import from_env
 
 _MIN = {
     "ALLOWED_PROJECTS": "group/proj",
@@ -24,11 +25,10 @@ _MIN = {
 
 
 # --- project_allowed -----------------------------------------------------------
-def test_project_allowed_exact_subpath_and_git_suffix():
+def test_project_allowed_exact_match_and_git_suffix():
     cfg = Config(allowed_projects=("group/proj",))
     assert cfg.project_allowed("group/proj")
     assert cfg.project_allowed("group/proj.git")  # .git stripped
-    assert cfg.project_allowed("group/proj/sub")  # subpath
     assert cfg.project_allowed("/group/proj/")  # surrounding slashes ignored
 
 
@@ -39,17 +39,15 @@ def test_project_allowed_rejects_prefix_confusion():
     assert not cfg.project_allowed("other/secret")
 
 
+def test_project_allowed_rejects_subpath():
+    # B4: the allowlist names concrete projects, never group/project prefixes —
+    # "group/proj/sub" must NOT be allowed by an allowlist entry "group/proj".
+    cfg = Config(allowed_projects=("group/proj",))
+    assert not cfg.project_allowed("group/proj/sub")
+
+
 def test_project_allowed_empty_allowlist_denies_all():
     assert not Config(allowed_projects=()).project_allowed("group/proj")
-
-
-def test_project_allowed_matches_reconciled_numeric_id():
-    # GitLab's /projects/:id accepts the numeric id, not just the path. Reconcile
-    # fills allowed_project_ids; a request naming the id must pass, an unknown id
-    # must still be denied (default-deny).
-    cfg = Config(allowed_projects=("group/proj",), allowed_project_ids=("81882161",))
-    assert cfg.project_allowed("81882161")
-    assert not cfg.project_allowed("99999999")
 
 
 def test_git_base_strips_api_suffix():
@@ -59,7 +57,12 @@ def test_git_base_strips_api_suffix():
 # --- from_env: happy path ------------------------------------------------------
 def test_from_env_parses_and_derives_urls():
     cfg = from_env(
-        {**_MIN, "ALLOWED_PROJECTS": "group/proj, group/two", "GITLAB_URL": "https://gl.example/", "MAX_OPEN_MRS": "3"},
+        {
+            **_MIN,
+            "ALLOWED_PROJECTS": "group/proj, group/two",
+            "GITLAB_URL": "https://gl.example/",
+            "MAX_OPEN_MRS": "3",
+        },
         strict=True,
     )
     assert cfg.allowed_projects == ("group/proj", "group/two")  # CSV split + trimmed
@@ -185,11 +188,61 @@ def test_non_integer_quota_aborts_startup():
 
 def test_empty_branch_prefix_aborts_startup(tmp_path):
     # An empty BRANCH_PREFIX env now means "fall back to the file", so an empty
-    # prefix can only come from the toml — and must still abort.
+    # prefix can only come from the toml (legacy scalar form) — and must still abort.
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefix = ""\n')
     with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
         from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_empty_branch_prefixes_list_aborts_startup(tmp_path):
+    """An empty ``branch_prefixes`` list is fail-closed: it must not mean "no filter"."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text("branch_prefixes = []\n")
+    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_branch_prefixes_list_with_empty_element_aborts_startup(tmp_path):
+    """A blank element (e.g. ``["claude/", ""]``) would allow every branch — reject it."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/", ""]\n')
+    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_branch_prefixes_and_legacy_branch_prefix_both_set_aborts(tmp_path):
+    """Two sources of truth for the same namespace (list + legacy scalar) is an error."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/"]\nbranch_prefix = "claude/"\n')
+    with pytest.raises(
+        ConfigError, match="branch_prefixes.*branch_prefix|branch_prefix.*branch_prefixes"
+    ):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_branch_prefixes_list_from_toml(tmp_path):
+    """A ``branch_prefixes`` list in warden.toml becomes the tuple as-is."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/", "bot/"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.branch_prefixes == ("claude/", "bot/")
+
+
+def test_legacy_branch_prefix_scalar_becomes_single_element_tuple(tmp_path):
+    """The legacy scalar ``branch_prefix = "..."`` form stays valid as a 1-element list."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefix = "claude/"\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.branch_prefixes == ("claude/",)
+
+
+def test_branch_prefix_env_csv_overrides_toml_list(tmp_path):
+    """BRANCH_PREFIX env accepts CSV for multiple prefixes, and wins over the file."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/"]\n')
+    cfg = from_env({**_MIN, "BRANCH_PREFIX": "claude/,bot/"}, strict=True, toml_path=str(toml))
+    assert cfg.branch_prefixes == ("claude/", "bot/")
 
 
 # --- toml source of truth + env override (one source per setting) -------------
@@ -206,7 +259,7 @@ def test_tunables_read_from_toml_when_env_absent(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env({"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w"}, toml_path=str(toml))
-    assert cfg.branch_prefix == "claude/"
+    assert cfg.branch_prefixes == ("claude/",)
     assert (cfg.max_open_mrs, cfg.max_open_branches, cfg.max_writes_per_hour) == (7, 3, 99)
     assert cfg.allowed_projects == ("group/a", "group/b")
 
@@ -224,9 +277,9 @@ def test_env_overrides_toml(tmp_path):
         },
         toml_path=str(toml),
     )
-    assert cfg.branch_prefix == "test/"            # env wins
-    assert cfg.max_open_mrs == 1                    # env wins
-    assert cfg.max_open_branches == 3              # not overridden → toml
+    assert cfg.branch_prefixes == ("test/",)  # env wins
+    assert cfg.max_open_mrs == 1  # env wins
+    assert cfg.max_open_branches == 3  # not overridden → toml
     assert cfg.allowed_projects == ("group/x", "group/y")
 
 
@@ -235,10 +288,15 @@ def test_empty_env_falls_back_to_toml(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env(
-        {"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w", "BRANCH_PREFIX": "", "ALLOWED_PROJECTS": ""},
+        {
+            "GITLAB_READ_TOKEN": "r",
+            "GITLAB_WRITE_TOKEN": "w",
+            "BRANCH_PREFIX": "",
+            "ALLOWED_PROJECTS": "",
+        },
         toml_path=str(toml),
     )
-    assert cfg.branch_prefix == "claude/"
+    assert cfg.branch_prefixes == ("claude/",)
     assert cfg.allowed_projects == ("group/a", "group/b")
 
 
@@ -259,6 +317,7 @@ def test_invalid_toml_type_aborts(tmp_path):
 
 
 # --- _secret / *_FILE indirection (11.1) --------------------------------------
+
 
 def test_secret_file_read_token(tmp_path):
     """(a) GITLAB_READ_TOKEN_FILE → tmp file "glpat-x\n" → read_token == "glpat-x"."""

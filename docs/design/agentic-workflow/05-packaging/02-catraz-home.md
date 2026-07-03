@@ -1,5 +1,15 @@
 # 02 — `.catraz/`-Heim & Compose aus dem Asset
 
+> **Update (§06-migration.md Schritt 7, Agent-Layer):** die Dockerfile-COPY-Pfade
+> unten (`COPY container/entrypoint.py /entrypoint.py`, `COPY AGENT.md
+> /opt/claude-dev-env/AGENT.md`) beschreiben den vor-Schritt-7-Stand. Seit Schritt 7
+> COPYt `assets/agents/claude/layer.Dockerfile` zusätzlich `agent_contract.py`/
+> `git_routing.py` (generisch) sowie `agents/claude/{adapter.py,agent.toml,
+> AGENT.md.tmpl}` (agent-spezifisch) flach neben den Entrypoint — es gibt kein
+> statisches `AGENT.md`-Bind-Mount mehr, die Instruktionsdatei wird zur Laufzeit
+> aus dem Template gerendert (`adapter.render_instructions`, §05.2).
+> `paths.claude_home` ist unverändert.
+
 **Ziel:** Laufzeit/Config liegen unter `<projekt>/.catraz/`; `catraz` findet das Projekt wie
 `git` aufwärts; Compose kommt aus dem Asset, nicht aus dem CWD. **Voraussetzung:** Doc 01
 fertig (Paket, `paths.asset_root()`, Assets unter `src/catraz/assets/`). **Konventionen:**

@@ -1,4 +1,5 @@
 """Findings + Checks."""
+
 import json
 import os
 import shutil
@@ -18,13 +19,32 @@ from catraz import image
 # Secrets live in .catraz/secrets/<filename> (mode 0600), mounted into the warden
 # via compose secrets: at /run/secrets/<filename>. Never stored in .env.
 SECRETS = [
-    ("gitlab_read_token", "GitLab READ token (scopes: read_api, read_repository)", "GitLab READ token"),
-    ("gitlab_write_token", "GitLab WRITE token (classic 'api' scope, or fine-grained + 'User: Read')", "GitLab WRITE token"),
+    (
+        "gitlab_read_token",
+        "GitLab READ token (scopes: read_api, read_repository)",
+        "GitLab READ token",
+    ),
+    (
+        "gitlab_write_token",
+        "GitLab WRITE token (classic 'api' scope, or fine-grained + 'User: Read')",
+        "GitLab WRITE token",
+    ),
 ]
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "claude", "net", "auth", "base"]
+DOCTOR_SECTIONS = [
+    "docker",
+    "compose",
+    "env",
+    "tokens",
+    "policy",
+    "endpoints",
+    "agent",
+    "net",
+    "auth",
+    "base",
+]
 # Sections that gate the trust boundary — `up` always runs these, no opt-out.
 SECURITY_SECTIONS = ["docker", "compose", "env", "policy", "auth"]
 
@@ -36,9 +56,14 @@ class Findings:
     def add(self, level: str, section: str, msg: str, hint: str | None = None) -> None:
         self.items.append((level, section, msg, hint))
 
-    def ok(self, sec: str, msg: str) -> None: self.add(OK, sec, msg)
-    def warn(self, sec: str, msg: str, hint: str | None = None) -> None: self.add(WARN, sec, msg, hint)
-    def bad(self, sec: str, msg: str, hint: str | None = None) -> None: self.add(BAD, sec, msg, hint)
+    def ok(self, sec: str, msg: str) -> None:
+        self.add(OK, sec, msg)
+
+    def warn(self, sec: str, msg: str, hint: str | None = None) -> None:
+        self.add(WARN, sec, msg, hint)
+
+    def bad(self, sec: str, msg: str, hint: str | None = None) -> None:
+        self.add(BAD, sec, msg, hint)
 
 
 def which(cmd: str) -> bool:
@@ -52,6 +77,7 @@ MIN_COMPOSE = (2, 20)
 def _parse_version(text: str) -> tuple[int, int] | None:
     """Extract the first x.y.z tuple from a version string like 'Docker version 24.0.7, ...'."""
     import re
+
     m = re.search(r"(\d+)\.(\d+)", text)
     if not m:
         return None
@@ -62,27 +88,48 @@ def check_docker(f: Findings) -> None:
     if not which("docker"):
         f.bad("docker", "docker not on PATH", "install Docker + Compose v2")
         return
-    r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        capture_output=True,
+        text=True,
+    )
     if r.returncode != 0:
-        f.bad("docker", "Docker daemon not reachable", "start Docker (`systemctl start docker`)")
+        f.bad(
+            "docker",
+            "Docker daemon not reachable",
+            "start Docker (`systemctl start docker`)",
+        )
     else:
         ver = _parse_version(r.stdout.strip())
         if ver is None or ver < MIN_ENGINE:
-            f.bad("docker", f"Docker Engine {r.stdout.strip()!r} < {MIN_ENGINE[0]}.{MIN_ENGINE[1]} required",
-                  f"upgrade Docker Engine to ≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]}")
+            f.bad(
+                "docker",
+                f"Docker Engine {r.stdout.strip()!r} < {MIN_ENGINE[0]}.{MIN_ENGINE[1]} required",
+                f"upgrade Docker Engine to ≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]}",
+            )
         else:
-            f.ok("docker", f"Docker Engine {r.stdout.strip()} (≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]} ✔)")
-    r = subprocess.run(["docker", "compose", "version", "--short"], capture_output=True, text=True)
+            f.ok(
+                "docker",
+                f"Docker Engine {r.stdout.strip()} (≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]} ✔)",
+            )
+    r = subprocess.run(
+        ["docker", "compose", "version", "--short"], capture_output=True, text=True
+    )
     if r.returncode != 0:
         f.bad("docker", "Compose v2 missing", "install the `docker compose` plugin")
     else:
         ver = _parse_version(r.stdout.strip())
         if ver is None or ver < MIN_COMPOSE:
-            f.bad("docker", f"Compose {r.stdout.strip()!r} < {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} required",
-                  f"upgrade Docker Compose plugin to ≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]}")
+            f.bad(
+                "docker",
+                f"Compose {r.stdout.strip()!r} < {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} required",
+                f"upgrade Docker Compose plugin to ≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]}",
+            )
         else:
-            f.ok("docker", f"Compose {r.stdout.strip()} (≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} ✔)")
+            f.ok(
+                "docker",
+                f"Compose {r.stdout.strip()} (≥ {MIN_COMPOSE[0]}.{MIN_COMPOSE[1]} ✔)",
+            )
 
 
 def check_compose(root: Path, env: dict[str, str], f: Findings) -> None:
@@ -97,8 +144,11 @@ def check_compose(root: Path, env: dict[str, str], f: Findings) -> None:
     if not services:
         f.warn("compose", "could not resolve compose services")
     elif "gitlab-warden" not in services:
-        f.bad("compose", "gitlab-warden missing from the compose config",
-              "the warden is the trust boundary — it must always be a service")
+        f.bad(
+            "compose",
+            "gitlab-warden missing from the compose config",
+            "the warden is the trust boundary — it must always be a service",
+        )
     else:
         f.ok("compose", "warden service present")
 
@@ -114,13 +164,18 @@ def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
     write_dirs = [root / ".catraz" / "state", root / ".catraz" / "logs"]
     for d in write_dirs:
         if not d.exists():
-            f.bad("env", f"{d.name}/ missing", "run `catraz init` or `catraz doctor --fix`")
+            f.bad(
+                "env",
+                f"{d.name}/ missing",
+                "run `catraz init` or `catraz doctor --fix`",
+            )
             continue
         if dev_uid.isdigit():
             owner = d.stat().st_uid
             if owner != int(dev_uid):
                 f.bad(
-                    "env", f"{d.name}/ owned by uid {owner}, DEV_UID={dev_uid}",
+                    "env",
+                    f"{d.name}/ owned by uid {owner}, DEV_UID={dev_uid}",
                     f"run `catraz doctor --fix` (chown {dev_uid}) — the non-root "
                     "service can't write otherwise",
                 )
@@ -139,8 +194,11 @@ def check_gitlab(env: dict[str, str], f: Findings) -> None:
         return
     url = (env.get("GITLAB_URL") or "").strip()
     if not url:
-        f.warn("tokens", "GITLAB_URL unset — defaulting to https://gitlab.com",
-               "set GITLAB_URL in .catraz/.env for self-hosted GitLab")
+        f.warn(
+            "tokens",
+            "GITLAB_URL unset — defaulting to https://gitlab.com",
+            "set GITLAB_URL in .catraz/.env for self-hosted GitLab",
+        )
     else:
         f.ok("tokens", f"GitLab endpoint: {url}")
 
@@ -167,7 +225,10 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
             f.bad("tokens", "gitlab_read_token is empty", "run `catraz init`")
             return
         if write_t:
-            f.warn("tokens", "write token set but GITLAB_MODE=read-only — it will be ignored")
+            f.warn(
+                "tokens",
+                "write token set but GITLAB_MODE=read-only — it will be ignored",
+            )
         f.ok("tokens", "read token is set")
         _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token")])
         return
@@ -182,7 +243,9 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
     if missing:
         return
     f.ok("tokens", "both GitLab tokens are set")
-    _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")])
+    _probe_gitlab_tokens(
+        root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")]
+    )
     _probe_write_user_read(root, env, f)
 
 
@@ -193,7 +256,12 @@ def _gitlab_get(base: str, path: str, token: str, timeout: int = 5) -> dict[str,
         return cast(dict[str, Any], json.loads(resp.read().decode()))
 
 
-def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: list[tuple[str, str]] | None = None) -> None:
+def _probe_gitlab_tokens(
+    root: Path,
+    env: dict[str, str],
+    f: Findings,
+    tokens: list[tuple[str, str]] | None = None,
+) -> None:
     """Best-effort online probe (P1 roast fix): catch expired/swapped/wrong-scope
     tokens. Degrades silently to 'set/not set' when the host can't reach GitLab.
 
@@ -226,14 +294,23 @@ def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: l
             me = _gitlab_get(base, "/api/v4/personal_access_tokens/self", token)
         except urllib.error.HTTPError as e:
             if e.code == 401:  # GitLab's unambiguous "this token is invalid/expired"
-                f.bad("tokens", f"{label} token rejected by {base} (401)",
-                      "rotate the token — it's invalid or expired")
+                f.bad(
+                    "tokens",
+                    f"{label} token rejected by {base} (401)",
+                    "rotate the token — it's invalid or expired",
+                )
                 continue
             # 403/407/5xx etc. can be the proxy or a scope quirk → don't over-claim.
-            f.warn("tokens", f"{label} token not probed (HTTP {e.code}) — online check skipped (likely because you chose a fine-grained scope)")
+            f.warn(
+                "tokens",
+                f"{label} token not probed (HTTP {e.code}) — online check skipped (likely because you chose a fine-grained scope)",
+            )
             return
         except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
-            f.warn("tokens", f"{label} token not probed ({type(e).__name__}) — offline, check skipped")
+            f.warn(
+                "tokens",
+                f"{label} token not probed ({type(e).__name__}) — offline, check skipped",
+            )
             return  # host is offline/blocked; don't spam the other token
         scopes = me.get("scopes", [])
         active = me.get("active", True)
@@ -242,11 +319,17 @@ def _probe_gitlab_tokens(root: Path, env: dict[str, str], f: Findings, tokens: l
             continue
         f.ok("tokens", f"{label} token valid (scopes: {', '.join(scopes) or '∅'})")
         if label == "read" and "api" in scopes:
-            f.warn("tokens", "READ token carries the write 'api' scope — too broad (R6)",
-                   "issue a read-only token (read_api, read_repository)")
+            f.warn(
+                "tokens",
+                "READ token carries the write 'api' scope — too broad (R6)",
+                "issue a read-only token (read_api, read_repository)",
+            )
         if label == "write" and "api" not in scopes:
-            f.bad("tokens", "WRITE token lacks the 'api' scope — pushes will fail",
-                  "issue a token with the 'api' scope")
+            f.bad(
+                "tokens",
+                "WRITE token lacks the 'api' scope — pushes will fail",
+                "issue a token with the 'api' scope",
+            )
 
 
 def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None:
@@ -265,24 +348,42 @@ def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None
         me = _gitlab_get(base, "/api/v4/user", token)
     except urllib.error.HTTPError as e:
         if e.code == 403:
-            f.bad("tokens", "WRITE token cannot read its own user (GET /user → 403)",
-                  "the warden needs this to resolve its service account and enforce MR "
-                  "ownership (R3) — comments and MR edits will be denied. Grant the token "
-                  "the 'User: Read' (read_user) permission, or use a classic api-scope PAT")
+            f.bad(
+                "tokens",
+                "WRITE token cannot read its own user (GET /user → 403)",
+                "the warden needs this to resolve its service account and enforce MR "
+                "ownership (R3) — comments and MR edits will be denied. Grant the token "
+                "the 'User: Read' (read_user) permission, or use a classic api-scope PAT",
+            )
         elif e.code == 401:
-            f.bad("tokens", "WRITE token rejected on GET /user (401)",
-                  "rotate the token — it's invalid or expired")
+            f.bad(
+                "tokens",
+                "WRITE token rejected on GET /user (401)",
+                "rotate the token — it's invalid or expired",
+            )
         else:
-            f.warn("tokens", f"WRITE token GET /user not probed (HTTP {e.code}) — online check skipped")
+            f.warn(
+                "tokens",
+                f"WRITE token GET /user not probed (HTTP {e.code}) — online check skipped",
+            )
         return
     except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
-        f.warn("tokens", f"WRITE token GET /user not probed ({type(e).__name__}) — offline, check skipped")
+        f.warn(
+            "tokens",
+            f"WRITE token GET /user not probed ({type(e).__name__}) — offline, check skipped",
+        )
         return
     uid = me.get("id")
     if uid is not None:
-        f.ok("tokens", f"WRITE token resolves its service account (GET /user → @{me.get('username')}, id {uid})")
+        f.ok(
+            "tokens",
+            f"WRITE token resolves its service account (GET /user → @{me.get('username')}, id {uid})",
+        )
     else:
-        f.warn("tokens", "WRITE token GET /user returned no id — MR ownership checks (R3) may fail")
+        f.warn(
+            "tokens",
+            "WRITE token GET /user returned no id — MR ownership checks (R3) may fail",
+        )
 
 
 def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
@@ -293,11 +394,15 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         f.ok("policy", "GitLab off — allowlist not required")
         return
     from catraz.policy import _resolve_allowed_projects, validate_project
+
     resolved, source = _resolve_allowed_projects(root, env)
     if not resolved:
-        f.warn("policy", f"allowed_projects empty (source: {source})",
-               "stack still starts (offline work OK); every GitLab op is denied "
-               "until you add a project")
+        f.warn(
+            "policy",
+            f"allowed_projects empty (source: {source})",
+            "stack still starts (offline work OK); every GitLab op is denied "
+            "until you add a project",
+        )
         return
     bad = []
     for p in resolved:
@@ -305,25 +410,116 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         if reason:
             bad.append(f"{p!r} ({reason})")
     if bad:
-        f.bad("policy", "invalid allowed_projects: " + "; ".join(bad),
-              "each entry must be a full project path, no wildcards/leaf/group-prefix")
+        f.bad(
+            "policy",
+            "invalid allowed_projects: " + "; ".join(bad),
+            "each entry must be a full project path, no wildcards/leaf/group-prefix",
+        )
     else:
         f.ok("policy", f"{len(resolved)} allowed project(s) [{source}]")
 
 
-def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
-    from catraz.paths import claude_home
+def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
+    """Effective endpoint-catalog table (§04.3): default set + activations.
+
+    A thin section — the actual report is fetched from the running warden's
+    read-only ``/policy`` admin route and formatted by ``catraz.endpoints``;
+    doctor.py only wires it into the Findings list, so this module doesn't
+    grow with the catalog (see ``catraz.endpoints.fetch_policy_report``).
+    """
+    from catraz.admin_client import AdminUnreachable
+    from catraz.endpoints import fetch_policy_report
+
+    mode = _gitlab_mode(env)
+    if mode == "off":
+        f.ok("endpoints", "GitLab off — endpoint catalog not applicable")
+        return
+    try:
+        report = fetch_policy_report(root)
+    except AdminUnreachable as exc:
+        f.warn(
+            "endpoints",
+            f"activation state unknown ({exc})",
+            "start the stack (`catraz run` / `catraz up`) to see it",
+        )
+        return
+    rows = report["catalog"]
+    active = [r for r in rows if r["active"]]
+    inactive = [r for r in rows if not r["active"]]
+    active_desc = ", ".join(
+        f"{r['id']}[{r['enabled_via']}]" if r["enabled_via"] != "default" else r["id"]
+        for r in active
+    )
+    f.ok("endpoints", f"{len(active)} active: {active_desc or '(none)'}")
+    if inactive:
+        f.ok(
+            "endpoints",
+            f"{len(inactive)} in catalog but not enabled: "
+            f"{', '.join(r['id'] for r in inactive)}",
+        )
+
+
+def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
+    """§05.3/§05.6 — active agent profile + credential-mode consistency.
+
+    `credentials.mode = "sync"` keeps the pre-Schritt-7 check (sandbox seed
+    present, not root-owned — the trap `entrypoint.py` hard-coded: Docker
+    auto-creates a bind target as root when the source file is missing).
+    `credentials.mode = "persistent"` (claude's default, §05.6) instead
+    checks the per-repo state dir itself: present, mode 0700.
+    """
+    from catraz.agents import load_manifest, resolve_agent_profile
+    from catraz.errors import CliError as _CliError
+    from catraz.paths import agent_state_dir, claude_home
+
+    try:
+        profile = resolve_agent_profile(root)
+        manifest = load_manifest(profile)
+    except _CliError as e:
+        f.bad("agent", str(e))
+        return
+    f.ok("agent", f"profile: {profile} (command: {manifest.command})")
+
+    if manifest.credentials_mode == "persistent":
+        state_dir = agent_state_dir(root, profile)
+        if not state_dir.is_dir():
+            f.bad(
+                "agent",
+                f"{state_dir} missing",
+                "run `catraz init` or `catraz doctor --fix`",
+            )
+            return
+        mode = state_dir.stat().st_mode & 0o777
+        if mode != 0o700:
+            f.bad(
+                "agent",
+                f"{state_dir} has mode {oct(mode)}, expected 0700",
+                f"chmod 0700 {state_dir}",
+            )
+        else:
+            f.ok("agent", f"{state_dir} present (0700)")
+        if (state_dir / ".credentials.json").exists():
+            f.ok("agent", "persistent credential present")
+        else:
+            f.ok(
+                "agent",
+                "no persistent credential yet — `claude login` inside the container",
+            )
+        return
+
     home = claude_home(root)
     creds = home / ".credentials.json"
-    # The specific trap entrypoint.py hard-codes: Docker auto-created it as root.
     if home.exists() and home.stat().st_uid == 0 and os.getuid() != 0:
-        f.bad("claude", f"{home} owned by root (Docker auto-created it)",
-              f"sudo rm -rf {home} && mkdir -p {home} && catraz sync")
+        f.bad(
+            "agent",
+            f"{home} owned by root (Docker auto-created it)",
+            f"sudo rm -rf {home} && mkdir -p {home} && catraz sync",
+        )
         return
     if not creds.exists():
-        f.bad("claude", f"no sandbox credential in {home}", "run `catraz sync`")
+        f.bad("agent", f"no sandbox credential in {home}", "run `catraz sync`")
     else:
-        f.ok("claude", "Claude sandbox credential present")
+        f.ok("agent", "sandbox credential present")
 
 
 def check_net(root: Path, f: Findings) -> None:
@@ -350,66 +546,109 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
     # present-but-invalid value is an error.
     mode = env.get("AUTH_MODE") or "subscription"
     if mode not in ("subscription", "api_key"):
-        f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"); return
+        f.bad(
+            "auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"
+        )
+        return
     cred = paths.claude_home(root) / ".credentials.json"
     # api_key: key is in .catraz/secrets/anthropic_api_key (compose secret); bare env var is fallback.
-    api_key = _read_secret_file(root, "anthropic_api_key") or env.get("ANTHROPIC_API_KEY", "")
+    api_key = _read_secret_file(root, "anthropic_api_key") or env.get(
+        "ANTHROPIC_API_KEY", ""
+    )
     if mode == "subscription":
-        if api_key: f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
-        if not cred.exists(): f.bad("auth", "no .credentials.json", "run `catraz sync`")
+        if api_key:
+            f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
+        if not cred.exists():
+            f.bad("auth", "no .credentials.json", "run `catraz sync`")
         else:
             f.ok("auth", "subscription credential present")
-            f.warn("auth", "subscription token refreshes are not persisted across restarts "
-                   "— re-run `catraz sync` if auth breaks")
+            f.warn(
+                "auth",
+                "subscription token refreshes are not persisted across restarts "
+                "— re-run `catraz sync` if auth breaks",
+            )
     else:
-        if not api_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty",
-                               "set it in .catraz/secrets/anthropic_api_key or .catraz/.env")
-        if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",
-                                f"remove {paths.claude_home(root) / '.credentials.json'}")
-        if api_key and not cred.exists(): f.ok("auth", "api_key set")
+        if not api_key:
+            f.bad(
+                "auth",
+                "api_key mode but ANTHROPIC_API_KEY empty",
+                "set it in .catraz/secrets/anthropic_api_key or .catraz/.env",
+            )
+        if cred.exists():
+            f.bad(
+                "auth",
+                "api_key mode but .credentials.json present (ambiguous)",
+                f"remove {paths.claude_home(root) / '.credentials.json'}",
+            )
+        if api_key and not cred.exists():
+            f.ok("auth", "api_key set")
 
 
 def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
     if not which("docker"):
-        f.warn("base", "docker missing — base not checked"); return
+        f.warn("base", "docker missing — base not checked")
+        return
     try:
         base = image.resolve_base(root)
     except CliError as e:
-        f.bad("base", str(e)); return
+        f.bad("base", str(e))
+        return
     contract = subprocess.run(
         ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get"],
-        capture_output=True, text=True)
+        capture_output=True,
+        text=True,
+    )
     if contract.returncode != 0:
         f.bad("base", "base lacks apt-get", "base contract: Debian/Ubuntu")
     else:
         f.ok("base", f"base contract ok ({base})")
-    setuid = subprocess.run(["docker", "run", "--rm", base, "find", "/", "-perm", "/6000",
-                             "-type", "f"], capture_output=True, text=True)
+    setuid = subprocess.run(
+        ["docker", "run", "--rm", base, "find", "/", "-perm", "/6000", "-type", "f"],
+        capture_output=True,
+        text=True,
+    )
     extra = [ln for ln in setuid.stdout.split() if ln]
     if extra:
         # These are distro-shipped setuid/setgid binaries (passwd, su, mount, …). They are
         # rendered inert by the agent's `no-new-privileges` security_opt, which is enforced
         # non-bypassably by compose.assert_invariants on every up/run — so this is informational,
         # not a warning. If that invariant were dropped, up/run would fail loudly, not here.
-        f.ok("base", f"{len(extra)} setuid/setgid binaries in base — neutralized by no-new-privileges")
+        f.ok(
+            "base",
+            f"{len(extra)} setuid/setgid binaries in base — neutralized by no-new-privileges",
+        )
 
 
-def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> Findings:
+def run_doctor(
+    root: Path, only: list[str] | None = None, fix: bool = False
+) -> Findings:
     env: dict[str, str] = load_env(root / ".catraz" / ".env")
     f = Findings()
     sections = only or DOCTOR_SECTIONS
     if fix:
         _doctor_fix(root, env)
-    if "docker" in sections: check_docker(f)
-    if "compose" in sections: check_compose(root, env, f)
-    if "env" in sections: check_env(root, env, f)
-    if "tokens" in sections: check_gitlab(env, f)
-    if "tokens" in sections: check_tokens(root, env, f)
-    if "policy" in sections: check_policy(root, env, f)
-    if "claude" in sections: check_claude(root, env, f)
-    if "net" in sections: check_net(root, f)
-    if "auth" in sections: check_auth(root, env, f)
-    if "base" in sections: check_base(root, env, f)
+    if "docker" in sections:
+        check_docker(f)
+    if "compose" in sections:
+        check_compose(root, env, f)
+    if "env" in sections:
+        check_env(root, env, f)
+    if "tokens" in sections:
+        check_gitlab(env, f)
+    if "tokens" in sections:
+        check_tokens(root, env, f)
+    if "policy" in sections:
+        check_policy(root, env, f)
+    if "endpoints" in sections:
+        check_endpoints(root, env, f)
+    if "agent" in sections:
+        check_agent(root, env, f)
+    if "net" in sections:
+        check_net(root, f)
+    if "auth" in sections:
+        check_auth(root, env, f)
+    if "base" in sections:
+        check_base(root, env, f)
     return f
 
 
@@ -429,7 +668,21 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     claude_secrets = cat / "secrets" / "claude"
     claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
     claude_secrets.chmod(0o700)
-    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid", "logs/claude"]:
+    # §05.3/§05.6: the active agent profile's persistent-state + debug-log dirs.
+    # Best-effort default ("claude") if AGENT_PROFILE is unset/unresolvable —
+    # `check_agent` is the authoritative validator, this is just dir plumbing.
+    profile = (env.get("AGENT_PROFILE") or "claude").strip() or "claude"
+    agent_state = cat / "state" / profile
+    agent_state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    agent_state.chmod(0o700)
+    for d in [
+        "config",
+        "state/warden/db",
+        "state/warden/run",
+        "logs/warden",
+        "logs/squid",
+        f"logs/{profile}",
+    ]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
     secret_files = [f for f, _, _ in SECRETS]

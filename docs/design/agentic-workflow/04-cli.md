@@ -5,6 +5,16 @@
 
 Status: ⏳ geplant. Voraussetzung: Stufen 01/02 implementiert. Parallel zu Stufe 03 baubar.
 
+> **Update (§06-migration.md Schritt 7, Agent-Layer):** `doctor`'s `claude`-Sektion
+> heißt jetzt `agent` (`catraz doctor --section agent`) und prüft je nach
+> `credentials.mode` (§05.6) entweder die Sandbox-Seed-Credential (wie unten
+> beschrieben, Modus `sync`) oder Vorhandensein+Permissions von
+> `.catraz/state/<profile>/` (Modus `persistent`, claude's Default seit Schritt 7).
+> `catraz sync`/`entrypoint.py sync` bleiben für `mode=sync`-Profile gültig wie
+> beschrieben; für `mode=persistent` verweigert `catraz sync` mit einer klaren
+> Meldung (`claude login` im Container statt Host-Import). Neu:
+> `.catraz/.env`'s `AGENT_PROFILE` (Default `claude`, §05.3).
+
 ---
 
 ## 1. Motivation
@@ -88,12 +98,23 @@ Ein Review-Durchgang („roast") hat die erste Vereinfachung hart geprüft. Die
 | **`up --no-check`** ließ ausgerechnet die Sicherheits-Preflight abschalten. | `--no-check` entfällt; die sicherheitskritischen Checks (`policy`/`compose`) laufen immer. |
 | **Exit-Codes/`--print` unscharf.** | Implizites `doctor`-Scheitern in `up` → Exit `3`. `--print` gilt nur für Compose-aufrufende Befehle. |
 
-Bewusst **nicht** übernommen: ein eigener `policy add-project`-Befehl (der Wizard liefert
-den validierten Konstruktionspfad; `doctor` fängt Hand-Edits) und das Aufrufen des
-Warden-eigenen Parsers aus `doctor` (würde catraz an Warden-Interna koppeln und einen
-nicht existierenden `--validate-config`-Flag erfinden). Stattdessen schreibt catraz
-**nie** TOML — es schreibt ausschließlich `.env` — und `doctor` ist ehrlich als
-*schneller Vor-Check* dokumentiert; maßgeblich bleibt der Reconcile des Wardens.
+Bewusst **nicht** übernommen: das Aufrufen des Warden-eigenen Parsers aus `doctor` (würde
+catraz an Warden-Interna koppeln und einen nicht existierenden `--validate-config`-Flag
+erfinden) — `doctor` ist ehrlich als *schneller Vor-Check* dokumentiert; maßgeblich bleibt
+der Reconcile bzw. der Startgate-Lauf des Wardens.
+
+**Nachtrag (§06-migration.md Schritt 4, `catraz allow`/`allow-endpoint`):** Die ursprüngliche
+Aussage „catraz schreibt nie TOML" gilt nicht mehr uneingeschränkt. `catraz allow` (Projekte)
+und `catraz allow-endpoint` (Katalog-Aktivierung, §04.2/04.3) schreiben **gezielte
+Zeilen-Edits** in `config/warden.toml` (`catraz.policy.set_toml_list` bzw.
+`catraz.endpoints.write_enable_list`) — nie eine vollständige Neuserialisierung, nie
+Freitext-Policy-Zeilen (P5 bleibt: catraz *aktiviert* nur benannte, vom Warden-Katalog
+geprüfte IDs, es *erfindet* keine). Für `allow-endpoint` ist das bedingt: ist der Stack
+erreichbar (`/policy`-Admin-Route), wird die ID gegen den echten Katalog geprüft und der
+Edit automatisch geschrieben; offline und ohne existierende `[api.endpoints]`-Sektion
+verweigert das CLI den Schreibvorgang bewusst (das Default-Set client-seitig zu raten wäre
+derselbe Drift-Fehler, den der Katalog gerade beheben soll) und druckt stattdessen den
+exakten TOML-Block zum Einfügen — siehe §5.8.
 
 ---
 
@@ -122,7 +143,15 @@ catraz down [-v]            # stoppen
 catraz status               # Health je Service, URLs, Quota-Snapshot
 catraz logs [service] [-f]  # Logs — agent | warden | proxy | --audit
 catraz sync                 # Claude-Credentials (Sandbox-Konto) vom Host re-importieren
+catraz allow <project>...          # GitLab-Projekt(e) zur Warden-Allowlist hinzufügen
+catraz allow-endpoint <id>...      # Endpoint-Katalog-Eintrag über den Default-Satz hinaus aktivieren (§5.8)
 ```
+
+(Der Befehlsüberblick oben stammt aus der ursprünglichen Skizze und ist an einigen Stellen —
+`up`/`down` vs. das inzwischen implementierte `run`/`reload`/`ps`/`audit` — nicht mehr
+wortgleich mit der aktuellen CLI; `allow`/`allow-endpoint` sind hier nachgetragen, weil
+dieser Schritt sie einführt bzw. dokumentiert. Maßgeblich für die genaue Flag-Form bleibt
+`catraz --help` bzw. `cli.py`.)
 
 **Globale Optionen** (alle Subcommands):
 
@@ -182,6 +211,7 @@ Einzeiler-Begründung **und** Fix-Hinweis.
 | `env` | `.env` existiert, `DEV_UID` == Owner der Bind-Mounts, Schreib-Dirs vorhanden. |
 | `tokens` | `ANTHROPIC_API_KEY` + beide GitLab-Tokens gesetzt (Wert wird nie ausgegeben). **Best-Effort-Online-Probe** vom Host gegen `GITLAB_URL`: Token gültig/nicht abgelaufen, Scopes plausibel (Read-Token nicht `api`-schreibend, Write-Token mit `api`), vertauschte Tokens erkannt. Offline → Rückfall auf „gesetzt/nicht gesetzt". |
 | `policy` | resolvierte `allowed_projects` (`.env`-Override *oder* `warden.toml`) ohne Wildcard/Leaf/Group-Präfix und nicht leer (sonst startet Warden nicht); Limits numerisch. Schneller Vor-Check — maßgeblich bleibt der Warden-Reconcile. |
+| `endpoints` | Effektive Endpoint-Katalog-Tabelle (§04.3): fragt die read-only `/policy`-Admin-Route des laufenden Wardens ab (`catraz.endpoints.fetch_policy_report`) und listet aktive vs. verfügbare-aber-nicht-aktivierte Katalog-Einträge. Rein informativ (nie ❌) — läuft der Stack nicht, ein sauberes ⚠️ statt eines Fehlers. Nicht Teil der `up`-Sicherheits-Sektionen. |
 | `claude` | `CLAUDE_HOME` enthält eine Sandbox-Credential und ist **nicht von root** angelegt (die konkrete Falle aus `entrypoint.py cmd_sync`). |
 | `net` | Audit-Viewer-Port frei. |
 
@@ -239,6 +269,35 @@ will dafür nicht den ganzen Wizard durchlaufen.
 | ---- | ------- |
 | `--from <path>` | Quell-`~/.claude` explizit angeben (Default: `~/.claude`). |
 | `--force` | Vorhandene Credential überschreiben. |
+
+### 5.8 `allow-endpoint` (§06-migration.md Schritt 4, §04.2/04.3)
+
+`catraz allow-endpoint <id> [<id> …]` aktiviert Endpoint-Katalog-Einträge über den
+Default-Satz hinaus (z. B. `branch.create`) in `config/warden.toml`s
+`[api.endpoints].enable`. Katalog-IDs sind ausschließlich dem laufenden Warden bekannt —
+catraz bündelt `warden/` nur als Container-Asset und importiert/führt es nie selbst aus
+(A2); die Validierung läuft daher über die read-only `/policy`-Admin-Route:
+
+1. **Formvalidierung** (offline, immer): jede ID muss wie `namespace.name` aussehen
+   (Kleinbuchstaben, punktgetrennt) — reiner Syntax-Check, kein Katalog-Wissen.
+2. **Live-Pfad** (Stack läuft, `/policy` erreichbar): ID gegen den echten Katalog geprüft;
+   unbekannte ID → Fehler, kein Schreibvorgang. Die aktuell aktive Menge (Default *oder*
+   bereits angepasst) kommt ebenfalls aus `/policy` — die neue ID wird dazugemergt und
+   `[api.endpoints].enable` **automatisch** geschrieben.
+3. **Offline-Pfad, `[api.endpoints]` existiert schon:** die Datei selbst ist dann die
+   Quelle der Wahrheit für die aktuelle Aktivierung — wird gemergt und geschrieben, aber
+   mit einer Warnung, dass die ID nicht gegen den echten Katalog geprüft wurde
+   (`catraz doctor --section endpoints` nach dem nächsten Start empfohlen).
+4. **Offline-Pfad, keine `[api.endpoints]`-Sektion:** catraz kennt den Default-Satz nicht
+   zuverlässig (ihn client-seitig zu hardcoden wäre derselbe Drift-Fehler, den der Katalog
+   beheben soll, F10) — **kein Schreibvorgang**. Stattdessen druckt catraz den exakten
+   TOML-Block zum manuellen Einfügen plus den Hinweis, dass `enable = […]` den Default-Satz
+   ersetzt (die gewünschten bestehenden IDs müssen mit rein).
+
+Nach jedem erfolgreichen Schreibvorgang: Hinweis auf `catraz reload`, damit der Warden die
+geänderte `warden.toml` neu lädt. Implementiert in `catraz/endpoints.py` (Validierung +
+TOML-I/O), `catraz/admin_client.py` (zero-dependency HTTP-GET über den Admin-Unix-Socket)
+und `catraz/commands/endpoints.py` (`cmd_allow_endpoint`).
 
 ---
 

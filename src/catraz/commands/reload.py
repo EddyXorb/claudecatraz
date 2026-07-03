@@ -12,6 +12,7 @@ after the image was built is picked up too (plain `up` reuses the cached image).
 even when the stack is down — the escape hatch for "the image is stale but no
 config file changed" (a pure source fix leaves config mtimes untouched).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,7 +39,9 @@ def _config_paths(root: Path, service: str) -> list[Path]:
     return [p for p in paths if p.exists()]
 
 
-def stale_services(root: Path, started_at: dict[str, datetime.datetime | None]) -> dict[str, list[Path] | list[str]]:
+def stale_services(
+    root: Path, started_at: dict[str, datetime.datetime | None]
+) -> dict[str, list[Path] | list[str]]:
     """Map of stale service → list of changed Paths (or `<unknown start>` marker).
 
     `started_at` is `{service: datetime|None}`, injected so this is unit-testable.
@@ -52,7 +55,8 @@ def stale_services(root: Path, started_at: dict[str, datetime.datetime | None]) 
         changed: list[Path] = []
         for p in _config_paths(root, service):
             mtime = datetime.datetime.fromtimestamp(
-                p.stat().st_mtime, tz=datetime.timezone.utc)
+                p.stat().st_mtime, tz=datetime.timezone.utc
+            )
             if mtime > start:
                 changed.append(p)
         if changed:
@@ -69,7 +73,9 @@ def cmd_reload(root: Path, args: argparse.Namespace, out: Out) -> int:
     prefix = compose.prepare(root, render=False)
     rows = compose_ps(root, prefix=prefix)
     if not rows and not force:
-        out.info("Stack is not running — nothing to reload (use --force to rebuild + start anyway).")
+        out.info(
+            "Stack is not running — nothing to reload (use --force to rebuild + start anyway)."
+        )
         return EXIT_OK
 
     services_running = {r.get("Service") for r in rows}
@@ -98,8 +104,10 @@ def cmd_reload(root: Path, args: argparse.Namespace, out: Out) -> int:
         targets = sorted(stale)
 
     if "claude-dev-env" in services_running:
-        out.info("  note: recreating infra briefly interrupts the agent's egress/git "
-                 "until health returns (the agent itself is not recreated)")
+        out.info(
+            "  note: recreating infra briefly interrupts the agent's egress/git "
+            "until health returns (the agent itself is not recreated)"
+        )
 
     # --build so a service whose source changed after its image was built is
     # rebuilt, not silently recreated from the stale cached image.

@@ -225,7 +225,7 @@ The Warden reads section 1 completely, parses the ref commands and calls
 
 - R6: `group/proj` in allowlist? ✓
 - R2: `claude/feature` has prefix `claude/`? ✓
-- R2: no delete (old ≠ 0000…)? ✓
+- R4: no delete (old ≠ 0000…) — an irreversible verb, never permitted? ✓
 - R5: quotas (branches, rate, lock)? ✓
 
 All checks pass → Warden writes an audit log entry, injects the write

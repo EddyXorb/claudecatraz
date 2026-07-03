@@ -29,24 +29,22 @@ warden/
 ├── pyproject.toml          # uv-managed, pinned deps
 ├── Dockerfile              # python:3.12-slim, non-root, read-only rootfs
 ├── warden/
-│   ├── pktline.py          # pkt-line parser (pure)        ← W7.2
-│   ├── model.py            # core policy data types (pure)
-│   ├── policy.py           # decide(req, state, cfg) (pure) ← W5
-│   ├── api_endpoints.py    # REST write-endpoint table (pure) ← W6.1
-│   ├── config.py           # env → Config, hard validation ← W10
-│   ├── state.py            # SQLite quota state             ← W8
-│   ├── audit.py            # JSONL logger                   ← W11
-│   ├── upstream.py         # httpx + token injection        ← W9.2
-│   ├── context.py          # runtime ctx + reconcile        ← W6.2/W8.2
-│   ├── api_proxy.py        # REST filter                    ← W6
-│   ├── git_proxy.py        # git G1 Smart-HTTP proxy        ← W7
-│   ├── app.py              # Starlette routing              ← W4
-│   └── __main__.py         # uvicorn bootstrap + reconcile  ← W16
+│   ├── app.py              # Starlette routing               ← W4
+│   ├── __main__.py         # uvicorn bootstrap + reconcile   ← W16
+│   ├── errors.py           # deny / git-reject responses     ← W13
+│   ├── core/               # kernel: pipeline (run_guarded), Intent/Decision,
+│   │                       #   rules, capabilities, audit, state, config (§03.2/03.3)
+│   └── guards/
+│       ├── git/            # git Smart-HTTP guard: pktline, ref policy, GitGuard ← W7
+│       └── gitlab_api/     # GitLab REST guard: catalog, read table, ApiGuard,
+│                           #   ownership/reconcile, upstream token injection ← W6
 └── tests/                  # policy / pktline / quota / api / git / redteam
 ```
 
-`pktline.py`, `model.py`, `policy.py`, `api_endpoints.py` are transport-free and pure — the
-foundation of the test strategy and auditability (W2).
+The policy cores (`guards/*/policy.py`, `guards/git/pktline.py`, `core/model.py`,
+`core/capabilities.py`, the catalog) are transport-free and pure — the foundation of the
+test strategy and auditability (W2). Full module tree →
+[`docs/design/agentic-workflow/02-warden.md`](../docs/design/agentic-workflow/02-warden.md).
 
 ## Develop
 

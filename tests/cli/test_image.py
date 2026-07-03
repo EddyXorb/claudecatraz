@@ -1,3 +1,4 @@
+import subprocess
 import types
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ def test_tag_is_content_addressed(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     def fake_run(cmd: list[str], **k: Any) -> Any:
         seen.setdefault("tag", cmd[cmd.index("-t") + 1])
         return type("R", (), {"returncode": 0})()
-    monkeypatch.setattr(image.subprocess, "run", fake_run)  # type: ignore[attr-defined]
+    monkeypatch.setattr(subprocess, "run", fake_run)
     image._build_base(df)
     assert seen["tag"].startswith("catraz-base:") and len(seen["tag"].split(":")[1]) == 12
 
@@ -29,8 +30,12 @@ def test_resolve_default_uses_local_dockerfile(tmp_path: Path, monkeypatch: pyte
     (tmp_path / ".catraz" / ".env").write_text("")
     seen: dict[str, Any] = {}
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
-    monkeypatch.setattr(image.subprocess, "run",  # type: ignore[attr-defined]
-                        lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0))
+
+    def _mock_run_update(cmd: object, **k: Any) -> types.SimpleNamespace:
+        seen.update(cmd=cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", _mock_run_update)
     image.resolve_base(tmp_path)
     assert str(df) in seen["cmd"]
 
@@ -55,7 +60,7 @@ def test_base_context_overrides_build_dir(tmp_path: Path, monkeypatch: pytest.Mo
     seen: dict[str, Any] = {}
     def fake_run(cmd: list[str], **k: Any) -> types.SimpleNamespace:
         seen["cmd"] = cmd; return types.SimpleNamespace(returncode=0)
-    monkeypatch.setattr(image.subprocess, "run", fake_run)  # type: ignore[attr-defined]
+    monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
     image.resolve_base(tmp_path)
     assert str((tmp_path/"ctxroot").resolve()) in seen["cmd"]
@@ -66,7 +71,12 @@ def test_base_context_default_is_dockerfile_dir(tmp_path: Path, monkeypatch: pyt
     df = tmp_path/"docker"/"Dockerfile.base"; df.parent.mkdir(parents=True); df.write_text("FROM scratch\n")
     _seed(tmp_path, "BASE_DOCKERFILE=./docker/Dockerfile.base\n")
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(image.subprocess, "run", lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0))  # type: ignore[attr-defined]
+
+    def _mock_run_ctx(cmd: object, **k: Any) -> types.SimpleNamespace:
+        seen.update(cmd=cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", _mock_run_ctx)
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
     image.resolve_base(tmp_path)
     assert str(df.parent.resolve()) in seen["cmd"]

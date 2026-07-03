@@ -35,7 +35,12 @@ markers = [
 # (src layout) and explicit_package_bases + same-basename test files (importlib
 # mode) need namespace packages so duplicate basenames don't collide.
 files = ["src/catraz", "tests"]
-mypy_path = "src"
+# The generic container entrypoint asset and each agent adapter import each
+# other by bare module name (agent_contract, git_routing) — resolved via
+# sys.path at container/test runtime (§05.2: they're flattened into one
+# image directory by layer.Dockerfile, never a normal package import). Adding
+# their source dirs here lets mypy resolve the same names statically too.
+mypy_path = "src:src/catraz/assets/container"
 python_version = "3.11"
 strict = true
 explicit_package_bases = true

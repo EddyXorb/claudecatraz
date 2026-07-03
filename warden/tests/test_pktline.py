@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gzip
 
-from warden.pktline import (
+from warden.guards.git.pktline import (
     FLUSH,
     capabilities,
     parse_commands,

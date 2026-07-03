@@ -3,7 +3,7 @@
 #
 # Precedence: a matching env var in .catraz/.env OVERRIDES the value here when set
 # (non-empty):
-#   branch_prefix       <- WARDEN_BRANCH_PREFIX
+#   branch_prefixes     <- WARDEN_BRANCH_PREFIX  (comma-separated for more than one)
 #   max_open_mrs        <- WARDEN_MAX_OPEN_MRS
 #   max_open_branches   <- WARDEN_MAX_OPEN_BRANCHES
 #   max_writes_per_hour <- WARDEN_MAX_WRITES_PER_HOUR
@@ -12,7 +12,10 @@
 # the GitLab tokens live in .catraz/secrets/ (one file each, mounted as compose
 # secrets); GITLAB_URL / GITLAB_MODE live in .catraz/.env — never put any here.
 
-branch_prefix       = "claude/"          # R2: only branches with this prefix may be pushed
+# R2: only branches under one of these prefixes may be pushed (the allowed
+# namespace is the union of the list). Legacy single-prefix form still works:
+#   branch_prefix = "claude/"
+branch_prefixes     = ["claude/"]
 max_open_mrs        = 5                   # R5: max simultaneously open MRs
 max_open_branches   = 10                  # R5: max simultaneously existing branches
 max_writes_per_hour = 60                  # R5: max write actions per hour

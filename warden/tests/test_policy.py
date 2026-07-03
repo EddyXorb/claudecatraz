@@ -1,16 +1,35 @@
-"""Unit tests for the pure policy core (W14, §8.1): every rule R0–R6, default-deny."""
+"""Unit tests for the pure policy cores (W14, §8.1): every rule R0–R6, default-deny.
+
+§06-migration.md Schritt 5 split the channel-union ``policy.decide`` into the
+kernel gates (:func:`warden.core.guard.kernel_gates`) plus one pure ``decide``
+per guard. Each guard's ``full_decide`` composes exactly that sequence, so the
+:func:`decide` helper below dispatches on the intent type — the assertions are
+unchanged from the pre-split file.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from warden.config import Config
-from warden.model import ProxyRequest, StateView, TokenKind
-from warden.pktline import RefCommand
-from warden.policy import check_ref, decide
+from warden.core.config import Config
+from warden.core.model import Decision, StateView, TokenKind
+from warden.guards.git import policy as git_policy
+from warden.guards.git.intent import GitIntent
+from warden.guards.git.pktline import RefCommand
+from warden.guards.git.policy import check_ref
+from warden.guards.gitlab_api import policy as api_policy
+from warden.guards.gitlab_api.catalog.activation import build_effective_table
+from warden.guards.gitlab_api.intent import ApiIntent
 
 ZERO = "0" * 40
 SHA = "a" * 40
+
+
+def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Decision:
+    """Dispatch to the owning guard's full decision (kernel gates + guard decide)."""
+    if isinstance(intent, GitIntent):
+        return git_policy.full_decide(intent, state, cfg)
+    return api_policy.full_decide(intent, state, cfg)
 
 
 @pytest.fixture
@@ -22,9 +41,20 @@ def cfg() -> Config:
     )
 
 
-def _api(method, path, **fields) -> ProxyRequest:
+@pytest.fixture
+def multi_prefix_cfg() -> Config:
+    # M2: the branch namespace is the *union* of all configured prefixes.
+    return Config(
+        branch_prefixes=("claude/", "bot/"),
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+    )
+
+
+def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ProxyRequest(channel="api", project=project, method=method, path=path, fields=fields)
+    return ApiIntent(_project=project, _method=method, path=path, fields=fields)
 
 
 # --- R1 / R6 -------------------------------------------------------------------
@@ -38,9 +68,94 @@ def test_r1_get_without_project_allowed(cfg):
     assert d.allow and d.token == TokenKind.READ
 
 
+# --- B1: projectless read-endpoint table ("content, not visibility") -----------
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/projects",
+        "/users",
+        "/users/7",
+        "/user",
+        "/user/keys",
+        "/version",
+        "/metadata",
+        "/groups",
+        "/groups/1",
+        "/groups/1/projects",  # AGENT.md discovery flow — must keep working
+        "/groups/1/subgroups",
+        "/groups/1/descendant_groups",
+        "/merge_requests",
+        "/issues",
+        "/events",
+        "/broadcast_messages",
+    ],
+)
+def test_b1_projectless_metadata_endpoints_allowed(cfg, path):
+    d = decide(_api("GET", path), StateView(), cfg)
+    assert d.allow and d.rule == "R1" and d.token == TokenKind.READ
+
+
+@pytest.mark.parametrize("scope", ["blobs", "commits", "wiki_blobs", "notes"])
+def test_b1_global_search_content_scope_denied(cfg, scope):
+    d = decide(_api("GET", "/search", scope=scope), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_global_search_without_scope_denied_fail_closed(cfg):
+    d = decide(_api("GET", "/search"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_global_search_unknown_scope_denied_fail_closed(cfg):
+    d = decide(_api("GET", "/search", scope="commit_titles_or_whatever"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+@pytest.mark.parametrize("scope", ["projects", "issues", "merge_requests", "milestones", "users"])
+def test_b1_global_search_metadata_scope_allowed(cfg, scope):
+    d = decide(_api("GET", "/search", scope=scope), StateView(), cfg)
+    assert d.allow and d.rule == "R1" and d.token == TokenKind.READ
+
+
+def test_b1_group_search_content_scope_denied(cfg):
+    d = decide(_api("GET", "/groups/1/search", scope="blobs"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_snippets_denied(cfg):
+    d = decide(_api("GET", "/snippets"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_snippet_subpath_denied(cfg):
+    d = decide(_api("GET", "/snippets/1/raw"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_b1_unknown_projectless_endpoint_default_denied(cfg):
+    d = decide(_api("GET", "/admin/ci/variables"), StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+    assert "not in allowlist" in d.reason
+
+
 def test_r6_project_not_in_allowlist_denied(cfg):
-    req = ProxyRequest(channel="api", project="other/secret", method="GET", path="/projects/other%2Fsecret")
+    req = ApiIntent(_project="other/secret", _method="GET", path="/projects/other%2Fsecret")
     d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R6"
+
+
+def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
+    # issue.create ships with checks=() (§04.2) — this pins down that the
+    # project boundary (R6, a kernel gate run before any entry-specific
+    # check) still applies to an entry that checks nothing of its own.
+    effective = build_effective_table(cfg, ("issue.create",))
+    req = ApiIntent(
+        _project="other/secret",
+        _method="POST",
+        path="/projects/other%2Fsecret/issues",
+        fields={"title": "x"},
+    )
+    d = api_policy.full_decide(req, StateView(), cfg, effective)
     assert not d.allow and d.rule == "R6"
 
 
@@ -82,6 +197,26 @@ def test_r3_pipeline_ref_prefix(cfg):
     assert not decide(bad, StateView(), cfg).allow
 
 
+# --- M2: branch namespace is a list of prefixes (Maintainer-Entscheid) --------
+def test_r3_create_mr_with_second_prefix_allowed(multi_prefix_cfg):
+    """A source_branch under the *second* configured prefix (``bot/``) is allowed."""
+    d = decide(
+        _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="bot/x"),
+        StateView(),
+        multi_prefix_cfg,
+    )
+    assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
+
+
+def test_r2_create_mr_outside_all_prefixes_denied(multi_prefix_cfg):
+    d = decide(
+        _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="feature/x"),
+        StateView(),
+        multi_prefix_cfg,
+    )
+    assert not d.allow and d.rule == "R2"
+
+
 # --- R4 merge block ------------------------------------------------------------
 def test_r4_merge_endpoint_always_denied(cfg):
     d = decide(_api("PUT", "/projects/group%2Fproj/merge_requests/7/merge"), StateView(), cfg)
@@ -95,8 +230,23 @@ def test_r4_state_event_merge_alias_denied(cfg):
     assert not d.allow and d.rule == "R4"
 
 
+def test_r3_mr_update_requires_ownership(cfg):
+    # mr.update's OWNED_BY_AGENT check (§04.2): editing an MR whose ownership
+    # can't be verified is denied — same check as mr.note/mr.discussion, but
+    # exercised on the update endpoint itself, not just the note endpoint.
+    req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="x")
+    req.mr_owner_ok = False
+    d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R3"
+    req.mr_owner_ok = None  # unverifiable → default-deny
+    d = decide(req, StateView(), cfg)
+    assert not d.allow and d.rule == "R3"
+
+
 def test_default_deny_unknown_write_endpoint(cfg):
-    d = decide(_api("DELETE", "/projects/group%2Fproj/repository/branches/claude%2Fx"), StateView(), cfg)
+    d = decide(
+        _api("DELETE", "/projects/group%2Fproj/repository/branches/claude%2Fx"), StateView(), cfg
+    )
     assert not d.allow and d.rule == "R3"
 
 
@@ -131,11 +281,13 @@ def test_locked_state_denies_all_writes(cfg):
     assert not d.allow and d.rule == "R5"
 
 
-# --- git channel (R2/R5) -------------------------------------------------------
-def _git(*cmds) -> ProxyRequest:
-    return ProxyRequest(
-        channel="git",
-        project="group/proj.git",
+# --- git guard (R2/R5) ---------------------------------------------------------
+def _git(*cmds) -> GitIntent:
+    return GitIntent(
+        _project="group/proj.git",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(*c) for c in cmds],
     )
 
@@ -150,9 +302,21 @@ def test_git_push_wrong_prefix_denied(cfg):
     assert not d.allow and d.rule == "R2"
 
 
-def test_git_branch_delete_denied(cfg):
-    d = decide(_git((SHA, ZERO, "refs/heads/claude/feature")), StateView(), cfg)
+def test_git_push_second_prefix_allowed(multi_prefix_cfg):
+    """Push to a branch under the *second* configured prefix (``bot/``) is allowed."""
+    d = decide(_git((ZERO, SHA, "refs/heads/bot/feature")), StateView(), multi_prefix_cfg)
+    assert d.allow and d.token == TokenKind.WRITE
+
+
+def test_git_push_outside_all_prefixes_denied(multi_prefix_cfg):
+    d = decide(_git((ZERO, SHA, "refs/heads/other/feature")), StateView(), multi_prefix_cfg)
     assert not d.allow and d.rule == "R2"
+
+
+def test_git_branch_delete_denied(cfg):
+    # B3 fix: a branch delete is an irreversible verb (M4) — R4, not R2.
+    d = decide(_git((SHA, ZERO, "refs/heads/claude/feature")), StateView(), cfg)
+    assert not d.allow and d.rule == "R4"
 
 
 def test_git_atomic_reject_on_one_bad_ref(cfg):
@@ -201,14 +365,17 @@ def test_git_multiref_quota_accounts_within_batch(cfg):
 
 
 def test_git_tag_push_rejected_with_tag_message(cfg):
+    # B3 fix: a tag push is an irreversible verb (M4) — R4, not R2.
     d = check_ref(RefCommand(ZERO, SHA, "refs/tags/claude/v1"), StateView(), cfg)
-    assert not d.allow and d.rule == "R2" and "tag" in d.reason
+    assert not d.allow and d.rule == "R4" and "tag" in d.reason
 
 
 def test_git_project_not_allowlisted_denied(cfg):
-    req = ProxyRequest(
-        channel="git",
-        project="other/x.git",
+    req = GitIntent(
+        _project="other/x.git",
+        operation="receive-pack",
+        _method="push",
+        _writes=True,
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
     d = decide(req, StateView(), cfg)
@@ -230,12 +397,14 @@ def test_mr_update_without_merge_intent_allowed(cfg):
     assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
 
 
-def test_unknown_channel_default_denied(cfg):
-    d = decide(ProxyRequest(channel="bogus", project=""), StateView(), cfg)
-    assert not d.allow and d.rule == "R6"
+# NOTE (§06 Schritt 5): the pre-split ``test_unknown_channel_default_denied``
+# is gone with the Channel enum itself — an "unknown channel" can no longer be
+# expressed: every request is parsed by exactly one guard into that guard's
+# own Intent type, and an unrouted path never reaches any decide at all.
 
 
 # --- R0: GITLAB_MODE gates -------------------------------------------------------
+
 
 def test_off_denies_reads_and_writes():
     """GITLAB_MODE=off: both reads and writes are denied (R0) — no GitLab traffic at all."""
@@ -259,9 +428,11 @@ def test_off_denies_reads_and_writes():
 
     # git push
     d = decide(
-        ProxyRequest(
-            channel="git",
-            project="group/proj",
+        GitIntent(
+            _project="group/proj",
+            operation="receive-pack",
+            _method="push",
+            _writes=True,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),
@@ -292,9 +463,11 @@ def test_read_only_denies_writes_allows_reads():
 
     # git push: denied R0
     d = decide(
-        ProxyRequest(
-            channel="git",
-            project="group/proj",
+        GitIntent(
+            _project="group/proj",
+            operation="receive-pack",
+            _method="push",
+            _writes=True,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),

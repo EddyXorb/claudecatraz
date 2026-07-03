@@ -92,11 +92,14 @@ services:
     profiles: ["remote"]
     build:
       context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}
-      dockerfile: claude-layer/Dockerfile
+      # Per-agent-profile layer (§05.3): AGENT_PROFILE selects which
+      # `assets/agents/<profile>/layer.Dockerfile` gets built — the ONE
+      # adapter this image will carry (§06.2: no runtime adapter choice).
+      dockerfile: agents/${AGENT_PROFILE:-claude}/layer.Dockerfile
       args:
         # Default to empty so a profile-less `up`/`down` (which interpolates this service
         # but never builds it) does not warn "BASE_IMAGE is not set". The agent is the only
-        # consumer of the base (claude-layer: FROM ${BASE_IMAGE}); catraz run / up --remote
+        # consumer of the base (the agent layer: FROM ${BASE_IMAGE}); catraz run / up --remote
         # always inject the resolved value via extra_env, overriding this default.
         BASE_IMAGE: ${BASE_IMAGE:-}
         NODE_VERSION: ${NODE_VERSION:-22}
@@ -113,7 +116,9 @@ services:
       - no-new-privileges:true
     environment:
       - AUTH_MODE=${AUTH_MODE}
-      # Agent runtime (advanced) — remote-control invocation tuning:
+      - AGENT_HOME=/home/dev/.claude
+      # Agent runtime (advanced) — remote-control invocation tuning (claude-specific
+      # env vars the adapter itself reads; see assets/agents/claude/adapter.py):
       - CLAUDE_RC_SPAWN=${CLAUDE_RC_SPAWN:-same-dir}
       - CLAUDE_RC_DEBUG_FILE=${CLAUDE_RC_DEBUG_FILE:-}
       - CLAUDE_RC_EXTRA_ARGS=${CLAUDE_RC_EXTRA_ARGS:-}
@@ -125,15 +130,19 @@ services:
       # gitlab-warden directly (no proxy); loopback likewise.
       - no_proxy=gitlab-warden,localhost,127.0.0.1
       - NO_PROXY=gitlab-warden,localhost,127.0.0.1
-      # Canonical GitLab URL for the insteadOf rewrite to gitlab-warden (entrypoint.py).
+      # Canonical GitLab URL for the insteadOf rewrite to gitlab-warden (git_routing.py)
+      # and the REST base the rendered instructions point the agent at (§05.2).
       # No token in the agent container (R6/W9.3).
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
       - GITLAB_MODE=${GITLAB_MODE:-read-write}
-      # The CLAUDE.md bind below is part of every catraz-launched container; require it
-      # so a missing/misconfigured mount fails loud in the entrypoint instead of starting
-      # the agent without its user-memory. A bare `docker run` of the image leaves this
-      # unset and may start without CLAUDE.md (local image testing). See install_claude_md().
-      - REQUIRE_CLAUDE_FILE=true
+      - WARDEN_REST_URL=http://gitlab-warden:8080/api/v4
+      - WARDEN_BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-}
+      # The rendered instructions file (§05.2 render_instructions) is required by
+      # default so a missing/misconfigured adapter fails loud in the entrypoint
+      # instead of starting the agent without its user-memory. A bare `docker run`
+      # of the image leaves this unset and may start without instructions (local
+      # image testing). See entrypoint.install_instructions().
+      - REQUIRE_AGENT_INSTRUCTIONS=true
     volumes:
       - type: bind
         source: ${PROJECT_DIR}
@@ -143,13 +152,13 @@ services:
         tmpfs: { size: 1048576, mode: 0700 }
       - type: tmpfs
         target: /home/dev/.claude
-      # Agent user-memory source: read-only bind of the packaged AGENT.md from the asset
-      # cache, nested inside the tmpfs above. entrypoint.py copies it to the writable live
-      # ~/.claude/CLAUDE.md. Single source of truth = the asset cache (not baked in image).
+      # Writable per-repo agent state (§05.6, credentials.mode = "persistent"):
+      # always mounted (harmless if the active profile ignores it) so the same
+      # compose file serves every profile; the adapter decides whether/how to
+      # wire it into the live home (assets/agents/claude/adapter.py:_wire_persistent).
       - type: bind
-        source: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/AGENT.md
-        target: /home/dev/.claude/.ro/CLAUDE.md
-        read_only: true
+        source: ${PROJECT_DIR}/.catraz/state/${AGENT_PROFILE:-claude}
+        target: /var/lib/agent-state
       # Host git identity (user.name/email, etc.), copied to the writable ~/.gitconfig
       # at startup so the agent can commit. Staged read-only under .ro/ because the
       # entrypoint's warden setup appends insteadOf rules to the live ~/.gitconfig — a
@@ -159,9 +168,10 @@ services:
         source: ${HOST_GITCONFIG:-/dev/null}
         target: /home/dev/.claude/.ro/.gitconfig
         read_only: true
-      # Non-secret warden policy (branch_prefix, allowed_projects, quotas), read-only.
-      # Lets the agent discover its ACTUAL limits — especially a custom branch_prefix —
-      # instead of assuming the claude/ default; AGENT.md points the agent here. This is
+      # Non-secret warden policy (branch_prefixes, allowed_projects, quotas), read-only.
+      # Lets the agent discover its ACTUAL limits — especially custom branch_prefixes —
+      # instead of assuming the claude/ default; the rendered CLAUDE.md (§05.2
+      # render_instructions) points the agent here. This is
       # the very file the warden enforces from, so the agent's view can't drift from the
       # rules. The mount is read-only and purely advisory: the warden reads its own copy
       # and stays the sole enforcer, and no secrets live here (the GitLab tokens are in
@@ -170,19 +180,21 @@ services:
         source: ${PROJECT_DIR}/.catraz/config/warden.toml
         target: /etc/catraz/warden.toml
         read_only: true
-      # Host-persistent Claude debug logs (--debug-file). The live ~/.claude is a tmpfs,
-      # so the remote-control daemon's rc-debug.log and `catraz run`'s run-debug.log would
-      # vanish on exit; this bind keeps them on the host next to logs/warden + logs/squid.
-      # The entrypoint points --debug-file here (claude_log_dir()). This is the only
-      # host-writable path the agent has outside /workspace — deliberately scoped to a logs
-      # dir; doctor creates it and chowns to DEV_UID so the dev user can write.
+      # Host-persistent agent debug logs (--debug-file style). The live home is a
+      # tmpfs, so the remote-control daemon's rc-debug.log and `catraz run`'s
+      # run-debug.log would vanish on exit; this bind keeps them on the host next
+      # to logs/warden + logs/squid. The entrypoint resolves this generically
+      # (entrypoint.resolve_log_dir()) and exports it as AGENT_LOG_DIR for the
+      # adapter to use. This is the only host-writable path the agent has outside
+      # /workspace — deliberately scoped to a logs dir; doctor creates it and
+      # chowns it to DEV_UID so the dev user can write.
       - type: bind
-        source: ${PROJECT_DIR}/.catraz/logs/claude
-        target: /var/log/claude
+        source: ${PROJECT_DIR}/.catraz/logs/${AGENT_PROFILE:-claude}
+        target: /var/log/agent-debug
     # Network isolation (agent-net internal: true + forward-proxy for http_proxy) is
     # activated in stage 03 once the Forward-Proxy service is in Compose.
     # Until then: default bridge (internet access for api.anthropic.com).
-    # No `command:` — the claude-layer sets ENTRYPOINT ["python3","/entrypoint.py"].
+    # No `command:` — the agent layer sets ENTRYPOINT ["python3","/entrypoint.py"].
     working_dir: /workspace
     tty: true
     stdin_open: true

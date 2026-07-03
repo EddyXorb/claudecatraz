@@ -1,4 +1,5 @@
 """docker-compose call + invariants."""
+
 from __future__ import annotations
 
 import datetime
@@ -44,12 +45,20 @@ def _source_cmd(root: Path) -> list[str]:
     An invalid AUTH_MODE therefore fails fast at every call site, not only on first `up`.
     """
     from catraz.auth import auth_mode
+
     ar = asset_root()
-    cmd = ["docker", "compose",
-           "-f", str(ar / "assets/compose/docker-compose.yml"),
-           "--project-directory", str(root),
-           "--project-name", project_name(root),
-           "--env-file", str(root / ".catraz/.env")]
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(ar / "assets/compose/docker-compose.yml"),
+        "--project-directory",
+        str(root),
+        "--project-name",
+        project_name(root),
+        "--env-file",
+        str(root / ".catraz/.env"),
+    ]
     cmd += ["-f", str(ar / "assets/compose" / f"auth.{auth_mode(root)}.yml")]
     override = root / ".catraz/compose.override.yml"
     if override.exists():
@@ -63,10 +72,16 @@ base_cmd = _source_cmd
 
 def _resolved_cmd(root: Path) -> list[str]:
     """Command prefix that runs the fully-interpolated resolved.yml."""
-    return ["docker", "compose",
-            "-f", str(root / ".catraz/compose.resolved.yml"),
-            "--project-directory", str(root),
-            "--project-name", project_name(root)]
+    return [
+        "docker",
+        "compose",
+        "-f",
+        str(root / ".catraz/compose.resolved.yml"),
+        "--project-directory",
+        str(root),
+        "--project-name",
+        project_name(root),
+    ]
 
 
 def _warn_fallback(msg: str) -> None:
@@ -79,7 +94,9 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     Runs `docker compose ... --profile remote config` (interpolated, agent stays gated).
     Returns True on success, False on failure (caller falls back to _source_cmd).
     """
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
+    env = dict(
+        os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets")
+    )
     if extra_env:
         env.update(extra_env)
     cmd = [*_source_cmd(root), "--profile", "remote", "config"]
@@ -105,7 +122,9 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     return True
 
 
-def prepare(root: Path, *, render: bool, extra_env: dict[str, str] | None = None) -> list[str]:
+def prepare(
+    root: Path, *, render: bool, extra_env: dict[str, str] | None = None
+) -> list[str]:
     """Return the compose cmd prefix for this handler to use consistently.
 
     render=True  (up/run/shell/down): write auth fragment + (re)generate resolved.yml.
@@ -115,16 +134,28 @@ def prepare(root: Path, *, render: bool, extra_env: dict[str, str] | None = None
     if render:
         if generate_resolved(root, extra_env):
             return _resolved_cmd(root)
-        _warn_fallback("config render failed — running layered; resolved.yml may be stale")
+        _warn_fallback(
+            "config render failed — running layered; resolved.yml may be stale"
+        )
         return _source_cmd(root)
     if (root / ".catraz/compose.resolved.yml").exists():
         return _resolved_cmd(root)
     return _source_cmd(root)  # read-only before first up → layered, no side effects
 
 
-def run(root: Path, args: list[str], *, prefix: list[str] | None = None, capture: bool = False, check: bool = True, print_only: bool = False,
-        extra_env: dict[str, str] | None = None, tee: Path | None = None) -> subprocess.CompletedProcess[str] | None:
+def run(
+    root: Path,
+    args: list[str],
+    *,
+    prefix: list[str] | None = None,
+    capture: bool = False,
+    check: bool = True,
+    print_only: bool = False,
+    extra_env: dict[str, str] | None = None,
+    tee: Path | None = None,
+) -> subprocess.CompletedProcess[str] | None:
     from catraz.errors import CliError, EXIT_DOCKER
+
     _prefix = prefix if prefix is not None else _source_cmd(root)
     cmd = [*_prefix, *args]
     if print_only:
@@ -133,7 +164,9 @@ def run(root: Path, args: list[str], *, prefix: list[str] | None = None, capture
     # CATRAZ_ASSETS anchors the compose build contexts at the extracted asset cache.
     # Compose resolves relative `context:` paths against --project-directory (the user's
     # repo), so the contexts are absolute via this var instead — see docker-compose.yml.
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
+    env = dict(
+        os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets")
+    )
     if extra_env:
         env.update(extra_env)
     if tee is not None:
@@ -144,8 +177,9 @@ def run(root: Path, args: list[str], *, prefix: list[str] | None = None, capture
         tee.parent.mkdir(parents=True, exist_ok=True)
         try:
             with open(tee, "wb") as f:
-                p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT)
+                p = subprocess.Popen(
+                    cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                )
                 # read1 (not read) returns as soon as data is available, preserving live
                 # output — read(n) would block until n bytes or EOF.
                 assert p.stdout is not None
@@ -159,12 +193,16 @@ def run(root: Path, args: list[str], *, prefix: list[str] | None = None, capture
             raise CliError("`docker` not found on PATH", EXIT_DOCKER)
         return subprocess.CompletedProcess(cmd, p.returncode)
     try:
-        return subprocess.run(cmd, env=env, check=check, capture_output=capture, text=True)
+        return subprocess.run(
+            cmd, env=env, check=check, capture_output=capture, text=True
+        )
     except FileNotFoundError:
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
 
 
-def compose_ps(root: Path, *, prefix: list[str] | None = None, all: bool = False) -> list[dict[str, str]]:
+def compose_ps(
+    root: Path, *, prefix: list[str] | None = None, all: bool = False
+) -> list[dict[str, str]]:
     """Return [{Service, State, Health}, …] from `docker compose ps`.
 
     all=True passes `-a` so stopped containers *and* `run --rm` one-offs (hidden by
@@ -197,15 +235,20 @@ def _parse_docker_time(s: str) -> datetime.datetime | None:
         return None
 
 
-def container_started_at(root: Path, name_or_id: str, *, prefix: list[str] | None = None) -> datetime.datetime | None:
+def container_started_at(
+    root: Path, name_or_id: str, *, prefix: list[str] | None = None
+) -> datetime.datetime | None:
     """Container start time via `docker inspect`, or None if unreadable/unparseable.
 
     Pass the `Name`/`ID` already carried by `compose ps --format json` rows — no
     separate `ps -q` per service. None means "couldn't read it" (caller treats a
     running-but-unknown service as stale, never as up-to-date)."""
     try:
-        r = subprocess.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", name_or_id],
-                           capture_output=True, text=True)
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.StartedAt}}", name_or_id],
+            capture_output=True,
+            text=True,
+        )
     except FileNotFoundError:
         return None
     if r.returncode != 0 or not r.stdout.strip():
@@ -215,6 +258,7 @@ def container_started_at(root: Path, name_or_id: str, *, prefix: list[str] | Non
 
 def resolve_service(name: str) -> str:
     from catraz.errors import CliError, EXIT_CONFIG
+
     if name in SERVICES:
         return SERVICES[name]
     if name in SERVICES.values():
@@ -230,13 +274,16 @@ def _rc(r: subprocess.CompletedProcess[str] | None) -> int:
     Used by cmd_down and cmd_logs only. cmd_run propagates claude's own exit
     code directly (2, 130, 137, …) — do NOT route cmd_run through _rc."""
     from catraz.errors import EXIT_OK, EXIT_GENERAL
+
     return EXIT_OK if r and r.returncode == 0 else EXIT_GENERAL
 
 
 def assert_real_dirs(root: Path) -> None:
     for p in (root, root / ".catraz"):
         if p.is_symlink():
-            raise CliError(f"{p} is a symlink — bind source must be a real dir", EXIT_CONFIG)
+            raise CliError(
+                f"{p} is a symlink — bind source must be a real dir", EXIT_CONFIG
+            )
 
 
 def _env_keys(agent: dict[str, Any]) -> set[str]:
@@ -260,10 +307,17 @@ def _good_tmpfs(v: dict[str, Any]) -> bool:
 
 def assert_invariants(root: Path, *, prefix: list[str] | None = None) -> None:
     _prefix = prefix if prefix is not None else _source_cmd(root)
-    r = run(root, ["--profile", "remote", "config", "--format", "json"],
-            prefix=_prefix, capture=True, check=False)
+    r = run(
+        root,
+        ["--profile", "remote", "config", "--format", "json"],
+        prefix=_prefix,
+        capture=True,
+        check=False,
+    )
     if r is None or r.returncode != 0:
-        raise CliError("docker compose config failed (cannot verify trust boundary)", EXIT_CONFIG)
+        raise CliError(
+            "docker compose config failed (cannot verify trust boundary)", EXIT_CONFIG
+        )
     cfg = json.loads(r.stdout)
     if not cfg.get("networks", {}).get("agent-net", {}).get("internal"):
         raise CliError("invariant: agent-net is not internal", EXIT_CONFIG)
@@ -278,9 +332,14 @@ def assert_invariants(root: Path, *, prefix: list[str] | None = None) -> None:
     # warning about those binaries) — normalize `:`/`=` separators across compose versions.
     sec = {o.replace("=", ":") for o in (agent.get("security_opt") or [])}
     if "no-new-privileges:true" not in sec:
-        raise CliError("invariant: agent missing no-new-privileges (setuid escalation)", EXIT_CONFIG)
+        raise CliError(
+            "invariant: agent missing no-new-privileges (setuid escalation)",
+            EXIT_CONFIG,
+        )
     vols = agent.get("volumes", [])
     if not any(_good_tmpfs(v) for v in vols):
         raise CliError(
             "invariant: tmpfs shadow on /workspace/.catraz missing or misconfigured "
-            "(expected type=tmpfs, mode=448, size)", EXIT_CONFIG)
+            "(expected type=tmpfs, mode=448, size)",
+            EXIT_CONFIG,
+        )
