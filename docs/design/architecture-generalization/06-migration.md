@@ -66,10 +66,26 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
    in `check_ref`) bleiben als Defense-in-depth (A10) bestehen; `test_capabilities.py` belegt
    golden-getestet, dass die Invariante auch ohne sie greift (u. a. eine hypothetische
    Endpoint-Zeile ganz ohne Checks, die trotzdem R4-denied wird). Voraussetzung für Schritt 4.
-4. **Endpoint-Katalog + Check-Registry + Aktivierungs-Config** (§04.1–04.3) — der
-   nutzersichtbare Gewinn. Jeder Katalog-Eintrag bringt seine Deny-Sonden mit (§04.4), und
-   das Startgate, das sie ausführt, ist **Teil dieses Schritts** — nicht ein späterer
-   (Röst-Runde 2: sonst shipped Schritt 4 unabgesichert). Fixt F2/F10/F12 nebenbei.
+4. ✅ **Endpoint-Katalog + Check-Registry + Aktivierungs-Config** (§04.1–04.3) *(umgesetzt:
+   `warden/warden/catalog/` — `checks.py`, `entries.py`, `builtin.py`, `config_parse.py`,
+   `activation.py`, `startgate.py`, `report.py`; `api_endpoints.py` ist jetzt eine
+   Kompat-Fassade)* — der nutzersichtbare Gewinn. Jeder Katalog-Eintrag bringt seine
+   Deny-Sonden mit (§04.4), und das Startgate, das sie ausführt, ist **Teil dieses
+   Schritts** — nicht ein späterer (Röst-Runde 2: sonst shipped Schritt 4 unabgesichert).
+   Fixt F2 (`RegisteredCheck.needs` statt Funktions-Identität), F10 zu Ende (die
+   Deduplizierung von `src_branch_prefix`/`ref_prefix` zu `field_has_prefix` war bereits
+   Vorarbeiten-Stand; dieser Schritt hebt sie zusätzlich in die benannte Check-Registry,
+   §04.1) und F12 (`CatalogEntry.decision_fields` — Entscheidung liest nur die deklarierte
+   Lage, Body **oder** Query) nebenbei. `DEFAULT_ENABLED` ist
+   exakt der vor diesem Schritt aktive Sechser-Satz (Verhaltenserhaltung); zwei zusätzliche,
+   ehrlich katalogisierte, aber nicht default-aktive Einträge (`branch.create`,
+   `issue.create`) demonstrieren den Katalog inkl. Golden-Tests und Deny-Sonden. Zwei
+   dokumentierte Abweichungen von der Skizze in §04-policy-erweiterbarkeit.md (§04.5
+   „Umsetzungsnotizen"): Audit-Markierung als eigenes Feld `enabled_via` statt `rule`-Suffix
+   (Registry-Disziplin aus Schritt 2 bleibt gewahrt), und kein Taming-Mechanismus für
+   FORBIDDEN-Capabilities (bewusstes YAGNI — kein aktueller Eintrag braucht ihn; kommt mit
+   dem ersten, z. B. `release.create`). `catraz allow-endpoint` + eine read-only
+   `/policy`-Admin-Route (`catraz doctor --section endpoints`) sind die CLI-Front dafür.
 5. **Kernel-Extraktion + Intent-Split** (§03.2/03.3, inkl. `intent.writes` für das
    read-only-Gate) — reines Refactoring, von `test_api_proxy`/`test_git_proxy` abgedeckt;
    fixt F1/F3/F6; blockiert keinen Nutzerwert und wird deshalb *nicht* vorgezogen.

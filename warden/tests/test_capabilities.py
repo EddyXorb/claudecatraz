@@ -1,20 +1,22 @@
 """Golden tests for the capability-invariant layer (§03.4, B2,
-§06-migration.md Schritt 3): known requests → expected capability sets, plus
+§06-migration.md Schritt 3/4): known requests → expected capability sets, plus
 the cross-channel invariant that a FORBIDDEN hit denies with R4 regardless of
 channel or endpoint-specific checks.
+
+Schritt 4 moved the write-endpoint table into ``warden.catalog`` and took the
+merge endpoint out of it entirely (it is now a built-in deny invariant, not a
+catalog row — ``warden.catalog.builtin``) — this file's golden tables were
+updated accordingly; see ``tests/catalog/`` for the catalog/activation/
+startgate-specific tests Schritt 4 added.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from warden.api_endpoints import (
-    WRITE_ENDPOINTS,
-    EndpointKind,
-    WriteEndpoint,
-    api_capabilities,
-)
 from warden.capabilities import FORBIDDEN, Capability, forbidden_check, git_ref_capabilities
+from warden.catalog import CATALOG, DEFAULT_ENABLED, CatalogEntry, EndpointKind, api_capabilities
+from warden.catalog.builtin import is_builtin_merge_endpoint
 from warden.config import Config
 from warden.model import ProxyRequest, StateView
 from warden.pktline import RefCommand
@@ -136,20 +138,19 @@ def test_git_ref_capabilities_golden_table(cfg, old, new, ref, expected):
     assert caps == frozenset(expected)
 
 
-# --- REST: every WRITE_ENDPOINTS row, plus the field-dependent merge alias -
+# --- REST: every CATALOG row, plus the field-dependent merge alias --------
 
 
-def _endpoint(template: str, method: str) -> WriteEndpoint:
-    for ep in WRITE_ENDPOINTS:
+def _endpoint(template: str, method: str) -> CatalogEntry:
+    for ep in CATALOG:
         if ep.template == template and ep.method == method:
             return ep
-    raise AssertionError(f"no such endpoint row: {method} {template}")
+    raise AssertionError(f"no such catalog entry: {method} {template}")
 
 
 @pytest.mark.parametrize(
     "method,template,fields,expected",
     [
-        ("PUT", "/projects/{id}/merge_requests/{iid}/merge", {}, {Capability.MERGES}),
         (
             "POST",
             "/projects/{id}/merge_requests",
@@ -166,7 +167,9 @@ def _endpoint(template: str, method: str) -> WriteEndpoint:
         ),
         # MR update: no state_event → empty (editing title/description).
         ("PUT", "/projects/{id}/merge_requests/{iid}", {"title": "x"}, set()),
-        # MR update: state_event=merge alias → merges, field-dependent.
+        # MR update: state_event=merge alias → merges, field-dependent. This is
+        # the FORBIDDEN-layer proof that the merge alias is closed even though
+        # the raw merge endpoint itself is no longer a catalog row at all.
         (
             "PUT",
             "/projects/{id}/merge_requests/{iid}",
@@ -176,6 +179,10 @@ def _endpoint(template: str, method: str) -> WriteEndpoint:
         # A non-merge state_event (e.g. "close") stays empty.
         ("PUT", "/projects/{id}/merge_requests/{iid}", {"state_event": "close"}, set()),
         ("POST", "/projects/{id}/pipeline", {"ref": "claude/x"}, set()),
+        # Extra, non-default catalog entries (§04.2) — honestly catalogued
+        # capabilities, golden-tested like every other row.
+        ("POST", "/projects/{id}/repository/branches", {"branch": "claude/x"}, {Capability.CREATES_REF}),
+        ("POST", "/projects/{id}/issues", {"title": "x"}, set()),
     ],
 )
 def test_api_capabilities_golden_table(method, template, fields, expected):
@@ -183,21 +190,77 @@ def test_api_capabilities_golden_table(method, template, fields, expected):
     assert api_capabilities(ep, fields) == frozenset(expected)
 
 
-def test_every_write_endpoint_row_is_covered_by_the_golden_table():
-    # Guards against a new WRITE_ENDPOINTS row being added without a matching
+def test_every_catalog_row_is_covered_by_the_golden_table():
+    # Guards against a new CATALOG row being added without a matching
     # golden-table entry above (silent capability coverage gap, §03.4's
-    # "honest cost").
+    # "honest cost"). The merge endpoint is deliberately absent — it is a
+    # built-in deny invariant (builtin.py), not a catalog row (§04.2).
     covered = {
-        ("PUT", "/projects/{id}/merge_requests/{iid}/merge"),
         ("POST", "/projects/{id}/merge_requests"),
         ("POST", "/projects/{id}/merge_requests/{iid}/notes"),
         ("POST", "/projects/{id}/merge_requests/{iid}/discussions"),
         ("POST", "/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes"),
         ("PUT", "/projects/{id}/merge_requests/{iid}"),
         ("POST", "/projects/{id}/pipeline"),
+        ("POST", "/projects/{id}/repository/branches"),
+        ("POST", "/projects/{id}/issues"),
     }
-    actual = {(ep.method, ep.template) for ep in WRITE_ENDPOINTS}
+    actual = {(ep.method, ep.template) for ep in CATALOG}
     assert actual == covered
+
+
+def test_default_enabled_is_exactly_the_pre_schritt4_active_set():
+    # §04.2/04.3 behaviour preservation: the shipped default set must be
+    # exactly what was unconditionally active before the catalog existed.
+    assert DEFAULT_ENABLED == {
+        "mr.create",
+        "mr.note",
+        "mr.discussion",
+        "mr.discussion_reply",
+        "mr.update",
+        "pipeline.trigger",
+    }
+    # And the two extra entries are honestly catalogued but NOT default.
+    assert "branch.create" not in DEFAULT_ENABLED
+    assert "issue.create" not in DEFAULT_ENABLED
+
+
+def test_every_catalog_entry_has_an_id_and_at_least_one_deny_probe():
+    # §04.2/04.4: a catalog entry without probes would be an activatable row
+    # the startgate can never exercise — every row here must carry both.
+    for ep in CATALOG:
+        assert ep.id, f"catalog entry with empty id: {ep.method} {ep.template}"
+        assert ep.deny_probes, f"catalog entry {ep.id!r} has no deny probes"
+
+
+def test_no_catalog_entry_declares_a_forbidden_capability():
+    # §04.2 YAGNI: activating an entry whose capabilities intersect FORBIDDEN
+    # is refused at startup (activation.py) — but nothing stops a catalog PR
+    # from *authoring* such a row today (no taming mechanism exists yet). Pin
+    # down that none of the entries actually shipped do this, so that
+    # invariant is never silently relied upon by a real default-enabled row.
+    for ep in CATALOG:
+        assert not (ep.capabilities & FORBIDDEN), f"{ep.id!r} declares a FORBIDDEN capability"
+
+
+# --- the built-in merge invariant (§04.2) — not a catalog row -------------
+
+
+def test_merge_endpoint_is_not_a_catalog_row():
+    assert not any(ep.template.endswith("/merge") for ep in CATALOG)
+
+
+@pytest.mark.parametrize(
+    "method,path,expected",
+    [
+        ("PUT", "/projects/group%2Fproj/merge_requests/7/merge", True),
+        ("put", "/projects/group%2Fproj/merge_requests/7/merge", True),  # case-insensitive method
+        ("POST", "/projects/group%2Fproj/merge_requests/7/merge", False),  # wrong method
+        ("PUT", "/projects/group%2Fproj/merge_requests/7", False),  # not the merge sub-path
+    ],
+)
+def test_is_builtin_merge_endpoint(method, path, expected):
+    assert is_builtin_merge_endpoint(method, path) is expected
 
 
 # --- end-to-end via decide(): the invariant holds on both channels --------
@@ -236,24 +299,28 @@ def test_e2e_api_state_event_merge_alias_denied_r4(cfg):
 
 
 def test_e2e_capability_layer_denies_even_without_endpoint_checks(cfg):
-    """Proves the invariant is structural, not just a lucky consequence of the
-    existing ``always_deny``/``not_merge_intent`` checks (§03.4): a
-    hypothetical endpoint row that declares the merge capability but has *no*
-    checks at all is still denied, because the capability layer runs before
-    ``ep.checks`` in ``policy._decide_api``.
+    """Proves the capability layer is structural, not just a lucky
+    consequence of an endpoint's own checks (§03.4): a hypothetical catalog
+    row — one that is *not* shaped like the built-in merge endpoint, so this
+    genuinely exercises the capability layer and not ``is_builtin_merge_endpoint``
+    — that declares the merge capability but has *no* checks at all is still
+    denied, because the capability layer runs before ``ep.checks`` in
+    ``policy._decide_api``.
     """
-    hypothetical_row = WriteEndpoint(
-        method="PUT",
-        template="/projects/{id}/merge_requests/{iid}/merge",
+    hypothetical_row = CatalogEntry(
+        id="hypothetical.merge_via_release",
+        method="POST",
+        template="/projects/{id}/releases",
         checks=(),  # no checks whatsoever — the old-style defense is gone
         rule="R4",
         kind=EndpointKind.MERGE,
         capabilities=frozenset({Capability.MERGES}),
     )
-    req = _api("PUT", "/projects/group%2Fproj/merge_requests/7/merge")
+    req = _api("POST", "/projects/group%2Fproj/releases")
     req.endpoint = hypothetical_row
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
+    assert "forbidden capability" in d.reason
 
 
 def test_e2e_capability_layer_denies_git_even_if_check_ref_logic_is_bypassed(cfg):

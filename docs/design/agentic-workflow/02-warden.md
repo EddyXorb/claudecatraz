@@ -15,14 +15,24 @@ warden/
 ├── warden/
 │   ├── __main__.py             # uvicorn-Bootstrap, Reconcile beim Start
 │   ├── app.py                  # Starlette-App, Routing API vs. git
-│   ├── config.py               # Env → typisiertes Config-Objekt, harte Validierung
+│   ├── config.py               # das typisierte, frozen Config-Objekt (Modell-Hälfte)
+│   ├── config_load.py          # Env + warden.toml → Config, harte fail-closed Validierung
 │   ├── model.py                # Policy-Datentypen (pure)
 │   ├── rules.py                # zentrale Regel-Registry R0–R6 + Meta-Regel-Zuordnung (B3, F11)  ← pure
 │   ├── capabilities.py         # Capability-Vokabular + FORBIDDEN + forbidden_check (§03.4, B2)  ← pure
 │   ├── policy.py               # decide(request, state, cfg) → Decision  ← pure
-│   ├── api_endpoints.py        # datengetriebene Write-Endpoint-Tabelle  ← pure
+│   ├── api_endpoints.py        # Kompat-Fassade auf warden.catalog (§06 Schritt 4)  ← pure
+│   ├── catalog/                # Endpoint-Katalog + Check-Registry + Aktivierung (§04, Schritt 4)
+│   │   ├── model.py            #   CatalogEntry/FieldSpec/DenyProbe/OverridableParam  ← pure
+│   │   ├── checks.py           #   Check-Registry (§04.1): field_has_prefix, owned_by_agent, …  ← pure
+│   │   ├── entries.py          #   CATALOG-Tabelle (§04.2) + api_capabilities/match_endpoint  ← pure
+│   │   ├── builtin.py          #   Merge-Endpoint: eingebaute Deny-Invariante, kein Katalog-Eintrag  ← pure
+│   │   ├── config_parse.py     #   [api.endpoints]-TOML-Form parsen (kein Config-Import)  ← pure
+│   │   ├── activation.py       #   Config × Katalog → effektive Tabelle (§04.3), fail-closed  ← pure
+│   │   ├── startgate.py        #   Deny-Sonden gegen die effektive Policy beim Start (§04.4)
+│   │   └── report.py           #   /policy-Admin-Route: JSON-Report der effektiven Tabelle
 │   ├── read_endpoints.py       # datengetriebene Read-Endpoint-Tabelle (B1)  ← pure
-│   ├── path_template.py        # {platzhalter}-Pfad → Regex, von beiden Tabellen genutzt  ← pure
+│   ├── path_template.py        # {platzhalter}-Pfad → Regex, von Katalog+Read-Tabelle genutzt  ← pure
 │   ├── api_proxy.py            # REST-Reverse-Proxy (GET-Passthrough + Write-Filter)
 │   ├── git_proxy.py            # G1: 4 Smart-HTTP-Routen, Stream-Handling
 │   ├── pktline.py              # pkt-line-Parser (receive-pack-Kommandos)  ← pure
@@ -43,7 +53,7 @@ warden/
     └── redteam/                # docker-compose-basiert (→ 03-testing-redteam.md)
 ```
 
-`policy.py`, `pktline.py`, `model.py`, `capabilities.py`, `api_endpoints.py`, `read_endpoints.py`, `path_template.py` sind transport-frei und rein — direkt unit-testbar.
+`policy.py`, `pktline.py`, `model.py`, `capabilities.py`, `catalog/` (bis auf `startgate.py`, das `policy.decide` aufruft, aber selbst keine Ein-/Ausgabe hat), `read_endpoints.py`, `path_template.py` sind transport-frei und rein — direkt unit-testbar.
 
 ---
 
@@ -89,6 +99,7 @@ Der Agent hält **kein** GitLab-Token. Kein `.netrc`.
 /api/v4/{rest:path}                     → api_proxy (alle Methoden)
 /api/graphql, /api/graphql/{rest:path}  → api_proxy.deny_graphql (immer 403, B5)
 /healthz                                → (nur Port 9090)
+/policy                                 → catalog.report (nur Port 9090, read-only, §04.3)
 ```
 
 GraphQL wird nie an den Upstream durchgereicht (B5, `docs/design/architecture-generalization/02-befunde.md`): eine einzige Mutation dort könnte alles, was der REST-Schreibfilter verbietet.
@@ -195,24 +206,92 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision: ...
 
 ---
 
-## API-Filter
+## Endpoint-Katalog + Aktivierung + Startgate (`catalog/`, §04, Schritt 4)
 
-Write-Endpoints als **Tabelle** in `api_endpoints.py` (Anpassung = Config-Edit, kein Logikumbau).
-Jede Zeile trägt zusätzlich ihre statischen `capabilities` (§03.4, siehe oben):
+*Der nutzersichtbare Gewinn von §06-migration.md Schritt 4 — Details:
+[`04-policy-erweiterbarkeit.md`](../architecture-generalization/04-policy-erweiterbarkeit.md).*
 
-| Methode | Pfad-Template | Checks | Regel | Capabilities |
-| ------- | ------------- | ------ | ----- | ------------ |
-| POST | `/projects/{id}/merge_requests` | `src_branch_prefix` | R3 | ∅ (kein Git-Ref) |
-| POST | `/projects/{id}/merge_requests/{iid}/notes` | `mr_owned_by_claude` | R3 | ∅ |
-| POST | `/projects/{id}/merge_requests/{iid}/discussions` | `mr_owned_by_claude` | R3 | ∅ |
-| POST | `/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes` | `mr_owned_by_claude` | R3 | ∅ |
-| PUT | `/projects/{id}/merge_requests/{iid}` | `mr_owned_by_claude`, `not_merge_intent` | R3 | ∅ statisch, `+merges` bei `state_event=merge` (feld-abhängig) |
-| POST | `/projects/{id}/pipeline` | `ref_prefix` | R3 | ∅ |
-| PUT | `/projects/{id}/merge_requests/{iid}/merge` | `ALWAYS_DENY` | **R4** | `{merges}` |
+**Check-Registry (§04.1, `catalog/checks.py`).** Benannte, parametrisierbare Bausteine statt
+verstreuter Einzelfunktionen: `field_has_prefix(field)` (vereinigt die alten
+`src_branch_prefix`/`ref_prefix`, F10), `owned_by_agent` (früher `mr_owned_by_claude`, jetzt ein
+`RegisteredCheck` mit `needs={"mr_owner"}`), `field_not_equals(field, value)` (verallgemeinert
+`not_merge_intent`). `needs` ersetzt die alte Identitätsprüfung
+`mr_owned_by_claude in ep.checks` (F2) — `api_proxy._resolve_ownership` fragt stattdessen
+`any("mr_owner" in check.needs for check in ep.checks)`.
+
+**Der Katalog (§04.2, `catalog/entries.py`).** Jeder Eintrag (`CatalogEntry`) trägt Methode +
+Pfad-Template, `checks` aus der Registry, `rule` (R-ID), `kind` (Quoten-Dimension),
+`capabilities` (§03.4, code-deklariert, nie vom Nutzer), `decision_fields` (pro Feld die Lage
+Body/Query, F12) und `deny_probes` (§04.4). `DEFAULT_ENABLED` ist exakt der vor Schritt 4 aktive
+Sechser-Satz — Verhaltenserhaltung bei fehlender `[api.endpoints]`-Sektion:
+
+| ID | Methode | Pfad-Template | Checks | Regel | Capabilities |
+| -- | ------- | -------------- | ------ | ----- | ------------ |
+| `mr.create` | POST | `/projects/{id}/merge_requests` | `field_has_prefix(source_branch)` | R3 | ∅ |
+| `mr.note` | POST | `/projects/{id}/merge_requests/{iid}/notes` | `owned_by_agent` | R3 | ∅ |
+| `mr.discussion` | POST | `/projects/{id}/merge_requests/{iid}/discussions` | `owned_by_agent` | R3 | ∅ |
+| `mr.discussion_reply` | POST | `/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes` | `owned_by_agent` | R3 | ∅ |
+| `mr.update` | PUT | `/projects/{id}/merge_requests/{iid}` | `owned_by_agent`, `field_not_equals(state_event, merge)` | R3 | ∅ statisch, `+merges` bei `state_event=merge` |
+| `pipeline.trigger` | POST | `/projects/{id}/pipeline` | `field_has_prefix(ref)` | R3 | ∅ |
+
+Zusätzlich, **ehrlich katalogisiert, aber nicht im Default-Satz**:
+
+| ID | Methode | Pfad-Template | Checks | Regel | Capabilities |
+| -- | ------- | -------------- | ------ | ----- | ------------ |
+| `branch.create` | POST | `/projects/{id}/repository/branches` | `field_has_prefix(branch)` | R3 | `{creates_ref}` |
+| `issue.create` | POST | `/projects/{id}/issues` | — | R3 | ∅ |
+
+Die Merge-Zeile (`PUT .../merge_requests/{iid}/merge`) ist **kein Katalog-Eintrag** —
+`catalog/builtin.py` matcht sie als eingebaute Deny-Invariante, unabhängig vom
+Aktivierungszustand, bevor die effektive Tabelle überhaupt konsultiert wird. Kein
+`[api.endpoints]`-Eintrag kann sie je aktivierbar machen.
+
+**Aktivierung (§04.3, `catalog/config_parse.py` + `catalog/activation.py`).**
+`warden.toml`:
+
+```toml
+[api.endpoints]
+enable = ["mr.create", "mr.note", "mr.discussion", "mr.discussion_reply",
+          "mr.update", "pipeline.trigger", "branch.create"]   # heutiger Default + branch.create
+
+[api.endpoints.overrides."branch.create"]
+branch_prefix = "claude/x-"     # nur Verengung erlaubt (muss in Config.branch_prefixes liegen)
+```
+
+Fehlt die Sektion, gilt `DEFAULT_ENABLED` (Verhaltenserhaltung). `build_effective_table`
+(Config × Katalog → `EffectiveTable`) läuft **einmal** beim Start
+(`Config.effective_endpoints`, memoisiert) und bricht mit `ConfigError` ab bei: unbekannter
+Katalog-ID (in `enable` oder `overrides`), Override für einen nicht-aktivierten Eintrag,
+Override ohne passenden `OverridableParam`, Override, der erweitert statt verengt, oder
+Aktivierung eines Eintrags, dessen `capabilities` die `FORBIDDEN`-Menge schneiden (§04.2
+YAGNI — kein Taming-Mechanismus in diesem Schritt, siehe
+[`04-policy-erweiterbarkeit.md`](../architecture-generalization/04-policy-erweiterbarkeit.md)).
+`policy._decide_api` und `api_proxy._parse_request` matchen ausschließlich gegen
+`cfg.effective_endpoints.entries` — nie gegen `catalog.CATALOG` direkt.
+
+**F12-Fix:** `api_proxy._extract_fields` liest für einen gematchten Katalog-Eintrag nur die in
+`decision_fields` deklarierten Felder, jeweils exakt aus der deklarierten Lage (Body/Query) —
+kein Merge mehr. Ein `source_branch`, das nur als Query-Parameter mitgeschickt wird, zählt für
+die Entscheidung als **nicht gesetzt**, obwohl das Forwarding den Querystring unverändert
+weiterreicht (wie seit Schritt 1).
+
+**Audit-Markierung.** Ein Eintrag, der über die Default-Menge hinaus aktiviert wurde, bekommt im
+Audit-Event ein zusätzliches Feld `enabled_via = "config:<id>"` (additiv, kein
+`AUDIT_SCHEMA_VERSION`-Bump — siehe Doku-Notiz). Default-aktivierte Einträge tragen das Feld gar
+nicht.
+
+**Startgate (§04.4, `catalog/startgate.py`).** Nach Config-Validierung, vor dem Öffnen der
+Ports (`__main__.py`): für jeden aktivierten Katalog-Eintrag laufen seine `deny_probes` gegen
+`policy.decide` mit einer synthetischen, entsperrten `StateView` — kein Netz, keine State-DB.
+Eine Sonde, die **erlaubt** würde, wirft `StartgateFailure` (Prozess-Exit 2, wie `ConfigError`).
+Zusätzlich laufen zwei globale Sonden der eingebauten Invarianten (`catalog.builtin.BUILTIN_DENY_PROBES`):
+der Merge-Endpoint, und `state_event=merge` unabhängig davon, ob `mr.update` aktiv ist.
+
+**Ownership-Check** (`owned_by_agent`): Warden holt `GET /merge_requests/{iid}`, prüft
+`source_branch.startswith(BRANCH_PREFIX)` und `author.id == SERVICE_ACCOUNT_ID`. Die
+Service-Account-ID wird einmal beim Start gecacht (`GET /user`).
 
 Alles nicht explizit Erlaubte → default-deny + Audit. Lese-GETs werden mit Read-Token durchgereicht (R1).
-
-**Ownership-Check** (`mr_owned_by_claude`): Warden holt `GET /merge_requests/{iid}`, prüft `source_branch.startswith(BRANCH_PREFIX)` und `author.id == SERVICE_ACCOUNT_ID`. Die Service-Account-ID wird einmal beim Start gecacht (`GET /user`).
 
 ---
 
@@ -313,6 +392,11 @@ gitlab_git_base      = "https://gitlab.com"
 reconcile_interval_s = 300
 state_db_path        = "/var/lib/warden/state.db"
 audit_log_path       = "/var/log/warden/audit.jsonl"
+
+# optional (§04.2/04.3) — fehlt die Sektion, gilt der Default-Satz:
+[api.endpoints]
+enable = ["mr.create", "mr.note", "mr.discussion", "mr.discussion_reply",
+          "mr.update", "pipeline.trigger"]
 ```
 
 Tokens kommen ausschließlich aus `.env` (niemals in `warden.toml`). Leere `allowed_projects` → Startup-Abbruch (fail-closed).
@@ -341,6 +425,10 @@ Ein Schreiber (asyncio-Queue → einzelner Writer-Task), `O_APPEND`, eine vollst
 | Unit Policy | `test_policy.py` | parametrisierte `decide`-Fälle, alle R1–R6, Default-deny |
 | git Parser | `test_pktline.py` | aufgezeichnete receive-pack-Bodies: Präfix, Delete=Null-OID, Multi-Ref, gzip |
 | git E2E | `test_git_e2e.py` | echtes `git push` über den Warden, SHA-erhaltend |
-| API | `test_api_proxy.py` | GET passthrough, Merge→403, Ownership-Verletzung, Token nie geleakt |
+| API | `test_api_proxy.py` | GET passthrough, Merge→403, Ownership-Verletzung, Token nie geleakt, F2/F12/§04.3-Audit-Marker |
 | Quoten | `test_quota.py` | N ok, N+1 blockt; Sliding-Window mit Fake-Clock |
+| Katalog | `tests/catalog/test_config_parse.py` | `[api.endpoints]`-Formvalidierung (fail-closed) |
+| Katalog | `tests/catalog/test_activation.py` | Aktivierung/Overrides: Default-Satz, unbekannte ID, Erweiterung↯, Verengung✓, FORBIDDEN↯ |
+| Katalog | `tests/catalog/test_startgate.py` | jede Katalog-Sonde hält; eine durchkommende Sonde ⇒ `StartgateFailure` |
+| Katalog | `tests/catalog/test_config_integration.py` | `Config.effective_endpoints` end-to-end über `from_env` |
 | Red-Team | `tests/redteam/` | → [`03-testing-redteam.md`](./03-testing-redteam.md) |

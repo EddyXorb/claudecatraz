@@ -3,7 +3,7 @@ Clean-Code vorarbeiten, ``docs/design/architecture-generalization/06-migration.m
 
 A template like ``/projects/{id}/merge_requests/{iid}`` compiles to a regex that
 matches exactly one non-slash, URL-encoded path segment per ``{...}`` token. Both
-:class:`api_endpoints.WriteEndpoint` and :class:`read_endpoints.ReadEndpoint` used
+:class:`catalog.model.CatalogEntry` and :class:`read_endpoints.ReadEndpoint` used
 to build this regex independently — one compiler instead of two near-identical
 copies.
 """

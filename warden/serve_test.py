@@ -22,7 +22,7 @@ os.environ.setdefault("AUDIT_LOG_PATH", "-")
 
 from warden.app import create_app
 from warden.audit import AuditLog
-from warden.config import from_env
+from warden.config_load import from_env
 from warden.context import AppContext
 from warden.state import State
 from warden.upstream import Upstream

@@ -1,8 +1,9 @@
 """Core policy data types (W5): the pure values exchanged between the proxies,
 the policy core, and the audit/state layers.
 
-Kept in a leaf module so the endpoint table (``api_endpoints``) can hold the
-check predicates directly without an import cycle back through ``policy``.
+Kept in a leaf module so the endpoint catalog (``warden.catalog``) can hold
+the check predicates directly without an import cycle back through
+``policy``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from .pktline import RefCommand
 
 if TYPE_CHECKING:  # only for the annotation; no runtime import (avoids a cycle)
-    from .api_endpoints import WriteEndpoint
+    from .catalog.model import CatalogEntry
 
 
 class TokenKind(str, Enum):
@@ -56,7 +57,7 @@ class ProxyRequest:
     project: str
     method: str = ""
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
-    endpoint: Optional[WriteEndpoint] = None  # matched write endpoint (api)
+    endpoint: Optional["CatalogEntry"] = None  # matched catalog entry (api)
     fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
     ref_commands: list[RefCommand] = field(default_factory=list)  # git push
     # Resolved by api_proxy via an upstream lookup (W6.2); None ⇒ unverifiable.

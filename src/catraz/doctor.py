@@ -24,7 +24,7 @@ SECRETS = [
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "claude", "net", "auth", "base"]
+DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "endpoints", "claude", "net", "auth", "base"]
 # Sections that gate the trust boundary — `up` always runs these, no opt-out.
 SECURITY_SECTIONS = ["docker", "compose", "env", "policy", "auth"]
 
@@ -311,6 +311,40 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         f.ok("policy", f"{len(resolved)} allowed project(s) [{source}]")
 
 
+def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
+    """Effective endpoint-catalog table (§04.3): default set + activations.
+
+    A thin section — the actual report is fetched from the running warden's
+    read-only ``/policy`` admin route and formatted by ``catraz.endpoints``;
+    doctor.py only wires it into the Findings list, so this module doesn't
+    grow with the catalog (see ``catraz.endpoints.fetch_policy_report``).
+    """
+    from catraz.admin_client import AdminUnreachable
+    from catraz.endpoints import fetch_policy_report
+
+    mode = _gitlab_mode(env)
+    if mode == "off":
+        f.ok("endpoints", "GitLab off — endpoint catalog not applicable")
+        return
+    try:
+        report = fetch_policy_report(root)
+    except AdminUnreachable as exc:
+        f.warn("endpoints", f"activation state unknown ({exc})",
+               "start the stack (`catraz run` / `catraz up`) to see it")
+        return
+    rows = report["catalog"]
+    active = [r for r in rows if r["active"]]
+    inactive = [r for r in rows if not r["active"]]
+    active_desc = ", ".join(
+        f"{r['id']}[{r['enabled_via']}]" if r["enabled_via"] != "default" else r["id"]
+        for r in active
+    )
+    f.ok("endpoints", f"{len(active)} active: {active_desc or '(none)'}")
+    if inactive:
+        f.ok("endpoints", f"{len(inactive)} in catalog but not enabled: "
+             f"{', '.join(r['id'] for r in inactive)}")
+
+
 def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
     from catraz.paths import claude_home
     home = claude_home(root)
@@ -406,6 +440,7 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
     if "tokens" in sections: check_gitlab(env, f)
     if "tokens" in sections: check_tokens(root, env, f)
     if "policy" in sections: check_policy(root, env, f)
+    if "endpoints" in sections: check_endpoints(root, env, f)
     if "claude" in sections: check_claude(root, env, f)
     if "net" in sections: check_net(root, f)
     if "auth" in sections: check_auth(root, env, f)

@@ -49,6 +49,43 @@ async def test_audit_tail_empty_when_log_missing(cfg, tmp_path):
     await ctx.upstream.aclose()
 
 
+async def test_policy_route_reports_the_effective_table(cfg):
+    # §04.3: catraz doctor / allow-endpoint read this route.
+    ctx = AppContext(cfg, Upstream(cfg), State(":memory:"), AuditLog("-"))
+    async with await _admin_client(ctx) as c:
+        resp = await c.get("/policy")
+    assert resp.status_code == 200
+    body = resp.json()
+    ids = {row["id"] for row in body["catalog"]}
+    assert "mr.create" in ids and "branch.create" in ids
+    mr_create = next(row for row in body["catalog"] if row["id"] == "mr.create")
+    assert mr_create["default"] is True and mr_create["active"] is True
+    branch_create = next(row for row in body["catalog"] if row["id"] == "branch.create")
+    assert branch_create["default"] is False and branch_create["active"] is False
+    assert body["builtin_deny"] == ["mr.merge"]
+    await ctx.upstream.aclose()
+
+
+async def test_policy_route_reflects_activation_config(cfg, tmp_path):
+    from dataclasses import replace
+
+    from warden.catalog.config_parse import EndpointActivation
+
+    activated = replace(
+        cfg, endpoint_activation=EndpointActivation(enable=("mr.create", "branch.create"))
+    )
+    ctx = AppContext(activated, Upstream(activated), State(":memory:"), AuditLog("-"))
+    async with await _admin_client(ctx) as c:
+        resp = await c.get("/policy")
+    body = resp.json()
+    branch_create = next(row for row in body["catalog"] if row["id"] == "branch.create")
+    assert branch_create["active"] is True
+    assert branch_create["enabled_via"] == "config:branch.create"
+    mr_note = next(row for row in body["catalog"] if row["id"] == "mr.note")
+    assert mr_note["active"] is False  # not in this test's enable list
+    await ctx.upstream.aclose()
+
+
 async def test_viewer_serves_the_static_html_page(cfg):
     # F7: _VIEWER_HTML now loads from warden/static/viewer.html (a package asset,
     # not an inline string in routing code) — the endpoint must still serve it.

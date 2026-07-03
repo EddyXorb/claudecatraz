@@ -11,7 +11,8 @@ from __future__ import annotations
 import pytest
 
 import warden.__main__ as main_mod
-from warden.config import ConfigError
+from warden.catalog import StartgateFailure
+from warden.config import Config, ConfigError
 from warden.state import SchemaError
 
 
@@ -30,6 +31,20 @@ def test_main_exits_2_on_schema_error(monkeypatch):
         raise SchemaError("state DB schema version 99 is newer than this warden build supports")
 
     monkeypatch.setattr(main_mod, "from_env", _raise)
+    with pytest.raises(SystemExit) as exc:
+        main_mod.main()
+    assert exc.value.code == 2
+
+
+def test_main_exits_2_on_startgate_failure(monkeypatch):
+    # §04.4: a catalog deny-probe that would be ALLOWED is a fail-closed
+    # startup abort, exactly like a bad config or an unrecognised schema.
+    monkeypatch.setattr(main_mod, "from_env", lambda: Config())
+
+    def _raise(cfg, table) -> None:
+        raise StartgateFailure("probe 'x' was ALLOWED")
+
+    monkeypatch.setattr(main_mod, "run_startgate", _raise)
     with pytest.raises(SystemExit) as exc:
         main_mod.main()
     assert exc.value.code == 2

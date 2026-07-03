@@ -48,6 +48,17 @@ _ALLOWED_FIELDS = {
     "open_mrs",
     "open_branches",
     "writes_last_hour",
+    # §04.3 (docs/design/architecture-generalization/04-policy-erweiterbarkeit.md):
+    # marks a decision made against a catalog entry a deployment's warden.toml
+    # activated beyond the shipped default set (e.g. "config:branch.create").
+    # Additive and optional — most events never carry it — so no
+    # AUDIT_SCHEMA_VERSION bump: unlike the R2→R4 rename that earned version 2
+    # (an audit-visible change to an *existing* field's value), a new,
+    # absent-by-default field is exactly the kind of extension O.5's
+    # field-allowlist redaction was designed to admit without a version bump —
+    # every existing reader (viewer.html, `catraz observe`) already renders
+    # unknown/missing fields defensively.
+    "enabled_via",
 }
 
 

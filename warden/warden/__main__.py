@@ -11,7 +11,9 @@ import uvicorn
 
 from .app import create_admin_app, create_app
 from .audit import AuditLog
-from .config import ConfigError, from_env
+from .catalog import StartgateFailure, run_startgate
+from .config import ConfigError
+from .config_load import from_env
 from .context import AppContext
 from .state import SchemaError, State
 from .upstream import Upstream
@@ -29,6 +31,15 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
 
 async def _serve() -> None:
     cfg = from_env()
+
+    # §04.3/04.4: build the effective endpoint table (raises ConfigError on
+    # any fail-closed activation-config problem) and run its startgate — every
+    # activated catalog entry's deny-probes, plus the built-in invariants'
+    # global probes — before anything else. Pure, offline, no state DB / no
+    # upstream: this is the earliest possible fail-closed abort point.
+    table = cfg.effective_endpoints
+    run_startgate(cfg, table)
+
     if cfg.gitlab_enabled and not cfg.allowed_projects:
         print(
             "warden: WARNING: allowed_projects is empty — ALL GitLab operations "
@@ -73,10 +84,11 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except (ConfigError, SchemaError) as exc:
-        # Both are fail-closed startup aborts (A9): bad config or a state DB
-        # this build cannot understand. Neither should ever surface as a
-        # traceback — a clean message and a non-zero exit is the contract.
+    except (ConfigError, SchemaError, StartgateFailure) as exc:
+        # All three are fail-closed startup aborts (A9): bad config, a state
+        # DB this build cannot understand, or a catalog deny-probe that would
+        # have been allowed. None should ever surface as a traceback — a
+        # clean message and a non-zero exit is the contract.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

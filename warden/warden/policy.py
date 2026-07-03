@@ -56,8 +56,14 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Optional
 
-from .api_endpoints import EndpointKind, WriteEndpoint, api_capabilities, match_endpoint
 from .capabilities import forbidden_check, git_ref_capabilities
+from .catalog import (
+    CatalogEntry,
+    EndpointKind,
+    api_capabilities,
+    is_builtin_merge_endpoint,
+    match_endpoint,
+)
 from .config import Config
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
 from .pktline import RefCommand
@@ -190,8 +196,16 @@ def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     if req.method.upper() in ("GET", "HEAD", "OPTIONS"):
         return _decide_read(req)
 
-    # Write methods: endpoint must be in the allowlist (default-deny otherwise).
-    ep = req.endpoint or match_endpoint(req.method, req.path)
+    # The merge endpoint is a built-in deny invariant (§04.2/04.3), not a
+    # catalog row — it matches unconditionally, before the effective table is
+    # even consulted, so no [api.endpoints] config can ever disable it.
+    if is_builtin_merge_endpoint(req.method, req.path):
+        return Decision(False, R4, "merge is never permitted")
+
+    # Write methods: endpoint must be in the *effective* table (§04.3) —
+    # cfg.effective_endpoints, built once from Catalog × config, never the
+    # catalog itself — default-deny otherwise.
+    ep = req.endpoint or match_endpoint(cfg.effective_endpoints.entries, req.method, req.path)
     if ep is None:
         return Decision(False, R3, f"write endpoint not in allowlist: {req.method} {req.path}")
 
@@ -215,7 +229,7 @@ def _decide_api(req: ProxyRequest, state: StateView, cfg: Config) -> Decision:
     return Decision(True, ep.rule, "ok", TokenKind.WRITE)
 
 
-def _quota_check(ep: WriteEndpoint, state: StateView, cfg: Config) -> Optional[Decision]:
+def _quota_check(ep: CatalogEntry, state: StateView, cfg: Config) -> Optional[Decision]:
     if state.locked:  # §6.11 fail-safe: never "empty = free"
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if state.writes_last_hour >= cfg.max_writes_per_hour:

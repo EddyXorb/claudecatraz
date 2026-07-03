@@ -10,6 +10,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from . import api_proxy, git_proxy
+from .catalog import endpoint_table_report
 from .context import AppContext
 
 # Static log-viewer page (O.4) — a package asset, not routing code (F7).
@@ -57,6 +58,7 @@ def create_admin_app(ctx: AppContext) -> Starlette:
     routes = [
         Route("/healthz", _healthz, methods=["GET"]),
         Route("/audit", _audit_tail, methods=["GET"]),
+        Route("/policy", _policy, methods=["GET"]),
         Route("/", _viewer, methods=["GET"]),
     ]
     app = Starlette(routes=routes)
@@ -85,6 +87,18 @@ async def _audit_tail(request: Request) -> Response:
     except OSError:
         return PlainTextResponse("", status_code=200)
     return PlainTextResponse(b"".join(lines).decode("utf-8", "replace"))
+
+
+async def _policy(request: Request) -> JSONResponse:
+    """Read-only summary of the effective endpoint catalog (§04.3, admin net
+    only): every catalog entry, whether it's part of the default set, and
+    whether this deployment actually activated it. ``catraz doctor``/
+    ``catraz allow-endpoint`` are the CLI front for this route — it is how
+    the CLI learns catalog ids and activation state without shipping (or
+    running) a copy of the warden's Python.
+    """
+    ctx: AppContext = request.app.state.ctx
+    return JSONResponse(endpoint_table_report(ctx.cfg))
 
 
 async def _viewer(request: Request) -> HTMLResponse:

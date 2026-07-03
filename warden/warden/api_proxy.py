@@ -18,8 +18,8 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .api_endpoints import match_endpoint, mr_owned_by_claude
 from .audit import build_event
+from .catalog import CatalogEntry, Location, match_endpoint
 from .context import AppContext
 from .errors import deny_json
 from .model import Channel, Decision, ProxyRequest, StateView, TokenKind
@@ -76,25 +76,57 @@ def _iid_from_path(path: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-async def _extract_fields(request: Request, body: bytes) -> dict[str, Any]:
-    """Pull only the decision fields from body/query — no deep schema parsing (§6.9)."""
-    fields: dict[str, Any] = dict(request.query_params)
+def _parse_body_fields(body: bytes, content_type: str) -> dict[str, Any]:
+    """Parse a JSON or form-encoded body into a flat field dict — no deep
+    schema parsing (§6.9). Pure; a parse failure yields no fields, never an
+    exception (default-deny handles the rest downstream).
+    """
     if not body:
-        return fields
-    ctype = request.headers.get("content-type", "")
+        return {}
     try:
-        if "application/json" in ctype:
+        if "application/json" in content_type:
             data = json.loads(body)
             if isinstance(data, dict):
-                fields.update({k: v for k, v in data.items() if isinstance(v, (str, int, bool))})
-        elif "application/x-www-form-urlencoded" in ctype:
-            fields.update(dict(parse_qsl(body.decode())))
+                return {k: v for k, v in data.items() if isinstance(v, (str, int, bool))}
+        elif "application/x-www-form-urlencoded" in content_type:
+            return dict(parse_qsl(body.decode()))
     except (ValueError, UnicodeDecodeError):
         pass
+    return {}
+
+
+def _extract_fields(
+    request: Request, body: bytes, ep: Optional[CatalogEntry]
+) -> dict[str, Any]:
+    """Pull the decision fields for this request (§6.9; F12 fix).
+
+    For an unmatched write or any read (``ep is None``) this stays the old,
+    query-only behaviour — the read path (``read_endpoints``) still decides
+    on ``req.fields`` and is out of scope for this step (§06-migration.md
+    Schritt 1 built it, Schritt 4 only extends the *write* catalog).
+
+    For a matched catalog entry, F12 is fixed here: only the fields the entry
+    *declares* (:attr:`CatalogEntry.decision_fields`) are read, each strictly
+    from its declared location (body or query) — never a blind merge of
+    both. A body-declared field that only appears in the query string (or the
+    reverse) is simply absent from the decision, exactly as if the caller had
+    never sent it at all.
+    """
+    if ep is None:
+        return dict(request.query_params)
+    query_fields = dict(request.query_params)
+    body_fields = _parse_body_fields(body, request.headers.get("content-type", ""))
+    fields: dict[str, Any] = {}
+    for spec in ep.decision_fields:
+        source = query_fields if spec.location is Location.QUERY else body_fields
+        if spec.name in source:
+            fields[spec.name] = source[spec.name]
     return fields
 
 
-async def _parse_request(request: Request) -> tuple[ProxyRequest, bytes, Optional[int], str]:
+async def _parse_request(
+    request: Request, ctx: AppContext
+) -> tuple[ProxyRequest, bytes, Optional[int], str]:
     """Parse method/path/project/fields/body into the decision intent (W6, §6.9).
 
     Returns the raw query string too (F12) — kept out of ``ProxyRequest.path``
@@ -106,8 +138,15 @@ async def _parse_request(request: Request) -> tuple[ProxyRequest, bytes, Optiona
     project = _project_from_path(rest_path)
 
     body = b"" if method in ("GET", "HEAD", "OPTIONS") else await request.body()
-    fields = await _extract_fields(request, body)
-    ep = None if method in ("GET", "HEAD", "OPTIONS") else match_endpoint(method, rest_path)
+    # §04.3: match against the effective table (Catalog × config), never the
+    # catalog itself — a deployment's [api.endpoints] genuinely decides what
+    # is reachable here.
+    ep = (
+        None
+        if method in ("GET", "HEAD", "OPTIONS")
+        else match_endpoint(ctx.cfg.effective_endpoints.entries, method, rest_path)
+    )
+    fields = _extract_fields(request, body, ep)
     iid = _iid_from_path(rest_path)
 
     req = ProxyRequest(
@@ -121,6 +160,14 @@ async def _parse_request(request: Request) -> tuple[ProxyRequest, bytes, Optiona
     return req, body, iid, raw_query
 
 
+def _needs_mr_owner(ep: CatalogEntry) -> bool:
+    """F2 fix: does any check on the matched entry declare a need for the MR
+    ownership lookup — instead of testing function identity
+    (``mr_owned_by_claude in ep.checks``) against a hardcoded predicate.
+    """
+    return any("mr_owner" in check.needs for check in ep.checks)
+
+
 async def _resolve_ownership(ctx: AppContext, req: ProxyRequest, iid: Optional[int]) -> None:
     """MR ownership lookup (W6.2), only when the matched endpoint needs it.
 
@@ -129,7 +176,7 @@ async def _resolve_ownership(ctx: AppContext, req: ProxyRequest, iid: Optional[i
     not be sent upstream first.)
     """
     ep = req.endpoint
-    if not (ctx.cfg.writes_enabled and ep is not None and mr_owned_by_claude in ep.checks):
+    if not (ctx.cfg.writes_enabled and ep is not None and _needs_mr_owner(ep)):
         return
     if iid is not None and req.project:
         req.mr_owner_ok = await ctx.mr_owned_by_claude(req.project, iid)
@@ -168,7 +215,7 @@ async def handle(request: Request) -> Response:
     correlation_id = str(uuid.uuid4())
     started = time.monotonic()
 
-    req, body, iid, raw_query = await _parse_request(request)
+    req, body, iid, raw_query = await _parse_request(request, ctx)
     await _resolve_ownership(ctx, req, iid)
 
     state = ctx.state.view()
@@ -185,6 +232,21 @@ async def handle(request: Request) -> Response:
     return stream_upstream(resp)
 
 
+def _enabled_via(ctx: AppContext, req: ProxyRequest) -> Optional[str]:
+    """Audit marking for a non-default-activated catalog entry (§04.3).
+
+    Returns ``None`` for the shipped default set (and for no match at all) —
+    the field is additive and only shows up when it actually says something
+    (§04.3 deviation from the ``rule = "gitlab.R3+enabled:…"`` sketch in
+    ``04-policy-erweiterbarkeit.md``: a dedicated field instead of a
+    rule-id suffix, documented there).
+    """
+    if req.endpoint is None:
+        return None
+    via = ctx.cfg.effective_endpoints.enabled_via.get(req.endpoint.id)
+    return via if via and via != "default" else None
+
+
 def _audit(
     ctx: AppContext,
     req: ProxyRequest,
@@ -195,6 +257,10 @@ def _audit(
     *,
     upstream_status: Optional[int],
 ) -> None:
+    extra: dict[str, Any] = {}
+    enabled_via = _enabled_via(ctx, req)
+    if enabled_via is not None:
+        extra["enabled_via"] = enabled_via
     ctx.audit.log(
         build_event(
             channel="api",
@@ -207,6 +273,7 @@ def _audit(
             upstream_status=upstream_status,
             path=req.path,
             kind=req.endpoint.kind if req.endpoint else None,
+            **extra,
         )
     )
 

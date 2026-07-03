@@ -23,6 +23,7 @@ from catraz.errors import (
 from catraz.doctor import DOCTOR_SECTIONS
 from catraz.ui import Out as Out  # also re-exported for tests that access cli.Out
 from catraz import image as _image_mod  # noqa: F401 (kept for tests that import catraz.image)
+from catraz.commands import endpoints as endpoints_cmd
 from catraz.commands import setup, stack, observe
 from catraz.commands import run as run_cmd
 from catraz.commands import reload as reload_cmd
@@ -146,6 +147,12 @@ def build_parser() -> argparse.ArgumentParser:
     pal.add_argument("projects", nargs="+",
                      help="full project path(s), e.g. group/sub/project")
 
+    pae = sub.add_parser(
+        "allow-endpoint", parents=[_g()],
+        help="activate an endpoint-catalog entry beyond the default set (§04.2)")
+    pae.add_argument("endpoint_ids", nargs="+", metavar="ID",
+                     help="catalog id(s), e.g. branch.create — see `catraz doctor --section endpoints`")
+
     pa = sub.add_parser("audit", parents=[_g()], help="warden decision log (JSONL tail or --web viewer)")
     pa.add_argument("--web", action="store_true", help="open the live viewer over the admin socket")
     pa.add_argument("-f", "--follow", action="store_true", help="follow")
@@ -168,6 +175,7 @@ HANDLERS = {
     "audit":   observe.cmd_audit,
     "sync":    setup.cmd_sync,
     "allow":   setup.cmd_allow,
+    "allow-endpoint": endpoints_cmd.cmd_allow_endpoint,
     "version": cmd_version,
 }
 

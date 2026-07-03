@@ -125,7 +125,69 @@ body   = { tag_name = "claude/release-v1", ref = "main" }
   Katalog-Eintrag (plus minimale Verengungs-Overrides) **vorschlagen** — der Nutzer
   bestätigt eine konkrete, lesbare Aktivierung statt sie zu erfinden.
 
-## 04.5 Richtung für self-hosted: kurzlebige, eng gescopte Credentials
+## 04.5 Umsetzungsnotizen (Schritt 4, tatsächlicher Code)
+
+*Ergänzt nach der Umsetzung — wo der Code bewusst von der obigen Skizze abweicht, und warum.*
+
+- **Audit-Markierung als eigenes Feld, nicht als `rule`-Suffix.** §04.3 skizzierte
+  `rule = "gitlab.R3+enabled:release.create"`. Umgesetzt ist stattdessen ein additives
+  Audit-Feld `enabled_via` (`"config:<id>"`, nur gesetzt für nicht-default-aktivierte
+  Einträge; ganz abwesend für den Default-Satz) — die `rule`-ID bleibt unverändert die
+  reine Registry-ID aus `rules.py`. Grund: die Regel-Registry (§06 Schritt 2) hat genau
+  das Gegenteil-Problem gelöst — Regel-IDs als Streuliteral/verschmutzte Strings (B3). Ein
+  zusammengesetzter `rule`-String hätte diese Disziplin sofort wieder aufgeweicht (jeder
+  Leser von `rules.RULES` hätte ab dann auch `+enabled:`-Suffixe parsen müssen). Ein
+  eigenes Feld ist zusätzlich strukturiert abfragbar (Viewer/`catraz doctor`), statt aus
+  einem String zurückgeparst werden zu müssen. In die Audit-Feld-Allowlist aufgenommen
+  (`audit._ALLOWED_FIELDS`); **kein** `AUDIT_SCHEMA_VERSION`-Bump — anders als der
+  R2→R4-Rename (Schritt 2, Version 2), der eine *bestehende* Feldbedeutung änderte, ist
+  `enabled_via` ein komplett neues, standardmäßig abwesendes Feld. Genau diese Additivität
+  ist es, die O.5s Feld-Allowlist-Redaction von Anfang an zulassen sollte: jeder Leser
+  (Viewer, `catraz observe`) rendert unbekannte/fehlende Felder bereits defensiv.
+- **Kein Taming-Mechanismus für FORBIDDEN-Capabilities (YAGNI).** §04.2 skizzierte einen
+  Scoping-Check, der eine FORBIDDEN-Capability nachweislich bändigt (das `release.create`-
+  Beispiel: `ref` muss Namespace-Präfix tragen ⇒ der erzeugte Tag liegt nur auf eigenen
+  Branches). Dieser Schritt implementiert das **nicht**: ein Katalog-Eintrag, dessen
+  statische `capabilities` die `FORBIDDEN`-Menge schneiden, kann grundsätzlich nicht
+  aktiviert werden — `activation.build_effective_table` bricht mit `CatalogConfigError`
+  (→ `ConfigError`) ab, sobald ein solcher Eintrag in `enable` steht, ganz ohne
+  Umgehungsmöglichkeit. Das ist eine bewusste Auslassung: kein aktueller Katalog-Eintrag
+  (auch nicht `branch.create`/`issue.create`) braucht sie, und ein Taming-Mechanismus ohne
+  einen echten Verbraucher wäre spekulative Generalität (§06.2-Anti-Ziel „kein generisches
+  Proxy-Framework als Selbstzweck"). Der richtige Zeitpunkt dafür ist der erste reale
+  Katalog-Eintrag, der eine FORBIDDEN-Capability trägt (der Kandidat aus der Skizze bleibt
+  `release.create` — `creates_tag`) — dann bekommt `OverridableParam`/`activation.py` eine
+  zusätzliche Validierungsstufe „ist die Capability durch einen der Checks nachweislich
+  gebändigt", nicht vorher.
+- **Der Override-Mechanismus existiert, aber kein Default-Eintrag braucht ihn.**
+  `CatalogEntry.overridable` (Liste von `OverridableParam`: TOML-Schlüssel, welcher Check
+  ersetzt wird, ein `is_narrower`-Beweis, ein `rebuild`) ist generisch, aber nur
+  `branch.create` deklariert einen Knopf (`branch_prefix`, per
+  `Config.in_branch_namespace` als Verengungs-Beweis — ein neuer literaler Präfix muss
+  selbst innerhalb des allgemeinen Namensraums liegen). Keiner der sechs Default-Einträge
+  braucht das: `field_has_prefix` prüft dort gegen `Config.branch_prefixes` (den
+  deployment-weiten Namensraum), nicht gegen einen im Katalog fest verdrahteten String —
+  es gibt nichts Literales, das ein Override sinnvoll verengen könnte. `branch.create`
+  demonstriert den Mechanismus end-to-end (golden- und aktivierungs-getestet), damit er
+  beim ersten echten Bedarf (z. B. `release.create`s `tag_prefix`) bereits erprobt ist.
+- **F12-Fix ist auf den Schreibpfad/Katalog begrenzt.** `read_endpoints.py` (Schritt 1)
+  hatte sein eigenes F12-Beifang bereits gelöst (Query wird konsistent in Entscheidung und
+  Forwarding verwendet) und wird von diesem Schritt unverändert weiterverwendet. Der neue
+  Fix betrifft nur den *Schreib*pfad: `CatalogEntry.decision_fields` deklariert pro Feld
+  Body oder Query, und `api_proxy._extract_fields` liest für einen gematchten
+  Katalog-Eintrag ausschließlich diese deklarierten Felder aus der deklarierten Lage —
+  kein Merge von Query- und Body-Feldern mehr für Writes.
+- **`Config.effective_endpoints` als memoisierte `cached_property`, nicht als expliziter
+  Funktionsparameter.** `policy.decide(req, state, cfg)` behält seine Signatur (kein
+  Aufruf-Update nötig in `test_policy.py`/`test_quota.py`/`test_rules.py`, die alle direkt
+  gegen `decide` testen) — `_decide_api` liest `cfg.effective_endpoints` selbst. Das
+  Startgate (`startgate._probe_config`) seedet diesen Cache direkt (dieselbe
+  `instance.__dict__`-Mechanik, die `functools.cached_property` selbst benutzt), damit es
+  exakt die ihm übergebene Tabelle validiert — auch eine testweise von Hand gebaute, die zu
+  keiner realen `[api.endpoints]`-Config gehört — statt eine möglicherweise abweichende
+  Tabelle aus `cfg.endpoint_activation` neu zu bauen.
+
+## 04.6 Richtung für self-hosted: kurzlebige, eng gescopte Credentials
 
 *Aus Röst-Runde 1 (Roaster-Idee 4), als Option dokumentiert.*
 

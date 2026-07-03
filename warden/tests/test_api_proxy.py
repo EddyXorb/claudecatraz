@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
 
-from warden.api_proxy import _iid_from_path, _project_from_path
+from warden.api_proxy import _iid_from_path, _needs_mr_owner, _project_from_path
 from warden.audit import AuditLog
+from warden.catalog import DEFAULT_ENABLED
+from warden.catalog.config_parse import EndpointActivation
+from warden.catalog.entries import CATALOG
 
 PROJ = "group%2Fproj"
 
@@ -325,3 +329,122 @@ async def test_graphql_deny_is_audited(client, ctx, tmp_path):
     assert records[0]["decision"] == "deny"
     assert records[0]["rule"] == "R6"
     assert "graphql" in records[0]["path"]
+
+
+# --- F2: needs-based ownership resolution, not function-identity ---------------
+
+
+def test_needs_mr_owner_true_for_note_endpoint():
+    ep = next(e for e in CATALOG if e.id == "mr.note")
+    assert _needs_mr_owner(ep)
+
+
+def test_needs_mr_owner_false_for_mr_create():
+    ep = next(e for e in CATALOG if e.id == "mr.create")
+    assert not _needs_mr_owner(ep)
+
+
+def test_needs_mr_owner_false_for_entry_with_no_checks():
+    ep = next(e for e in CATALOG if e.id == "issue.create")
+    assert not _needs_mr_owner(ep)
+
+
+# --- F12: decision fields are read only from their declared location -----------
+
+
+async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client, respx_router):
+    # source_branch is a BODY-declared decision field for mr.create (§04.2).
+    # Sending it only as a query parameter must not satisfy field_has_prefix —
+    # the field must be treated as simply absent, not silently read from the
+    # wrong location (F12's actual footgun: a scoping check "passing" on a
+    # value the checked location never carried).
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests?source_branch=claude/x",
+        json={"target_branch": "main"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R2"
+
+
+# --- §04.3: audit marks non-default-activated catalog entries ------------------
+
+
+def _activated_client_ctx(cfg, respx_router):
+    """Build a fresh app/ctx/client with branch.create activated beyond the
+    default set — the shared ``client``/``ctx`` fixtures use the plain
+    default activation, so this scenario needs its own wiring.
+    """
+    from warden.app import create_app
+    from warden.audit import AuditLog
+    from warden.context import AppContext
+    from warden.state import State
+    from warden.upstream import Upstream
+
+    activated_cfg = replace(
+        cfg,
+        endpoint_activation=EndpointActivation(enable=tuple(DEFAULT_ENABLED) + ("branch.create",)),
+    )
+    state = State(":memory:")
+    state.mark_reconciled()
+    ctx = AppContext(activated_cfg, Upstream(activated_cfg), state, AuditLog("-"))
+    ctx.service_account_id = 42
+    return ctx, create_app(ctx)
+
+
+async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_router):
+    ctx, app = _activated_client_ctx(cfg, respx_router)
+    transport = httpx.ASGITransport(app=app)
+    route = respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
+        return_value=httpx.Response(201, json={"name": "claude/x"})
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+        resp = await c.post(
+            f"/api/v4/projects/{PROJ}/repository/branches",
+            json={"branch": "claude/x", "ref": "claude/y"},
+        )
+    assert resp.status_code == 201
+    assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
+    await ctx.upstream.aclose()
+
+
+async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
+    ctx, app = _activated_client_ctx(cfg, respx_router)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+        resp = await c.post(
+            f"/api/v4/projects/{PROJ}/repository/branches",
+            json={"branch": "main", "ref": "main"},
+        )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R2"
+    await ctx.upstream.aclose()
+
+
+async def test_config_activated_entry_marked_in_audit_default_entry_is_not(cfg, respx_router, tmp_path):
+    ctx, app = _activated_client_ctx(cfg, respx_router)
+    logf = tmp_path / "audit.jsonl"
+    ctx.audit = AuditLog(str(logf))
+    ctx.audit.start()
+    respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
+        return_value=httpx.Response(201, json={"name": "claude/x"})
+    )
+    respx_router.route(method="POST", url__regex=r".*/merge_requests$").mock(
+        return_value=httpx.Response(201, json={"iid": 1})
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+        await c.post(
+            f"/api/v4/projects/{PROJ}/repository/branches",
+            json={"branch": "claude/x", "ref": "claude/y"},
+        )
+        await c.post(
+            f"/api/v4/projects/{PROJ}/merge_requests",
+            json={"source_branch": "claude/x", "target_branch": "main"},
+        )
+    await ctx.audit.stop()
+    records = [json.loads(line) for line in logf.read_text().splitlines()]
+    branch_event = next(r for r in records if r["path"].endswith("/repository/branches"))
+    mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
+    assert branch_event["enabled_via"] == "config:branch.create"
+    assert "enabled_via" not in mr_event  # default-activated entry: no marking
+    await ctx.upstream.aclose()
