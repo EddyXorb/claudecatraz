@@ -354,6 +354,9 @@ F); erst nach G angehen, wenn H/F den Katalog schon geschlankt haben.
 
 ## Beobachtungen ohne eigenen Schritt (bei Gelegenheit)
 
+- die Ownership-regel (keine MRs ändern die dem agent nicht gehören) ist vermutlich übertrieben vorsichtig.
+  Es würde vermutlich reichen zu fordern keine MRs anzufassen, die nicht von einem erlaubten branch starten. 
+  Dadurch fallen auch wieder viele sonderfälle und sonderbehandlungen weg und für den endnutzer ist die Funktionsweise viel klarer.
 - die State-Migrations sind unnötig, weil das Projekt noch komplett neu ist - weg damit
 - **Zwei parallele Policy-Mechanismen:** die Read-Tabelle (`read_endpoints.py`,
   `ReadCheck` liefert immer eine terminale Decision) und der Write-Catalog
