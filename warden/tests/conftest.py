@@ -48,9 +48,8 @@ def forge(cfg, state) -> GitForge:
 
 @pytest.fixture
 def ctx(cfg, state) -> AppContext:
-    upstream = Upstream(cfg)
     audit = AuditLog("-")
-    return build_context(cfg, upstream, state, audit)
+    return build_context(cfg, state, audit)
 
 
 @pytest.fixture
@@ -65,4 +64,4 @@ async def client(ctx) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
         yield c
-    await ctx.forge.upstream.aclose()
+    await ctx.upstream.aclose()

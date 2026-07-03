@@ -21,7 +21,6 @@ from warden.context import build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.guards.gitlab.upstream import Upstream
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
@@ -150,7 +149,7 @@ def e2e(tmp_path):
     )
     state = State(cfg.state_db_path)
     state.mark_reconciled()
-    ctx = build_context(cfg, Upstream(cfg), state, AuditLog("-"))
+    ctx = build_context(cfg, state, AuditLog("-"))
     warden_port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(create_app(ctx), host="127.0.0.1", port=warden_port, log_level="error")

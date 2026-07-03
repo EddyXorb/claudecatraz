@@ -395,7 +395,6 @@ def _activated_client_ctx(cfg, respx_router):
     from warden.context import build_context
     from warden.core.audit import AuditLog
     from warden.core.state import State
-    from warden.guards.gitlab.upstream import Upstream
 
     activated_cfg = replace(
         cfg,
@@ -403,7 +402,7 @@ def _activated_client_ctx(cfg, respx_router):
     )
     state = State(":memory:")
     state.mark_reconciled()
-    ctx = build_context(activated_cfg, Upstream(activated_cfg), state, AuditLog("-"))
+    ctx = build_context(activated_cfg, state, AuditLog("-"))
     return ctx, create_app(ctx)
 
 
@@ -420,7 +419,7 @@ async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_route
         )
     assert resp.status_code == 201
     assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
-    await ctx.forge.upstream.aclose()
+    await ctx.upstream.aclose()
 
 
 async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
@@ -433,7 +432,7 @@ async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_route
         )
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R2"
-    await ctx.forge.upstream.aclose()
+    await ctx.upstream.aclose()
 
 
 async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
@@ -467,4 +466,4 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
     mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
     assert branch_event["enabled_via"] == "config:branch.create"
     assert "enabled_via" not in mr_event  # default-activated entry: no marking
-    await ctx.forge.upstream.aclose()
+    await ctx.upstream.aclose()

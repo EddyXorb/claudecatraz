@@ -13,7 +13,6 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
 from warden.guards.git.pktline import FLUSH, pkt_line
-from warden.guards.gitlab.upstream import Upstream
 
 ZERO = "0" * 40
 SHA1 = "1" * 40
@@ -140,9 +139,8 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
     )
     state = State(":memory:")
     state.mark_reconciled()
-    upstream = Upstream(cfg)
     audit = AuditLog("-")
-    ctx = build_context(cfg, upstream, state, audit)
+    ctx = build_context(cfg, state, audit)
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://warden")

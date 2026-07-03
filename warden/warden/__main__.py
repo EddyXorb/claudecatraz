@@ -17,7 +17,6 @@ from .core.config import ConfigError
 from .core.config_load import from_env
 from .core.logging_setup import configure_logging
 from .core.state import SchemaError, State
-from .guards.gitlab.upstream import Upstream
 from .guards.gitlab_api.catalog import CatalogConfigError
 
 log = logging.getLogger("warden")
@@ -34,7 +33,33 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
             log.error("periodic reconcile error: %s", exc)
 
 
-# TODO: tidy up this function and split it into smaller functions.
+async def _run_servers(ctx: AppContext) -> None:
+    """Own the uvicorn lifecycle: agent + admin servers, periodic reconcile,
+    and teardown once either server stops."""
+    agent = uvicorn.Server(
+        uvicorn.Config(create_app(ctx), host="0.0.0.0", port=ctx.cfg.agent_port, log_level="info")
+    )
+    admin_uds = os.environ.get("ADMIN_UDS")
+    if admin_uds:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(admin_uds)  # stale socket von Crash entfernen
+        admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
+    else:
+        admin_config = uvicorn.Config(
+            create_admin_app(ctx),
+            host=ctx.cfg.admin_host,
+            port=ctx.cfg.admin_port,
+            log_level="warning",
+        )
+    admin = uvicorn.Server(admin_config)
+    reconcile_task = asyncio.create_task(_periodic_reconcile(ctx))
+    try:
+        await asyncio.gather(agent.serve(), admin.serve())
+    finally:
+        reconcile_task.cancel()
+        await ctx.aclose()
+
+
 async def _serve() -> None:
     cfg = from_env()
     configure_logging(cfg.log_path)
@@ -45,20 +70,14 @@ async def _serve() -> None:
             "(R-rules) until a project is added to warden.toml. The dev-env "
             "still starts for offline work."
         )
-    # TODO: this leaks from gitlab_api, should not be here. If is is really needed it
-    # can persist in the Guards that the build-context creates, but as part of the
-    # their initialization (make it a member of the guard class) without the context
-    # builder needing to know about it.
-    upstream = Upstream(cfg)
     state = State(cfg.state_db_path)
     audit = AuditLog(cfg.audit_log_path)
     audit.start()
-    ctx = build_context(cfg, upstream, state, audit)
+    ctx = build_context(cfg, state, audit)
 
-    # Reconcile BEFORE opening the agent port: GitLab truth dominates.
-    # TODO: consider moving this into the Gitlab-Guard directly.
-    # The fact the the context holds all guards alive (and they are no one-shot
-    # objects anymore) makes this possible
+    # Reconcile BEFORE opening the agent port: GitLab truth dominates. This is a
+    # global lifecycle guarantee (port-open timing), so it lives in the runtime
+    # and stays out of any individual guard (won't-do: see §07 Punkt 5).
     for g in ctx.guards:
         await g.startup()
     ok = True
@@ -67,27 +86,7 @@ async def _serve() -> None:
     if not ok:
         log.error("initial reconcile incomplete — state stays locked")
 
-    agent = uvicorn.Server(
-        uvicorn.Config(create_app(ctx), host="0.0.0.0", port=cfg.agent_port, log_level="info")
-    )
-    admin_uds = os.environ.get("ADMIN_UDS")
-    if admin_uds:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(admin_uds)  # stale socket von Crash entfernen
-        admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
-    else:
-        admin_config = uvicorn.Config(
-            create_admin_app(ctx), host=cfg.admin_host, port=cfg.admin_port, log_level="warning"
-        )
-    admin = uvicorn.Server(admin_config)
-    reconcile_task = asyncio.create_task(_periodic_reconcile(ctx))
-    try:
-        await asyncio.gather(agent.serve(), admin.serve())
-    finally:
-        reconcile_task.cancel()
-        await audit.stop()
-        await upstream.aclose()
-        state.close()
+    await _run_servers(ctx)
 
 
 def main() -> None:
