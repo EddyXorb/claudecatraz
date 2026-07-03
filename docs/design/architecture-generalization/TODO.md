@@ -65,21 +65,32 @@ Erledigt und einzeln committet:
   (R0 statt R6 in zwei Randfällen, in Tests dokumentiert). 344 Tests grün
   (Commit `c194d46`).
 
-Offen (Reihenfolge: D, E, H, F, G):
+Erledigt (Fortsetzung):
 
-- ⬜ **D** — AppContext zerlegen. Vorgehen pro Subagent war: Forge-Schicht
-  `guards/gitlab/` (Upstream + Service-Account + Owner-Cache + Reconcile als
-  `GitlabForge`, beiden Guards injiziert), Root-`warden/context.py` ohne Logik,
-  Guard-Lifecycle-Hooks (`startup`/`reconcile`), langlebige Guards + `routes()`
-  statt freier Handler in `app.py`. Harte Anforderung beachten: Config-Mutation
-  in `reconcile()` beenden — numerische Projekt-Id-Aliase werden Forge-State
-  (fail-closed), `allowed_project_ids` fliegt aus `Config`, `project_allowed`
-  wird überschreibbarer Guard-Hook.
-- ⬜ **E** — Persistenz: Forge-Tabellen raus aus `core/state.py`, `StateStore`-Werkzeug.
-- ⬜ **H** — Entfetten: Override-Mechanismus löschen, Deny-Probes auslagern,
-  `git_reject_response` in den git-Guard.
-- ⬜ **F** — Dataclass-Config + generischer TOML-Decoder (braucht H).
-- ⬜ **G** — Docstring-Pass (zuletzt).
+- ✅ **D** — AppContext zerlegt. D1 (`85730da`): git-Guards zu einem
+  `GitGuard`/`GitIntent` verschmolzen. D2 (`6611817`): Forge-Schicht
+  `guards/gitlab/` (`GitlabForge` + `upstream.py`, beiden Guards injiziert),
+  logikfreies Root-`warden/context.py` (`build_context`), Guard-Lifecycle
+  (`startup`/`reconcile`), `routes()` pro Guard, `create_app(ctx)` generisch;
+  Config-Mutation beendet (`allowed_project_ids` raus aus `Config`,
+  `project_id_aliases` als Forge-State, `project_allowed` als Guard-Hook).
+- ✅ **E** — Persistenz gesplittet (`bc25505`): `StateStore` (Connection +
+  Migrations + writes-Zähler/Lock) im Core, `agent_branches`/`agent_mrs` als
+  `ForgeState` in `guards/gitlab/state.py`; `Guard.state_view()`-Hook.
+- ✅ **H** — Entfettet (`23a1b61`): Override-Mechanismus gelöscht, Deny-Probes
+  nach `catalog/probes.py` ausgelagert, `git_reject_response` in `guards/git/errors.py`.
+
+Offen (Reihenfolge: F, G, danach die zwei neuen Vereinfachungs-Schritte H2, I):
+
+- 🔄 **F** — Dataclass-Config + generischer TOML-Decoder (in Arbeit). Kern-Ziel:
+  den Deferred-Import-Trick (`Config.effective_endpoints` → Katalog) aus
+  `core/config.py` entfernen und `catalog/config_parse.py` durch den Decoder
+  ersetzen.
+- ⬜ **G** — Docstring-Pass (zuletzt vor den Vereinfachungs-Schritten).
+- ⬜ **H2** — Startgate abbauen (neu, siehe unten). Nach H ist sein einzig
+  nicht-redundanter Wert (Deployment-Config validieren) weg.
+- ⬜ **I** — Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen
+  (neu, siehe unten). Reads und Writes fallen unter *ein* Modell.
 
 Arbeitsmodus bisher: pro Schritt ein Sonnet-Subagent (Prompt aus dem Plan-Abschnitt
 unten plus betroffene Dateien plus Verifikation: `cd warden && uv run pytest -q`,
@@ -93,7 +104,9 @@ Verhaltensnetz. A ist frei; B → C → D; E braucht D (Guard-Basisklasse als Au
 für Guard-State); H (Entfetten) nach C jederzeit; F (Dataclass-Config) braucht H
 (Overrides weg ⇒ Schema statisch typbar) und profitiert von D (Guard-eigene
 Config-Sektion); G (Docstrings) zuletzt, weil vorher noch Code bewegt wird.
-Ausführungsreihenfolge: A, B, C, D, E, H, F, G.
+Ausführungsreihenfolge: A, B, C, D, E, H, F, G, **H2, I** (die letzten zwei
+sind die 2026-07-03 entschiedenen Vereinfachungs-Schritte: es ist insgesamt zu
+viel Ballast im System — siehe unten).
 
 ### A. `api_endpoints.py` ersatzlos löschen
 
@@ -229,6 +242,62 @@ bilden 1:1 auf die Dataclass-Struktur ab.
   *wo es dokumentiert ist*. Zielgröße: Modul-Docstrings ≤ 5 Zeilen, Methoden ≤ 3.
 - Zuletzt ausführen (nach allen anderen Schritten), damit der Pass nicht Text
   poliert, der ohnehin verschoben oder gelöscht wird.
+
+### H2. Startgate abbauen (Vereinfachung, entschieden 2026-07-03)
+
+Das Startgate hat zwei Rollen: (a) ein Golden-Test, der beim Boot statt in CI
+läuft — das meiste (`state_event=merge` denied, Tag-Push denied, Branch außer
+Namespace denied) steht schon in `test_policy`/`test_capabilities`/
+`redteam/test_bypass`, also **redundant**; (b) Validierung der Deployment-
+*Config* gegen die effektive Tabelle — der einzige nicht-redundante Wert. Rolle
+(b) lebte fast ausschließlich vom Override-Mechanismus. **H hat die Overrides
+gelöscht** ⇒ Config kann Einträge nur noch an-/abschalten, und `activation.py`
+validiert das bereits fail-closed direkt (unbekannte Id, FORBIDDEN-Capability).
+Damit schmilzt (b) weg und das Startgate dupliziert nur noch CI-Golden-Tests.
+
+Vorgehen:
+
+- Entry-spezifische Deny-Probes (`catalog/probes.py`) in normale pytest-Fälle
+  überführen (Testwert bleibt).
+- Die zwei globalen Invarianten (Merge-nie, Projekt-Grenze-immer) als 2–3
+  Unit-Tests behalten; die Config-Validierung bleibt in `activation.py`.
+- Löschen: `startgate.py`, `DenyProbe`, `catalog/probes.py`, `builtin.py`s
+  `BUILTIN_DENY_PROBES`, `PROBE_PROJECT`/`OTHER_PROJECT`, die duplizierte
+  Projekt-Regex in `startgate.py`, `StartgateFailure` und dessen Handling in
+  `__main__.py`.
+- `is_builtin_merge_endpoint` bleibt (das ist Laufzeit-Policy, kein Probe-Ding).
+
+### I. Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen (entschieden 2026-07-03)
+
+Die halbe Idee existiert schon: `core/capabilities.py` **ist** die globale,
+geschlossene Capability-Registry am Wurzel — jeder Guard mappt seinen Intent
+dorthin (`git_ref_capabilities`, `api_capabilities`), der Kernel prüft gegen
+`FORBIDDEN`. Der Umbau ersetzt die Trias `template` + `decision_fields` +
+`checks`-Tupel pro Katalog-Eintrag durch *einen* Recognizer, der (a) match/kein
+Match sagt und (b) bei Match die immer gebrauchten Zusatzinfos (Scope:
+Branchname, iid, „braucht Owner-Lookup") normalisiert zurückgibt.
+
+Beobachtung aus dem Durchmappen: **jeder** heutige Write-Check reduziert sich auf
+⟨Capability-Set + Branch-Scope-Feld + Ownership-Scope⟩. `mr.create` →
+`branch=source_branch`; `mr.note/discussion/reply` → `owner(iid)`; `mr.update` →
+`owner(iid)` + Merge-Alias (schon Capability `MERGES`, der `field_not_equals`
+ist redundant); `pipeline.trigger` → `branch=ref`; `branch.create` →
+`branch=branch` + `CREATES_REF`; `issue.create` → nur Projekt-Grenze+Quota. Der
+Scope-Raum ist winzig und geschlossen: `branch-namespace`, `mr-ownership`,
+`quota-by-kind`, plus `content-exposure` auf der Read-Seite. Damit **vereinen
+sich die zwei parallelen Policy-Mechanismen** (Read-Tabelle liefert terminale
+Decision, Write-Katalog liefert `Optional[Decision]`) zu einem: Recognizer →
+⟨cap, scope⟩ → *eine* generische `decide`.
+
+Drei Dinge dürfen dabei NICHT verloren gehen (sonst hat man die Checks nur in
+Matcher umbenannt): (1) Capabilities bleiben geschlossenes Core-Vokabular; (2)
+Scope bleibt ein kleiner, geschlossener Satz normalisierter Felder, den *eine*
+`decide` konsumiert — keine Ad-hoc-Logik pro Eintrag; (3) Feld-Extraktion bleibt
+geteilt (F12: Body/Query nie blind mergen). Der Recognizer ist eine **Dataclass
+mit Metadaten** (id/method/template) + schmaler match/extract-Funktion, keine
+beliebige Funktion — sonst stirbt die `/policy`-Introspektion und die generische
+fail-closed-Validierung. Der Umbau fasst §04 komplett an (dieselben Dateien wie
+F); erst nach G angehen, wenn H/F den Katalog schon geschlankt haben.
 
 ## Beobachtungen ohne eigenen Schritt (bei Gelegenheit)
 
