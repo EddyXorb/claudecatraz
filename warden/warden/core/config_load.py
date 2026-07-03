@@ -172,6 +172,7 @@ def from_env(
         max_open_mrs=_tunable_int("MAX_OPEN_MRS", "max_open_mrs", 5),
         max_open_branches=_tunable_int("MAX_OPEN_BRANCHES", "max_open_branches", 10),
         max_writes_per_hour=_tunable_int("MAX_WRITES_PER_HOUR", "max_writes_per_hour", 60),
+        max_push_bytes=_tunable_int("MAX_PUSH_BYTES", "max_push_bytes", 50 * 1024 * 1024),
         allowed_projects=_tunable_projects("ALLOWED_PROJECTS", "allowed_projects"),
         api_url=env.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/api/v4",
         read_token=_secret(env, "GITLAB_READ_TOKEN"),
@@ -202,7 +203,7 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("invalid configuration: " + "; ".join(problems))
 
     # Quota limits apply in all modes.
-    for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour"):
+    for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour", "max_push_bytes"):
         if getattr(cfg, name) <= 0:
             problems.append(f"{name.upper()} must be > 0")
 

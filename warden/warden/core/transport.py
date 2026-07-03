@@ -1,22 +1,24 @@
-"""httpx client to gitlab.com: token injection and project mapping.
+"""Forge-neutral httpx transport: token injection and project mapping.
 
 Read- vs. write-token chosen per :class:`~warden.core.model.Decision`. REST
 uses ``PRIVATE-TOKEN`` header; git Smart-HTTP uses HTTP-Basic ``oauth2:<token>``.
-Shared by both git and REST guards; lives in ``guards.gitlab`` rather than
-in either guard package.
+Shared by both the git guard and the GitLab REST-API guard — a core module,
+not a guard-owned one, so neither guard depends on the other to reach
+upstream (§07 Punkt 6). The git guard depends on this module only, never on
+anything under ``guards.gitlab_api``.
 """
 
 from __future__ import annotations
 
 import base64
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 from urllib.parse import quote
 
 import httpx
 from starlette.responses import StreamingResponse
 
-from ...core.config import Config, normalize_project
-from ...core.model import TokenKind
+from .config import Config, normalize_project
+from .model import TokenKind
 
 # Hop-by-hop headers that must not be forwarded verbatim.
 _DROP_REQUEST_HEADERS = {
@@ -151,3 +153,25 @@ def stream_upstream(resp: httpx.Response) -> StreamingResponse:
         headers=Upstream.response_headers(resp),
         media_type=resp.headers.get("content-type"),
     )
+
+
+async def get_paginated(upstream: Upstream, path: str) -> list[Any]:
+    """Fetch every page of a GitLab-shaped list endpoint (W8.2).
+
+    Without this a project with >100 agent branches/MRs would only count the
+    first page, undercount the quota, and wrongly ``allow`` further writes.
+    Follows the ``X-Next-Page`` header until it is empty. Generic REST-listing
+    helper on the transport, not a forge concept — reused by the git guard's
+    own branch reconcile and the GitLab REST-API guard's own MR reconcile,
+    so neither depends on the other for it.
+    """
+    items: list[Any] = []
+    page = 1
+    while page:
+        sep = "&" if "?" in path else "?"
+        resp = await upstream.get_json(f"{path}{sep}per_page=100&page={page}", TokenKind.READ)
+        resp.raise_for_status()
+        items.extend(resp.json())
+        nxt = resp.headers.get("x-next-page", "")
+        page = int(nxt) if nxt else 0
+    return items

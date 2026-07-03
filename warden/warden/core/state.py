@@ -4,8 +4,10 @@ SQLite with WAL + ``synchronous=FULL``: every write-record commits *before* the 
 State view is **locked** until a reconcile succeeds (never "empty = all free").
 
 Kernel-owned: counters and fail-safe locking are resource-agnostic (M5), keyed by
-``guard``/``kind`` strings. Module has no forge vocabulary (branch/MR tables live
-in forge's own :class:`~warden.guards.gitlab.state.ForgeState`).
+``guard``/``kind`` strings. Module has no forge vocabulary — each guard owns its
+own domain table on the shared connection: branches in
+:class:`~warden.guards.git.state.BranchState`, MRs in
+:class:`~warden.guards.gitlab_api.state.MrState`.
 
 Schema versioning via SQLite's ``PRAGMA user_version``. Pre-1.0: no migration
 machinery — a DB is stamped at :data:`CURRENT_SCHEMA_VERSION` on first use
@@ -59,8 +61,9 @@ WINDOW_SECONDS = 3600
 
 class StateStore:
     """The connection owner: one SQLite connection (WAL + ``synchronous=FULL``),
-    shared by core state and every domain's own state (e.g. the forge's
-    :class:`~warden.guards.gitlab.state.ForgeState`) so they stay one writer on
+    shared by core state and every guard's own domain state (the git guard's
+    :class:`~warden.guards.git.state.BranchState`, the REST-API guard's
+    :class:`~warden.guards.gitlab_api.state.MrState`) so they stay one writer on
     one file, never a second connection.
 
     Checks and stamps the schema version at connect time, before any table
@@ -166,9 +169,10 @@ class State:
 
     def view(self) -> StateView:
         """Core-only snapshot for the policy. Locked until the first
-        successful reconcile; open_mrs/open_branches default to 0 — a domain
-        (e.g. :class:`~warden.guards.gitlab.forge.GitForge`) fills those
-        via its own :meth:`~warden.guards.gitlab.forge.GitForge.state_view`.
+        successful reconcile; open_mrs/open_branches default to 0 — each guard
+        fills its own domain count via its own ``state_view`` override (the
+        git guard's :meth:`~warden.guards.git.guard.GitGuard.state_view`, the
+        REST-API guard's :meth:`~warden.guards.gitlab_api.guard.ApiGuard.state_view`).
         """
         if not self.is_reconciled():
             return StateView(locked=True)

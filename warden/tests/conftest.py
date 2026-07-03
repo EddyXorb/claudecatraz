@@ -11,8 +11,8 @@ from warden.context import AppContext, build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.guards.gitlab.forge import GitForge
-from warden.guards.gitlab.upstream import Upstream
+from warden.core.transport import Upstream
+from warden.guards.gitlab_api.guard import ApiGuard
 
 UPSTREAM = "https://gitlab.example"
 
@@ -40,10 +40,8 @@ def state() -> State:
 
 
 @pytest.fixture
-def forge(cfg, state) -> GitForge:
-    upstream = Upstream(cfg)
-    audit = AuditLog("-")
-    return GitForge(cfg, upstream, state, audit)
+def api_guard(cfg, state) -> ApiGuard:
+    return ApiGuard(cfg, state, AuditLog("-"), Upstream(cfg))
 
 
 @pytest.fixture

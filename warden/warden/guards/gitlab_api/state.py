@@ -1,21 +1,18 @@
-"""The forge domain's quota tables: ``agent_branches`` and ``agent_mrs``,
-living in the same SQLite file as :mod:`warden.core.state` via shared
+"""The REST-API guard's own quota table: ``agent_mrs``, living in the same
+SQLite file as :mod:`warden.core.state` via the shared
 :class:`~warden.core.state.StateStore` — never a second connection.
 
-Named for what they track (agent's namespace-scoped branches/MRs), not for
-a specific guard; both git and REST-API guards read via
-:class:`~warden.guards.gitlab.forge.GitForge`.
+Folded here from the now-dissolved ``guards.gitlab.state.ForgeState``
+(§07 Punkt 6, step 5): branch tracking lives in the git guard's own
+:mod:`warden.guards.git.state`; this table is the REST-API guard's MR-quota
+domain only.
 """
 
 from __future__ import annotations
 
 from ...core.state import StateStore
 
-_FORGE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS agent_branches (
-  project TEXT, ref TEXT, created REAL,
-  PRIMARY KEY (project, ref)
-);
+_MR_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_mrs (
   project TEXT, iid INTEGER, state TEXT, created REAL,
   PRIMARY KEY (project, iid)
@@ -23,17 +20,10 @@ CREATE TABLE IF NOT EXISTS agent_mrs (
 """
 
 
-class ForgeState:
+class MrState:
     def __init__(self, store: StateStore) -> None:
         self._store = store
-        self._store.executescript(_FORGE_SCHEMA)
-
-    def add_branch(self, project: str, ref: str) -> None:
-        self._store.execute(
-            "INSERT OR REPLACE INTO agent_branches (project, ref, created) VALUES (?, ?, ?)",
-            (project, ref, self._store.clock()),
-        )
-        self._store.commit()
+        self._store.executescript(_MR_SCHEMA)
 
     def upsert_mr(self, project: str, iid: int, state: str) -> None:
         self._store.execute(
@@ -43,24 +33,11 @@ class ForgeState:
         )
         self._store.commit()
 
-    def open_branches(self) -> int:
-        row = self._store.execute("SELECT count(*) AS c FROM agent_branches").fetchone()
-        return int(row["c"])
-
     def open_mrs(self) -> int:
         row = self._store.execute(
             "SELECT count(*) AS c FROM agent_mrs WHERE state='opened'"
         ).fetchone()
         return int(row["c"])
-
-    def replace_branches(self, project: str, refs: list[str]) -> None:
-        self._store.execute("DELETE FROM agent_branches WHERE project=?", (project,))
-        now = self._store.clock()
-        self._store.executemany(
-            "INSERT OR REPLACE INTO agent_branches (project, ref, created) VALUES (?, ?, ?)",
-            [(project, r, now) for r in refs],
-        )
-        self._store.commit()
 
     def replace_mrs(self, project: str, mrs: list[tuple[int, str]]) -> None:
         self._store.execute("DELETE FROM agent_mrs WHERE project=?", (project,))

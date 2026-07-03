@@ -34,6 +34,10 @@ class Config:
     max_open_mrs: int = 5
     max_open_branches: int = 10
     max_writes_per_hour: int = 60
+    # Cheap, no packfile-parsing push-size cap (§07 Punkt 6.3): checked against
+    # the receive-pack request's Content-Length before the body is streamed
+    # upstream. Generous default so a normal push is never affected.
+    max_push_bytes: int = 50 * 1024 * 1024
     allowed_projects: tuple[str, ...] = ()
     api_url: str = "https://gitlab.com/api/v4"
     read_token: str = ""
@@ -74,8 +78,8 @@ class Config:
         No prefix/subpath match — the allowlist names concrete projects, never
         group prefixes (README doctrine). GitLab also accepts a project's
         numeric id interchangeably with its path; matching that form is a
-        forge concept (the id is only known after reconcile talks to
-        GitLab) — see ``guards.gitlab.forge.GitForge.project_allowed_by_id``,
+        REST-API-guard concept (the id is only known after reconcile talks to
+        GitLab) — see ``guards.gitlab_api.guard.ApiGuard.project_allowed``,
         not this method.
         """
         project = normalize_project(project)

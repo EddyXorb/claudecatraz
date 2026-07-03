@@ -3,6 +3,11 @@ the guard half of the write pipeline. Reads stream through with the read-token (
 writes are matched against the data-driven allowlist, ownership-checked,
 quota-checked, then forwarded with the write-token — or denied with a 403
 that never leaks a GitLab response.
+
+Self-contained GitLab domain logic (§07 Punkt 6, step 5 — the former shared
+``GitForge`` class is dissolved): MR ownership (:mod:`.ownership`), MR/project-id
+reconcile (:mod:`.reconcile`) and the MR-quota table (:mod:`.state`) are this
+guard's own implementation details now, reachable by no other guard.
 """
 
 from __future__ import annotations
@@ -15,18 +20,20 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from ...core.audit import AuditLog
-from ...core.config import Config
+from ...core.config import Config, normalize_project
 from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
 from ...core.state import State
+from ...core.transport import Upstream, stream_upstream
 from ...errors import deny_json
-from ..gitlab.forge import GitForge
-from ..gitlab.upstream import stream_upstream
 from .catalog import CatalogEntry, EffectiveTable, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
+from .ownership import MrOwnership
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
 from .policy import capability_gate, decide
+from .reconcile import reconcile_mrs
+from .state import MrState
 
 
 def _needs_mr_owner(ep: CatalogEntry) -> bool:
@@ -43,9 +50,15 @@ class ApiGuard(Guard[ApiIntent]):
     def name(self) -> str:
         return "api"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitForge) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, transport: Upstream) -> None:
         super().__init__(cfg, state, audit)
-        self.forge = forge
+        self.transport = transport
+        self.mr_state = MrState(state.store)
+        self.ownership = MrOwnership(transport, cfg)
+        # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
+        # Guard state, not Config — Config stays immutable; only this guard's
+        # view of "which ids currently alias an allowlisted project" is refreshed.
+        self.project_id_aliases: set[str] = set()
         # Built once at construction, never rebuilt — no runtime rebuild, no drift.
         self._effective: EffectiveTable = build_effective_table(cfg, cfg.endpoint_enable)
 
@@ -59,14 +72,38 @@ class ApiGuard(Guard[ApiIntent]):
         ]
 
     def project_allowed(self, project: str) -> bool:
-        """Check if project is allowed by path or numeric id."""
-        return self.cfg.project_allowed(project) or self.forge.project_allowed_by_id(project)
+        """Check if project is allowed by path or numeric id (M6)."""
+        return (
+            self.cfg.project_allowed(project)
+            or normalize_project(project) in self.project_id_aliases
+        )
 
     def state_view(self) -> StateView:
-        return self.forge.state_view()
+        """This guard's own snapshot: core's fail-safe lock/writes counter plus
+        this domain's MR count — never branches (the git guard tracks those)."""
+        if not self.state.is_reconciled():
+            return StateView(locked=True)
+        return StateView(
+            open_mrs=self.mr_state.open_mrs(),
+            writes_last_hour=self.state.writes_last_hour(),
+            locked=False,
+        )
 
     async def reconcile(self) -> bool:
-        return await self.forge.reconcile()
+        """Rebuild the MR counter + numeric-id aliases from GitLab truth.
+
+        In ``off`` mode no upstream call is made — the warden marks itself
+        reconciled/unlocked so it can serve (and then deny) requests without
+        ever contacting GitLab.
+        """
+        if not self.cfg.gitlab_enabled:
+            self.state.mark_reconciled()
+            return True
+        ok, resolved_ids = await reconcile_mrs(self.cfg, self.transport, self.mr_state)
+        self.project_id_aliases = resolved_ids
+        if ok:
+            self.state.mark_reconciled()
+        return ok
 
     async def parse(self, request: Request) -> ApiIntent:
         """Parse method/path/project/fields/body into the decision intent.
@@ -106,7 +143,7 @@ class ApiGuard(Guard[ApiIntent]):
         """
         ep = intent.endpoint
         if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
-            intent.mr_source_ok = await self.forge.mr_source_in_namespace(
+            intent.mr_source_ok = await self.ownership.source_in_namespace(
                 intent.project, intent.iid
             )
         return intent
@@ -126,7 +163,7 @@ class ApiGuard(Guard[ApiIntent]):
         # Raw query is reattached here at transport boundary only, never in intent.path
         # — matching/decision stay query-less.
         path = f"{intent.path}?{intent.raw_query}" if intent.raw_query else intent.path
-        resp: httpx.Response = await self.forge.upstream.open_rest(
+        resp: httpx.Response = await self.transport.open_rest(
             intent.method,
             path,
             headers=dict(request.headers),

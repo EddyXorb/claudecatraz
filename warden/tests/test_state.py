@@ -1,7 +1,9 @@
 """state.py (W8, §6.11): quota counting, the rolling write-window, and the
 fail-safe lock that holds until the first reconcile — the core-only state.
-Branch/MR counter tests live in :mod:`test_forge_state` (they exercise
-:class:`~warden.guards.gitlab.state.ForgeState`, not core).
+Branch counter tests live in :mod:`test_git_state` (they exercise
+:class:`~warden.guards.git.state.BranchState`); MR counter tests live in
+:mod:`test_api_state` (:class:`~warden.guards.gitlab_api.state.MrState`) —
+neither is core.
 
 These counters are what the policy's R5 quotas read, so an off-by-one or a
 missed time-window here would directly mis-gate writes.
@@ -19,7 +21,8 @@ from warden.core.state import (
     SchemaError,
     State,
 )
-from warden.guards.gitlab.state import ForgeState
+from warden.guards.git.state import BranchState
+from warden.guards.gitlab_api.state import MrState
 
 
 def _clocked(start=1000.0):
@@ -69,8 +72,8 @@ def test_view_reflects_writes_counter_once_reconciled():
     st.mark_reconciled()
     st.record_write("git", "push", "claude/a")
     v = st.view()
-    # open_branches/open_mrs default to 0 on the core-only view — a domain
-    # (the forge) fills those via its own combined state_view (test_forge.py).
+    # open_branches/open_mrs default to 0 on the core-only view — each guard
+    # fills its own via its own state_view (test_git_reconcile.py/test_api_reconcile.py).
     assert (v.open_branches, v.open_mrs, v.writes_last_hour, v.locked) == (0, 0, 1, False)
 
 
@@ -84,12 +87,14 @@ def test_fresh_db_is_created_at_current_schema_version():
 
 def test_fresh_db_has_target_tables():
     """A brand-new DB gets the current shape directly — no legacy names, no
-    lift needed: ``agent_branches``/``agent_mrs`` (via ForgeState, sharing the
+    lift needed: ``agent_branches`` (the git guard's own :class:`BranchState`),
+    ``agent_mrs`` (the REST-API guard's own :class:`MrState`, both sharing the
     same connection) and ``writes.guard``."""
     st = State(":memory:")
-    fs = ForgeState(st.store)
-    assert fs.open_branches() == 0
-    assert fs.open_mrs() == 0
+    bs = BranchState(st.store)
+    ms = MrState(st.store)
+    assert bs.open_branches() == 0
+    assert ms.open_mrs() == 0
     st.record_write("git", "push", "claude/a")
     row = st.store.execute("SELECT guard, kind FROM writes").fetchone()
     assert (row["guard"], row["kind"]) == ("git", "push")

@@ -1,9 +1,9 @@
 """git Smart-HTTP guard: all three operations — advertise, upload-pack,
 receive-pack — dispatched via :class:`GitGuard` hooks per-operation.
 
-Forge-agnostic in logic (no GitLab vocabulary) but depends on
-:mod:`warden.guards.gitlab` for credential/transport collaborator
-(:class:`~warden.guards.gitlab.forge.GitForge`) to reach upstream.
+Forge-agnostic in logic (no GitLab vocabulary). Credential injection and
+response streaming come from the forge-neutral :mod:`warden.core.transport`
+(§07 Punkt 6, step 1) — this guard never imports ``guards.gitlab.upstream``.
 """
 
 from __future__ import annotations
@@ -20,13 +20,14 @@ from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R1
 from ...core.state import State
+from ...core.transport import Upstream, stream_upstream
 from ...errors import deny_json
-from ..gitlab.forge import GitForge
-from ..gitlab.upstream import stream_upstream
 from . import policy
 from .errors import git_reject_response
 from .intent import GitIntent
 from .pktline import capabilities, parse_commands, read_until_flush
+from .reconcile import reconcile_branches
+from .state import BranchState
 
 
 def _project(request: Request) -> str:
@@ -44,6 +45,16 @@ def _forward_encoding(request: Request) -> dict[str, str]:
     return {"Content-Encoding": enc} if enc else {}
 
 
+def _content_length(request: Request) -> Optional[int]:
+    """Read ``Content-Length`` for the cheap push-size gate (R5, §07 Punkt 6.3).
+
+    No packfile parsing: an absent/non-numeric header (chunked transfer)
+    yields ``None`` — the size gate simply has nothing to check then.
+    """
+    raw = request.headers.get("content-length")
+    return int(raw) if raw and raw.isdigit() else None
+
+
 class GitGuard(Guard[GitIntent]):
     """All three git Smart-HTTP operations dispatched via :meth:`Guard.handle`.
 
@@ -55,9 +66,10 @@ class GitGuard(Guard[GitIntent]):
     def name(self) -> str:
         return "git"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitForge) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, transport: Upstream) -> None:
         super().__init__(cfg, state, audit)
-        self.forge = forge
+        self.transport = transport
+        self.branch_state = BranchState(state.store)
 
     def routes(self) -> list[Route]:
         return [
@@ -67,7 +79,31 @@ class GitGuard(Guard[GitIntent]):
         ]
 
     def state_view(self) -> StateView:
-        return self.forge.state_view()
+        """Core-lock (shared, §07 Punkt 6 step 4) + this guard's own branch counter."""
+        if not self.state.is_reconciled():
+            return StateView(locked=True)
+        return StateView(
+            open_branches=self.branch_state.open_branches(),
+            writes_last_hour=self.state.writes_last_hour(),
+            locked=False,
+        )
+
+    async def reconcile(self) -> bool:
+        """Rebuild the branch-quota counter from upstream truth (§07 Punkt 6, step 4).
+
+        Own reconcile, independent of the REST-API guard's MR reconcile — the
+        core lock (:meth:`~warden.core.state.State.mark_reconciled`) stays the
+        shared, core-owned fail-safe flag, only the domain counters split.
+        """
+        if not self.cfg.gitlab_enabled:
+            # off mode: skip all upstream calls; mark reconciled so the warden
+            # opens the agent port and denies ops (instead of staying fail-safe locked).
+            self.state.mark_reconciled()
+            return True
+        ok = await reconcile_branches(self.cfg, self.transport, self.branch_state)
+        if ok:
+            self.state.mark_reconciled()
+        return ok
 
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for receive-pack;
@@ -100,6 +136,7 @@ class GitGuard(Guard[GitIntent]):
                 ),
                 extra_headers=_forward_encoding(request),
                 sideband=sideband,
+                push_bytes=_content_length(request),
             )
         return GitIntent(
             _project=project,
@@ -135,11 +172,11 @@ class GitGuard(Guard[GitIntent]):
             ref = cmd.ref.removeprefix("refs/heads/")
             self.state.record_write("git", "push", ref)
             if cmd.is_create:
-                self.forge.forge_state.add_branch(intent.project, ref)
+                self.branch_state.add_branch(intent.project, ref)
 
     async def forward(self, request: Request, intent: GitIntent, decision: Decision) -> Response:
         if intent.operation == "advertise":
-            resp = await self.forge.upstream.git_get(
+            resp = await self.transport.git_get(
                 intent.project,
                 "info/refs",
                 params={"service": intent.service},
@@ -148,11 +185,11 @@ class GitGuard(Guard[GitIntent]):
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
-                headers=self.forge.upstream.response_headers(resp),
+                headers=self.transport.response_headers(resp),
                 media_type=resp.headers.get("content-type"),
             )
         if intent.operation == "upload-pack":
-            resp = await self.forge.upstream.git_post_stream(
+            resp = await self.transport.git_post_stream(
                 intent.project,
                 "git-upload-pack",
                 body=request.stream(),
@@ -169,7 +206,7 @@ class GitGuard(Guard[GitIntent]):
             async for chunk in intent.rest:
                 yield chunk
 
-        resp = await self.forge.upstream.git_post_stream(
+        resp = await self.transport.git_post_stream(
             intent.project,
             "git-receive-pack",
             body=body(),

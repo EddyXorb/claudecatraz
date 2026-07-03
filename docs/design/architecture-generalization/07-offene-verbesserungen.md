@@ -457,6 +457,30 @@ nicht mehr; der git-Guard importiert keine Forge-/Guard-Fremdlogik und hat eigen
 State + Push-Größenlimit; die GitLab-Domänenlogik liegt im `gitlab_api`-Paket; die
 git-nativen Regeln (R2/R4/R5 + Größe) stehen ohne Forge; Tests grün.
 
+> **✅ ERLEDIGT** (Commit-Serie `§07 Punkt 6`). Strikt in der vorgegebenen
+> Reihenfolge: (1) `guards/gitlab/upstream.py` → `core/transport.py`
+> (`Upstream`, `stream_upstream`, `project_id`, neu `get_paginated`), von
+> `context.py`, git- und `gitlab_api`-Guard importiert — git-Guard hängt seither
+> nie mehr an `guards.gitlab`. (6.2 `git_reject_response` war schon in
+> `guards/git/errors.py` — kein Rest-Import mehr, nichts zu tun.) (3)
+> `max_push_bytes` (Default 50 MiB) in `Config`/`config_load.py`; `GitIntent.
+> push_bytes` aus `Content-Length`; `policy.decide` lehnt Überschreitung vor dem
+> Ref-Loop mit R5 ab, ohne Packfile-Parsing. (4) Branch-Tabelle/-Methoden →
+> `guards/git/state.py::BranchState`; eigener Reconcile in
+> `guards/git/reconcile.py::reconcile_branches` (nutzt nur `core.transport`);
+> `GitGuard.state_view()`/`reconcile()` eigenständig, Core-Lock bleibt geteilt
+> (wie im Dokument gefordert). (5) `GitForge` aufgelöst: MR-Ownership →
+> `guards/gitlab_api/ownership.py::MrOwnership`, MR-Reconcile +
+> Projekt-Id-Alias → `guards/gitlab_api/reconcile.py::reconcile_mrs`, MR-Tabelle
+> → `guards/gitlab_api/state.py::MrState`; `ApiGuard` hält sie direkt (kein
+> Gott-Objekt). `guards/gitlab/` komplett gelöscht (`forge.py`, `state.py`,
+> `__init__.py`). `context.py`/`AppContext` kennen `GitForge`/`forge` nicht mehr,
+> nur noch den geteilten `Upstream`. Nordstern-Grep leer, `ls guards/gitlab/`
+> → nicht gefunden. Tests thematisch umgezogen (`test_git_state.py`,
+> `test_git_reconcile.py`, `test_api_ownership.py`, `test_api_reconcile.py`,
+> `test_api_state.py`); `test_forge.py` gelöscht. 347 passed (Warden) + 386
+> passed (CLI/Container), ruff/format/mypy grün (Root + Warden).
+
 ---
 
 ## 7. Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen (ehem. Schritt I, Ownership bereits ausgebaut)

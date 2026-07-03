@@ -14,9 +14,8 @@ from .core.audit import AuditLog
 from .core.config import Config
 from .core.guard import Guard
 from .core.state import State
+from .core.transport import Upstream
 from .guards.git.guard import GitGuard
-from .guards.gitlab.forge import GitForge
-from .guards.gitlab.upstream import Upstream
 from .guards.gitlab_api.guard import ApiGuard, GraphqlGuard
 
 
@@ -26,7 +25,6 @@ class AppContext:
     state: State
     audit: AuditLog
     upstream: Upstream
-    forge: GitForge
     guards: list[Guard[Any]]
 
     async def aclose(self) -> None:
@@ -41,22 +39,19 @@ class AppContext:
 
 
 def build_context(cfg: Config, state: State, audit: AuditLog) -> AppContext:
-    """Assemble the upstream, forge and every shipped guard, then the root context.
+    """Assemble the transport and every shipped guard, then the root context.
 
     The one place that decides which guards exist and what each is given —
     a guard sees only the collaborators its own ``__init__`` declares (e.g.
-    ``GraphqlGuard`` gets no ``forge`` at all, since it never contacts
-    upstream). ``Upstream`` is gitlab-specific transport, so it is built here
-    rather than by the caller — nothing outside the composition root needs to
-    know it exists.
+    ``GraphqlGuard`` gets no transport at all, since it never contacts
+    upstream). ``Upstream`` is forge-neutral transport (§07 Punkt 6), built
+    here and shared (one connection pool) by the git guard and the REST-API
+    guard — neither guard depends on the other to reach it.
     """
     upstream = Upstream(cfg)
-    forge = GitForge(cfg, upstream, state, audit)
     guards: list[Guard[Any]] = [
-        GitGuard(cfg, state, audit, forge),
-        ApiGuard(cfg, state, audit, forge),
+        GitGuard(cfg, state, audit, upstream),
+        ApiGuard(cfg, state, audit, upstream),
         GraphqlGuard(cfg, state, audit),
     ]
-    return AppContext(
-        cfg=cfg, state=state, audit=audit, upstream=upstream, forge=forge, guards=guards
-    )
+    return AppContext(cfg=cfg, state=state, audit=audit, upstream=upstream, guards=guards)
