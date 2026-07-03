@@ -18,7 +18,7 @@ from starlette.responses import Response
 
 from ...core.audit import AuditEvent
 from ...core.config import Config
-from ...core.guard import run_guarded
+from ...core.guard import Guard, run_guarded
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
 from ...errors import deny_json
@@ -38,14 +38,16 @@ def _needs_mr_owner(ep: CatalogEntry) -> bool:
     return any("mr_owner" in check.needs for check in ep.checks)
 
 
-class ApiGuard:
+class ApiGuard(Guard[ApiIntent]):
     """The REST write pipeline's hooks (§03.2) — driven by
     :func:`core.guard.run_guarded` from :func:`handle` below.
     """
 
     # Audit ``channel`` value — kept as the pre-Schritt-5 bare string for
     # byte-compatible JSONL (the channel→guard rename is §06 Schritt 6).
-    name = "api"
+    @property
+    def name(self) -> str:
+        return "api"
 
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx

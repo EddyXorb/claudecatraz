@@ -21,7 +21,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from ...core.config import Config, normalize_project
-from ...core.guard import mode_gate_off, mode_gate_writes, project_gate, run_guarded
+from ...core.guard import Guard, mode_gate_off, mode_gate_writes, project_gate, run_guarded
 from ...core.model import Decision, StateView, TokenKind
 from ...errors import deny_json, git_reject_response
 from ..gitlab_api.context import AppContext
@@ -115,13 +115,15 @@ def _forward_encoding(request: Request) -> dict[str, str]:
     return {"Content-Encoding": enc} if enc else {}
 
 
-class GitGuard:
+class GitGuard(Guard[GitPushIntent]):
     """The receive-pack write pipeline's hooks (§03.2) — used only via
     :func:`core.guard.run_guarded` from :func:`receive_pack` below."""
 
     # Audit ``channel`` value — kept as the pre-Schritt-5 bare string for
     # byte-compatible JSONL (the channel→guard rename is §06 Schritt 6).
-    name = "git"
+    @property
+    def name(self) -> str:
+        return "git"
 
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
