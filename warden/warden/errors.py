@@ -1,4 +1,4 @@
-"""Uniform API deny response (W13): 403 JSON, never leaking a GitLab response."""
+"""Uniform API deny response: 403 JSON, never leaking a GitLab response."""
 
 from __future__ import annotations
 

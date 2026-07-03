@@ -104,7 +104,7 @@ def main() -> None:
     try:
         asyncio.run(_serve())
     except (ConfigError, CatalogConfigError, SchemaError, StartgateFailure) as exc:
-        # All four are fail-closed startup aborts (A9): bad config (shape or
+        # All four are fail-closed startup aborts: bad config (shape or
         # catalog-activation), a state DB this build cannot understand, or a
         # catalog deny-probe that would have been allowed. None should ever
         # surface as a traceback — a clean message and a non-zero exit is

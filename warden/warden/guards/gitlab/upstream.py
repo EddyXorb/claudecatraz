@@ -1,12 +1,9 @@
-"""httpx client to gitlab.com: token injection + project mapping (W9.2, W4).
+"""httpx client to gitlab.com: token injection and project mapping.
 
 Read- vs. write-token chosen per :class:`~warden.core.model.Decision`. REST
-uses the ``PRIVATE-TOKEN`` header; git Smart-HTTP uses HTTP-Basic
-``oauth2:<token>``. Forge domain (§03.3/§03.5: "``Upstream`` ist
-GitLab-spezifisch" — a generic streaming client + a per-guard
-``CredentialAdapter`` is future work); shared by both the git guard and the
-REST guard, which is exactly why it lives in ``guards.gitlab`` rather than in
-either guard package.
+uses ``PRIVATE-TOKEN`` header; git Smart-HTTP uses HTTP-Basic ``oauth2:<token>``.
+Shared by both git and REST guards; lives in ``guards.gitlab`` rather than
+in either guard package.
 """
 
 from __future__ import annotations
@@ -134,7 +131,7 @@ class Upstream:
 def stream_upstream(resp: httpx.Response) -> StreamingResponse:
     """Relay a streamed upstream response to the client, closing it when done.
 
-    Shared by the REST and git guards so the body is never buffered (W6/W7).
+    Shared by REST and git guards; body is never buffered.
     """
 
     async def body_iter() -> AsyncIterator[bytes]:

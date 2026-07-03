@@ -1,11 +1,8 @@
-"""JSON-serialisable summary of the effective endpoint table (§04.3;
-docs/design/agentic-workflow/04-cli.md ``catraz doctor``/``allow-endpoint``).
+"""JSON-serialisable summary of the effective endpoint table.
 
-Served by the admin ``/policy`` route (``app.py``) so the CLI (which never
-imports ``warden`` — it only ships it as a container asset) can learn the
+Served by the admin ``/policy`` route (``app.py``) so the CLI can learn the
 catalog's ids and the running stack's activation state without a runtime
-Python import (A2: no code execution from config, and no code execution to
-introspect config either).
+Python import.
 """
 
 from __future__ import annotations
@@ -19,9 +16,8 @@ from .entries import CATALOG, DEFAULT_ENABLED
 
 def endpoint_table_report(cfg: Config) -> dict[str, Any]:
     """Build the ``/policy`` response body: every catalog entry, whether it
-    is part of the shipped default set, and whether *this* deployment's
-    config actually activated it (§04.3's "Default-Satz + Aktivierungen +
-    Overrides" — ``catraz doctor`` prints exactly this).
+    is part of the shipped default set, and whether this deployment's config
+    actually activated it.
     """
     table = build_effective_table(cfg, cfg.endpoint_enable)
     active_by_id = {e.id: e for e in table.entries}

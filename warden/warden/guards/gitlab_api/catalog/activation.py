@@ -1,14 +1,9 @@
-"""Endpoint activation: Config × Catalog → the effective table (§04.2/04.3;
-docs/design/architecture-generalization/04-policy-erweiterbarkeit.md §04.2/04.3,
-§06-migration.md Schritt 4).
+"""Endpoint activation: Config × Catalog → the effective table.
 
 :func:`build_effective_table` is the one pure function this step's whole
 security story rests on: it runs exactly once at startup (``ApiGuard.__init__``,
 ``__main__.py``), never again — the guard's policy/proxy code matches requests
-against its output, never against
-:data:`~warden.guards.gitlab_api.catalog.entries.CATALOG` directly (F4
-hygiene: no runtime rebuild, no cache that could drift from the config that
-produced it).
+against its output, never against the catalog directly. No runtime rebuild, no drift.
 
 Fail-closed by construction: every branch below either returns a valid
 :class:`EffectiveTable` or raises
@@ -30,14 +25,12 @@ from .model import CatalogEntry
 
 @dataclass(frozen=True)
 class EffectiveTable:
-    """The built, request-matchable endpoint table (§04.2).
+    """The built, request-matchable endpoint table.
 
     ``enabled_via`` marks every active entry with how it came to be active:
     ``"default"`` for the shipped default set, ``"config:<id>"`` for anything
     a deployment's ``warden.toml`` additionally enabled. The audit layer uses
-    this to flag non-default activations via a dedicated field instead of
-    overloading the ``rule`` id (§04.3 deviation from the sketch in
-    ``04-policy-erweiterbarkeit.md`` — documented there).
+    this to flag non-default activations.
     """
 
     entries: tuple[CatalogEntry, ...]
@@ -45,12 +38,11 @@ class EffectiveTable:
 
 
 def build_effective_table(cfg: Config, enable: Optional[tuple[str, ...]]) -> EffectiveTable:
-    """Build the effective table once. Raises :class:`CatalogConfigError` on
-    any of the fail-closed validation rules from §04.3:
+    """Build the effective table once. Raises :class:`CatalogConfigError` on validation failures:
 
     * an unknown catalog id in ``enable``,
     * enabling an entry whose static capabilities intersect ``FORBIDDEN``
-      (§04.2's deliberate YAGNI: no scoping-check taming mechanism exists yet).
+      (no scoping-check taming mechanism exists yet).
 
     ``enable`` is ``cfg.endpoint_enable`` — ``None`` means the ``[api.endpoints]``
     section (or the whole ``warden.toml``) was absent, falling back to the
@@ -80,8 +72,7 @@ def build_effective_table(cfg: Config, enable: Optional[tuple[str, ...]]) -> Eff
             raise CatalogConfigError(
                 f"warden.toml [api.endpoints].enable: {entry_id!r} declares forbidden "
                 f"capabilities ({names}) — activation refused. No scoping-check taming "
-                "mechanism exists yet for FORBIDDEN capabilities (§04.2 YAGNI); see "
-                "docs/design/architecture-generalization/04-policy-erweiterbarkeit.md"
+                "mechanism exists yet for FORBIDDEN capabilities."
             )
         entries.append(entry)
         enabled_via[entry_id] = "default" if entry_id in DEFAULT_ENABLED else f"config:{entry_id}"

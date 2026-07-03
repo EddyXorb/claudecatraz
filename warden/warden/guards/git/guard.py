@@ -1,14 +1,9 @@
-"""git Smart-HTTP guard (W7): all three operations — advertise (GET
-info/refs), upload-pack (POST git-upload-pack), receive-pack (POST
-git-receive-pack) — run through the single :class:`GitGuard`, dispatching
-per-operation inside its hooks, via :meth:`core.guard.Guard.handle`.
+"""git Smart-HTTP guard: all three operations — advertise, upload-pack,
+receive-pack — dispatched via :class:`GitGuard` hooks per-operation.
 
-The guard is forge-agnostic in its own logic (no GitLab vocabulary) but
-depends on :mod:`warden.guards.gitlab` (the forge domain) for the
-credential/transport collaborator (:class:`~warden.guards.gitlab.forge.GitForge`)
-it needs to reach an upstream at all — the one honest exception §03.3 leaves
-in place, now an explicit dependency on a shared package instead of a borrow
-from the REST guard's own internals.
+Forge-agnostic in logic (no GitLab vocabulary) but depends on
+:mod:`warden.guards.gitlab` for credential/transport collaborator
+(:class:`~warden.guards.gitlab.forge.GitForge`) to reach upstream.
 """
 
 from __future__ import annotations
@@ -44,22 +39,18 @@ def _project(request: Request) -> str:
 
 
 def _forward_encoding(request: Request) -> dict[str, str]:
-    # gzip stays gzip; the body is forwarded untouched (W7.4).
+    # Forward content-encoding unchanged; body is forwarded untouched.
     enc = request.headers.get("content-encoding")
     return {"Content-Encoding": enc} if enc else {}
 
 
 class GitGuard(Guard[GitIntent]):
-    """All three git Smart-HTTP operations (§03.2) — dispatched via
-    :meth:`Guard.handle` from the routes :meth:`routes` returns.
+    """All three git Smart-HTTP operations dispatched via :meth:`Guard.handle`.
 
-    Reads (advertise/upload-pack) are read-only, except push discovery, which
-    carries the write token but never a ref write (so ``record`` is a no-op
-    for it). receive-pack is always a write.
+    Reads (advertise/upload-pack) are read-only except push discovery, which
+    carries the write token but never performs a ref write. receive-pack is always a write.
     """
 
-    # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
-    # field used to be called ``channel``; the value itself is unchanged).
     @property
     def name(self) -> str:
         return "git"
@@ -79,10 +70,8 @@ class GitGuard(Guard[GitIntent]):
         return self.forge.state_view()
 
     async def parse(self, request: Request) -> GitIntent:
-        """Buffer only the pkt-line command section (KB-sized) for
-        receive-pack — the untouched PACK payload streams through
-        :attr:`GitIntent.rest` (W7.3).
-        """
+        """Buffer only the pkt-line command section (KB-sized) for receive-pack;
+        the untouched PACK payload streams through :attr:`GitIntent.rest`."""
         project = _project(request)
         if request.method == "GET":
             service = request.query_params.get("service", "git-upload-pack")
@@ -119,8 +108,8 @@ class GitGuard(Guard[GitIntent]):
         )
 
     async def enrich(self, intent: GitIntent) -> GitIntent:
-        # git needs no unpure lookups before deciding (A10: unlike the REST
-        # guard's MR-ownership check, no credential-backed lookup happens here).
+        # git needs no unpure lookups; unlike REST guard's MR-ownership check,
+        # no credential-backed lookup happens here.
         return intent
 
     def capability_gate(self, intent: GitIntent, cfg: Config) -> Optional[Decision]:
@@ -136,7 +125,7 @@ class GitGuard(Guard[GitIntent]):
         return Decision(True, R1, "read pass-through", TokenKind.READ)
 
     def record(self, intent: GitIntent, decision: Decision) -> None:
-        """Record every ref write *before* the upstream call (§6.11).
+        """Record every ref write before the upstream call to ensure a crash never loses a write.
 
         Reads and push discovery never count against the write quota.
         """
@@ -191,18 +180,12 @@ class GitGuard(Guard[GitIntent]):
         return stream_upstream(resp)
 
     def deny_response(self, intent: GitIntent, decision: Decision, state: StateView) -> Response:
-        """Per-ref rejection for receive-pack (W7.3): the client sees which
-        ref failed and why.
+        """Per-ref rejection for receive-pack: client sees which ref failed and why.
 
-        Refs that individually pass :func:`policy.check_ref` but were denied
-        at the whole-push level (e.g. R6 project, or the aggregated §03.4
-        capability gate) report the overall ``decision``, never a misleading
-        "ok" — mirrors the pre-Schritt-5 ``git_proxy.receive_pack`` logic
-        exactly, just relocated behind this hook so the kernel can call it
-        without building a git-shaped response itself.
-
-        advertise/upload-pack denials get a plain JSON body instead — there
-        is no per-ref shape for a read.
+        Refs that individually pass :func:`policy.check_ref` but were denied at
+        the whole-push level (e.g. R6 project or capability gate) report the overall
+        ``decision``, never a misleading "ok". advertise/upload-pack denials get
+        a plain JSON body instead — there is no per-ref shape for a read.
         """
         if intent.operation != "receive-pack":
             return deny_json(decision)

@@ -1,13 +1,8 @@
-"""The git guard's Intent: replaces the old channel-union ``ProxyRequest``.
-Forge-agnostic — the only non-primitive field is a git-protocol concept
-(``RefCommand``), never a forge one.
+"""The git guard's Intent: forge-agnostic, covers all three git Smart-HTTP
+operations (advertise, upload-pack, receive-pack) dispatched on ``operation``.
 
-:class:`GitIntent` covers all three git Smart-HTTP operations —
-``advertise`` (GET info/refs), ``upload-pack`` (POST git-upload-pack) and
-``receive-pack`` (POST git-receive-pack) — dispatched on ``operation``.
-``writes`` is normally ``False`` except for a ``receive-pack`` push and for
-push discovery (``advertise`` with ``?service=git-receive-pack``), both of
-which must still carry the write token.
+``writes`` is False except for receive-pack push and push discovery
+(advertise with ?service=git-receive-pack), both of which must carry the write token.
 """
 
 from __future__ import annotations
@@ -24,9 +19,8 @@ from .pktline import RefCommand
 class GitIntent(Intent):
     _project: str
     operation: str  # "advertise" | "upload-pack" | "receive-pack"
-    # Audit-facing verb (§03.2 core.model.Intent) — not always an HTTP method:
-    # advertise→"GET", upload-pack→"POST", receive-pack→"push" (byte-compatible
-    # with the pre-merge literal, kept for JSONL compatibility).
+    # Audit-facing verb, not always an HTTP method: advertise→"GET",
+    # upload-pack→"POST", receive-pack→"push" (kept for JSONL compatibility).
     _method: str
     # Set by the guard's parse(), never derived here: True for receive-pack
     # and for push discovery (advertise with ?service=git-receive-pack) — the

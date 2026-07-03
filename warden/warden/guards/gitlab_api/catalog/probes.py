@@ -1,7 +1,5 @@
-"""Deny-probes per catalog entry (§04.4), kept beside — but out of —
-``entries.py``: the must-deny examples the startgate runs against the
-effective policy for each activated entry, indexed by entry id so the
-catalog table itself stays a legible one-row-per-endpoint list.
+"""Deny-probes per catalog entry: must-deny examples the startgate runs
+for each activated entry, indexed by entry id so the catalog table stays legible.
 """
 
 from __future__ import annotations

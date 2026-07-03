@@ -1,19 +1,7 @@
-"""Check registry (§04.1, F2/F10; docs/design/architecture-generalization,
-§04-policy-erweiterbarkeit.md §04.1).
+"""Check registry: named, parametrised check factories catalog entries reference.
 
-Before this module the predicates were free functions in the now-removed
-``api_endpoints.py`` compat facade:
-``field_has_prefix`` was already parametrised but not registered under a
-stable name; ``mr_owned_by_claude`` and ``not_merge_intent`` were one-off,
-unparametrised functions duplicating what a generalised check could express
-(F10: ``src_branch_prefix``/``ref_prefix`` were the same function twice before
-an earlier step already folded them into ``field_has_prefix`` — this module
-is where that check becomes a *named* registry entry instead of just a local
-factory).
-
-Every check returns ``None`` when it passes (the same "None ⇒ still passing"
-shape ``guards.gitlab_api.policy.decide`` already relies on), or a deny
-:class:`~warden.core.model.Decision`.
+Every check returns ``None`` when it passes (the "None ⇒ still passing" shape),
+or a deny :class:`~warden.core.model.Decision`.
 """
 
 from __future__ import annotations
@@ -56,10 +44,9 @@ def _owned_by_agent(intent: ApiIntent, state: StateView, cfg: Config) -> Optiona
     return Decision(False, R3, "MR not owned by the service account")
 
 
-# A singleton, not a factory: unparametrised and reused by every ownership-
-# gated catalog entry. ``needs={"mr_owner"}`` is the F2 fix — the guard asks
-# "does any check on the matched entry need mr_owner?" instead of comparing
-# this object's identity against a hardcoded predicate.
+# A singleton, not a factory: unparametrised and reused by every ownership-gated entry.
+# ``needs={"mr_owner"}`` allows the guard to ask "does any check need mr_owner?" instead
+# of comparing object identity against a hardcoded predicate.
 OWNED_BY_AGENT = RegisteredCheck(
     name="owned_by_agent", fn=_owned_by_agent, needs=frozenset({"mr_owner"})
 )
@@ -78,12 +65,9 @@ def field_not_equals(field: str, value: object) -> RegisteredCheck:
     return RegisteredCheck(name=f"field_not_equals({field!r}, {value!r})", fn=check)
 
 
-# The registry itself (§04.1): named, parametrisable check factories a
-# catalog entry can reference by name. Not consulted by the runtime path
-# today (catalog entries build ``RegisteredCheck`` values directly by calling
-# these factories) — it exists as the single, stable list of what a catalog
-# PR is allowed to build a row's checks out of, and as the anchor for any
-# future config-facing introspection (``catraz doctor``, §04.3).
+# The registry: named, parametrisable check factories. The stable list of what
+# a catalog PR can use to build a row's checks, and anchor for future
+# config-facing introspection.
 CHECKS: Mapping[str, Callable[..., RegisteredCheck]] = {
     "field_has_prefix": field_has_prefix,
     "owned_by_agent": lambda: OWNED_BY_AGENT,

@@ -1,9 +1,8 @@
-"""State-DB schema migrations (§06-migration.md Schritt 2/6, F11 precondition).
+"""State-DB schema migrations: versioned lifts from one schema shape to the next.
 
-Split out of :mod:`warden.core.state` (Clean-Code budget: adding the Schritt-6
-rename migration would have pushed that module past 300 lines) — this module
-owns *only* the versioned lift from one schema shape to the next; ``state.py``
-keeps the runtime API (``State``) that reads/writes the current shape.
+Split out of :mod:`warden.core.state` — this module owns *only* the versioned
+lift from one schema shape to the next; ``state.py`` keeps the runtime API
+(``State``) that reads/writes the current shape.
 
 **Version history** (also documented in ``core/audit.py`` for the audit-log's
 own, independent version counter — the two are unrelated schemas with
@@ -12,16 +11,13 @@ unrelated numbers):
 * **1** — the historical, implicit shape: ``claude_branches``/``claude_mrs``,
   a ``writes.channel`` column, no ``user_version`` marker at all (predates
   this module).
-* **2** (§06-migration.md Schritt 2) — introduces the version marker itself,
-  via SQLite's ``PRAGMA user_version``. No table change — proves the runner
-  can carry a step before a real one (Schritt 6, below) needs it.
-* **3** (§06-migration.md Schritt 6, F11) — ``claude_branches``/``claude_mrs``
-  → ``agent_branches``/``agent_mrs``, ``writes.channel`` → ``writes.guard``:
-  the claude→agent, channel→guard vocabulary shift (§03-guard-architektur.md
-  §03.5 — "claude" stays only the default namespace-prefix value, never a
-  code identifier). Both renames are lossless (``ALTER TABLE ... RENAME TO`` /
-  ``RENAME COLUMN``, SQLite ≥3.25 — comfortably covered by the Docker image's
-  Python 3.12 bundled SQLite).
+* **2** — introduces the version marker itself via SQLite's ``PRAGMA user_version``.
+  No table change.
+* **3** — ``claude_branches``/``claude_mrs`` → ``agent_branches``/``agent_mrs``,
+  ``writes.channel`` → ``writes.guard``: the claude→agent, channel→guard
+  vocabulary shift ("claude" stays only the default namespace-prefix value,
+  never a code identifier). Both renames are lossless (``ALTER TABLE ... RENAME TO`` /
+  ``RENAME COLUMN``, SQLite ≥3.25).
 """
 
 from __future__ import annotations
@@ -33,8 +29,8 @@ from typing import Callable, Final
 
 class SchemaError(RuntimeError):
     """Raised when the state DB's schema version is newer than this build
-    understands — fail-closed (A9): a downgrade must never silently run
-    against a shape it does not fully know, so it refuses to start."""
+    understands — fail-closed: a downgrade must never silently run against a
+    shape it does not fully know, so it refuses to start."""
 
 
 @dataclass(frozen=True)
@@ -50,21 +46,15 @@ class Migration:
 
 
 def _stamp_schema_version(conn: sqlite3.Connection) -> None:
-    """Version 1 → 2 (§06-migration.md Schritt 2): no table changes — see the
-    module docstring's version history."""
+    """Version 1 → 2: no table changes — see module docstring for details."""
     # Intentionally empty — the runner stamps PRAGMA user_version regardless.
 
 
 def _rename_agent_tables(conn: sqlite3.Connection) -> None:
-    """Version 2 → 3 (§06-migration.md Schritt 6, F11): claude→agent,
-    channel→guard — see the module docstring's version history for why both
-    renames land together as one migration (they are one audit-visible
-    vocabulary change, not two independent ones).
-
-    Reached from either a v1 DB (unversioned but already carrying these exact
-    tables/column, lifted here via :data:`BASE_SCHEMA_VERSION`) or a v2 DB
-    (stamped, but migration 2 above never touched a table name) — both start
-    points have the old names, so one migration body covers both.
+    """Version 2 → 3: claude→agent, channel→guard. Both renames land together
+    as one migration (one audit-visible vocabulary change, not two independent
+    ones). Reached from either a v1 DB (already carrying these tables/columns)
+    or a v2 DB (stamped but never touched table names).
     """
     conn.execute("ALTER TABLE claude_branches RENAME TO agent_branches")
     conn.execute("ALTER TABLE claude_mrs RENAME TO agent_mrs")

@@ -54,10 +54,10 @@ WINDOW_SECONDS = 3600
 
 
 class StateStore:
-    """The connection owner (the "Persistenz-Werkzeug", §E): one SQLite
-    connection (WAL + ``synchronous=FULL``), shared by core state and every
-    domain's own state (e.g. the forge's :class:`~warden.guards.gitlab.state.ForgeState`)
-    so they stay one writer on one file, never a second connection.
+    """The connection owner: one SQLite connection (WAL + ``synchronous=FULL``),
+    shared by core state and every domain's own state (e.g. the forge's
+    :class:`~warden.guards.gitlab.state.ForgeState`) so they stay one writer on
+    one file, never a second connection.
 
     Runs the historical schema migrations at connect time, before any table
     (core's or a domain's) is created — a legacy ``claude_*`` DB must already
@@ -102,10 +102,10 @@ class StateStore:
 
 
 class State:
-    """Core quota state (W8, §6.11): the ``writes`` counter and the reconcile
-    lock, built on a :class:`StateStore`. No branch/MR vocabulary — a guard
-    with no domain state genuinely has no open branches/MRs, so
-    :meth:`view` reports zero for those, never fabricating a forge concept.
+    """Core quota state: the ``writes`` counter and the reconcile lock, built
+    on a :class:`StateStore`. No branch/MR vocabulary — a guard with no domain
+    state genuinely has no open branches/MRs, so :meth:`view` reports zero for
+    those, never fabricating a forge concept.
     """
 
     def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
@@ -127,7 +127,7 @@ class State:
 
     # --- recording -------------------------------------------------------------
     def record_write(self, guard: str, kind: str, ref_or_iid: Optional[str] = None) -> None:
-        """Persist a write-record and fsync *before* the upstream call (§6.11)."""
+        """Persist a write-record and fsync *before* the upstream call."""
         self._store.execute(
             "INSERT INTO writes (ts, guard, kind, ref_or_iid) VALUES (?, ?, ?, ?)",
             (self._clock(), guard, kind, ref_or_iid),

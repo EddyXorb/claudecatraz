@@ -38,24 +38,24 @@ _METADATA_SEARCH_SCOPES = frozenset({"projects", "issues", "merge_requests", "mi
 
 
 def _allow_metadata(intent: ApiIntent) -> Decision:
-    """Category 2 (B1): projectless names/metadata — always readable."""
+    """Projectless names/metadata — always readable."""
     return Decision(True, R1, "read pass-through (projectless metadata)", TokenKind.READ)
 
 
 def _deny_snippets(intent: ApiIntent) -> Decision:
-    """Category 3 (B1): snippets are repository content with no project scope."""
+    """Snippets are repository content with no project scope."""
     return Decision(
         False, R6, f"projectless snippet content is not permitted: {intent.method} {intent.path}"
     )
 
 
 def _search_scope_gate(intent: ApiIntent) -> Decision:
-    """Category 3 (B1): global/group search — the `scope` query field decides.
+    """Global/group search — the `scope` query field decides.
 
-    F12: ``scope`` lives in ``intent.fields`` (query params are folded in by
+    ``scope`` lives in ``intent.fields`` (query params are folded in by
     the guard's ``parse``/``extract_fields`` for every method, including GET)
-    and the raw query string is forwarded unchanged by ``forward`` — so this
-    check and the upstream request see the same value.
+    and the raw query string is forwarded unchanged — so this check and the
+    upstream request see the same value.
     """
     scope = intent.fields.get("scope")
     if scope in _METADATA_SEARCH_SCOPES:
@@ -79,16 +79,12 @@ class ReadEndpoint:
 
 
 READ_ENDPOINTS: tuple[ReadEndpoint, ...] = (
-    # --- category 3 (B1): projectless, content-capable → deny. Listed first —
-    # none of these templates overlap a category-2 row below, but keeping the
-    # denies up front mirrors the write catalog's "most specific / most
-    # sensitive first" convention. ---
+    # --- Content-capable denies: listed first by convention (most specific/sensitive first) ---
     ReadEndpoint("/snippets", _deny_snippets),
     ReadEndpoint("/snippets/{rest}", _deny_snippets),
     ReadEndpoint("/search", _search_scope_gate),
     ReadEndpoint("/groups/{id}/search", _search_scope_gate),
-    # --- category 2 (B1): projectless metadata → allow (R1). AGENT.md's
-    # documented discovery flow (`GET /groups/<id>/projects`) lives here. ---
+    # --- Projectless metadata allow (R1): documented discovery flow ---
     ReadEndpoint("/projects", _allow_metadata),
     ReadEndpoint("/users", _allow_metadata),
     ReadEndpoint("/users/{id}", _allow_metadata),

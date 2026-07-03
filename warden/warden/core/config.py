@@ -1,4 +1,4 @@
-"""The typed, frozen Config value the policy consumes (W10).
+"""The typed, frozen Config value the policy consumes.
 
 Only the *model* half of the config layer lives here — building a
 :class:`Config` from env + ``warden.toml`` (secret files, precedence, hard
@@ -68,8 +68,7 @@ class Config:
         return self.api_url.removesuffix("/api/v4")
 
     def project_allowed(self, project: str) -> bool:
-        """Default-deny match against ``ALLOWED_PROJECTS`` (Q9, A8, B4), path
-        form only.
+        """Default-deny match against ``ALLOWED_PROJECTS``, path form only.
 
         No prefix/subpath match — the allowlist names concrete projects, never
         group prefixes (README doctrine). GitLab also accepts a project's
@@ -82,7 +81,7 @@ class Config:
         return any(project == allowed.strip("/") for allowed in self.allowed_projects)
 
     def in_branch_namespace(self, name: str) -> bool:
-        """True iff ``name`` starts with any configured branch prefix (M2).
+        """True iff ``name`` starts with any configured branch prefix.
 
         Single source of truth for the branch namespace: git guard's R2/R3 checks
         and reconcile filters call this instead of comparing directly.

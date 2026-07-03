@@ -1,19 +1,16 @@
-"""The endpoint catalog package (§04.1-04.4; docs/design/architecture-generalization,
-§04-policy-erweiterbarkeit.md, §06-migration.md Schritt 4).
+"""The endpoint catalog package: data-driven endpoint definitions, activation, validation.
 
-Public surface other modules should import from — ``guards.gitlab_api.policy``,
-``guards.gitlab_api.guard``, ``__main__.py`` and ``app.py`` all import
-``warden.guards.gitlab_api.catalog`` rather than reaching into a submodule
-directly:
+Public surface — ``guards.gitlab_api.policy``, ``guards.gitlab_api.guard``, ``__main__.py``,
+and ``app.py`` import ``warden.guards.gitlab_api.catalog`` rather than submodules:
 
-* ``model``      — the data types (``CatalogEntry``, ``FieldSpec``, ``Location``, …)
-* ``checks``      — the named Check registry (§04.1)
-* ``entries``     — the catalog table itself (§04.2) + ``api_capabilities``/``match_endpoint``
-* ``builtin``     — the non-catalog merge deny invariant (§04.2)
-* ``config_parse``— ``[api.endpoints]`` TOML shape parsing (no Config dependency)
-* ``activation``  — Config × Catalog → the effective, request-matchable table (§04.3)
-* ``probes``      — deny-probes per entry id, kept out of the ``entries`` table (§04.4)
-* ``startgate``   — runs every activated entry's deny-probes at boot (§04.4)
+* ``model``      — data types: ``CatalogEntry``, ``FieldSpec``, ``Location``, …
+* ``checks``      — the named Check registry
+* ``entries``     — the catalog table + ``api_capabilities``/``match_endpoint``
+* ``builtin``     — the merge endpoint's built-in deny invariant
+* ``config_parse``— ``[api.endpoints]`` TOML shape parsing
+* ``activation``  — Config × Catalog → effective, request-matchable table
+* ``probes``      — deny-probes per entry, separate from the entries table
+* ``startgate``   — runs activated entries' deny-probes at boot
 """
 
 from __future__ import annotations

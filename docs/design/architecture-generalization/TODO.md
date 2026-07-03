@@ -87,59 +87,13 @@ Erledigt (Fortsetzung):
   effektive Tabelle vom `ApiGuard` (`self._effective`) besessen und durch
   Policy/Startgate gefädelt statt via `cfg.__dict__`-Hack.
 
-Offen (Reihenfolge: G, danach die zwei neuen Vereinfachungs-Schritte H2, I):
+Offen (Reihenfolge: die zwei neuen Vereinfachungs-Schritte H2, I):
 
-- ⬜ **G** — Docstring-Pass (zuletzt vor den Vereinfachungs-Schritten).
-  Starte den Subagenten mit dem Text: 
-  "You are doing a docstring/comment cleanup pass ("Schritt G") on the Python codebase under /home/cr/code/privat/catraz/warden/warden/ (source only — NOT tests, NOT any .md files).
-
-  Goal
-
-  Make every module/class/method docstring and inline comment concise and self-contained: explain what holds and why, never what the code used to be or where it is documented in the design docs.
-
-  What to REMOVE
-
-  1. Design-doc section citations: §03.4, §04.2/04.3, §6.11, §E, (W8), (A9), (B1), (F4), (M5), (Q9), (R6 hygiene) when used purely as a citation marker, and file-path references like docs/design/architecture-generalization/04-policy-erweiterbarkeit.md or 06-migration.md. Delete the citation, keep the sentence.
-  2. Migration/history narrative: phrases like "Schritt 5", "pre-Schritt-5", "the old channel-union", "used to live in", "replaces the manual guard", "as before B1", "exactly like the pre-Schritt-5 ... ordered it", "Röst-Runde", "Schritt 3's six rows", "unchanged since ...". Anything describing a previous state of the code.
-  3. Redundant "see X for why" pointers to other modules when they only add narrative — but KEEP a cross-reference if it names a real symbol the reader needs (e.g. "built by GitlabForge.state_view").
-
-  What to KEEP (do NOT delete)
-
-  - Real invariants stated as one self-contained sentence. E.g. "record the write before forwarding so a crash never loses a write", "fail-closed: default-deny", "run migrations before any CREATE TABLE, or a legacy DB grows a second empty table", "built once at construction, never rebuilt — no drift".
-  - Rule-id labels that describe current behavior (R1 read pass-through, R3 write filter, R4 merge never permitted, etc.) — these are live core.rules constants, not doc citations. Keep them as behavior tags; just drop any trailing "(§03.x)" citation next to them.
-  - Capability / TokenKind / concept names that are real code.
-  - The reason behind a decision whenever a docstring gives one — compress it, don't delete it.
-
-  Size targets (rules of thumb, not hard limits)
-
-  - Module docstrings ≤ 5 lines.
-  - Method/function docstrings ≤ 3 lines.
-  - If compressing below the target would drop a genuine invariant/reason, keep the invariant and slightly exceed the target rather than lose meaning.
-
-  Hard constraints
-
-  - Only edit docstrings and comments. Never change code, signatures, names, or behavior.
-  - Do not touch test files or .md files.
-  - German is fine where the code already uses it, but prefer matching the surrounding language of each file (most are English).
-
-  Files to sweep
-
-  All .py under warden/warden/ (core/, guards/git/, guards/gitlab/, guards/gitlab_api/ and its catalog/, top-level app.py/main.py/context.py/errors.py). Grep for the citation markers to find the worst offenders first:
-  cd /home/cr/code/privat/catraz/warden && grep -rn "§\|Schritt\|pre-Schritt\|channel-union\|used to live\|docs/design\|Röst" warden/
-
-  Verification (MUST pass before you report done)
-
-  cd /home/cr/code/privat/catraz/warden
-  uv run pytest -q        # must stay 348 passed
-  uv run ruff check .     # must stay clean
-  uv run mypy warden      # must stay clean
-  If anything goes red, you changed code by accident — revert that and keep only docstring edits.
-
-  Report back
-
-  A concise summary: which files you touched, roughly how many citation/narrative references you removed, any docstring where you deliberately kept a longer form because it carried a real invariant, and the final pytest/ruff/mypy status. Do NOT commit — I will review the diff and commit.
-  "
-  danach lösche diesen Text aus dem TODO.md
+- ✅ **G** — Docstring-Pass. Drei Haiku-Subagenten mit disjunkten Datei-Scopes
+  (core/+top-level, git/+gitlab/, gitlab_api/+catalog/), parallel gelaufen.
+  34 Dateien geändert, ~190 Zeilen netto entfernt (§/Schritt/Röst-Runde-Zitate
+  und Migrations-Erzählung raus, Invarianten und Rule-Id-Tags behalten).
+  348 Tests grün, ruff/mypy clean.
 - ⬜ **H2** — Startgate abbauen (neu, siehe unten). Nach H ist sein einzig
   nicht-redundanter Wert (Deployment-Config validieren) weg.
 - ⬜ **I** — Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen
