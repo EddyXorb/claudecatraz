@@ -7,8 +7,12 @@ Kernel-owned: counters and fail-safe locking are resource-agnostic (M5), keyed b
 ``guard``/``kind`` strings. Module has no forge vocabulary (branch/MR tables live
 in forge's own :class:`~warden.guards.gitlab.state.ForgeState`).
 
-Schema versioning via SQLite's ``PRAGMA user_version``. Migrations in
-:mod:`warden.core.state_migrations`.
+Schema versioning via SQLite's ``PRAGMA user_version``. Pre-1.0: no migration
+machinery — a DB is stamped at :data:`CURRENT_SCHEMA_VERSION` on first use
+(``CREATE TABLE IF NOT EXISTS`` builds the current shape directly). The one
+value kept is fail-closed (A9): a DB stamped with a version *newer* than this
+build understands raises :class:`SchemaError` rather than run against an
+unknown shape.
 """
 
 from __future__ import annotations
@@ -16,26 +20,26 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Final, Iterable, Optional, Sequence
 
 from .model import StateView
-from .state_migrations import (
-    BASE_SCHEMA_VERSION,
-    CURRENT_SCHEMA_VERSION,
-    MIGRATIONS,
-    SchemaError,
-    run_migrations,
-)
 
 __all__ = [
-    "BASE_SCHEMA_VERSION",
     "CURRENT_SCHEMA_VERSION",
-    "MIGRATIONS",
     "SchemaError",
     "State",
     "StateStore",
     "WINDOW_SECONDS",
 ]
+
+CURRENT_SCHEMA_VERSION: Final[int] = 1
+
+
+class SchemaError(RuntimeError):
+    """Raised when the state DB's schema version is newer than this build
+    understands — fail-closed: a downgrade must never silently run against a
+    shape it does not fully know, so it refuses to start."""
+
 
 _CORE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS writes (
@@ -59,11 +63,13 @@ class StateStore:
     :class:`~warden.guards.gitlab.state.ForgeState`) so they stay one writer on
     one file, never a second connection.
 
-    Runs the historical schema migrations at connect time, before any table
-    (core's or a domain's) is created — a legacy ``claude_*`` DB must already
-    be lifted to current names by the time a domain's own
-    ``CREATE TABLE IF NOT EXISTS`` runs, or that statement would create a
-    second, empty table alongside the legacy one instead of a no-op.
+    Checks and stamps the schema version at connect time, before any table
+    (core's or a domain's) is created: a fresh file has ``user_version == 0``
+    and gets stamped at :data:`CURRENT_SCHEMA_VERSION`; a DB already at
+    :data:`CURRENT_SCHEMA_VERSION` is left as-is; a DB stamped *newer* than
+    this build understands raises :class:`SchemaError` (fail-closed, A9) —
+    the caller's own ``CREATE TABLE IF NOT EXISTS`` then builds/confirms the
+    current shape.
     """
 
     def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
@@ -74,7 +80,19 @@ class StateStore:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
-        run_migrations(self._db)  # before any CREATE TABLE — see class docstring
+        self._check_and_stamp_schema_version()  # before any CREATE TABLE — see class docstring
+
+    def _check_and_stamp_schema_version(self) -> None:
+        user_version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
+        if user_version > CURRENT_SCHEMA_VERSION:
+            raise SchemaError(
+                f"state DB schema version {user_version} is newer than this warden "
+                f"build supports ({CURRENT_SCHEMA_VERSION}) — refusing to start (fail-closed)"
+            )
+        # user_version == 0 (fresh file) or == CURRENT_SCHEMA_VERSION: nothing to
+        # lift — the caller's CREATE TABLE IF NOT EXISTS builds the current shape.
+        self._db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+        self._db.commit()
 
     @property
     def clock(self) -> Callable[[], float]:

@@ -14,7 +14,6 @@ import sqlite3
 import pytest
 
 from warden.core.state import (
-    BASE_SCHEMA_VERSION,
     CURRENT_SCHEMA_VERSION,
     WINDOW_SECONDS,
     SchemaError,
@@ -75,7 +74,7 @@ def test_view_reflects_writes_counter_once_reconciled():
     assert (v.open_branches, v.open_mrs, v.writes_last_hour, v.locked) == (0, 0, 1, False)
 
 
-# --- schema versioning (§06-migration.md Schritt 2, F11 precondition) ----------
+# --- schema versioning (no migrations, pre-1.0: version-stamp + fail-closed) --
 
 
 def test_fresh_db_is_created_at_current_schema_version():
@@ -83,90 +82,15 @@ def test_fresh_db_is_created_at_current_schema_version():
     assert st.schema_version() == CURRENT_SCHEMA_VERSION
 
 
-def test_migrations_span_exactly_base_to_current():
-    from warden.core.state import MIGRATIONS
-
-    versions = [m.version for m in MIGRATIONS]
-    assert versions == sorted(versions), "migrations must be listed in order"
-    assert versions[0] == BASE_SCHEMA_VERSION + 1
-    assert versions[-1] == CURRENT_SCHEMA_VERSION
-
-
-def _write_legacy_v1_db(path) -> None:
-    """Build a v1 DB on disk: the pre-Schritt-2 unversioned shape — old table
-    names (``claude_branches``/``claude_mrs``), old column name
-    (``writes.channel``), no ``user_version`` marker at all."""
-    raw = sqlite3.connect(str(path))
-    raw.executescript(
-        """
-        CREATE TABLE writes (
-          id INTEGER PRIMARY KEY, ts REAL NOT NULL,
-          channel TEXT NOT NULL, kind TEXT NOT NULL, ref_or_iid TEXT
-        );
-        CREATE TABLE claude_branches (project TEXT, ref TEXT, created REAL,
-                                       PRIMARY KEY (project, ref));
-        CREATE TABLE claude_mrs (project TEXT, iid INTEGER, state TEXT, created REAL,
-                                  PRIMARY KEY (project, iid));
-        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-        """
-    )
-    raw.execute(
-        "INSERT INTO claude_branches (project, ref, created) VALUES (?, ?, ?)",
-        ("group/proj", "claude/legacy", 1000.0),
-    )
-    raw.execute(
-        "INSERT INTO writes (ts, channel, kind, ref_or_iid) VALUES (?, ?, ?, ?)",
-        (1000.0, "git", "push", "claude/legacy"),
-    )
-    raw.execute("INSERT INTO meta (key, value) VALUES ('last_reconcile', '1000.0')")
-    raw.commit()
-    assert raw.execute("PRAGMA user_version").fetchone()[0] == 0  # sanity: truly unversioned
-    raw.close()
-
-
-def test_legacy_v1_db_is_migrated_to_v3_without_data_loss(tmp_path):
-    """A pre-existing v1 DB (unversioned: ``claude_branches``/``claude_mrs``,
-    ``writes.channel``) is lifted straight to :data:`CURRENT_SCHEMA_VERSION`
-    in place — no table recreated from scratch, no row dropped, including
-    through the Schritt-6 claude→agent/channel→guard rename (F11).
-
-    The migration itself is core's job (runs before ForgeState's own
-    ``CREATE TABLE IF NOT EXISTS``, §E) even though ``agent_branches`` is now
-    a forge-domain table — hence building a :class:`ForgeState` here to read
-    the migrated row back.
-    """
-    path = tmp_path / "legacy.db"
-    _write_legacy_v1_db(path)
-
-    st = State(str(path))
+def test_fresh_db_has_target_tables():
+    """A brand-new DB gets the current shape directly — no legacy names, no
+    lift needed: ``agent_branches``/``agent_mrs`` (via ForgeState, sharing the
+    same connection) and ``writes.guard``."""
+    st = State(":memory:")
     fs = ForgeState(st.store)
-    assert st.schema_version() == CURRENT_SCHEMA_VERSION
-    assert fs.open_branches() == 1  # the pre-existing row survived the lift
-    assert st.is_reconciled() is True  # so did the reconcile marker
-    # white-box: the renamed column carries the old row's value through.
-    row = st.store.execute("SELECT guard, kind FROM writes").fetchone()
-    assert (row["guard"], row["kind"]) == ("git", "push")
-    st.close()
-
-
-def test_v2_db_is_migrated_to_v3_without_data_loss(tmp_path):
-    """A v2 DB (§06-migration.md Schritt 2: ``user_version`` stamped, but
-    migration 2 was a table-name no-op — still ``claude_branches``/
-    ``claude_mrs``/``writes.channel``) is lifted to
-    :data:`CURRENT_SCHEMA_VERSION` by the Schritt-6 rename migration alone,
-    without dropping the ``user_version`` stamped starting point's data."""
-    path = tmp_path / "v2.db"
-    _write_legacy_v1_db(path)
-    raw = sqlite3.connect(str(path))
-    raw.execute("PRAGMA user_version = 2")
-    raw.commit()
-    raw.close()
-
-    st = State(str(path))
-    fs = ForgeState(st.store)
-    assert st.schema_version() == CURRENT_SCHEMA_VERSION
-    assert fs.open_branches() == 1
-    assert st.is_reconciled() is True
+    assert fs.open_branches() == 0
+    assert fs.open_mrs() == 0
+    st.record_write("git", "push", "claude/a")
     row = st.store.execute("SELECT guard, kind FROM writes").fetchone()
     assert (row["guard"], row["kind"]) == ("git", "push")
     st.close()
