@@ -1,4 +1,5 @@
 """Helpers for `catraz init --from <path>`: load inherited values from an existing sandbox."""
+
 from __future__ import annotations
 
 import shutil
@@ -69,7 +70,9 @@ def load_inherited(src_root: Path) -> dict[str, Any]:
                 # not real secrets.  Inheriting them would make the wizard show
                 # "inherited (hidden)" for a token that was never set.
                 try:
-                    content = child.read_text(encoding="utf-8", errors="replace").strip()
+                    content = child.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).strip()
                 except OSError:
                     continue
                 if content:
@@ -123,7 +126,10 @@ def stage_inherited(
                         d.chmod(0o600)
             out.info(f"  • inherited secrets/{name}/ (contents not shown)")
         else:
-            dst_empty = dst.is_file() and not dst.read_text(encoding="utf-8", errors="replace").strip()
+            dst_empty = (
+                dst.is_file()
+                and not dst.read_text(encoding="utf-8", errors="replace").strip()
+            )
             if not dst.exists() or yes or dst_empty:
                 shutil.copy2(src_path, dst)
                 dst.chmod(0o600)

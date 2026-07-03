@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 
-from warden.pktline import FLUSH, pkt_line
+from warden.guards.git.pktline import FLUSH, pkt_line
 
 PROJ = "group%2Fproj"
 ZERO = "0" * 40
@@ -105,6 +105,8 @@ async def test_push_prefix_lookalike_blocked(client, respx_router):
 
 
 async def test_git_cross_project_push_blocked(client, respx_router):
-    body = pkt_line(f"{ZERO} {SHA1} refs/heads/claude/x\x00report-status\n".encode()) + FLUSH + b"PACK"
+    body = (
+        pkt_line(f"{ZERO} {SHA1} refs/heads/claude/x\x00report-status\n".encode()) + FLUSH + b"PACK"
+    )
     resp = await client.post("/git/other/secret.git/git-receive-pack", content=body)
     assert b"warden: R6" in resp.content

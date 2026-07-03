@@ -1,248 +1,83 @@
 #!/usr/bin/env python3
 """
-Container entrypoint — and host-side credential sync tool.
+Generic container entrypoint (§05.2) — and host-side credential sync tool.
 
-  python3 entrypoint.py          # inside container: configure + exec claude
-  python3 entrypoint.py sync     # on host: copy .credentials.json into CLAUDE_HOME
+Split from the former single-agent entrypoint (§06-migration.md Schritt 7):
+everything in this file is agent-agnostic (UID drop, tmpfs-home lifecycle, `.catraz` shadow-mount
+contract, proxy env, git→Warden routing, process exec, signal handling via
+``os.execvp``). All agent-specific behaviour (credential layout, CLI command,
+remote-control support, instructions-file rendering) is delegated to the
+adapter this image was built for — a co-located ``agent_adapter.py`` (see
+``assets/agents/<name>/layer.Dockerfile``), through the contract defined in
+``agent_contract.py``.
+
+  python3 entrypoint.py          # inside container: configure + exec the agent
+  python3 entrypoint.py sync     # on host: import credentials into --agent-home
 """
 
 import argparse
-import json
+import importlib.util
 import os
-import shlex
-import shutil
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any, cast
-from urllib.parse import urlsplit
+from typing import cast
 
-
-def read_json(p: Path) -> dict[str, Any]:
-    try:
-        return cast(dict[str, Any], json.loads(p.read_text()))
-    except Exception:
-        return {}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent_contract import AgentAdapter, InstructionContext, Secrets  # noqa: E402
+from git_routing import configure_git_warden, install_host_gitconfig  # noqa: E402
 
 
 def _env_true(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-# Host-persistent target for Claude's own --debug-file output. catraz bind-mounts the
-# project's .catraz/logs/claude here (see docker-compose.yml), next to logs/warden and
-# logs/squid, so the remote-control daemon (rc-debug.log) and `catraz run` (run-debug.log)
-# debug logs survive container exit — the live ~/.claude is a tmpfs and loses them.
-CLAUDE_LOG_DIR = Path("/var/log/claude")
+# Host-persistent target for the agent's own --debug-file-style output. catraz
+# bind-mounts a project log dir here (see docker-compose.yml) so debug logs
+# survive container exit — the live agent home is a tmpfs and loses them.
+AGENT_LOG_DIR = Path("/var/log/agent-debug")
+
+# Writable per-repo state (§05.6) — always mounted (harmless if unused); an
+# adapter whose manifest declares `credentials.mode = "persistent"` wires
+# selected files from here into the live home itself.
+PERSISTENT_STATE_DIR = Path("/var/lib/agent-state")
 
 
-def claude_log_dir(claude_home: Path) -> Path:
-    """Where Claude should write its --debug-file logs.
-
-    Prefer the host-persistent bind at CLAUDE_LOG_DIR when it is present and writable by
-    the dev user (the catraz path: doctor creates it and chowns to DEV_UID). Fall back to
-    the ephemeral tmpfs Claude-home when the bind is absent or root-owned — e.g. a bare
-    `docker run` for local image testing, or a stale project whose dir Docker auto-created
-    as root. The fallback keeps logging working (just non-persistent) instead of crashing.
-    """
-    if CLAUDE_LOG_DIR.is_dir() and os.access(CLAUDE_LOG_DIR, os.W_OK):
-        return CLAUDE_LOG_DIR
-    return claude_home
+def resolve_log_dir(home: Path) -> Path:
+    """Prefer the host-persistent bind when present and writable by the dev
+    user (doctor creates + chowns it); fall back to the ephemeral tmpfs home
+    otherwise (bare `docker run` for local testing, stale root-owned dir)."""
+    if AGENT_LOG_DIR.is_dir() and os.access(AGENT_LOG_DIR, os.W_OK):
+        return AGENT_LOG_DIR
+    return home
 
 
-# ── host-side sync ────────────────────────────────────────────────────────────
+def _load_adapter() -> AgentAdapter:
+    """The one adapter this image was built for (co-located next to this
+    file, §05.2/§06.2 — no dynamic selection at runtime; the build already
+    committed to exactly one agent)."""
+    p = Path(__file__).resolve().parent / "agent_adapter.py"
+    spec = importlib.util.spec_from_file_location("agent_adapter", p)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # see agent_contract.py's Secrets/InstructionContext
+    spec.loader.exec_module(mod)
+    return cast(AgentAdapter, mod)
 
 
-def cmd_sync(claude_home: Path, source: str | None = None) -> None:
-    src_dir = Path(
-        source
-        or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
-        or str(Path.home() / ".claude")
-    ).expanduser()
-    cred = src_dir / ".credentials.json"
-    if not cred.exists():
+# ── host-side sync (credentials.mode = "sync" only) ──────────────────────────
+
+
+def cmd_sync(adapter: AgentAdapter, home: Path, source: str | None = None) -> None:
+    sync = getattr(adapter, "sync_from_host", None)
+    if sync is None:
         sys.exit(
-            f"error: {cred} not found — authenticate with `claude` on the host first"
+            "error: this agent profile has no host-credential sync "
+            "(credentials.mode=persistent logs in from inside the container instead)"
         )
-    claude_home.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(cred, claude_home / ".credentials.json")
-    # A custom config dir (e.g. ~/.claude2) keeps .claude.json INSIDE it; the default
-    # ~/.claude layout keeps it as a sibling at ~/.claude.json. Prefer in-dir, then sibling.
-    host_cj = src_dir / ".claude.json"
-    if not host_cj.exists():
-        host_cj = src_dir.parent / ".claude.json"
-    dst_cj = claude_home / ".claude.json"
-    if host_cj.exists():
-        shutil.copy2(host_cj, dst_cj)
-    elif not dst_cj.exists():
-        dst_cj.write_text(
-            json.dumps(
-                {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
-                indent=2,
-            )
-        )
-    print(f"Credentials synced into {claude_home}")
+    sync(Path(source).expanduser() if source else None, home)
 
 
-# ── container startup ─────────────────────────────────────────────────────────
-
-
-def build_claude_home(home: Path, mode: str, remote: bool = True) -> None:
-    """Build the tmpfs Claude-home each start. RO sources live under home/.ro/."""
-    home.mkdir(parents=True, exist_ok=True)
-    ro = home / ".ro"
-    if mode == "subscription":
-        src = ro / ".credentials.json"
-        if not src.exists():
-            sys.exit(
-                "error: subscription mode but no .credentials.json mounted (run `catraz sync`)"
-            )
-        shutil.copy2(src, home / ".credentials.json")
-    # .claude.json lives at the HOME ROOT (sibling of ~/.claude), NOT inside the tmpfs dir.
-    if mode == "subscription" and (ro / ".claude.json").exists():
-        data = read_json(ro / ".claude.json")
-    else:
-        data = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
-    # Both remote-control and run mode use --permission-mode bypassPermissions, so always
-    # pre-accept the one-time dialog.  remoteDialogSeen is only needed for the RC daemon.
-    # NOTE: recent Claude Code (≥2.1.x) migrates bypassPermissionsModeAccepted out of
-    # .claude.json into settings.json's skipDangerousModePermissionPrompt and then deletes
-    # the old key — so the .claude.json flag alone no longer reliably suppresses the prompt.
-    # We keep it for older versions but ALSO set the new canonical key below.
-    data["bypassPermissionsModeAccepted"] = True
-    if remote:
-        data["remoteDialogSeen"] = True
-    data.setdefault("projects", {}).setdefault("/workspace", {})[
-        "hasTrustDialogAccepted"
-    ] = True
-    (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
-    # skipDangerousModePermissionPrompt is the field current Claude Code actually checks
-    # (userSettings) before showing the bypassPermissions disclaimer — set it directly so
-    # the prompt never appears, independent of the .claude.json → settings.json migration.
-    (home / "settings.json").write_text(
-        json.dumps(
-            {
-                "theme": "dark",
-                "hasCompletedOnboarding": True,
-                "skipDangerousModePermissionPrompt": True,
-            },
-            indent=2,
-        )
-    )
-    install_claude_md(home)
-
-
-def install_claude_md(home: Path) -> None:
-    """Install the agent user-memory (~/.claude/CLAUDE.md) from its read-only source.
-
-    catraz mounts the packaged AGENT.md read-only at ~/.claude/.ro/CLAUDE.md (see
-    docker-compose.yml) and we copy it to the writable live path so Claude's `#`
-    add-memory shortcut keeps working. The image itself carries NO CLAUDE.md — the
-    single source of truth is the asset cache, which also lets a bare `docker run` of
-    the image start without the bind for local testing.
-
-    catraz hard-sets REQUIRE_CLAUDE_FILE=true in compose, so on the normal path a
-    missing/misconfigured mount fails loud instead of silently starting the agent
-    without its guidance.
-    """
-    src = home / ".ro" / "CLAUDE.md"
-    if src.exists():
-        shutil.copy2(src, home / "CLAUDE.md")
-        return
-    if _env_true("REQUIRE_CLAUDE_FILE"):
-        sys.exit(
-            f"error: REQUIRE_CLAUDE_FILE is set but no CLAUDE.md is mounted at {src}.\n\n"
-            "The agent user-memory (CLAUDE.md) is delivered as a read-only bind mount of\n"
-            "the packaged AGENT.md from the catraz asset cache. docker-compose.yml expects:\n\n"
-            "    - type: bind\n"
-            "      source: ${CATRAZ_ASSETS}/AGENT.md\n"
-            f"      target: {src}\n"
-            "      read_only: true\n\n"
-            "Check that:\n"
-            "  - you launched the stack via the `catraz` CLI (it sets CATRAZ_ASSETS and\n"
-            "    attaches the bind); a bare `docker compose`/`docker run` does not,\n"
-            "  - the asset cache contains AGENT.md ($CATRAZ_ASSETS/AGENT.md on the host),\n"
-            "  - no compose override removed the mount.\n\n"
-            "For local image testing without the bind, leave REQUIRE_CLAUDE_FILE unset."
-        )
-    # Not required (e.g. bare `docker run` for local testing) -> start without user-memory.
-
-
-def install_host_gitconfig(home: Path) -> None:
-    """Seed the writable ~/.gitconfig from the host's, so the agent can commit.
-
-    catraz bind-mounts the host's ~/.gitconfig read-only at home/.ro/.gitconfig (see
-    docker-compose.yml) and we copy it to the live ~/.gitconfig. It must be the live
-    (writable) file, not a read-only mount there, because configure_git_warden() then
-    appends insteadOf rules to it via `git config --global`.
-
-    When no host gitconfig exists the mount is /dev/null, which stages as an empty
-    file — skip it (the agent gets no identity, same as before this feature).
-    """
-    src = home / ".ro" / ".gitconfig"
-    if src.exists() and src.stat().st_size > 0:
-        shutil.copy2(src, Path.home() / ".gitconfig")
-
-
-def configure_git_warden() -> None:
-    """Set up global git insteadOf rewrites so canonical GitLab URLs are transparently
-    redirected to the Warden inside the container (W3.1). The repo's .git/config
-    stays untouched; the rewrites live only in ~/.gitconfig.
-
-    All three canonical remote forms are routed to the same warden base — git applies
-    the longest matching insteadOf prefix, so HTTPS as well as SSH remotes land on the
-    warden's Smart-HTTP endpoint:
-
-        https://gitlab.com/grp/repo.git   (https)
-        git@gitlab.com:grp/repo.git       (scp-like ssh)
-        ssh://git@gitlab.com/grp/repo.git (ssh://)
-
-    Rewriting SSH → warden-HTTP means the agent needs no SSH key at all: pushes succeed
-    because the warden injects the write-token upstream (R1). The SSH user defaults to
-    `git` (GITLAB_SSH_USER overrides it for self-hosted instances).
-
-    When GITLAB_MODE=off the rewrite is skipped: the warden denies all GitLab ops in
-    that mode, so routing git there would only produce confusing errors. The agent's
-    git commands will reach gitlab.com directly (and fail, as expected — no token).
-    """
-    gitlab_mode = os.environ.get("GITLAB_MODE", "read-write")
-    if gitlab_mode == "off":
-        print(
-            "GitLab disabled (GITLAB_MODE=off) — git will not be routed to the warden"
-        )
-        os.environ["GIT_TERMINAL_PROMPT"] = "0"
-        return
-    gitlab_url = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/")
-    warden_git = (
-        os.environ.get("WARDEN_GIT_URL", "http://gitlab-warden:8080/git/").rstrip("/")
-        + "/"
-    )
-    host = urlsplit(gitlab_url).hostname or "gitlab.com"
-    ssh_user = os.environ.get("GITLAB_SSH_USER", "git")
-    rewrites = [
-        gitlab_url + "/",  # https://gitlab.com/
-        f"{ssh_user}@{host}:",  # git@gitlab.com:   (scp-like)
-        f"ssh://{ssh_user}@{host}/",  # ssh://git@gitlab.com/
-    ]
-    key = f"url.{warden_git}.insteadOf"
-    # --unset-all first so re-running on the same ~/.gitconfig stays idempotent
-    # (no duplicate multivar entries); ignore the rc=5 "key not found" on a fresh home.
-    subprocess.run(["git", "config", "--global", "--unset-all", key], check=False)
-    for src in rewrites:
-        subprocess.run(["git", "config", "--global", "--add", key, src], check=True)
-    os.environ["GIT_TERMINAL_PROMPT"] = "0"
-
-
-# NOTE (Stage 01 — Bootstrap hardening, R6):
-# The former configure_git() and configure_gitlab() functions were deliberately removed.
-# They injected GitLab credentials into the agent container:
-#   - configure_git()    wrote GITLAB_GIT_TOKEN (write_repository) into ~/.netrc
-#   - configure_gitlab() registered the MCP with Authorization: Bearer GITLAB_API_TOKEN
-# Both tokens were therefore in the agent's process space and considered compromised
-# (docs/design/agentic-workflow, §3/§4). The agent no longer holds any GitLab token.
-# GitLab access returns in stage 02 via the Warden (git Smart-HTTP proxy + REST
-# filter); the git remote will then point to the Warden, not gitlab.com.
-# GitHub is out of scope for now (configure_github was removed).
+# ── generic per-start setup ───────────────────────────────────────────────────
 
 
 def drop_to_dev() -> None:
@@ -263,80 +98,107 @@ def drop_to_dev() -> None:
     os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
 
-def _resolve_api_key() -> str:
-    """Read ANTHROPIC_API_KEY from _FILE (compose secret) falling back to the bare var."""
-    file_path = os.environ.get("ANTHROPIC_API_KEY_FILE")
-    if file_path:
-        try:
-            return Path(file_path).read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
-    return os.environ.get("ANTHROPIC_API_KEY", "")
+def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None:
+    """Write the agent's rendered instructions file (§05.2 `render_instructions`
+    — target *and* content). Fails closed when REQUIRE_AGENT_INSTRUCTIONS is
+    set and rendering doesn't produce anything (packaging error), otherwise
+    starts without instructions (e.g. a bare `docker run` for local testing).
+    """
+    try:
+        dest, content = adapter.render_instructions(ctx)
+    except Exception as exc:  # noqa: BLE001 - deliberately broad, see the exit message
+        if _env_true("REQUIRE_AGENT_INSTRUCTIONS"):
+            sys.exit(f"error: could not render agent instructions: {exc}")
+        return
+    if not content and _env_true("REQUIRE_AGENT_INSTRUCTIONS"):
+        sys.exit(
+            "error: REQUIRE_AGENT_INSTRUCTIONS is set but rendered instructions are empty"
+        )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content)
 
 
-def _bootstrap(claude_home: Path, remote: bool) -> None:
+def _instruction_context() -> InstructionContext:
+    # "claude/" is only the fallback when WARDEN_BRANCH_PREFIX is unset AND
+    # warden.toml can't be read from here — the same justified default-value
+    # residue as the warden's own `branch_prefixes` default (§06-migration.md
+    # Schritt 6): a namespace default, not an agent-identity check.
+    prefixes = tuple(
+        p.strip()
+        for p in (os.environ.get("WARDEN_BRANCH_PREFIX") or "").split(",")
+        if p.strip()
+    ) or ("claude/",)
+    return InstructionContext(
+        forge_rest_base=os.environ.get(
+            "WARDEN_REST_URL", "http://gitlab-warden:8080/api/v4"
+        ),
+        branch_prefixes=prefixes,
+        warden_toml_path=Path("/etc/catraz/warden.toml"),
+    )
+
+
+def _resolve_secrets(home: Path, *, remote: bool) -> Secrets:
+    mode = os.environ.get("AUTH_MODE") or "subscription"
+    ro = home / ".ro"
+    api_key_file_env = os.environ.get("ANTHROPIC_API_KEY_FILE")
+    return Secrets(
+        auth_mode=mode,
+        subscription_ro_dir=ro if ro.is_dir() else None,
+        persistent_state_dir=PERSISTENT_STATE_DIR
+        if PERSISTENT_STATE_DIR.is_dir()
+        else None,
+        api_key_file=Path(api_key_file_env) if api_key_file_env else None,
+        api_key_env_fallback=os.environ.get("ANTHROPIC_API_KEY", ""),
+        remote=remote,
+    )
+
+
+def _bootstrap(adapter: AgentAdapter, home: Path, *, remote: bool) -> None:
     """Shared per-start setup for every container entry mode (start/run/exec).
 
-    Drops root → dev (chowning /workspace + re-execing via gosu), resolves the auth
-    mode — loading ANTHROPIC_API_KEY for api_key mode — rebuilds the tmpfs Claude-home
-    and routes git through the warden. `remote` is forwarded to build_claude_home: only
-    the remote-control daemon needs the one-time accept prompts pre-dismissed.
+    Drops root → dev (chowning /workspace + re-execing via gosu), resolves
+    secrets and hands them to the adapter (credential files + extra env),
+    rebuilds the live home, and routes git through the warden.
     """
     drop_to_dev()
-    mode = os.environ.get("AUTH_MODE") or "subscription"
-    if mode == "api_key":
-        key = _resolve_api_key()
-        if not key:
-            sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
-        os.environ["ANTHROPIC_API_KEY"] = key
-    build_claude_home(claude_home, mode, remote=remote)
-    install_host_gitconfig(claude_home)
+    secrets = _resolve_secrets(home, remote=remote)
+    os.environ["AGENT_LOG_DIR"] = str(resolve_log_dir(home))
+    try:
+        os.environ.update(adapter.environ(secrets))
+    except Exception as exc:  # noqa: BLE001 - fail closed with the adapter's own message
+        sys.exit(f"error: {exc}")
+    adapter.prepare_home(home, secrets)
+    install_host_gitconfig(home)
     configure_git_warden()
+    install_instructions(adapter, _instruction_context())
 
 
-def cmd_exec(claude_home: Path, cmd: list[str]) -> None:
+def cmd_exec(adapter: AgentAdapter, home: Path, cmd: list[str]) -> None:
     """Interactive shell / one-off command in the sandbox (`catraz run shell`).
 
-    Lands in the same configured state as claude/claude-remote: full _bootstrap so the
-    Claude-home and the git-warden insteadOf rewrite are in place. remote=False — this
-    is not the remote-control daemon, so keep normal permissions.
+    Lands in the same configured state as a one-off/remote run: full
+    _bootstrap so the home and the git-warden insteadOf rewrite are in place.
+    remote=False — this is not the remote-control daemon.
     """
-    _bootstrap(claude_home, remote=False)
+    _bootstrap(adapter, home, remote=False)
     argv = cmd or ["bash"]
     os.execvp(argv[0], argv)
 
 
-def cmd_start(claude_home: Path) -> None:
-    _bootstrap(claude_home, remote=True)
-    spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
-    debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(
-        claude_log_dir(claude_home) / "rc-debug.log"
-    )
-    extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
-    os.execvp(
-        "claude",
-        [
-            "claude",
-            "remote-control",
-            "--permission-mode",
-            "bypassPermissions",  # keep-fixed (headless)
-            "--spawn",
-            spawn,
-            "--debug-file",
-            debug,
-            *extra,
-        ],
-    )
+def cmd_start(adapter: AgentAdapter, home: Path) -> None:
+    _bootstrap(adapter, home, remote=True)
+    argv = adapter.remote_command()
+    if argv is None:
+        sys.exit(
+            "error: this agent profile does not support remote-control mode (modes.remote=false)"
+        )
+    os.execvp(argv[0], argv)
 
 
-def cmd_run(claude_home: Path, claude_args: list[str]) -> None:
-    _bootstrap(claude_home, remote=False)
-    argv = ["claude", "--dangerously-skip-permissions"]
-    # Persist a debug log to the host bind, unless the caller already drives debug output
-    # themselves (-d/--debug/--debug-file) — don't fight a user-supplied flag.
-    if not any(a == "-d" or a.startswith("--debug") for a in claude_args):
-        argv += ["--debug-file", str(claude_log_dir(claude_home) / "run-debug.log")]
-    os.execvp("claude", [*argv, *claude_args])
+def cmd_run(adapter: AgentAdapter, home: Path, argv: list[str]) -> None:
+    _bootstrap(adapter, home, remote=False)
+    full = adapter.command(argv)
+    os.execvp(full[0], full)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -346,26 +208,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    default_home = os.environ.get("AGENT_HOME", str(Path.home() / ".agent-home"))
     parser.add_argument(
-        "--claude-home",
-        default=os.environ.get("CLAUDE_HOME", str(Path.home() / ".claude")),
-        help="Claude config directory [env: CLAUDE_HOME, default: ~/.claude]",
+        "--agent-home",
+        default=default_home,
+        help="agent config directory [env: AGENT_HOME]",
     )
     sub = parser.add_subparsers(dest="command")
 
-    sync = sub.add_parser(
-        "sync", help="Copy .credentials.json from ~/.claude/ into CLAUDE_HOME"
-    )
+    sync = sub.add_parser("sync", help="Import host credentials into --agent-home")
     sync.add_argument(
-        "--claude-home",
-        default=os.environ.get("CLAUDE_HOME", str(Path(__file__).parent / "claude")),
-        help="Target directory [env: CLAUDE_HOME, default: ./claude next to this script]",
+        "--agent-home",
+        default=default_home,
+        help="Target directory [env: AGENT_HOME]",
     )
     sync.add_argument(
         "--from",
         dest="source",
         default=None,
-        help="Source ~/.claude dir [env: CLAUDE_CREDENTIAL_SOURCE, default: ~/.claude]",
+        help="Source credential dir (adapter-specific default env var, if any)",
     )
 
     rn = sub.add_parser("run")
@@ -375,19 +236,20 @@ def main() -> None:
     ex.add_argument("rest", nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
+    adapter = _load_adapter()
 
     if args.command == "sync":
-        cmd_sync(Path(args.claude_home).resolve(), source=args.source)
+        cmd_sync(adapter, Path(args.agent_home).resolve(), source=args.source)
         return
     if args.command == "run":
         rest = args.rest[1:] if args.rest and args.rest[0] == "--" else args.rest
-        cmd_run(Path(args.claude_home).resolve(), rest)
+        cmd_run(adapter, Path(args.agent_home).resolve(), rest)
         return
     if args.command == "exec":
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
-        cmd_exec(Path(args.claude_home).resolve(), rest)
+        cmd_exec(adapter, Path(args.agent_home).resolve(), rest)
         return
-    cmd_start(Path(args.claude_home).resolve())
+    cmd_start(adapter, Path(args.agent_home).resolve())
 
 
 if __name__ == "__main__":

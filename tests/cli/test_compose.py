@@ -4,7 +4,9 @@ import pytest
 from catraz import compose
 
 
-def test_base_cmd_points_at_asset_and_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_cmd_points_at_asset_and_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / ".catraz").mkdir()
     cmd = compose.base_cmd(tmp_path)
     assert "--project-directory" in cmd and str(tmp_path) in cmd
@@ -19,8 +21,9 @@ def test_base_cmd_sets_unique_project_name(tmp_path: Path) -> None:
 
 def test_project_name_is_valid_stable_and_unique(tmp_path: Path) -> None:
     a = tmp_path / "work" / "api"
-    b = tmp_path / "scratch" / "api"        # same basename, different path
-    a.mkdir(parents=True); b.mkdir(parents=True)
+    b = tmp_path / "scratch" / "api"  # same basename, different path
+    a.mkdir(parents=True)
+    b.mkdir(parents=True)
     na, nb = compose.project_name(a), compose.project_name(b)
     # valid Compose project name
     assert re.fullmatch(r"[a-z0-9][a-z0-9_-]*", na)

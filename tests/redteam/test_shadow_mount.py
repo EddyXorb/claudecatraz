@@ -15,6 +15,7 @@ Run fast (CI-equivalent):
 Run all (local, with real key + Docker):
     uv run --with pytest python -m pytest tests/redteam/ -q
 """
+
 import os
 import shutil
 import subprocess
@@ -46,15 +47,27 @@ def test_t2_tmpfs_overdeck_ordering(tmp_path: Path) -> None:
     """tmpfs over a bind subpath masks host content deterministically."""
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz/secret").write_text("TOP")
-    r = _run(["docker", "run", "--rm",
-              "-v", f"{tmp_path}:/workspace",
-              "--tmpfs", "/workspace/.catraz",
-              "alpine", "sh", "-c", "ls -A /workspace/.catraz | wc -l"])
+    r = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{tmp_path}:/workspace",
+            "--tmpfs",
+            "/workspace/.catraz",
+            "alpine",
+            "sh",
+            "-c",
+            "ls -A /workspace/.catraz | wc -l",
+        ]
+    )
     assert r.returncode == 0
-    assert r.stdout.strip() == "0"          # .catraz appears EMPTY to the container
+    assert r.stdout.strip() == "0"  # .catraz appears EMPTY to the container
 
 
 # ── Fixture: running stack via catraz init -y + up --remote ──────────────────
+
 
 @pytest.fixture(scope="module")
 def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
@@ -74,8 +87,9 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     env = dict(os.environ, HOME=str(root))
     catraz = [sys.executable, "-m", "catraz"]
 
-    subprocess.run([*catraz, "-C", str(root), "init", "-y", "--skip-sync"],
-                   env=env, check=False)   # exit 3 from doctor tolerated; scaffold created
+    subprocess.run(
+        [*catraz, "-C", str(root), "init", "-y", "--skip-sync"], env=env, check=False
+    )  # exit 3 from doctor tolerated; scaffold created
 
     # Write a complete .env after init (so it is not overwritten)
     (root / ".catraz" / ".env").write_text(
@@ -88,53 +102,94 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     )
 
     # `run claude-remote` starts the Remote-Control daemon (item 07 of cli-worklist).
-    subprocess.run([*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True)
+    subprocess.run(
+        [*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True
+    )
     yield root
     subprocess.run([*catraz, "-C", str(root), "stop"], env=env, check=False)
 
 
 # ── T1 — live stack: /workspace/.catraz is empty inside container ─────────────
 
+
 @pytest.mark.slow
 def test_t1_workspace_catraz_empty(live_stack: Path) -> None:
     """Inside the running agent container .catraz is the empty tmpfs shadow."""
-    r = _run(["docker", "compose",
-              "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
-              "--project-directory", str(live_stack),
-              "exec", "-T", "claude-dev-env",
-              "sh", "-c", "ls -A /workspace/.catraz | wc -l"])
+    r = _run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
+            "--project-directory",
+            str(live_stack),
+            "exec",
+            "-T",
+            "claude-dev-env",
+            "sh",
+            "-c",
+            "ls -A /workspace/.catraz | wc -l",
+        ]
+    )
     assert r.returncode == 0
     assert r.stdout.strip() == "0"
 
 
 # ── T3 — tmpfs write does NOT propagate to host .catraz ──────────────────────
 
+
 @pytest.mark.slow
 def test_t3_tmpfs_write_isolation(live_stack: Path) -> None:
     """Writing into the tmpfs shadow must NOT appear on the host."""
-    _run(["docker", "compose",
-          "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
-          "--project-directory", str(live_stack),
-          "exec", "-T", "claude-dev-env",
-          "sh", "-c", "echo EXFIL > /workspace/.catraz/exfil.txt"])
+    _run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
+            "--project-directory",
+            str(live_stack),
+            "exec",
+            "-T",
+            "claude-dev-env",
+            "sh",
+            "-c",
+            "echo EXFIL > /workspace/.catraz/exfil.txt",
+        ]
+    )
     assert not (live_stack / ".catraz" / "exfil.txt").exists()
 
 
 # ── T4 — dev user cannot umount the tmpfs shadow ─────────────────────────────
 
+
 @pytest.mark.slow
 def test_t4_umount_eperm(live_stack: Path) -> None:
     """Unprivileged dev user must get EPERM when trying to umount the shadow."""
-    r = _run(["docker", "compose",
-              "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
-              "--project-directory", str(live_stack),
-              "exec", "-T", "--user", "dev", "claude-dev-env",
-              "sh", "-c", "umount /workspace/.catraz 2>&1; echo rc=$?"])
+    r = _run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
+            "--project-directory",
+            str(live_stack),
+            "exec",
+            "-T",
+            "--user",
+            "dev",
+            "claude-dev-env",
+            "sh",
+            "-c",
+            "umount /workspace/.catraz 2>&1; echo rc=$?",
+        ]
+    )
     assert "rc=0" not in r.stdout  # must fail (EPERM or EACCES)
 
 
 # ── T7a — in-container symlink stays in container namespace ──────────────────
 # No @slow: uses only `docker run alpine`, no catraz stack.
+
 
 def test_t7a_container_symlink_no_host_escape(tmp_path: Path) -> None:
     """A symlink created inside the container resolves within the container namespace
@@ -143,11 +198,21 @@ def test_t7a_container_symlink_no_host_escape(tmp_path: Path) -> None:
     (tmp_path / ".catraz/secret").write_text("HOST-SECRET")
     # Create a symlink INSIDE the tmpfs shadow pointing to parent — should resolve
     # to the container-local empty tmpfs, not the host bind mount parent.
-    r = _run(["docker", "run", "--rm",
-              "-v", f"{tmp_path}:/workspace",
-              "--tmpfs", "/workspace/.catraz",
-              "alpine", "sh", "-c",
-              "ln -s /workspace/.catraz /tmp/link && ls -A /tmp/link | wc -l"])
+    r = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{tmp_path}:/workspace",
+            "--tmpfs",
+            "/workspace/.catraz",
+            "alpine",
+            "sh",
+            "-c",
+            "ln -s /workspace/.catraz /tmp/link && ls -A /tmp/link | wc -l",
+        ]
+    )
     assert r.returncode == 0
     assert r.stdout.strip() == "0"  # symlink in container sees empty tmpfs
 
@@ -155,15 +220,26 @@ def test_t7a_container_symlink_no_host_escape(tmp_path: Path) -> None:
 # ── T8 — /proc/self/mountinfo shows no reachable secret path ─────────────────
 # No @slow: uses only `docker run alpine`, no catraz stack.
 
+
 def test_t8_mountinfo_no_secret_path(tmp_path: Path) -> None:
     """/proc/self/mountinfo inside the container must not expose a device path
     that references the host .catraz directory directly."""
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz/secret").write_text("HOST-SECRET")
-    r = _run(["docker", "run", "--rm",
-              "-v", f"{tmp_path}:/workspace",
-              "--tmpfs", "/workspace/.catraz",
-              "alpine", "sh", "-c",
-              "grep '/workspace/.catraz' /proc/self/mountinfo | grep -v 'tmpfs' | wc -l"])
+    r = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{tmp_path}:/workspace",
+            "--tmpfs",
+            "/workspace/.catraz",
+            "alpine",
+            "sh",
+            "-c",
+            "grep '/workspace/.catraz' /proc/self/mountinfo | grep -v 'tmpfs' | wc -l",
+        ]
+    )
     assert r.returncode == 0
     assert r.stdout.strip() == "0"  # no non-tmpfs entry for /workspace/.catraz

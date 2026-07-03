@@ -1,4 +1,4 @@
-"""uvicorn bootstrap with reconcile-before-open and periodic reconcile (W8.2)."""
+"""Uvicorn bootstrap with reconcile-before-open and periodic reconcile."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ import sys
 import uvicorn
 
 from .app import create_admin_app, create_app
-from .audit import AuditLog
-from .config import ConfigError, from_env
-from .context import AppContext
-from .state import State
-from .upstream import Upstream
+from .context import AppContext, build_context
+from .core.audit import AuditLog
+from .core.config import ConfigError
+from .core.config_load import from_env
+from .core.state import SchemaError, State
+from .guards.gitlab.upstream import Upstream
+from .guards.gitlab_api.catalog import CatalogConfigError
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:
@@ -22,13 +24,16 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
         await asyncio.sleep(ctx.cfg.reconcile_interval_s)
         try:
             ctx.state.prune()
-            await ctx.reconcile()
+            for g in ctx.guards:
+                await g.reconcile()
         except Exception as exc:  # never crash the loop
             print(f"warden: periodic reconcile error: {exc}", file=sys.stderr)
 
 
+# TODO: tidy up this function and split it into smaller functions.
 async def _serve() -> None:
     cfg = from_env()
+
     if cfg.gitlab_enabled and not cfg.allowed_projects:
         print(
             "warden: WARNING: allowed_projects is empty — ALL GitLab operations "
@@ -36,15 +41,26 @@ async def _serve() -> None:
             "The dev-env still starts for offline work.",
             file=sys.stderr,
         )
+    # TODO: this leaks from gitlab_api, should not be here. If is is really needed it
+    # can persist in the Guards that the build-context creates, but as part of the
+    # their initialization (make it a member of the guard class) without the context
+    # builder needing to know about it.
     upstream = Upstream(cfg)
     state = State(cfg.state_db_path)
     audit = AuditLog(cfg.audit_log_path)
     audit.start()
-    ctx = AppContext(cfg, upstream, state, audit)
+    ctx = build_context(cfg, upstream, state, audit)
 
-    # Reconcile BEFORE opening the agent port (§6.11): GitLab truth dominates.
-    await ctx.resolve_service_account()
-    if not await ctx.reconcile():
+    # Reconcile BEFORE opening the agent port: GitLab truth dominates.
+    # TODO: consider moving this into the Gitlab-Guard directly.
+    # The fact the the context holds all guards alive (and they are no one-shot
+    # objects anymore) makes this possible
+    for g in ctx.guards:
+        await g.startup()
+    ok = True
+    for g in ctx.guards:
+        ok = (await g.reconcile()) and ok
+    if not ok:
         print("warden: initial reconcile incomplete — state stays locked", file=sys.stderr)
 
     agent = uvicorn.Server(
@@ -53,7 +69,7 @@ async def _serve() -> None:
     admin_uds = os.environ.get("ADMIN_UDS")
     if admin_uds:
         with contextlib.suppress(FileNotFoundError):
-            os.unlink(admin_uds)                      # stale socket von Crash entfernen
+            os.unlink(admin_uds)  # stale socket von Crash entfernen
         admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
     else:
         admin_config = uvicorn.Config(
@@ -73,7 +89,11 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except ConfigError as exc:
+    except (ConfigError, CatalogConfigError, SchemaError) as exc:
+        # All three are fail-closed startup aborts: bad config (shape or
+        # catalog-activation), or a state DB this build cannot understand.
+        # None should ever surface as a traceback — a clean message and a
+        # non-zero exit is the contract.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

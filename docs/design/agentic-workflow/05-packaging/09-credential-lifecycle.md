@@ -1,5 +1,16 @@
 # 09 — Claude-Credential: stille Seed-Auffrischung aus dem Host
 
+> **Update (§06-migration.md Schritt 7, Agent-Layer + §05.6):** dieser Mechanismus
+> gilt nur noch für `credentials.mode = "sync"`. Der Claude-Profil-Default ist seit
+> Schritt 7 `"persistent"` (eigenes `claude login` im Container, State in
+> `.catraz/state/claude/`) — für den Default-Fall ist `_auto_sync_if_needed` ein
+> No-op und `catraz sync` verweigert mit einer klaren Meldung statt die unten
+> beschriebene Auffrischung zu versuchen (`src/catraz/commands/setup/_sync.py`,
+> `_credentials_mode`). `_run_sync` ruft außerdem seit Schritt 7 den Adapter
+> in-process auf (`catraz.agents.load_adapter_module`) statt `entrypoint.py sync`
+> per Subprozess zu starten — der Rest dieser Seite (Motivation, Auto-Sync-Logik
+> für `mode=sync`) bleibt inhaltlich gültig.
+
 **Ziel:** Händisches `catraz sync` reduzieren — durch die *eine* ehrliche Automatik, die
 trägt: bei jedem (kalten) Start die Sandbox-Seed-Kopie best-effort aus dem Host
 nachziehen. **Kein** Ablauf-Heuristik, **kein** Doctor-Countdown, **kein** Re-Login-Nag.

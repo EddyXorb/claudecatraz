@@ -9,6 +9,7 @@ Override any env var on the command line:
 
     GITLAB_URL=https://mygitlab.example.com uv run dev.py
 """
+
 import os
 
 import uvicorn
@@ -21,11 +22,11 @@ os.environ.setdefault("STATE_DB_PATH", ":memory:")
 os.environ.setdefault("AUDIT_LOG_PATH", "-")
 
 from warden.app import create_app
-from warden.audit import AuditLog
-from warden.config import from_env
-from warden.context import AppContext
-from warden.state import State
-from warden.upstream import Upstream
+from warden.core.audit import AuditLog
+from warden.core.config_load import from_env
+from warden.core.state import State
+from warden.guards.gitlab_api.context import AppContext
+from warden.guards.gitlab_api.upstream import Upstream
 
 
 def factory() -> "uvicorn.typing.ASGIApp":

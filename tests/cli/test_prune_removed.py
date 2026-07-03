@@ -1,4 +1,5 @@
 """Regression: catraz prune was removed (P9)."""
+
 import pytest
 import catraz.image
 from catraz.cli import build_parser, HANDLERS

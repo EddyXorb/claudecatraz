@@ -1,4 +1,5 @@
 """Commit 11.2 — .catraz/secrets/ for GitLab tokens."""
+
 import argparse
 import stat
 import types
@@ -7,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from catraz.commands import setup
-from catraz.doctor import run_doctor, _doctor_fix, Findings, SECRETS
+from catraz.doctor import run_doctor, _doctor_fix, SECRETS
 from catraz.envfile import load_env
 from catraz.policy import _read_toml_allowed_projects
 from catraz.ui import Out
@@ -19,19 +20,27 @@ def _make_root(tmp_path: Path) -> Path:
     cat = root / ".catraz"
     cat.mkdir()
     (cat / "config").mkdir()
-    (cat / "config" / "warden.toml").write_text('allowed_projects = ["group/sub/proj"]\n')
+    (cat / "config" / "warden.toml").write_text(
+        'allowed_projects = ["group/sub/proj"]\n'
+    )
     (cat / ".env").write_text("DEV_UID=1000\nAUTH_MODE=subscription\n")
     return root
 
 
 def _yes_args() -> argparse.Namespace:
     return argparse.Namespace(
-        yes=True, force=False, skip_sync=False,
-        dir=None, no_color=True, print_only=False,
+        yes=True,
+        force=False,
+        skip_sync=False,
+        dir=None,
+        no_color=True,
+        print_only=False,
     )
 
 
-def test_cmd_init_creates_secret_files_even_blank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_init_creates_secret_files_even_blank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """cmd_init --yes creates secrets/ at 0700 and both token files at 0600, even if blank.
 
     With no token env vars the wizard infers GITLAB_MODE=off and writes it to .env.
@@ -39,10 +48,11 @@ def test_cmd_init_creates_secret_files_even_blank(tmp_path: Path, monkeypatch: p
     root = _make_root(tmp_path)
 
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr("catraz.commands.setup.run_doctor",
-                        lambda *a, **kw: types.SimpleNamespace(items=[]))
-    monkeypatch.setattr("catraz.commands.setup.print_findings",
-                        lambda *a, **kw: (0, 0))
+    monkeypatch.setattr(
+        "catraz.commands.setup.run_doctor",
+        lambda *a, **kw: types.SimpleNamespace(items=[]),
+    )
+    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
     out = Out(color=False)
     setup.cmd_init(root, _yes_args(), out)
@@ -61,7 +71,9 @@ def test_cmd_init_creates_secret_files_even_blank(tmp_path: Path, monkeypatch: p
     assert env.get("GITLAB_MODE") == "off"
 
 
-def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_init_writes_token_via_getpass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """cmd_init (interactive) writes the token value to the secret file at 0600.
 
     The interactive wizard uses out.secret() (in ui.py) which calls getpass internally,
@@ -76,21 +88,28 @@ def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.M
     # out.choice() and out.ask() use input(); "" picks the default each time
     monkeypatch.setattr("builtins.input", lambda prompt: "")
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr("catraz.commands.setup.run_doctor",
-                        lambda *a, **kw: types.SimpleNamespace(items=[]))
-    monkeypatch.setattr("catraz.commands.setup.print_findings",
-                        lambda *a, **kw: (0, 0))
+    monkeypatch.setattr(
+        "catraz.commands.setup.run_doctor",
+        lambda *a, **kw: types.SimpleNamespace(items=[]),
+    )
+    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
     args = argparse.Namespace(
-        yes=False, force=False, skip_sync=False,
-        dir=None, no_color=True, print_only=False,
+        yes=False,
+        force=False,
+        skip_sync=False,
+        dir=None,
+        no_color=True,
+        print_only=False,
     )
     out = Out(color=False)
     setup.cmd_init(root, args, out)
 
     secrets_dir = root / ".catraz" / "secrets"
     assert (secrets_dir / "gitlab_read_token").read_text().strip() == "glpat-readtoken"
-    assert (secrets_dir / "gitlab_write_token").read_text().strip() == "glpat-writetoken"
+    assert (
+        secrets_dir / "gitlab_write_token"
+    ).read_text().strip() == "glpat-writetoken"
     for filename, _, _ in SECRETS:
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
@@ -132,9 +151,12 @@ def test_doctor_bad_on_empty_file(tmp_path: Path) -> None:
         assert any(filename in m for m in bad_msgs), f"expected bad for {filename!r}"
 
 
-def test_doctor_ok_on_non_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_ok_on_non_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """doctor reports ok when both secret files are non-empty (probe skipped in unit tests)."""
     import catraz.doctor as doc
+
     monkeypatch.setattr(doc, "_probe_gitlab_tokens", lambda *a, **kw: None)
     monkeypatch.setattr(doc, "_probe_write_user_read", lambda *a, **kw: None)
 
@@ -166,16 +188,19 @@ def test_doctor_fix_creates_secrets_dir_and_files(tmp_path: Path) -> None:
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_reads_tokens_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_init_yes_reads_tokens_from_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """--yes writes token env vars to secret files at 0600."""
     root = _make_root(tmp_path)
     monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read-from-env")
     monkeypatch.setenv("GITLAB_WRITE_TOKEN", "glpat-write-from-env")
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr("catraz.commands.setup.run_doctor",
-                        lambda *a, **kw: types.SimpleNamespace(items=[]))
-    monkeypatch.setattr("catraz.commands.setup.print_findings",
-                        lambda *a, **kw: (0, 0))
+    monkeypatch.setattr(
+        "catraz.commands.setup.run_doctor",
+        lambda *a, **kw: types.SimpleNamespace(items=[]),
+    )
+    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
@@ -186,7 +211,9 @@ def test_cmd_init_yes_reads_tokens_from_env(tmp_path: Path, monkeypatch: pytest.
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_init_yes_persists_warden_projects_from_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """--yes writes WARDEN_ALLOWED_PROJECTS from env to warden.toml (not .env).
 
     Old cmd_init wrote to .env; new cmd_init uses warden.toml as the SSOT and
@@ -195,10 +222,11 @@ def test_cmd_init_yes_persists_warden_projects_from_env(tmp_path: Path, monkeypa
     root = _make_root(tmp_path)
     monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr("catraz.commands.setup.run_doctor",
-                        lambda *a, **kw: types.SimpleNamespace(items=[]))
-    monkeypatch.setattr("catraz.commands.setup.print_findings",
-                        lambda *a, **kw: (0, 0))
+    monkeypatch.setattr(
+        "catraz.commands.setup.run_doctor",
+        lambda *a, **kw: types.SimpleNamespace(items=[]),
+    )
+    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
@@ -242,4 +270,6 @@ def test_doctor_fix_secrets_and_claude_are_0700(tmp_path: Path) -> None:
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700, "secrets/ must be 0700"
     claude_dir = secrets_dir / "claude"
     assert claude_dir.is_dir(), "secrets/claude/ must exist"
-    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700, "secrets/claude/ must be 0700"
+    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700, (
+        "secrets/claude/ must be 0700"
+    )

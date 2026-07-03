@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
 
-from warden.api_proxy import _iid_from_path, _project_from_path
-from warden.audit import AuditLog
+from warden.guards.gitlab_api.catalog import DEFAULT_ENABLED
+from warden.guards.gitlab_api.catalog.entries import CATALOG
+from warden.guards.gitlab_api.guard import _needs_mr_owner
+from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
+from warden.guards.gitlab_api.parsing import project_from_path as _project_from_path
 
 PROJ = "group%2Fproj"
 
@@ -70,9 +74,7 @@ async def test_create_mr_with_prefix_forwarded_with_write_token(client, respx_ro
 async def test_note_ownership_violation_denied(client, respx_router):
     # MR lookup says the MR belongs to a different author.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 999}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     resp = await client.post(f"/api/v4/projects/{PROJ}/merge_requests/7/notes", json={"body": "hi"})
     assert resp.status_code == 403
@@ -81,9 +83,7 @@ async def test_note_ownership_violation_denied(client, respx_router):
 
 async def test_note_on_owned_mr_allowed(client, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
     note = respx_router.route(method="POST", url__regex=r".*/merge_requests/7/notes$").mock(
         return_value=httpx.Response(201, json={"id": 1})
@@ -96,13 +96,11 @@ async def test_note_on_owned_mr_allowed(client, respx_router):
 async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
     # Inline diff comment (line-level review) on the bot's own MR — forwarded.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
-    disc = respx_router.route(
-        method="POST", url__regex=r".*/merge_requests/7/discussions$"
-    ).mock(return_value=httpx.Response(201, json={"id": "abc"}))
+    disc = respx_router.route(method="POST", url__regex=r".*/merge_requests/7/discussions$").mock(
+        return_value=httpx.Response(201, json={"id": "abc"})
+    )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions",
         json={
@@ -120,9 +118,7 @@ async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
 
 async def test_inline_discussion_ownership_violation_denied(client, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 999}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions", json={"body": "nit"}
@@ -134,9 +130,7 @@ async def test_inline_discussion_ownership_violation_denied(client, respx_router
 async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
     # Reply under an existing discussion thread on the bot's own MR.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
     reply = respx_router.route(
         method="POST", url__regex=r".*/merge_requests/7/discussions/abc123/notes$"
@@ -149,8 +143,22 @@ async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
     assert reply.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
+async def test_discussion_reply_ownership_violation_denied(client, respx_router):
+    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
+    )
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests/7/discussions/abc123/notes",
+        json={"body": "done"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R3"
+
+
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
-    resp = await client.post(f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"})
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"}
+    )
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R3"
 
@@ -248,9 +256,9 @@ async def test_unknown_projectless_endpoint_denied(client, respx_router):
 
 # --- F12: the query string reaches the upstream request, not just the decision -
 async def test_query_string_is_forwarded_upstream(client, respx_router):
-    route = respx_router.route(
-        method="GET", url__regex=r".*/merge_requests.*"
-    ).mock(return_value=httpx.Response(200, json=[]))
+    route = respx_router.route(method="GET", url__regex=r".*/merge_requests.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
     resp = await client.get(f"/api/v4/projects/{PROJ}/merge_requests?state=opened&per_page=50")
     assert resp.status_code == 200
     sent_url = route.calls.last.request.url
@@ -292,8 +300,12 @@ async def test_graphql_subpath_denied(client, respx_router):
 
 # --- audit coverage: every new deny lands in the log ---------------------------
 async def _read_audit_lines(ctx, tmp_path, make_request):
+    # Redirect the *existing* AuditLog in place (rather than replacing
+    # ctx.audit with a new instance): the guards were assembled once, at
+    # build_context() time, and each holds its own reference to this exact
+    # object (§03.5/03.6) — reassigning ctx.audit itself would not reach them.
     logf = tmp_path / "audit.jsonl"
-    ctx.audit = AuditLog(str(logf))
+    ctx.audit._path = str(logf)
     ctx.audit.start()
     await make_request()
     await ctx.audit.stop()
@@ -325,3 +337,126 @@ async def test_graphql_deny_is_audited(client, ctx, tmp_path):
     assert records[0]["decision"] == "deny"
     assert records[0]["rule"] == "R6"
     assert "graphql" in records[0]["path"]
+
+
+# --- F2: needs-based ownership resolution, not function-identity ---------------
+
+
+def test_needs_mr_owner_true_for_note_endpoint():
+    ep = next(e for e in CATALOG if e.id == "mr.note")
+    assert _needs_mr_owner(ep)
+
+
+def test_needs_mr_owner_false_for_mr_create():
+    ep = next(e for e in CATALOG if e.id == "mr.create")
+    assert not _needs_mr_owner(ep)
+
+
+def test_needs_mr_owner_false_for_entry_with_no_checks():
+    ep = next(e for e in CATALOG if e.id == "issue.create")
+    assert not _needs_mr_owner(ep)
+
+
+# --- F12: decision fields are read only from their declared location -----------
+
+
+async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client, respx_router):
+    # source_branch is a BODY-declared decision field for mr.create (§04.2).
+    # Sending it only as a query parameter must not satisfy field_has_prefix —
+    # the field must be treated as simply absent, not silently read from the
+    # wrong location (F12's actual footgun: a scoping check "passing" on a
+    # value the checked location never carried).
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/merge_requests?source_branch=claude/x",
+        json={"target_branch": "main"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R2"
+
+
+# --- §04.3: audit marks non-default-activated catalog entries ------------------
+
+
+def _activated_client_ctx(cfg, respx_router):
+    """Build a fresh app/ctx/client with branch.create activated beyond the
+    default set — the shared ``client``/``ctx`` fixtures use the plain
+    default activation, so this scenario needs its own wiring.
+    """
+    from warden.app import create_app
+    from warden.context import build_context
+    from warden.core.audit import AuditLog
+    from warden.core.state import State
+    from warden.guards.gitlab.upstream import Upstream
+
+    activated_cfg = replace(
+        cfg,
+        endpoint_enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
+    )
+    state = State(":memory:")
+    state.mark_reconciled()
+    ctx = build_context(activated_cfg, Upstream(activated_cfg), state, AuditLog("-"))
+    ctx.forge.service_account_id = 42
+    return ctx, create_app(ctx)
+
+
+async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_router):
+    ctx, app = _activated_client_ctx(cfg, respx_router)
+    transport = httpx.ASGITransport(app=app)
+    route = respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
+        return_value=httpx.Response(201, json={"name": "claude/x"})
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+        resp = await c.post(
+            f"/api/v4/projects/{PROJ}/repository/branches",
+            json={"branch": "claude/x", "ref": "claude/y"},
+        )
+    assert resp.status_code == 201
+    assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
+    await ctx.forge.upstream.aclose()
+
+
+async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
+    ctx, app = _activated_client_ctx(cfg, respx_router)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+        resp = await c.post(
+            f"/api/v4/projects/{PROJ}/repository/branches",
+            json={"branch": "main", "ref": "main"},
+        )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R2"
+    await ctx.forge.upstream.aclose()
+
+
+async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
+    cfg, respx_router, tmp_path
+):
+    ctx, app = _activated_client_ctx(cfg, respx_router)
+    # Redirect the existing AuditLog in place — the guards inside `app` were
+    # already assembled (in _activated_client_ctx) around this exact object.
+    logf = tmp_path / "audit.jsonl"
+    ctx.audit._path = str(logf)
+    ctx.audit.start()
+    respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
+        return_value=httpx.Response(201, json={"name": "claude/x"})
+    )
+    respx_router.route(method="POST", url__regex=r".*/merge_requests$").mock(
+        return_value=httpx.Response(201, json={"iid": 1})
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+        await c.post(
+            f"/api/v4/projects/{PROJ}/repository/branches",
+            json={"branch": "claude/x", "ref": "claude/y"},
+        )
+        await c.post(
+            f"/api/v4/projects/{PROJ}/merge_requests",
+            json={"source_branch": "claude/x", "target_branch": "main"},
+        )
+    await ctx.audit.stop()
+    records = [json.loads(line) for line in logf.read_text().splitlines()]
+    branch_event = next(r for r in records if r["path"].endswith("/repository/branches"))
+    mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
+    assert branch_event["enabled_via"] == "config:branch.create"
+    assert "enabled_via" not in mr_event  # default-activated entry: no marking
+    await ctx.forge.upstream.aclose()

@@ -4,7 +4,10 @@ claude-home/
 # Local project workspace
 workspace*
 .claude
-claude
+# Root-level scratch dir only (a historical local --agent-home test target) —
+# anchored so it doesn't shadow src/catraz/assets/agents/claude/ (§06-migration.md
+# Schritt 7: the claude agent adapter's real source directory).
+/claude
 .mypy_cache
 .ruff_cache
 .venv
@@ -13,8 +16,6 @@ claude
 .env
 # Local env overrides
 .env.local
-
-claude
 
 # Forward-Proxy runtime audit logs — keep the dir, ignore the contents
 /logs/squid/*

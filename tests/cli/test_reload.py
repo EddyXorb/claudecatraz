@@ -113,9 +113,11 @@ def test_cmd_reload_stale_force_recreates(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(compose, "container_started_at",
                         lambda root, name, **kw: old)
-    monkeypatch.setattr(
-        compose, "run",
-        lambda root, args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+    def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compose, "run", _mock_compose_run)
     rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False)), _out())
     assert rc == EXIT_OK
     assert calls == [["up", "-d", "--force-recreate", "--build", "gitlab-warden"]]
@@ -140,9 +142,11 @@ def test_cmd_reload_force_not_running_rebuilds(monkeypatch: pytest.MonkeyPatch, 
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: [])
-    monkeypatch.setattr(
-        compose, "run",
-        lambda root, args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+    def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compose, "run", _mock_compose_run)
     rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)), _out())
     assert rc == EXIT_OK
     assert calls == [["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]]
@@ -160,9 +164,11 @@ def test_cmd_reload_force_running_not_stale(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: future)
-    monkeypatch.setattr(
-        compose, "run",
-        lambda root, args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))  # type: ignore[func-returns-value]
+    def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compose, "run", _mock_compose_run)
     rc = reload_cmd.cmd_reload(tmp_path, typing.cast(argparse.Namespace, types.SimpleNamespace(print_only=False, force=True)), _out())
     assert rc == EXIT_OK
     assert calls == [["up", "-d", "--force-recreate", "--build", "forward-proxy", "gitlab-warden"]]

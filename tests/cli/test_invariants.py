@@ -2,6 +2,7 @@
 
 No Docker required — compose.run is monkeypatched to return a fake JSON response.
 """
+
 import copy
 import json
 import types
@@ -20,8 +21,11 @@ GOOD = {
             "environment": {},
             "security_opt": ["no-new-privileges:true"],
             "volumes": [
-                {"type": "tmpfs", "target": "/workspace/.catraz",
-                 "tmpfs": {"mode": 448, "size": 1048576}},
+                {
+                    "type": "tmpfs",
+                    "target": "/workspace/.catraz",
+                    "tmpfs": {"mode": 448, "size": 1048576},
+                },
             ],
         }
     },
@@ -38,21 +42,30 @@ def _patch(monkeypatch: pytest.MonkeyPatch, cfg: Any) -> None:
 
 def test_invariants_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch(monkeypatch, GOOD)
-    compose.assert_invariants(tmp_path)   # no raise
+    compose.assert_invariants(tmp_path)  # no raise
 
 
-@pytest.mark.parametrize("mut", [
-    lambda c: c["networks"]["agent-net"].__setitem__("internal", False),
-    lambda c: c["services"]["claude-dev-env"]["environment"].__setitem__("GITLAB_WRITE_TOKEN", "x"),
-    lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
-    lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
-    lambda c: c["services"]["claude-dev-env"].__setitem__("security_opt", []),
-    # tmpfs mode wrong (0o755 == 493, not 0o700 == 448)
-    lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].__setitem__("mode", 493),
-    # tmpfs size missing
-    lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].pop("size"),
-])
-def test_invariants_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mut: Any) -> None:
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda c: c["networks"]["agent-net"].__setitem__("internal", False),
+        lambda c: c["services"]["claude-dev-env"]["environment"].__setitem__(
+            "GITLAB_WRITE_TOKEN", "x"
+        ),
+        lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
+        lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
+        lambda c: c["services"]["claude-dev-env"].__setitem__("security_opt", []),
+        # tmpfs mode wrong (0o755 == 493, not 0o700 == 448)
+        lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].__setitem__(
+            "mode", 493
+        ),
+        # tmpfs size missing
+        lambda c: c["services"]["claude-dev-env"]["volumes"][0]["tmpfs"].pop("size"),
+    ],
+)
+def test_invariants_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mut: Any
+) -> None:
     bad = copy.deepcopy(GOOD)
     mut(bad)
     _patch(monkeypatch, bad)

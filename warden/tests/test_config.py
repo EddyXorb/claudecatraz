@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from warden.config import Config, ConfigError, from_env
+from warden.core.config import Config, ConfigError
+from warden.core.config_load import from_env
 
 _MIN = {
     "ALLOWED_PROJECTS": "group/proj",
@@ -49,15 +50,6 @@ def test_project_allowed_empty_allowlist_denies_all():
     assert not Config(allowed_projects=()).project_allowed("group/proj")
 
 
-def test_project_allowed_matches_reconciled_numeric_id():
-    # GitLab's /projects/:id accepts the numeric id, not just the path. Reconcile
-    # fills allowed_project_ids; a request naming the id must pass, an unknown id
-    # must still be denied (default-deny).
-    cfg = Config(allowed_projects=("group/proj",), allowed_project_ids=("81882161",))
-    assert cfg.project_allowed("81882161")
-    assert not cfg.project_allowed("99999999")
-
-
 def test_git_base_strips_api_suffix():
     assert Config(api_url="https://gl.example/api/v4").git_base == "https://gl.example"
 
@@ -65,7 +57,12 @@ def test_git_base_strips_api_suffix():
 # --- from_env: happy path ------------------------------------------------------
 def test_from_env_parses_and_derives_urls():
     cfg = from_env(
-        {**_MIN, "ALLOWED_PROJECTS": "group/proj, group/two", "GITLAB_URL": "https://gl.example/", "MAX_OPEN_MRS": "3"},
+        {
+            **_MIN,
+            "ALLOWED_PROJECTS": "group/proj, group/two",
+            "GITLAB_URL": "https://gl.example/",
+            "MAX_OPEN_MRS": "3",
+        },
         strict=True,
     )
     assert cfg.allowed_projects == ("group/proj", "group/two")  # CSV split + trimmed
@@ -218,7 +215,9 @@ def test_branch_prefixes_and_legacy_branch_prefix_both_set_aborts(tmp_path):
     """Two sources of truth for the same namespace (list + legacy scalar) is an error."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/"]\nbranch_prefix = "claude/"\n')
-    with pytest.raises(ConfigError, match="branch_prefixes.*branch_prefix|branch_prefix.*branch_prefixes"):
+    with pytest.raises(
+        ConfigError, match="branch_prefixes.*branch_prefix|branch_prefix.*branch_prefixes"
+    ):
         from_env(_MIN, strict=True, toml_path=str(toml))
 
 
@@ -242,9 +241,7 @@ def test_branch_prefix_env_csv_overrides_toml_list(tmp_path):
     """BRANCH_PREFIX env accepts CSV for multiple prefixes, and wins over the file."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/"]\n')
-    cfg = from_env(
-        {**_MIN, "BRANCH_PREFIX": "claude/,bot/"}, strict=True, toml_path=str(toml)
-    )
+    cfg = from_env({**_MIN, "BRANCH_PREFIX": "claude/,bot/"}, strict=True, toml_path=str(toml))
     assert cfg.branch_prefixes == ("claude/", "bot/")
 
 
@@ -280,9 +277,9 @@ def test_env_overrides_toml(tmp_path):
         },
         toml_path=str(toml),
     )
-    assert cfg.branch_prefixes == ("test/",)        # env wins
-    assert cfg.max_open_mrs == 1                    # env wins
-    assert cfg.max_open_branches == 3              # not overridden → toml
+    assert cfg.branch_prefixes == ("test/",)  # env wins
+    assert cfg.max_open_mrs == 1  # env wins
+    assert cfg.max_open_branches == 3  # not overridden → toml
     assert cfg.allowed_projects == ("group/x", "group/y")
 
 
@@ -291,7 +288,12 @@ def test_empty_env_falls_back_to_toml(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env(
-        {"GITLAB_READ_TOKEN": "r", "GITLAB_WRITE_TOKEN": "w", "BRANCH_PREFIX": "", "ALLOWED_PROJECTS": ""},
+        {
+            "GITLAB_READ_TOKEN": "r",
+            "GITLAB_WRITE_TOKEN": "w",
+            "BRANCH_PREFIX": "",
+            "ALLOWED_PROJECTS": "",
+        },
         toml_path=str(toml),
     )
     assert cfg.branch_prefixes == ("claude/",)
@@ -315,6 +317,7 @@ def test_invalid_toml_type_aborts(tmp_path):
 
 
 # --- _secret / *_FILE indirection (11.1) --------------------------------------
+
 
 def test_secret_file_read_token(tmp_path):
     """(a) GITLAB_READ_TOKEN_FILE → tmp file "glpat-x\n" → read_token == "glpat-x"."""

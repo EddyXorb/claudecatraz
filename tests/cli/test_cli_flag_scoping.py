@@ -18,6 +18,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
 
 # ── 1. Post-form stays valid ──────────────────────────────────────────────────
 
+
 def test_down_print_post() -> None:
     args = parse(["down", "--print"])
     assert args.print_only is True
@@ -40,6 +41,7 @@ def test_init_yes_long_post() -> None:
 
 # ── 2. Wrong-command fail-loud ────────────────────────────────────────────────
 
+
 def test_status_dry_run_fails(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         parse(["status", "--dry-run"])
@@ -57,6 +59,7 @@ def test_audit_dry_run_fails(capsys: pytest.CaptureFixture[str]) -> None:
 
 # ── 3. Pre-subcommand form now fail-loud (pins deliberate decision) ───────────
 
+
 def test_dry_run_before_stop_fails(capsys: pytest.CaptureFixture[str]) -> None:
     """--dry-run is no longer on the top-level parser; pre-subcommand form must fail."""
     with pytest.raises(SystemExit):
@@ -70,6 +73,7 @@ def test_yes_before_init_fails(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 # ── 4. Truly-global flags still work pre AND post ─────────────────────────────
+
 
 def test_dir_pre_subcommand() -> None:
     args = parse(["-C", "/x", "status"])
@@ -93,6 +97,7 @@ def test_no_color_post_subcommand() -> None:
 
 
 # ── 5. Default mechanic ───────────────────────────────────────────────────────
+
 
 def test_print_only_default_for_status() -> None:
     """Commands that don't declare --dry-run must not have print_only set."""

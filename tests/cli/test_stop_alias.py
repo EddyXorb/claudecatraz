@@ -1,4 +1,5 @@
 """P3: `up` removed; `down` renamed to `stop` with `down` kept as a back-compat alias."""
+
 import pytest
 
 from catraz import cli

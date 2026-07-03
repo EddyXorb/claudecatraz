@@ -1,5 +1,16 @@
 # 05 — Image-Schichtung: Base ⊕ Claude-Layer
 
+> **Update (§06-migration.md Schritt 7, Agent-Layer):** `assets/claude-layer/Dockerfile`
+> zog nach `assets/agents/claude/layer.Dockerfile` um (§05.3 der
+> architecture-generalization-Doku) — Build-Kontext bleibt `assets/`, aber
+> `docker-compose.yml`s `dockerfile:`-Feld interpoliert jetzt
+> `agents/${AGENT_PROFILE:-claude}/layer.Dockerfile`, damit ein zukünftiges zweites
+> Agent-Profil ohne Compose-Änderung baubar ist. `container/entrypoint.py` COPYt
+> zusätzlich `agent_contract.py`/`git_routing.py` (generisch) und der Layer selbst
+> `agents/claude/{adapter.py,agent.toml,AGENT.md.tmpl}` (agent-spezifisch, flach
+> daneben). Der Rest dieser historischen Seite (Base-Vertrag, Tag-Hashing, `doctor
+> base`) ist unverändert gültig.
+
 **Ziel:** Beliebige Toolchain-Base + catraz-eigener Claude-Layer (`FROM ${BASE_IMAGE}`).
 **Voraussetzung:** Doc 04 fertig (Auth, Entrypoint-Umbau; monolithisches
 `assets/Dockerfile` baut den Agenten). **Base-Vertrag:** Debian/Ubuntu (apt) + glibc +

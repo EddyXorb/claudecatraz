@@ -1,28 +1,37 @@
-import hashlib, subprocess
+import hashlib
+import subprocess
 from pathlib import Path
-from catraz.paths import asset_root
 from catraz.envfile import load_env
 from catraz.errors import CliError, EXIT_DOCKER
 
+
 def _image_exists(tag: str) -> bool:
-    return subprocess.run(["docker", "image", "inspect", tag],
-                          capture_output=True).returncode == 0
+    return (
+        subprocess.run(
+            ["docker", "image", "inspect", tag], capture_output=True
+        ).returncode
+        == 0
+    )
+
 
 def _build_base(dockerfile: Path, context: Path | None = None) -> str:
     ctx = context or dockerfile.parent
     tag = f"catraz-base:{hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]}"
     if not _image_exists(tag):
-        r = subprocess.run(["docker", "build", "-t", tag,
-                            "-f", str(dockerfile), str(ctx)])
+        r = subprocess.run(
+            ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx)]
+        )
         if r.returncode:
             raise CliError(
                 f"base build failed (Dockerfile {dockerfile}). "
-                "catraz's claude-layer uses apt-get and NodeSource — "
+                "catraz's agent layer (assets/agents/<profile>/layer.Dockerfile) "
+                "uses apt-get and NodeSource — "
                 "the base MUST be Debian/Ubuntu-based. "
                 "Alpine, RHEL, and other non-apt distros will fail here.",
                 EXIT_DOCKER,
             )
     return tag
+
 
 def resolve_base(root: Path) -> str:
     env: dict[str, str] = load_env(root / ".catraz/.env")

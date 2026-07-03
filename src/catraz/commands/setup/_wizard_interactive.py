@@ -57,8 +57,10 @@ def _prompt_auth_mode(
     if args.force or "AUTH_MODE" not in env or has_from:
         auth_mode = out.choice(
             "Claude auth mode?",
-            [("subscription", "subscription — import host ~/.claude (default)"),
-             ("api_key", "api_key — dedicated Anthropic API key")],
+            [
+                ("subscription", "subscription — import host ~/.claude (default)"),
+                ("api_key", "api_key — dedicated Anthropic API key"),
+            ],
             default=0 if auth_mode == "subscription" else 1,
         )
     return auth_mode
@@ -73,13 +75,18 @@ def _prompt_gitlab_mode(
     cur_mode = (inh or env.get("GITLAB_MODE") or "read-write").strip()
     if cur_mode not in _VALID_GITLAB_MODES:
         cur_mode = "read-write"
-    return cast(str, out.choice(
-        "GitLab integration?",
-        [("read-write", "read-write — read + push (needs read & write tokens)"),
-         ("read-only", "read-only — read only (needs a read token)"),
-         ("off", "off — no GitLab (the agent can't talk to GitLab)")],
-        default={"read-write": 0, "read-only": 1, "off": 2}[cur_mode],
-    ))
+    return cast(
+        str,
+        out.choice(
+            "GitLab integration?",
+            [
+                ("read-write", "read-write — read + push (needs read & write tokens)"),
+                ("read-only", "read-only — read only (needs a read token)"),
+                ("off", "off — no GitLab (the agent can't talk to GitLab)"),
+            ],
+            default={"read-write": 0, "read-only": 1, "off": 2}[cur_mode],
+        ),
+    )
 
 
 def _prompt_gitlab_tokens(
@@ -93,8 +100,12 @@ def _prompt_gitlab_tokens(
     p_read = secrets_dir / "gitlab_read_token"
     # With --from: the file was staged; offer keep-inherited without echoing.
     if has_from and p_read.exists():
-        _prompt_secret_keep_or_replace(secrets_dir, "gitlab_read_token",
-                                       "GitLab READ token (read_api, read_repository)", out)
+        _prompt_secret_keep_or_replace(
+            secrets_dir,
+            "gitlab_read_token",
+            "GitLab READ token (read_api, read_repository)",
+            out,
+        )
     else:
         existing_read = ""
         if p_read.exists() and not args.force:
@@ -102,7 +113,9 @@ def _prompt_gitlab_tokens(
                 existing_read = p_read.read_text(encoding="utf-8").strip()
             except OSError:
                 pass
-        val = out.secret("GitLab READ token (read_api, read_repository)", current=existing_read)
+        val = out.secret(
+            "GitLab READ token (read_api, read_repository)", current=existing_read
+        )
         _write_secret_value(secrets_dir, "gitlab_read_token", val)
         if not val:
             out.warn("gitlab_read_token left empty — doctor will flag it")
@@ -110,8 +123,9 @@ def _prompt_gitlab_tokens(
     if mode == "read-write":
         p_write = secrets_dir / "gitlab_write_token"
         if has_from and p_write.exists():
-            _prompt_secret_keep_or_replace(secrets_dir, "gitlab_write_token",
-                                           "GitLab WRITE token (api scope)", out)
+            _prompt_secret_keep_or_replace(
+                secrets_dir, "gitlab_write_token", "GitLab WRITE token (api scope)", out
+            )
         else:
             existing_write = ""
             if p_write.exists() and not args.force:
@@ -132,6 +146,7 @@ def _prompt_secret_keep_or_replace(
 ) -> None:
     """Offer "keep inherited (hidden)" / "enter new" without ever echoing the value."""
     import getpass
+
     out.info(f"  {label} — inherited (hidden); Enter to keep, or type a new value.")
     try:
         val = getpass.getpass(f"  {label}: ").strip()
@@ -161,7 +176,9 @@ def _prompt_allowed_projects(
     discovered = _discover_gitlab_projects(root, gitlab_url)
     default = ", ".join(discovered) if discovered else ""
     if discovered:
-        out.info("  Detected GitLab project(s) from git remotes: " + ", ".join(discovered))
+        out.info(
+            "  Detected GitLab project(s) from git remotes: " + ", ".join(discovered)
+        )
     raw = out.ask("projects (group/sub/project,...)", default)
     projects = [p.strip() for p in raw.split(",") if p.strip()]
     valid: list[str] = []
@@ -204,8 +221,12 @@ def _prompt_anthropic_key(
     has_from = inherited is not None
     p_key = secrets_dir / "anthropic_api_key"
     if has_from and p_key.exists():
-        _prompt_secret_keep_or_replace(secrets_dir, "anthropic_api_key",
-                                       "Anthropic API key (dedicated sandbox account)", out)
+        _prompt_secret_keep_or_replace(
+            secrets_dir,
+            "anthropic_api_key",
+            "Anthropic API key (dedicated sandbox account)",
+            out,
+        )
         return
     existing_key = ""
     if p_key.exists() and not args.force:
@@ -265,8 +286,11 @@ def _wizard_interactive(
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
     proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
-    url_part = (f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}"
-                if mode != "off" else "")
+    url_part = (
+        f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}"
+        if mode != "off"
+        else ""
+    )
     proj_part = f"  projects={len(proj_count)}" if mode != "off" else ""
     out.info(
         f"\n• auth_mode={auth_mode}  gitlab_mode={mode}"
