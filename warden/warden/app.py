@@ -109,5 +109,5 @@ async def _policy(request: Request) -> JSONResponse:
 
 
 async def _viewer(request: Request) -> HTMLResponse:
-    """Static log viewer (O.4): filters JSONL by channel/rule/decision/project."""
+    """Static log viewer (O.4): filters JSONL by guard/rule/decision/project."""
     return HTMLResponse(_VIEWER_HTML)

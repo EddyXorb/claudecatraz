@@ -35,7 +35,7 @@ def _project(request: Request) -> str:
     """Canonical project path (no ``.git``) for state keys, gate and upstream.
 
     git appends ``.git`` to the repo path while the reconcile/allowlist forms use
-    the bare path; normalising here keeps the ``claude_branches`` key consistent
+    the bare path; normalising here keeps the ``agent_branches`` key consistent
     so a branch is not counted twice and reconcile can prune push-recorded rows."""
     return normalize_project(str(request.path_params["project"]))
 
@@ -119,8 +119,8 @@ class GitGuard(Guard[GitPushIntent]):
     """The receive-pack write pipeline's hooks (§03.2) — used only via
     :func:`core.guard.run_guarded` from :func:`receive_pack` below."""
 
-    # Audit ``channel`` value — kept as the pre-Schritt-5 bare string for
-    # byte-compatible JSONL (the channel→guard rename is §06 Schritt 6).
+    # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
+    # field used to be called ``channel``; the value itself is unchanged).
     @property
     def name(self) -> str:
         return "git"

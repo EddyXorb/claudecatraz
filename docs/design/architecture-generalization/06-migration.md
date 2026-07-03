@@ -130,8 +130,38 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
      `test_api_proxy`/`test_git_proxy`/`test_git_e2e`/`redteam` nur mit
      Import-Anpassungen. Einzige verbleibende Kompat-Fassade:
      `warden/api_endpoints.py` (re-exportiert, definiert nichts neu).
-6. **Rename claude→agent im Warden** — jetzt trivial, weil Schritt 2 die Migrationen
+6. ✅ **Rename claude→agent im Warden** — jetzt trivial, weil Schritt 2 die Migrationen
    bereitstellt (State-Tabellen `claude_branches`/`claude_mrs`, Audit-Felder).
+   *(umgesetzt: `AUDIT_SCHEMA_VERSION = 3`, State-DB `user_version = 3`,
+   `warden/core/state_migrations.py`.)* Umsetzungsvermerk:
+   - **Audit-JSONL (F11/F6-Rest):** Feld `channel` → `guard` (Werte unverändert,
+     `"git"`/`"api"`), `AUDIT_SCHEMA_VERSION` 2 → 3; die Redaction-Allowlist
+     (`_ALLOWED_FIELDS`) führt `guard` statt `channel`. Kompat-Fenster: der Viewer liest
+     `guard` mit Fallback auf `channel` (Alt-Zeilen v1/v2 bleiben filter- und sichtbar,
+     Spaltenkopf „Guard"); `catraz observe` tailt roh und ist unberührt (verifiziert).
+     Versionsgeschichte an einer Stelle dokumentiert (Modul-Docstring `core/audit.py` +
+     O.6 in `03-observability.md`): v1 = feldlos, v2 = `schema`-Feld + R2→R4,
+     v3 = channel→guard + State-Tabellen-Rename.
+   - **State-DB:** neue Migration 3 (`rename_agent_tables`): `claude_branches` →
+     `agent_branches`, `claude_mrs` → `agent_mrs`, Spalte `writes.channel` →
+     `writes.guard` — verlustfrei per `ALTER TABLE … RENAME TO …`/`RENAME COLUMN`
+     (SQLite ≥ 3.25, vom Python-3.12-Image gedeckt). `_SCHEMA` erzeugt frische DBs direkt
+     mit den neuen Namen; die Legacy-Erkennung prüft weiter auf `claude_branches` (die
+     einzige Form, die ein versionierter Build nie selbst erzeugt). Der Migrations-Runner
+     zog dabei ins eigene Modul `core/state_migrations.py` um (Clean-Code-Budget:
+     `state.py` wäre sonst über 300 Zeilen). Tests: frisch = v3; v1-DB (mit Daten in
+     allen betroffenen Tabellen/Spalten) → v3 verlustfrei; v2-DB → v3 verlustfrei;
+     zu neu ⇒ `SchemaError`.
+   - **Code-Identifier (§03.5):** `mr_owned_by_claude` → `mr_owned_by_agent`,
+     `_list_claude_branches`/`_list_claude_mrs` → `_list_agent_branches`/
+     `_list_agent_mrs` (`guards/gitlab_api/context.py` + Aufrufer);
+     `State.record_write(guard=…)`-Parameter. Die Kompat-Fassade
+     `api_endpoints.mr_owned_by_claude` bleibt unter ihrem alten Namen bestehen (sie
+     *ist* die Abwärtskompatibilität) und delegiert weiter an
+     `catalog.checks.OWNED_BY_AGENT`. „claude" verbleibt nur als Default-Wert des
+     Namespace-Präfixes (`branch_prefixes = ("claude/",)`), in Test-Fixtures/-Daten
+     (Branch-Namen sind Daten, keine Identifier) und in historischen Kommentaren zur
+     Versionsgeschichte.
 7. **Agent-Layer: Entrypoint-Zerlegung** (§05.2) — generischer Entrypoint + Claude-Adapter
    (inkl. `environ`/`render_instructions`), verhaltenserhaltend, von `tests/container/`
    abgedeckt. Danach Manifest + Profile (§05.3), `catraz`-CLI-Entkopplung und die

@@ -34,7 +34,7 @@ td{padding:4px 8px;vertical-align:top}
 <body>
 <h1>Warden Audit Log</h1>
 <div id="filters">
-  <label>Channel <select id="fc"><option value="">all</option><option>api</option><option>git</option></select></label>
+  <label>Guard <select id="fc"><option value="">all</option><option>api</option><option>git</option></select></label>
   <label>Decision <select id="fd"><option value="">all</option><option>allow</option><option>deny</option></select></label>
   <label>Rule <input id="fr" placeholder="e.g. R4" style="width:60px"></label>
   <label>Project <input id="fp" placeholder="path filter" style="width:160px"></label>
@@ -43,13 +43,18 @@ td{padding:4px 8px;vertical-align:top}
 </div>
 <div id="err"></div>
 <table>
-<thead><tr><th>Time</th><th>Schema</th><th>Channel</th><th>Method</th><th>Decision</th><th>Rule</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
+<thead><tr><th>Time</th><th>Schema</th><th>Guard</th><th>Method</th><th>Decision</th><th>Rule</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
 <tbody id="tb"></tbody>
 </table>
 <script>
 let rows=[];
 function fmt(ts){if(!ts)return'';const d=new Date(ts*1000);return d.toISOString().replace('T',' ').replace(/\.\d+Z$/,' UTC')}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+// Compat window (§06-migration.md Schritt 6, F11): schema v3 renamed the
+// `channel` field to `guard` (values unchanged, "git"/"api"). Pre-v3 lines
+// only carry `channel` — read either so the filter and the column work for
+// both old and new rows without a separate "legacy" code path.
+function guardOf(r){return r.guard!=null?r.guard:r.channel}
 async function load(){
   document.getElementById('err').textContent='';
   try{
@@ -66,7 +71,7 @@ function render(){
   const rule=document.getElementById('fr').value.toUpperCase();
   const proj=document.getElementById('fp').value.toLowerCase();
   const f=rows.filter(r=>
-    (!ch||r.channel===ch)&&
+    (!ch||guardOf(r)===ch)&&
     (!dec||r.decision===dec)&&
     (!rule||(r.rule||'').toUpperCase().includes(rule))&&
     (!proj||(r.project||'').toLowerCase().includes(proj))
@@ -84,7 +89,7 @@ function render(){
     const schemaCell=r.schema!=null?`v${esc(r.schema)}`:'legacy';
     const schemaCls=r.schema!=null?'sch':'sch legacy';
     tr.innerHTML=`<td class="ts">${fmt(r.ts)}</td><td class="${schemaCls}">${schemaCell}</td>`+
-      `<td>${esc(r.channel)}</td><td>${esc(r.method)}</td>`+
+      `<td>${esc(guardOf(r))}</td><td>${esc(r.method)}</td>`+
       `<td class="${r.decision==='deny'?'deny':'allow'}">${esc(r.decision)}</td>`+
       `<td class="rule">${esc(r.rule)}</td><td class="proj">${esc(r.project)}</td>`+
       `<td class="path">${esc(r.path)}</td><td class="rsn">${esc(r.reason)}${r.enabled_via?' &middot; <i>'+esc(r.enabled_via)+'</i>':''}</td>`+

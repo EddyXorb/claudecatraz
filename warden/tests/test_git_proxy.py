@@ -80,7 +80,7 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
     # reconcile row (``proj``) coexist → the branch is counted twice and the push
     # row is never pruned (R5 ``max_open_branches`` drift).
-    keys = [r["project"] for r in ctx.state._db.execute("SELECT project FROM claude_branches")]
+    keys = [r["project"] for r in ctx.state._db.execute("SELECT project FROM agent_branches")]
     assert keys == ["group/proj"]
 
 

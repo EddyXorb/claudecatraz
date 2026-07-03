@@ -1,6 +1,6 @@
 """JSONL audit log (W11, §6.8; F6, docs/design/architecture-generalization,
-§02-befunde.md F6, §06-migration.md Schritt 5): typed events, one writer,
-O_APPEND, redaction-by-allowlist.
+§02-befunde.md F6/F11, §06-migration.md Schritt 5/6): typed events, one
+writer, O_APPEND, redaction-by-allowlist.
 
 **F6 fix.** Every guard used to build its own near-identical dict by hand
 (``git_proxy._audit``/``api_proxy._audit``). :class:`AuditEvent` is the one
@@ -9,17 +9,24 @@ every pipeline exit (allow or deny) from the envelope fields every guard
 shares, plus whatever guard-specific extras :meth:`Guard.audit_fields`
 supplies (F6: "Aufrufer konstruieren das Event typisiert").
 
-**Byte-compatibility (hard requirement, §06-migration.md Schritt 5): this is
-refactoring only.** The JSONL shape — field *names*, field *values*, and the
-``schema`` version — is unchanged from before this step. In particular
-``extra`` is spread into the serialised dict exactly as the old
-``**channel_fields`` kwarg was: a guard that never passes a key (e.g. git
-never passes ``path``) leaves that key absent from the line entirely, while a
-guard that passes ``None`` explicitly (e.g. the REST guard's ``kind`` for an
-unmatched endpoint) serialises it as JSON ``null`` — both behaviours match the
-pre-Schritt-5 output byte for byte. The ``channel`` field's *values*
-(``"git"``, ``"api"``) are unchanged too — renaming them to guard ids is
-Schritt 6 (F11), not this step.
+**JSONL schema version history** (independent of the state DB's own
+``user_version`` counter in :mod:`warden.core.state_migrations` — the two
+schemas evolve on unrelated axes and unrelated numbers):
+
+* **1** — the historical, feldlose format: no ``schema`` field on the line at
+  all (every line written before Schritt 2).
+* **2** (§06-migration.md Schritt 2) — introduces the ``schema`` field itself,
+  gating the B3 fix (tag-push/branch-delete relogged from R2 to R4 — an
+  audit-visible change to an *existing* field's value).
+* **3** (§06-migration.md Schritt 6, F11) — the ``channel`` field is renamed
+  to ``guard`` (values unchanged: still ``"git"``/``"api"``); paired with the
+  state DB's own claude→agent table rename in the same migration step (both
+  are one vocabulary shift, §03-guard-architektur.md §03.5). ``extra`` is
+  still spread into the serialised dict exactly as the old
+  ``**channel_fields``/``**guard_fields`` kwarg was: a guard that never passes
+  a key (e.g. git never passes ``path``) leaves that key absent from the line
+  entirely, while a guard that passes ``None`` explicitly (e.g. the REST
+  guard's ``kind`` for an unmatched endpoint) serialises it as JSON ``null``.
 """
 
 from __future__ import annotations
@@ -35,21 +42,19 @@ from typing import Any, Final, Mapping, Optional
 
 from .model import Decision, StateView
 
-# Audit-JSONL schema version (§06-migration.md Schritt 2, F11 precondition).
-# 1 = the historical, unversioned format (no `schema` field at all — every
-#     line written before this step). 2 = the B3 rename of tag-push/branch-delete
-#     from R2 to R4 (an audit-visible change, which is exactly why it is gated
-#     on a schema bump).
-# A reader (viewer, `catraz observe`) must keep accepting *both*: a missing
-# `schema` field means version 1, by construction (compat window, §06.1).
-AUDIT_SCHEMA_VERSION: Final[int] = 2
+# Audit-JSONL schema version — see the module docstring for the full version
+# history (1 = feldlos, 2 = `schema` field + R2→R4, 3 = channel→guard).
+# A reader (viewer, `catraz observe`) must keep accepting all of them: a
+# missing `schema` field means version 1, and a `channel` field with no
+# `guard` field means version <3 (compat window, §06.1).
+AUDIT_SCHEMA_VERSION: Final[int] = 3
 
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
 # is dropped by construction.
 _ALLOWED_FIELDS = {
     "ts",
     "schema",
-    "channel",
+    "guard",
     "correlation_id",
     "method",
     "path",
@@ -88,12 +93,12 @@ class AuditEvent:
     attribute; ``extra`` carries whatever additional fields a specific guard
     supplies (REST: ``path``/``kind``/``enabled_via``; git: ``refs``) — see
     the module docstring for why this stays a passthrough mapping rather than
-    a fixed set of optional attributes: the byte-compatibility requirement
-    means "present with value None" and "absent" must both stay expressible,
-    exactly as the old ``**channel_fields`` kwargs allowed.
+    a fixed set of optional attributes: "present with value None" and
+    "absent" must both stay expressible, exactly as the old
+    ``**guard_fields`` kwargs allow.
     """
 
-    channel: str
+    guard: str
     correlation_id: str
     method: str
     project: str
@@ -106,7 +111,7 @@ class AuditEvent:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": AUDIT_SCHEMA_VERSION,
-            "channel": self.channel,
+            "guard": self.guard,
             "correlation_id": self.correlation_id,
             "method": self.method,
             "project": self.project,
@@ -124,7 +129,7 @@ class AuditEvent:
 
 def build_event(
     *,
-    channel: str,
+    guard: str,
     correlation_id: str,
     method: str,
     project: str,
@@ -132,7 +137,7 @@ def build_event(
     state: StateView,
     started: float,
     upstream_status: Optional[int],
-    **channel_fields: Any,
+    **guard_fields: Any,
 ) -> dict[str, Any]:
     """Thin, dict-returning compatibility facade over :class:`AuditEvent` (F6:
     "build_event darf zur dünnen Fassade werden"). New code constructs an
@@ -141,7 +146,7 @@ def build_event(
     tests pinning that shape down byte for byte).
     """
     return AuditEvent(
-        channel=channel,
+        guard=guard,
         correlation_id=correlation_id,
         method=method,
         project=project,
@@ -149,7 +154,7 @@ def build_event(
         state=state,
         started=started,
         upstream_status=upstream_status,
-        extra=channel_fields,
+        extra=guard_fields,
     ).to_dict()
 
 

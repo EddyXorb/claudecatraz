@@ -84,7 +84,7 @@ def capability_gate(intent: GitPushIntent, cfg: Config) -> Optional[Decision]:
 
 
 def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
-    if cmd.ref.startswith("refs/tags/"):  # tags are never claude/* branches
+    if cmd.ref.startswith("refs/tags/"):  # tags are never namespace branches
         # B3 fix: an irreversible verb ("never" capability, M4) — R4, not R2.
         return Decision(False, R4, "tag pushes are not permitted")
     ref = cmd.ref

@@ -54,7 +54,7 @@ def normalize_project(project: str) -> str:
     The git Smart-HTTP path carries ``group/proj.git``; the allowlist and REST
     forms use the bare ``group/proj``. Normalising in one place keeps allowlist
     checks, REST project-ids, upstream URLs and state keys consistent (one
-    definition), so a pushed branch is not counted twice in ``claude_branches``."""
+    definition), so a pushed branch is not counted twice in ``agent_branches``."""
     return project.removesuffix(".git").strip("/")
 
 

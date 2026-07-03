@@ -40,7 +40,7 @@ async def test_list_branches_follows_every_page(ctx, respx_router):
         method="GET", url__regex=r".*/repository/branches.*"
     ).mock(side_effect=[page1, page2])
 
-    branches = await ctx._list_claude_branches("group%2Fproj")
+    branches = await ctx._list_agent_branches("group%2Fproj")
 
     assert branches == ["claude/a", "claude/z"]  # both pages, prefix-filtered
     assert "page=1" in str(route.calls[0].request.url)
@@ -65,7 +65,7 @@ async def test_list_mrs_paginates_filters_and_scopes_to_author(ctx, respx_router
         method="GET", url__regex=r".*/merge_requests\?.*"
     ).mock(side_effect=[page1, page2])
 
-    mrs = await ctx._list_claude_mrs("group%2Fproj", 42)
+    mrs = await ctx._list_agent_mrs("group%2Fproj", 42)
 
     assert mrs == [(1, "opened"), (3, "opened")]  # both pages, prefix-filtered
     assert "author_id=42" in str(route.calls[0].request.url)  # only the SA's MRs
@@ -127,7 +127,7 @@ async def test_ownership_true_when_prefixed_and_authored_by_sa(ctx, respx_router
             200, json={"source_branch": "claude/x", "author": {"id": 42}}
         )
     )
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is True
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is True
     await ctx.upstream.aclose()
 
 
@@ -137,7 +137,7 @@ async def test_ownership_false_when_author_differs(ctx, respx_router):
             200, json={"source_branch": "claude/x", "author": {"id": 999}}
         )
     )
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is False
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is False
     await ctx.upstream.aclose()
 
 
@@ -147,7 +147,7 @@ async def test_ownership_false_when_prefix_missing(ctx, respx_router):
             200, json={"source_branch": "feature/x", "author": {"id": 42}}
         )
     )
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is False
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is False
     await ctx.upstream.aclose()
 
 
@@ -156,7 +156,7 @@ async def test_ownership_none_when_lookup_fails(ctx, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(404)
     )
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is None
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is None
     await ctx.upstream.aclose()
 
 
@@ -169,12 +169,12 @@ async def test_ownership_cached_within_ttl_then_refetched(cfg, respx_router):
         )
     )
 
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is True
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is True
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is True
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is True
     assert route.call_count == 1  # second call served from the 30s cache
 
     now["t"] += 31  # past the TTL
-    assert await ctx.mr_owned_by_claude("group/proj", 7) is True
+    assert await ctx.mr_owned_by_agent("group/proj", 7) is True
     assert route.call_count == 2  # cache expired → refetched
     await ctx.upstream.aclose()
 

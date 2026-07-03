@@ -16,8 +16,10 @@ capability invariants) once a second guard exists and rule ids must be
 namespaced (``gitlab.R4`` vs. ``core.R5``) to stay unambiguous. This step only
 prepares the concept — :func:`qualify` can build a namespaced id — the audit
 log and viewer keep logging/reading the *bare* id (``"R4"``, not
-``"gitlab.R4"``) until the channel→guard rename (F11) lands and a second guard
-(§06 Schritt 9) makes bare ids ambiguous.
+``"gitlab.R4"``) until a second guard (§06 Schritt 9) makes bare ids
+ambiguous; the channel→guard rename (F11, §06 Schritt 6) is a different,
+already-landed change (the JSONL field the rule id sits next to, not the
+rule id itself).
 """
 
 from __future__ import annotations

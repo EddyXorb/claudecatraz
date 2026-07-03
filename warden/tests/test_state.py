@@ -124,11 +124,10 @@ def test_migrations_span_exactly_base_to_current():
     assert versions[-1] == CURRENT_SCHEMA_VERSION
 
 
-def test_legacy_unversioned_db_is_migrated_without_data_loss(tmp_path):
-    """A pre-existing DB (the old, unversioned shape: tables present, no
-    ``user_version`` marker) is lifted to :data:`CURRENT_SCHEMA_VERSION` in
-    place — no table recreated from scratch, no row dropped."""
-    path = tmp_path / "legacy.db"
+def _write_legacy_v1_db(path) -> None:
+    """Build a v1 DB on disk: the pre-Schritt-2 unversioned shape — old table
+    names (``claude_branches``/``claude_mrs``), old column name
+    (``writes.channel``), no ``user_version`` marker at all."""
     raw = sqlite3.connect(str(path))
     raw.executescript(
         """
@@ -147,15 +146,53 @@ def test_legacy_unversioned_db_is_migrated_without_data_loss(tmp_path):
         "INSERT INTO claude_branches (project, ref, created) VALUES (?, ?, ?)",
         ("group/proj", "claude/legacy", 1000.0),
     )
+    raw.execute(
+        "INSERT INTO writes (ts, channel, kind, ref_or_iid) VALUES (?, ?, ?, ?)",
+        (1000.0, "git", "push", "claude/legacy"),
+    )
     raw.execute("INSERT INTO meta (key, value) VALUES ('last_reconcile', '1000.0')")
     raw.commit()
     assert raw.execute("PRAGMA user_version").fetchone()[0] == 0  # sanity: truly unversioned
     raw.close()
 
+
+def test_legacy_v1_db_is_migrated_to_v3_without_data_loss(tmp_path):
+    """A pre-existing v1 DB (unversioned: ``claude_branches``/``claude_mrs``,
+    ``writes.channel``) is lifted straight to :data:`CURRENT_SCHEMA_VERSION`
+    in place — no table recreated from scratch, no row dropped, including
+    through the Schritt-6 claude→agent/channel→guard rename (F11)."""
+    path = tmp_path / "legacy.db"
+    _write_legacy_v1_db(path)
+
     st = State(str(path))
     assert st.schema_version() == CURRENT_SCHEMA_VERSION
     assert st.open_branches() == 1  # the pre-existing row survived the lift
     assert st.is_reconciled() is True  # so did the reconcile marker
+    # white-box: the renamed column carries the old row's value through.
+    row = st._db.execute("SELECT guard, kind FROM writes").fetchone()
+    assert (row["guard"], row["kind"]) == ("git", "push")
+    st.close()
+
+
+def test_v2_db_is_migrated_to_v3_without_data_loss(tmp_path):
+    """A v2 DB (§06-migration.md Schritt 2: ``user_version`` stamped, but
+    migration 2 was a table-name no-op — still ``claude_branches``/
+    ``claude_mrs``/``writes.channel``) is lifted to
+    :data:`CURRENT_SCHEMA_VERSION` by the Schritt-6 rename migration alone,
+    without dropping the ``user_version`` stamped starting point's data."""
+    path = tmp_path / "v2.db"
+    _write_legacy_v1_db(path)
+    raw = sqlite3.connect(str(path))
+    raw.execute("PRAGMA user_version = 2")
+    raw.commit()
+    raw.close()
+
+    st = State(str(path))
+    assert st.schema_version() == CURRENT_SCHEMA_VERSION
+    assert st.open_branches() == 1
+    assert st.is_reconciled() is True
+    row = st._db.execute("SELECT guard, kind FROM writes").fetchone()
+    assert (row["guard"], row["kind"]) == ("git", "push")
     st.close()
 
 

@@ -43,8 +43,8 @@ class ApiGuard(Guard[ApiIntent]):
     :func:`core.guard.run_guarded` from :func:`handle` below.
     """
 
-    # Audit ``channel`` value — kept as the pre-Schritt-5 bare string for
-    # byte-compatible JSONL (the channel→guard rename is §06 Schritt 6).
+    # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
+    # field used to be called ``channel``; the value itself is unchanged).
     @property
     def name(self) -> str:
         return "api"
@@ -96,7 +96,7 @@ class ApiGuard(Guard[ApiIntent]):
         """
         ep = intent.endpoint
         if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
-            intent.mr_owner_ok = await self.ctx.mr_owned_by_claude(intent.project, intent.iid)
+            intent.mr_owner_ok = await self.ctx.mr_owned_by_agent(intent.project, intent.iid)
         return intent
 
     def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:
@@ -176,7 +176,7 @@ async def deny_graphql(request: Request) -> Response:
     state = ctx.state.view()
     ctx.audit.log(
         AuditEvent(
-            channel="api",
+            guard="api",
             correlation_id=correlation_id,
             method=request.method,
             project="",

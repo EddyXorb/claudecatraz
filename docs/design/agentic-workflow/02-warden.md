@@ -27,7 +27,8 @@ warden/
 │   │   ├── rules.py            #   zentrale Regel-Registry R0–R6 + Meta-Regeln (B3, F11)  ← pure
 │   │   ├── capabilities.py     #   Capability-Vokabular + FORBIDDEN + forbidden_check (§03.4)  ← pure
 │   │   ├── audit.py            #   AuditEvent (typisiert, F6) + JSONL-Logger, Redaction, `schema`
-│   │   ├── state.py            #   SQLite: Quoten, Rate, Schema-Versionierung
+│   │   ├── state.py            #   SQLite: Quoten, Rate (agent_branches/agent_mrs, Schritt 6)
+│   │   ├── state_migrations.py #   Migrations-Runner + Versionsgeschichte v1→v3 (Schritt 2/6)
 │   │   ├── config.py           #   frozen Config-Wert (Modell-Hälfte; GitLab-Felder = dokumentierte
 │   │   │                       #   Layering-Schuld, Zerlegung bewusst NICHT Teil von Schritt 5)
 │   │   ├── config_load.py      #   Env + warden.toml → Config, harte fail-closed Validierung
@@ -63,7 +64,7 @@ warden/
     ├── test_api_proxy.py       # respx/MockTransport
     ├── test_git_e2e.py         # echtes git push gegen Wegwerf-Upstream
     ├── test_quota.py           # Fake-Clock, Sliding-Window
-    ├── test_state.py           # inkl. Schema-Migration (frisch/legacy/zu neu)
+    ├── test_state.py           # inkl. Schema-Migration (frisch/v1→v3/v2→v3/zu neu)
     └── redteam/                # docker-compose-basiert (→ 03-testing-redteam.md)
 ```
 
@@ -131,9 +132,9 @@ ID, zugeordnete Meta-Regel (M0–M6, §01-grundregeln.md B) und Kurzbeschreibung
 (`core/guard.py`) und beide Guard-Packages referenzieren
 diese Konstanten statt Streuliteralen. Ein reservierter Kernel-Namespace (`core.*`, neben
 `gitlab.*` für diesen Guard) ist als Helfer (`rules.qualify`) vorbereitet, aber noch nicht
-aktiv — geloggt wird weiterhin die unqualifizierte Form (`"R4"`), bis der
-channel→guard-Rename (F11) landet und ein zweiter Guard (§06 Schritt 9) unqualifizierte
-IDs mehrdeutig macht.
+aktiv — geloggt wird weiterhin die unqualifizierte Form (`"R4"`), bis ein zweiter Guard
+(§06 Schritt 9) unqualifizierte IDs mehrdeutig macht. (Der channel→guard-Rename, F11, ist
+mit Schritt 6 gelandet — er betraf das JSONL-Feld neben der Regel-ID, nicht die ID selbst.)
 
 | Regel | Meta | Bedeutung |
 | ----- | ---- | --------- |
@@ -400,21 +401,21 @@ SQLite (WAL + `synchronous=FULL`), Volume-persistent.
 ```sql
 CREATE TABLE writes (
   id INTEGER PRIMARY KEY, ts REAL NOT NULL,
-  channel TEXT NOT NULL, kind TEXT NOT NULL, ref_or_iid TEXT
+  guard TEXT NOT NULL, kind TEXT NOT NULL, ref_or_iid TEXT
 );
-CREATE TABLE claude_branches (project TEXT, ref TEXT, created REAL,
-                              PRIMARY KEY (project, ref));
-CREATE TABLE claude_mrs      (project TEXT, iid INTEGER, state TEXT, created REAL,
-                              PRIMARY KEY (project, iid));
+CREATE TABLE agent_branches (project TEXT, ref TEXT, created REAL,
+                             PRIMARY KEY (project, ref));
+CREATE TABLE agent_mrs      (project TEXT, iid INTEGER, state TEXT, created REAL,
+                             PRIMARY KEY (project, iid));
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- 'last_reconcile'
 ```
 
 - Rate: `SELECT count(*) FROM writes WHERE ts > now-3600`.
 - **Fail-safe:** leer oder korrupt → „Limit erreicht", Writes verweigert bis Reconcile. Niemals „leer = 0 frei".
-- **Reconcile beim Start** (`__main__.py`): offene Claude-MRs/Branches per API zählen, bevor Port 8080 öffnet.
+- **Reconcile beim Start** (`__main__.py`): offene Agent-MRs/Branches (im Namespace-Präfix) per API zählen, bevor Port 8080 öffnet.
 - Periodischer Reconcile (alle 5 min): gleicht lokale Zähler gegen GitLab-Wahrheit ab.
 
-### Schema-Versionierung (§06-migration.md Schritt 2)
+### Schema-Versionierung (§06-migration.md Schritt 2, Renames in Schritt 6)
 
 Die DB trägt ihre Schema-Version in SQLite's eigenem `PRAGMA user_version` — ein von
 SQLite reservierter Integer-Slot, immer vorhanden (Default 0), braucht keine eigene
@@ -423,16 +424,23 @@ Bootstrap-Tabelle. Die bereits existierende `meta`-Tabelle bleibt für *Anwendun
 Tabellenzugriff geprüft wird — dafür ist `PRAGMA user_version` der richtige Ort, eine
 Vermischung mit `meta` würde beides verwischen.
 
-Ein kleiner Migrations-Runner (`state.MIGRATIONS`, geordnete `Migration`-Liste mit
-benannter Apply-Funktion) hebt eine DB Version für Version an:
+Ein kleiner Migrations-Runner (`core/state_migrations.py`: `MIGRATIONS`, geordnete
+`Migration`-Liste mit benannter Apply-Funktion; in Schritt 6 aus `state.py` ausgegliedert,
+Clean-Code-Budget <300 Zeilen) hebt eine DB Version für Version an:
 
 - **Version 1** (implizit): das historische, unversionierte Schema — `claude_branches`/
-  `claude_mrs` existieren bereits, aber kein Versions-Marker.
-- **Version 2** (dieser Schritt): führt nur den Versions-Marker selbst ein — keine
-  Tabellen-Umbenennung (die kommt in Schritt 6, claude→agent/F11), der Runner trägt aber
-  bereits die Form, die eine solche Migration braucht.
+  `claude_mrs` und Spalte `writes.channel` existieren bereits, aber kein Versions-Marker.
+- **Version 2** (Schritt 2): führt nur den Versions-Marker selbst ein — keine
+  Tabellen-Umbenennung, aber der Runner trägt bereits die Form, die eine solche
+  Migration braucht.
+- **Version 3** (Schritt 6, F11): `claude_branches`/`claude_mrs` → `agent_branches`/
+  `agent_mrs`, Spalte `writes.channel` → `writes.guard` — verlustfrei per
+  `ALTER TABLE … RENAME TO …` bzw. `RENAME COLUMN` (SQLite ≥ 3.25; das Docker-Image
+  bringt Python 3.12 mit, das reicht). Derselbe Migrationsschritt wie der
+  channel→guard-Rename im Audit-JSONL (eine Vokabular-Verschiebung, §03.5); „claude"
+  bleibt nur als Default-Wert des Namespace-Präfixes (`branch_prefixes = ("claude/",)`).
 - Eine frische DB wird direkt auf der aktuellen Version angelegt; eine bestehende
-  unversionierte DB wird ohne Datenverlust hochgezogen; eine **zu neue** Version (aus einer
+  v1- oder v2-DB wird ohne Datenverlust hochgezogen; eine **zu neue** Version (aus einer
   neueren Warden-Version) führt zu einem harten Fehler beim Start (`state.SchemaError`,
   fail-closed, A9) — kein stilles Weiterlaufen mit unbekanntem Schema.
 

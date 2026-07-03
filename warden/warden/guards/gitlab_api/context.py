@@ -71,7 +71,7 @@ class AppContext:
         return self.service_account_id
 
     # --- ownership (W6.2) ------------------------------------------------------
-    async def mr_owned_by_claude(self, project: str, iid: int) -> Optional[bool]:
+    async def mr_owned_by_agent(self, project: str, iid: int) -> Optional[bool]:
         """True iff the MR is prefixed AND authored by the service account.
 
         Returns None when the lookup fails (→ policy denies, default-deny holds).
@@ -116,8 +116,8 @@ class AppContext:
             pid = project_id(project)
             try:
                 numeric_id = await self._resolve_project_id(pid)
-                branches = await self._list_claude_branches(pid)
-                mrs = await self._list_claude_mrs(pid, sa)
+                branches = await self._list_agent_branches(pid)
+                mrs = await self._list_agent_mrs(pid, sa)
             except Exception as exc:  # keep state locked on any failure
                 print(f"warden: reconcile failed for {project}: {exc}", file=sys.stderr)
                 ok = False
@@ -141,7 +141,7 @@ class AppContext:
     async def _get_paginated(self, path: str) -> list[Any]:
         """Fetch every page of a GitLab list endpoint (W8.2).
 
-        Without this a project with >100 claude branches/MRs would only count the
+        Without this a project with >100 agent branches/MRs would only count the
         first page, undercount the quota, and wrongly ``allow`` further writes.
         Follows the ``X-Next-Page`` header until it is empty.
         """
@@ -158,7 +158,7 @@ class AppContext:
             page = int(nxt) if nxt else 0
         return items
 
-    async def _list_claude_branches(self, pid: str) -> list[str]:
+    async def _list_agent_branches(self, pid: str) -> list[str]:
         branches = await self._get_paginated(f"projects/{pid}/repository/branches")
         return [
             b["name"]
@@ -166,7 +166,7 @@ class AppContext:
             if self.cfg.in_branch_namespace(b.get("name", ""))
         ]
 
-    async def _list_claude_mrs(self, pid: str, sa: Optional[int]) -> list[tuple[int, str]]:
+    async def _list_agent_mrs(self, pid: str, sa: Optional[int]) -> list[tuple[int, str]]:
         path = f"projects/{pid}/merge_requests?state=opened"
         if sa is not None:
             path += f"&author_id={sa}"

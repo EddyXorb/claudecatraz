@@ -109,10 +109,10 @@ IntentT = TypeVar("IntentT", bound=Intent)
 class Guard(Protocol[IntentT]):
     """The parts a guard supplies to :func:`run_guarded` (§03.2/03.3).
 
-    ``name`` is the audit ``channel`` value (kept as the pre-Schritt-5 bare
-    string — ``"git"``/``"api"`` — for byte-compatible JSONL; the
-    channel→guard rename is §06 Schritt 6, not this step). Every method below
-    either does I/O (parse/enrich/record/forward/deny_response) or is pure
+    ``name`` is the audit ``guard`` value (§06-migration.md Schritt 6, F11:
+    the JSONL field used to be called ``channel``; the bare string values —
+    ``"git"``/``"api"`` — are unchanged). Every method below either does I/O
+    (parse/enrich/record/forward/deny_response) or is pure
     (capability_gate/decide) — only the pure half is what §03.4's capability
     invariant and default-deny guarantees rest on.
     """
@@ -173,7 +173,7 @@ async def run_guarded(
 
     audit.log(
         AuditEvent(
-            channel=guard.name,
+            guard=guard.name,
             correlation_id=correlation_id,
             method=intent.method,
             project=intent.project,
