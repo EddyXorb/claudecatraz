@@ -371,7 +371,8 @@ def test_needs_mr_owner_false_for_entry_with_no_checks():
 
 async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client, respx_router):
     # source_branch is a BODY-declared decision field for mr.create (§04.2).
-    # Sending it only as a query parameter must not satisfy field_has_prefix —
+    # Sending it only as a query parameter must not satisfy the branch-namespace
+    # check (§07 Punkt 7) —
     # the field must be treated as simply absent, not silently read from the
     # wrong location (F12's actual footgun: a scoping check "passing" on a
     # value the checked location never carried).

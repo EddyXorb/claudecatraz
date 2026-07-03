@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from warden.core.model import Intent
 
 if TYPE_CHECKING:  # only for the annotation; avoids a load cycle (catalog imports this module)
-    from .catalog.model import CatalogEntry
+    from .catalog.model import Recognizer
 
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 
@@ -23,7 +23,7 @@ class ApiIntent(Intent):
     _method: str
 
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
-    endpoint: Optional["CatalogEntry"] = None  # matched catalog entry (writes only)
+    endpoint: Optional["Recognizer"] = None  # matched catalog entry (writes only)
     fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
     # Resolved by the guard's enrich() via an upstream lookup; None ⇒ unverifiable.
     mr_source_ok: Optional[bool] = None

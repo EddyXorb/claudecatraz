@@ -591,6 +591,29 @@ Matcher umbenannt):
 scope⟩→`decide`-Modell; die drei Invarianten stehen; kein Autor-Ownership;
 `field_not_equals("merge")` entfernt; identisches Entscheidungsverhalten; Tests grün.
 
+> **✅ ERLEDIGT** (Warden `catalog/model.py`, `entries.py`, `read_endpoints.py`,
+> `policy.py`, `guard.py`, `parsing.py`, `intent.py`, `catalog/__init__.py`,
+> `catalog/activation.py`, `catalog/report.py`). `CatalogEntry`/`RegisteredCheck`/
+> `CheckFn`/`checks.py` (field_has_prefix, MR_SOURCE_IN_NAMESPACE, field_not_equals)
+> weg; **eine** `Recognizer`-Dataclass (`id`, `method`, `template`, `scope_kind`,
+> `kind`, `rule`, `capabilities`, `decision_fields`, `namespace_field`, `classify`)
+> für Read (`READ_RECOGNIZERS`, vormals `READ_ENDPOINTS`) **und** Write (`CATALOG`).
+> `ScopeKind` = `branch-namespace` (`namespace_field` literal oder `None` ⇒
+> iid-Lookup via `intent.mr_source_ok`) / `quota-by-kind` / `content-exposure`
+> (`classify: ApiIntent -> (ReadClass, str)`, schmal — nie eine beliebige Decision).
+> Eine generische `policy.decide_scope(intent, match, state, cfg)` dispatcht rein
+> über `scope_kind` — keine Pro-Eintrag-Logik mehr. `mr.update`s
+> `field_not_equals("state_event","merge")` entfernt; Merge bleibt R4-verboten
+> allein über die `MERGES`-Capability (`api_capabilities`, unverändert). Alle drei
+> Invarianten stehen (Capability-Vokabular, geschlossener Scope-Satz, Read-Default-
+> Deny). `/policy`-JSON-Struktur unverändert (`endpoint_table_report`, per
+> Golden-Test in `tests/catalog/test_report.py` abgesichert). Neue Struktur-Tests
+> in `tests/catalog/test_recognizer.py` + `test_report.py`; bestehende Verhaltens-
+> Tests (`test_policy.py`, `test_capabilities.py`, `test_api_proxy.py`,
+> `tests/catalog/*`, `redteam/test_bypass.py`) unverändert grün. 359 passed
+> (Warden, 347 vorher + 12 neue), 386 passed (CLI/Container, unverändert),
+> ruff/format/mypy grün (Root + Warden).
+
 ---
 
 ## 8. Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz` via Host-Routing

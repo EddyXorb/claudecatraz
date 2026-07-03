@@ -27,7 +27,7 @@ from ...core.rules import R6
 from ...core.state import State
 from ...core.transport import Upstream, stream_upstream
 from ...errors import deny_json
-from .catalog import CatalogEntry, EffectiveTable, build_effective_table, match_endpoint
+from .catalog import EffectiveTable, Recognizer, ScopeKind, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
 from .ownership import MrOwnership
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
@@ -36,9 +36,12 @@ from .reconcile import reconcile_mrs
 from .state import MrState
 
 
-def _needs_mr_owner(ep: CatalogEntry) -> bool:
-    """Check if the matched entry requires MR ownership verification by declared need."""
-    return any("mr_owner" in check.needs for check in ep.checks)
+def _needs_mr_owner(ep: Recognizer) -> bool:
+    """Check if the matched recognizer requires MR ownership verification:
+    a ``BRANCH_NAMESPACE`` scope whose branch is *not* literally in the
+    request (``namespace_field is None``) — the request carries only an iid,
+    so the branch must be resolved via the iid → MR upstream lookup."""
+    return ep.scope_kind is ScopeKind.BRANCH_NAMESPACE and ep.namespace_field is None
 
 
 class ApiGuard(Guard[ApiIntent]):
@@ -157,6 +160,9 @@ class ApiGuard(Guard[ApiIntent]):
     def record(self, intent: ApiIntent, decision: Decision) -> None:
         """Record the write *before* the upstream call — fail-safe against crashes."""
         if decision.token == TokenKind.WRITE and intent.endpoint is not None:
+            assert intent.endpoint.kind is not None, (
+                f"write recognizer {intent.endpoint.id!r} has no kind"
+            )
             self.state.record_write("api", intent.endpoint.kind, str(intent.iid or intent.project))
 
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:

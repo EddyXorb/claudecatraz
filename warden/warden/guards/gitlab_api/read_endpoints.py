@@ -8,26 +8,25 @@ Project-bound paths are gated by the project allowlist (R6); this table governs
 * Anything not in table is default-denied — new metadata endpoints are deliberate edits.
 
 The endpoint catalog only extends this, never replaces it.
+
+Every row is a :class:`~.catalog.model.Recognizer` with
+``scope_kind=ScopeKind.CONTENT_EXPOSURE` (§07 Punkt 7) — the same type the
+write catalog uses. Unlike a write recognizer's plain ``namespace_field``
+data, content-exposure genuinely needs a per-row classifier (``classify``):
+the *same* path template (``/search``) is metadata or content depending on
+the request's ``scope`` query field, so there is no static "denied unless
+proven otherwise" default a data field alone could express. The classifier
+is narrowly typed — it returns only a closed :class:`~.catalog.model.ReadClass`
+plus a reason string, never an arbitrary Decision — so the one generic
+``policy.decide_scope`` still owns turning it into a terminal Decision.
 """
 
 from __future__ import annotations
 
-import functools
-import re
-from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
-from ...core.model import Decision, TokenKind
-from ...core.path_template import compile_template
-from ...core.rules import R1, R6
+from .catalog.model import ReadClass, Recognizer, ScopeKind
 from .intent import ApiIntent
-
-# A read-table row decides outright — unlike a write-endpoint's Check (None ⇒
-# "still passing"), a read row must always return the terminal Decision: the
-# *same* path template (``/search``) can be R1 or R6 depending on the `scope`
-# query field, so there is no shared "denied unless proven otherwise" default
-# to fall back on within a single row.
-ReadCheck = Callable[[ApiIntent], Decision]
 
 # Search `scope` values that only return metadata (project/issue/MR/user
 # listings) — safe to pass through projectless (R1). Everything else,
@@ -37,19 +36,20 @@ ReadCheck = Callable[[ApiIntent], Decision]
 _METADATA_SEARCH_SCOPES = frozenset({"projects", "issues", "merge_requests", "milestones", "users"})
 
 
-def _allow_metadata(intent: ApiIntent) -> Decision:
+def _allow_metadata(intent: ApiIntent) -> tuple[ReadClass, str]:
     """Projectless names/metadata — always readable."""
-    return Decision(True, R1, "read pass-through (projectless metadata)", TokenKind.READ)
+    return ReadClass.METADATA, "read pass-through (projectless metadata)"
 
 
-def _deny_snippets(intent: ApiIntent) -> Decision:
+def _deny_snippets(intent: ApiIntent) -> tuple[ReadClass, str]:
     """Snippets are repository content with no project scope."""
-    return Decision(
-        False, R6, f"projectless snippet content is not permitted: {intent.method} {intent.path}"
+    return (
+        ReadClass.CONTENT,
+        f"projectless snippet content is not permitted: {intent.method} {intent.path}",
     )
 
 
-def _search_scope_gate(intent: ApiIntent) -> Decision:
+def _search_scope_gate(intent: ApiIntent) -> tuple[ReadClass, str]:
     """Global/group search — the `scope` query field decides.
 
     ``scope`` lives in ``intent.fields`` (query params are folded in by
@@ -59,55 +59,170 @@ def _search_scope_gate(intent: ApiIntent) -> Decision:
     """
     scope = intent.fields.get("scope")
     if scope in _METADATA_SEARCH_SCOPES:
-        return Decision(True, R1, f"read pass-through (search scope={scope!r})", TokenKind.READ)
-    return Decision(
-        False,
-        R6,
+        return ReadClass.METADATA, f"read pass-through (search scope={scope!r})"
+    return (
+        ReadClass.CONTENT,
         f"projectless search with scope {scope!r} may return repository content: "
         f"{intent.method} {intent.path}",
     )
 
 
-@dataclass(frozen=True)
-class ReadEndpoint:
-    template: str  # e.g. "/groups/{id}/projects"
-    decide: ReadCheck  # returns the terminal Decision for a path match
-
-    @functools.cached_property
-    def regex(self) -> re.Pattern[str]:
-        return compile_template(self.template)
-
-
-READ_ENDPOINTS: tuple[ReadEndpoint, ...] = (
+READ_RECOGNIZERS: tuple[Recognizer, ...] = (
     # --- Content-capable denies: listed first by convention (most specific/sensitive first) ---
-    ReadEndpoint("/snippets", _deny_snippets),
-    ReadEndpoint("/snippets/{rest}", _deny_snippets),
-    ReadEndpoint("/search", _search_scope_gate),
-    ReadEndpoint("/groups/{id}/search", _search_scope_gate),
+    Recognizer(
+        id="read.snippets",
+        method="GET",
+        template="/snippets",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_deny_snippets,
+    ),
+    Recognizer(
+        id="read.snippets_rest",
+        method="GET",
+        template="/snippets/{rest}",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_deny_snippets,
+    ),
+    Recognizer(
+        id="read.search",
+        method="GET",
+        template="/search",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_search_scope_gate,
+    ),
+    Recognizer(
+        id="read.group_search",
+        method="GET",
+        template="/groups/{id}/search",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_search_scope_gate,
+    ),
     # --- Projectless metadata allow (R1): documented discovery flow ---
-    ReadEndpoint("/projects", _allow_metadata),
-    ReadEndpoint("/users", _allow_metadata),
-    ReadEndpoint("/users/{id}", _allow_metadata),
-    ReadEndpoint("/user", _allow_metadata),
-    ReadEndpoint("/user/{rest}", _allow_metadata),
-    ReadEndpoint("/version", _allow_metadata),
-    ReadEndpoint("/metadata", _allow_metadata),
-    ReadEndpoint("/groups", _allow_metadata),
-    ReadEndpoint("/groups/{id}", _allow_metadata),
-    ReadEndpoint("/groups/{id}/projects", _allow_metadata),
-    ReadEndpoint("/groups/{id}/subgroups", _allow_metadata),
-    ReadEndpoint("/groups/{id}/descendant_groups", _allow_metadata),
-    ReadEndpoint("/merge_requests", _allow_metadata),
-    ReadEndpoint("/issues", _allow_metadata),
-    ReadEndpoint("/events", _allow_metadata),
-    ReadEndpoint("/broadcast_messages", _allow_metadata),
+    Recognizer(
+        id="read.projects",
+        method="GET",
+        template="/projects",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.users",
+        method="GET",
+        template="/users",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.user_by_id",
+        method="GET",
+        template="/users/{id}",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.user",
+        method="GET",
+        template="/user",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.user_rest",
+        method="GET",
+        template="/user/{rest}",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.version",
+        method="GET",
+        template="/version",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.metadata",
+        method="GET",
+        template="/metadata",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.groups",
+        method="GET",
+        template="/groups",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.group_by_id",
+        method="GET",
+        template="/groups/{id}",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.group_projects",
+        method="GET",
+        template="/groups/{id}/projects",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.group_subgroups",
+        method="GET",
+        template="/groups/{id}/subgroups",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.group_descendant_groups",
+        method="GET",
+        template="/groups/{id}/descendant_groups",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.merge_requests",
+        method="GET",
+        template="/merge_requests",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.issues",
+        method="GET",
+        template="/issues",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.events",
+        method="GET",
+        template="/events",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
+    Recognizer(
+        id="read.broadcast_messages",
+        method="GET",
+        template="/broadcast_messages",
+        scope_kind=ScopeKind.CONTENT_EXPOSURE,
+        classify=_allow_metadata,
+    ),
 )
 
 
-def match_read(path: str) -> Optional[ReadEndpoint]:
-    """Return the matching read-table row, or ``None`` (→ category 4, default-deny)."""
+def match_read(path: str) -> Optional[Recognizer]:
+    """Return the matching read-table row, or ``None`` (→ category 4, default-deny).
+
+    Matches on template alone, not method: every row here is reachable only
+    for GET/HEAD/OPTIONS (``policy.decide`` dispatches read methods here
+    before ever consulting the write catalog), so there is no ambiguity a
+    method check would resolve.
+    """
     path = path.rstrip("/")
-    for ep in READ_ENDPOINTS:
+    for ep in READ_RECOGNIZERS:
         if ep.regex.fullmatch(path):
             return ep
     return None

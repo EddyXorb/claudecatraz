@@ -20,7 +20,7 @@ from ....core.capabilities import FORBIDDEN
 from ....core.config import Config
 from .entries import CATALOG, DEFAULT_ENABLED
 from .errors import CatalogConfigError
-from .model import CatalogEntry
+from .model import Recognizer
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class EffectiveTable:
     this to flag non-default activations.
     """
 
-    entries: tuple[CatalogEntry, ...]
+    entries: tuple[Recognizer, ...]
     enabled_via: Mapping[str, str]
 
 
@@ -58,7 +58,7 @@ def build_effective_table(cfg: Config, enable: Optional[tuple[str, ...]]) -> Eff
             f"{', '.join(unknown_enabled)}"
         )
 
-    entries: list[CatalogEntry] = []
+    entries: list[Recognizer] = []
     enabled_via: dict[str, str] = {}
     seen: set[str] = set()
     for entry_id in enable:

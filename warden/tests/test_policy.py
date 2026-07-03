@@ -231,9 +231,9 @@ def test_r4_state_event_merge_alias_denied(cfg):
 
 
 def test_r3_mr_update_requires_mr_source_in_namespace(cfg):
-    # mr.update's MR_SOURCE_IN_NAMESPACE check (§07 Punkt 4): editing an MR whose
-    # source_branch can't be verified as namespace is denied — same check as
-    # mr.note/mr.discussion, but exercised on the update endpoint itself, not
+    # mr.update's branch-namespace scope, iid-lookup variant (§07 Punkt 4/7): editing
+    # an MR whose source_branch can't be verified as namespace is denied — same scope
+    # as mr.note/mr.discussion, but exercised on the update endpoint itself, not
     # just the note endpoint.
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="x")
     req.mr_source_ok = False

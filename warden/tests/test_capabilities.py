@@ -27,8 +27,9 @@ from warden.guards.git.policy import git_ref_capabilities
 from warden.guards.gitlab_api.catalog import (
     CATALOG,
     DEFAULT_ENABLED,
-    CatalogEntry,
     EndpointKind,
+    Recognizer,
+    ScopeKind,
     api_capabilities,
 )
 from warden.guards.gitlab_api.catalog.builtin import is_builtin_merge_endpoint
@@ -159,7 +160,7 @@ def test_git_ref_capabilities_golden_table(cfg, old, new, ref, expected):
 # --- REST: every CATALOG row, plus the field-dependent merge alias --------
 
 
-def _endpoint(template: str, method: str) -> CatalogEntry:
+def _endpoint(template: str, method: str) -> Recognizer:
     for ep in CATALOG:
         if ep.template == template and ep.method == method:
             return ep
@@ -333,11 +334,11 @@ def test_e2e_capability_layer_denies_even_without_endpoint_checks(cfg):
     denied, because the capability gate runs before the guard's own
     ``decide``/``ep.checks`` (kernel sequence, §03.2).
     """
-    hypothetical_row = CatalogEntry(
+    hypothetical_row = Recognizer(
         id="hypothetical.merge_via_release",
         method="POST",
         template="/projects/{id}/releases",
-        checks=(),  # no checks whatsoever — the old-style defense is gone
+        scope_kind=ScopeKind.QUOTA_BY_KIND,  # no scope check whatsoever — the old-style defense is gone
         rule="R4",
         kind=EndpointKind.MERGE,
         capabilities=frozenset({Capability.MERGES}),

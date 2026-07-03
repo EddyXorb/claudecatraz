@@ -24,6 +24,7 @@ def endpoint_table_report(cfg: Config) -> dict[str, Any]:
     rows = []
     for entry in CATALOG:
         active_entry = active_by_id.get(entry.id)
+        assert entry.kind is not None, f"write catalog entry {entry.id!r} has no kind"
         rows.append(
             {
                 "id": entry.id,

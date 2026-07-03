@@ -7,6 +7,13 @@ only reachable when explicitly enabled via ``warden.toml``.
 
 The merge endpoint is deliberately **not** here — it is a built-in deny invariant
 (``builtin.py``), not an activatable row.
+
+Every row is a :class:`~.model.Recognizer` (§07 Punkt 7): its ``scope_kind`` is
+either ``BRANCH_NAMESPACE`` (a branch name — literal or resolved via an iid → MR
+lookup — must lie in the namespace) or ``QUOTA_BY_KIND`` (project boundary +
+quota only, e.g. ``issue.create``). The former author-based ``mr-ownership``
+scope no longer exists (§07 Punkt 4): MR access is namespace-only, regardless
+of who opened the MR.
 """
 
 from __future__ import annotations
@@ -15,82 +22,90 @@ from typing import Iterable, Mapping, Optional
 
 from ....core.capabilities import Capability
 from ....core.rules import R3
-from .checks import MR_SOURCE_IN_NAMESPACE, field_has_prefix, field_not_equals
-from .model import CatalogEntry, EndpointKind, FieldSpec, Location
+from .model import EndpointKind, FieldSpec, Location, Recognizer, ScopeKind
 
-CATALOG: tuple[CatalogEntry, ...] = (
+CATALOG: tuple[Recognizer, ...] = (
     # --- default set -----
-    CatalogEntry(
+    Recognizer(
         id="mr.create",
         method="POST",
         template="/projects/{id}/merge_requests",
-        checks=(field_has_prefix("source_branch"),),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field="source_branch",
         rule=R3,
         kind=EndpointKind.MR,
         # capabilities=∅: creating an MR touches no git ref (the branch it
         # points at was already pushed separately) — honestly not creates_ref.
         decision_fields=(FieldSpec("source_branch", Location.BODY),),
     ),
-    CatalogEntry(
+    Recognizer(
         id="mr.note",
         method="POST",
         template="/projects/{id}/merge_requests/{iid}/notes",
-        checks=(MR_SOURCE_IN_NAMESPACE,),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field=None,  # request carries only the iid — resolved via MR lookup
         rule=R3,
         kind=EndpointKind.NOTE,
     ),
-    CatalogEntry(
+    Recognizer(
         id="mr.discussion",
         method="POST",
         template="/projects/{id}/merge_requests/{iid}/discussions",
-        checks=(MR_SOURCE_IN_NAMESPACE,),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field=None,
         rule=R3,
         kind=EndpointKind.NOTE,
     ),
-    CatalogEntry(
+    Recognizer(
         id="mr.discussion_reply",
         method="POST",
         template="/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes",
-        checks=(MR_SOURCE_IN_NAMESPACE,),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field=None,
         rule=R3,
         kind=EndpointKind.NOTE,
     ),
-    CatalogEntry(
+    Recognizer(
         id="mr.update",
         method="PUT",
         template="/projects/{id}/merge_requests/{iid}",
-        checks=(MR_SOURCE_IN_NAMESPACE, field_not_equals("state_event", "merge")),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field=None,
         rule=R3,
         kind=EndpointKind.MR_UPDATE,
         # capabilities=∅ *statically* — the state_event=merge alias is
-        # field-dependent, added by api_capabilities(), not declared here.
+        # field-dependent, added by api_capabilities(), not declared here. The
+        # capability layer alone forbids it (§07 Punkt 7: the former separate
+        # "state_event != merge" check is redundant and has been removed).
         decision_fields=(FieldSpec("state_event", Location.BODY),),
     ),
-    CatalogEntry(
+    Recognizer(
         id="pipeline.trigger",
         method="POST",
         template="/projects/{id}/pipeline",
-        checks=(field_has_prefix("ref"),),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field="ref",
         rule=R3,
         kind=EndpointKind.PIPELINE,
         decision_fields=(FieldSpec("ref", Location.BODY),),
     ),
     # --- extra, honestly-catalogued entries — NOT in DEFAULT_ENABLED --------
-    CatalogEntry(
+    Recognizer(
         id="branch.create",
         method="POST",
         template="/projects/{id}/repository/branches",
-        checks=(field_has_prefix("branch"),),
+        scope_kind=ScopeKind.BRANCH_NAMESPACE,
+        namespace_field="branch",
         rule=R3,
         kind=EndpointKind.BRANCH,
         capabilities=frozenset({Capability.CREATES_REF}),
         decision_fields=(FieldSpec("branch", Location.BODY),),
     ),
-    CatalogEntry(
+    Recognizer(
         id="issue.create",
         method="POST",
         template="/projects/{id}/issues",
-        checks=(),
+        scope_kind=ScopeKind.QUOTA_BY_KIND,
         rule=R3,
         kind=EndpointKind.ISSUE,
         # capabilities=∅: an issue is not a ref, a tag, or a merge — GitLab
@@ -112,7 +127,7 @@ DEFAULT_ENABLED: frozenset[str] = frozenset(
 )
 
 
-def api_capabilities(ep: CatalogEntry, fields: Mapping[str, object]) -> frozenset[Capability]:
+def api_capabilities(ep: Recognizer, fields: Mapping[str, object]) -> frozenset[Capability]:
     """Endpoint capabilities plus field-dependent additions.
 
     Every row's capabilities are static — declared on the table, independent
@@ -128,9 +143,7 @@ def api_capabilities(ep: CatalogEntry, fields: Mapping[str, object]) -> frozense
     return frozenset(caps)
 
 
-def match_endpoint(
-    entries: Iterable[CatalogEntry], method: str, path: str
-) -> Optional[CatalogEntry]:
+def match_endpoint(entries: Iterable[Recognizer], method: str, path: str) -> Optional[Recognizer]:
     """Return the first entry in ``entries`` matching ``method``/``path``.
 
     ``entries`` is normally an EffectiveTable's ``.entries`` — the activated

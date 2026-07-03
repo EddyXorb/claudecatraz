@@ -11,7 +11,7 @@ from warden.guards.gitlab_api.catalog import entries as entries_mod
 from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
 from warden.guards.gitlab_api.catalog.entries import CATALOG, DEFAULT_ENABLED
 from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
-from warden.guards.gitlab_api.catalog.model import CatalogEntry, EndpointKind
+from warden.guards.gitlab_api.catalog.model import EndpointKind, Recognizer, ScopeKind
 
 
 @pytest.fixture
@@ -68,11 +68,11 @@ def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):
     # substituting a fake catalog.
     from warden.core.capabilities import Capability
 
-    forbidden_entry = CatalogEntry(
+    forbidden_entry = Recognizer(
         id="hypothetical.forbidden",
         method="POST",
         template="/projects/{id}/whatever",
-        checks=(),
+        scope_kind=ScopeKind.QUOTA_BY_KIND,
         rule="R4",
         kind=EndpointKind.ISSUE,
         capabilities=frozenset({Capability.MERGES}),
