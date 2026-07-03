@@ -317,28 +317,44 @@ an H2 delegiert (Startgate) oder bewusst als won't-do vermerkt (reconcile-in-Gua
 
 ---
 
-## 6. Guard-Unabhängigkeit: git-Guard eigenständig, Transport entkoppelt
+## 6. Guard-Unabhängigkeit: git-Guard eigenständig, Transport entkoppelt, `GitForge` auflösen
 
 **Ziel.** Der git-Guard (`guards/git/guard.py`) importiert heute `GitForge` und
-`stream_upstream` aus `guards/gitlab/` — die „one honest exception §03.3". Ziel:
-jeder Guard steht für sich, der git-Guard funktioniert auch **ohne** GitLab (z.B.
-gegen einen privaten Non-Forge-git-Server). Dafür muss der reine **Transport**
-(HTTPS-Upstream + Credential-Injektion + Streaming) von den **GitLab-Domänen-
-Spezifika** (MR-Ownership, Reconcile von MRs) getrennt werden. Der Pfeil zeigt
-heute falsch: Transport ist fundamentaler als der Forge.
+`stream_upstream` aus `guards/gitlab/` — die „one honest exception §03.3". Zwei
+Ziele: (a) jeder Guard steht für sich, der git-Guard funktioniert auch **ohne**
+GitLab (z.B. gegen einen privaten Non-Forge-git-Server); (b) **die Klasse
+`GitForge` verschwindet ganz** — sie ist kein Guard, liegt aber im Guard-Bereich
+(`guards/gitlab/`, weder Guard noch Transport), und nach Entzug des Transports
+enthält sie nur noch GitLab-Spezifika, die ins API-Guard-Paket gehören.
+
+**Wichtige Ausgangslage (Reihenfolge-Falle).** `GitForge` ist heute **geteilt**:
+`context.py` injiziert es in `GitGuard` **und** `ApiGuard`. Der git-Guard nutzt
+daran mehr als Transport:
+
+- `reconcile()` baut in einem Rutsch **Branch**-Zähler (git) *und* MR-Zähler (API)
+  aus GitLab neu auf und setzt `mark_reconciled()`/Unlock;
+- `state_view()` kombiniert Core-Lock/Writes **+ Branch-Counts (git) + MR-Counts (API)**;
+- `project_id_aliases` / `project_allowed_by_id` (numerische-ID-Auflösung für die
+  R6-Projektgrenze), im Reconcile befüllt, von beiden Guards gelesen.
+
+Deshalb darf man das Rest-`GitForge` **nicht** einfach in `ApiGuard` falten,
+solange der git-Guard noch daran hängt — sonst tauscht man „git-Guard hängt an
+`gitlab.forge`" gegen „git-Guard hängt an `ApiGuard`" (Guard→Guard), also die
+**exakt verbotene** Kopplung. Die Fold kommt daher **zuletzt**, nach der
+git-Verselbstständigung. Der Pfeil zeigt heute falsch: Transport ist
+fundamentaler als der Forge.
 
 Die git-nativen Sicherheitsregeln existieren bereits in `guards/git/policy.py`
 (R2 Branch-Prefix, R4 kein Tag/Delete, R5 max offene Branches + Writes/Stunde) —
 sie brauchen keinen Forge. **Ergänzt** wird nur eine Regel: Push-Größe begrenzen.
 
-**Umsetzung.**
+**Umsetzung (in dieser Reihenfolge).**
 
 1. **Transport neutralisieren.** Die transport-artigen Teile von `GitForge`
    (`Upstream`-Nutzung, Credential-/Token-Injektion, `stream_upstream`) in einen
    forge-neutralen Baustein extrahieren — Vorschlag: `guards/git/transport.py`
    (oder `core/`, falls beide Guards ihn teilen). Der git-Guard hängt danach an
-   diesem Transport, **nicht** an `guards.gitlab.forge`. `GitForge` behält nur die
-   GitLab-Domänen-Logik (MR-Ownership-Lookup, MR-Reconcile). Falls git-Guard und
+   diesem Transport, **nicht** an `guards.gitlab.forge`. Falls git-Guard und
    REST-Guard denselben Upstream-Pool teilen sollen (Connection-Pooling), injiziert
    der Composition Root **einen generischen** HTTP-Client — der git-Guard bekommt
    nie ein gitlab-benanntes Objekt.
@@ -351,11 +367,38 @@ sie brauchen keinen Forge. **Ergänzt** wird nur eine Regel: Push-Größe begren
    **billig und ohne Packfile-Parsing**: `Content-Length` bzw. die Länge des
    gelesenen Bodys heranziehen. Config-Feld `max_push_bytes` in `core/config.py`
    ergänzen (Default großzügig, z.B. einige MB).
+4. **git-Guard bekommt eigenen State + `state_view`.** Damit der git-Guard nicht
+   mehr am geteilten `GitForge`-Reconcile hängt: seinen Branch-/Rate-Zustand selbst
+   führen (Core-`writes`/Lock bleibt Core; die Branch-Verfolgung wird git-eigen).
+   `state_view()` aufsplitten — jeder Guard baut seinen eigenen Snapshot
+   (Core-Lock + **eigene** Domänen-Counts), statt einen kombinierten aus dem Forge
+   zu ziehen. Nach diesem Schritt liest der git-Guard **nichts** mehr aus
+   `guards/gitlab/`.
+5. **`GitForge` auflösen und in den API-Guard falten (`GitForge` als Klasse
+   entfällt).** Erst wenn Schritt 4 steht, hat die Rest-Domänenlogik nur noch
+   **einen** Konsumenten (den API-Guard):
+   - `mr_source_in_namespace` (ehem. Ownership-Lookup, siehe Schritt 4 des
+     Dokuments), MR-Reconcile (`_list_agent_mrs`, `_get_paginated`), die
+     numerische-ID-Auflösung (`project_id_aliases`, `_resolve_project_id`,
+     `project_allowed_by_id`) und der MR-Anteil von `state_view` wandern ins
+     `guards/gitlab_api/`-Paket.
+   - Kein Gott-Objekt: diese Helfer dürfen in Nachbardateien im `gitlab_api`-Paket
+     liegen (`reconcile.py`, `ownership.py`, o.ä.), damit die Guard-Datei klein
+     bleibt. Sie sind Implementierungsdetail **des** API-Guards, keine geteilte
+     Klasse mehr.
+   - `guards/gitlab/` löst sich auf: `forge.py` weg, `upstream.py` → in den
+     neutralen Transport (Schritt 1), `state.py` (ForgeState/MRs) → ins
+     `gitlab_api`-Paket. Das Paket, das „weder Guard noch Transport" war,
+     existiert danach nicht mehr.
 
 **Nicht tun.**
+- **Rest-`GitForge` nicht vor Schritt 4 in `ApiGuard` falten.** Solange der
+  git-Guard noch am geteilten Reconcile/`state_view`/Projekt-Alias hängt, erzeugt
+  die Fold eine git→ApiGuard-Kopplung (Guard→Guard) — schlechter als heute. Erst
+  Transport raus (1) und git-eigener State (4), **dann** falten (5).
 - **Kein** Live-Zählen von Branches/Commits per `git fetch` im Entscheidungspfad.
   Das erforderte git-Binary + Netz-Roundtrip + Credentials nur für eine
-  Entscheidung. Der State (`agent_branches`/`writes_last_hour` in SQLite) existiert
+  Entscheidung. Der State (Branch-/`writes_last_hour`-Zähler in SQLite) existiert
   genau, um das zu vermeiden — er bleibt die Quelle für Regel 1/3/5.
 - **Kein** Umschreiben/Annotieren von Commits durch den Warden. Commit-Messages im
   Proxy zu verändern erzeugt neue SHAs, bricht Signaturen und lässt die gepushten
@@ -364,20 +407,24 @@ sie brauchen keinen Forge. **Ergänzt** wird nur eine Regel: Push-Größe begren
   hier.
 
 **Tests.**
-- `warden/tests/test_git_proxy.py`, `test_git_e2e.py`, `tests/container/test_git_warden.py`:
-  müssen nach der Transport-Extraktion unverändert grün bleiben (Verhalten gleich).
+- `warden/tests/test_git_proxy.py`, `test_git_e2e.py`, `test_forge.py`,
+  `test_forge_state.py`, `tests/container/test_git_warden.py`: müssen das Verhalten
+  über Transport-Extraktion, State-Split und Fold hinweg **grün** halten (gleiche
+  Entscheidungen, gleiche Reconcile-Ergebnisse). Bei der Fold ziehen die
+  `test_forge*`-Tests thematisch ins `gitlab_api`-Testpaket um.
 - Neuer Test für das Push-Größenlimit: ein receive-pack-Request knapp über
   `max_push_bytes` wird mit R5 abgelehnt, knapp darunter durchgelassen (in
   `test_git_proxy.py` oder `test_policy.py`).
-- Sicherstellen, dass `guards/git/` **nicht** mehr aus `guards/gitlab/forge`
-  importiert: `grep -n "from ..gitlab" warden/warden/guards/git/` darf nur noch
-  den Transport-Import (falls in `gitlab/` verblieben — besser nicht) bzw. gar
-  nichts Domänenspezifisches zeigen.
+- **Kopplungs-Test (die Kernaussage dieses Schritts):** `guards/git/` importiert
+  weder aus `guards/gitlab/` noch aus `guards/gitlab_api/`. Prüfen mit
+  `grep -rn "from ..gitlab\|import gitlab" warden/warden/guards/git/` → keine
+  Treffer. Und `guards/gitlab/` existiert nach Schritt 5 nicht mehr.
 - Verifikation: pytest/ruff/mypy grün.
 
-**Fertig-Kriterium.** `guards/git/` importiert keine GitLab-Domänenlogik mehr; der
-git-Guard hat ein Push-Größenlimit; die git-nativen Regeln (R2/R4/R5) stehen ohne
-Forge; Tests grün.
+**Fertig-Kriterium.** `GitForge` als Klasse ist weg; `guards/gitlab/` existiert
+nicht mehr; der git-Guard importiert keine Forge-/Guard-Fremdlogik und hat eigenen
+State + Push-Größenlimit; die GitLab-Domänenlogik liegt im `gitlab_api`-Paket; die
+git-nativen Regeln (R2/R4/R5 + Größe) stehen ohne Forge; Tests grün.
 
 ---
 
