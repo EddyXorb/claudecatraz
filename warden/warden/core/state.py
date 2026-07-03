@@ -1,16 +1,18 @@
-"""Durable, fail-safe quota state (W8, §6.11).
+"""Durable, fail-safe quota state (W8, §6.11): the generic writes counter and
+the reconcile lock, plus :class:`StateStore` — the connection owner every
+domain builds its own tables on.
 
-SQLite with WAL + ``synchronous=FULL``; every write-record commits *before* the
-upstream call so a crash never loses the hourly counter. If the state cannot be
-reconstructed, the view is **locked** ("limit reached") until a reconcile
-succeeds — never "empty = 0 used = all free".
+SQLite with WAL + ``synchronous=FULL``; every write-record commits *before*
+the upstream call so a crash never loses the hourly counter. If the state
+cannot be reconstructed, the view is **locked** ("limit reached") until a
+reconcile succeeds — never "empty = 0 used = all free".
 
 Kernel-owned (§03.3): the counters and their fail-safe locking are a
 resource-agnostic concept (M5) any guard's quotas can share, keyed by the
 ``guard``/``kind`` strings a guard passes to :meth:`State.record_write` — this
-module has no GitLab/git vocabulary of its own. ``agent_branches``/
-``agent_mrs`` are named for what they track (the agent's own namespace-scoped
-branches/MRs, §03.5), not for a specific guard.
+module has no forge vocabulary of its own (no branch/MR tables; those live in
+the forge domain's own :class:`~warden.guards.gitlab.state.ForgeState`, built
+on the :class:`StateStore` this module exposes).
 
 **Schema versioning** (§06-migration.md Schritt 2, F11): the DB carries its
 schema version in SQLite's own ``PRAGMA user_version`` — a single integer slot
@@ -31,7 +33,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional, Sequence
 
 from .model import StateView
 from .state_migrations import (
@@ -48,10 +50,11 @@ __all__ = [
     "MIGRATIONS",
     "SchemaError",
     "State",
+    "StateStore",
     "WINDOW_SECONDS",
 ]
 
-_SCHEMA = """
+_CORE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS writes (
   id         INTEGER PRIMARY KEY,
   ts         REAL NOT NULL,
@@ -61,21 +64,25 @@ CREATE TABLE IF NOT EXISTS writes (
 );
 CREATE INDEX IF NOT EXISTS idx_writes_ts ON writes(ts);
 
-CREATE TABLE IF NOT EXISTS agent_branches (
-  project TEXT, ref TEXT, created REAL,
-  PRIMARY KEY (project, ref)
-);
-CREATE TABLE IF NOT EXISTS agent_mrs (
-  project TEXT, iid INTEGER, state TEXT, created REAL,
-  PRIMARY KEY (project, iid)
-);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 WINDOW_SECONDS = 3600
 
 
-class State:
+class StateStore:
+    """The connection owner (the "Persistenz-Werkzeug", §E): one SQLite
+    connection (WAL + ``synchronous=FULL``), shared by core state and every
+    domain's own state (e.g. the forge's :class:`~warden.guards.gitlab.state.ForgeState`)
+    so they stay one writer on one file, never a second connection.
+
+    Runs the historical schema migrations at connect time, before any table
+    (core's or a domain's) is created — a legacy ``claude_*`` DB must already
+    be lifted to current names by the time a domain's own
+    ``CREATE TABLE IF NOT EXISTS`` runs, or that statement would create a
+    second, empty table alongside the legacy one instead of a no-op.
+    """
+
     def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
         self._clock = clock
         if db_path != ":memory:":
@@ -84,8 +91,23 @@ class State:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
-        run_migrations(self._db)  # before schema creation (see state_migrations.run_migrations)
-        self._db.executescript(_SCHEMA)
+        run_migrations(self._db)  # before any CREATE TABLE — see class docstring
+
+    @property
+    def clock(self) -> Callable[[], float]:
+        return self._clock
+
+    def execute(self, sql: str, params: Sequence[object] = ()) -> sqlite3.Cursor:
+        return self._db.execute(sql, params)
+
+    def executemany(self, sql: str, seq: Iterable[Sequence[object]]) -> None:
+        self._db.executemany(sql, seq)
+
+    def executescript(self, script: str) -> None:
+        self._db.executescript(script)
+        self._db.commit()
+
+    def commit(self) -> None:
         self._db.commit()
 
     def close(self) -> None:
@@ -95,90 +117,73 @@ class State:
         row = self._db.execute("PRAGMA user_version").fetchone()
         return int(row[0])
 
+
+class State:
+    """Core quota state (W8, §6.11): the ``writes`` counter and the reconcile
+    lock, built on a :class:`StateStore`. No branch/MR vocabulary — a guard
+    with no domain state genuinely has no open branches/MRs, so
+    :meth:`view` reports zero for those, never fabricating a forge concept.
+    """
+
+    def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
+        self._clock = clock
+        self._store = StateStore(db_path, clock=clock)
+        self._store.executescript(_CORE_SCHEMA)
+
+    @property
+    def store(self) -> StateStore:
+        """The shared connection, for a domain (e.g. the forge) to build its
+        own tables on — never a second connection."""
+        return self._store
+
+    def close(self) -> None:
+        self._store.close()
+
+    def schema_version(self) -> int:
+        return self._store.schema_version()
+
     # --- recording -------------------------------------------------------------
     def record_write(self, guard: str, kind: str, ref_or_iid: Optional[str] = None) -> None:
         """Persist a write-record and fsync *before* the upstream call (§6.11)."""
-        self._db.execute(
+        self._store.execute(
             "INSERT INTO writes (ts, guard, kind, ref_or_iid) VALUES (?, ?, ?, ?)",
             (self._clock(), guard, kind, ref_or_iid),
         )
-        self._db.commit()
-
-    def add_branch(self, project: str, ref: str) -> None:
-        self._db.execute(
-            "INSERT OR REPLACE INTO agent_branches (project, ref, created) VALUES (?, ?, ?)",
-            (project, ref, self._clock()),
-        )
-        self._db.commit()
-
-    def upsert_mr(self, project: str, iid: int, state: str) -> None:
-        self._db.execute(
-            "INSERT OR REPLACE INTO agent_mrs (project, iid, state, created) VALUES "
-            "(?, ?, ?, COALESCE((SELECT created FROM agent_mrs WHERE project=? AND iid=?), ?))",
-            (project, iid, state, project, iid, self._clock()),
-        )
-        self._db.commit()
+        self._store.commit()
 
     # --- views -----------------------------------------------------------------
     def writes_last_hour(self) -> int:
         cutoff = self._clock() - WINDOW_SECONDS
-        row = self._db.execute(
+        row = self._store.execute(
             "SELECT count(*) AS c FROM writes WHERE ts > ?", (cutoff,)
         ).fetchone()
         return int(row["c"])
 
-    def open_branches(self) -> int:
-        row = self._db.execute("SELECT count(*) AS c FROM agent_branches").fetchone()
-        return int(row["c"])
-
-    def open_mrs(self) -> int:
-        row = self._db.execute(
-            "SELECT count(*) AS c FROM agent_mrs WHERE state='opened'"
-        ).fetchone()
-        return int(row["c"])
-
     def is_reconciled(self) -> bool:
-        row = self._db.execute("SELECT value FROM meta WHERE key='last_reconcile'").fetchone()
+        row = self._store.execute(
+            "SELECT value FROM meta WHERE key='last_reconcile'"
+        ).fetchone()
         return row is not None
 
     def view(self) -> StateView:
-        """Snapshot for the policy. Locked until the first successful reconcile."""
+        """Core-only snapshot for the policy. Locked until the first
+        successful reconcile; open_mrs/open_branches default to 0 — a domain
+        (e.g. :class:`~warden.guards.gitlab.forge.GitlabForge`) fills those
+        via its own :meth:`~warden.guards.gitlab.forge.GitlabForge.state_view`.
+        """
         if not self.is_reconciled():
             return StateView(locked=True)
-        return StateView(
-            open_mrs=self.open_mrs(),
-            open_branches=self.open_branches(),
-            writes_last_hour=self.writes_last_hour(),
-            locked=False,
-        )
+        return StateView(writes_last_hour=self.writes_last_hour(), locked=False)
 
     # --- maintenance -----------------------------------------------------------
     def prune(self) -> None:
         cutoff = self._clock() - WINDOW_SECONDS
-        self._db.execute("DELETE FROM writes WHERE ts < ?", (cutoff,))
-        self._db.commit()
-
-    def replace_branches(self, project: str, refs: list[str]) -> None:
-        self._db.execute("DELETE FROM agent_branches WHERE project=?", (project,))
-        now = self._clock()
-        self._db.executemany(
-            "INSERT OR REPLACE INTO agent_branches (project, ref, created) VALUES (?, ?, ?)",
-            [(project, r, now) for r in refs],
-        )
-        self._db.commit()
-
-    def replace_mrs(self, project: str, mrs: list[tuple[int, str]]) -> None:
-        self._db.execute("DELETE FROM agent_mrs WHERE project=?", (project,))
-        now = self._clock()
-        self._db.executemany(
-            "INSERT OR REPLACE INTO agent_mrs (project, iid, state, created) VALUES (?, ?, ?, ?)",
-            [(project, iid, st, now) for iid, st in mrs],
-        )
-        self._db.commit()
+        self._store.execute("DELETE FROM writes WHERE ts < ?", (cutoff,))
+        self._store.commit()
 
     def mark_reconciled(self) -> None:
-        self._db.execute(
+        self._store.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('last_reconcile', ?)",
             (str(self._clock()),),
         )
-        self._db.commit()
+        self._store.commit()

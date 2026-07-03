@@ -75,13 +75,16 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     assert sent.headers["authorization"] == _basic("WRITE-TOKEN")
     assert sent.content == body
     # The create was recorded for the branch quota.
-    assert ctx.state.open_branches() == 1
+    assert ctx.forge.forge_state.open_branches() == 1
     assert ctx.state.writes_last_hour() == 1
     # Regression: the project key is normalised (no ``.git`` suffix) so it matches
     # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
     # reconcile row (``proj``) coexist → the branch is counted twice and the push
     # row is never pruned (R5 ``max_open_branches`` drift).
-    keys = [r["project"] for r in ctx.state._db.execute("SELECT project FROM agent_branches")]
+    keys = [
+        r["project"]
+        for r in ctx.state.store.execute("SELECT project FROM agent_branches")
+    ]
     assert keys == ["group/proj"]
 
 

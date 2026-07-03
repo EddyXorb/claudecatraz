@@ -85,7 +85,7 @@ async def test_list_mrs_paginates_filters_and_scopes_to_author(forge, respx_rout
 # --- reconcile (W8.2 / §6.11) --------------------------------------------------
 async def test_reconcile_populates_counters_and_unlocks(cfg, respx_router):
     forge = _forge(cfg)
-    assert forge.state.view().locked is True  # locked until first successful reconcile
+    assert forge.state_view().locked is True  # locked until first successful reconcile
 
     respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
         return_value=httpx.Response(200, json={"id": 12345})
@@ -102,7 +102,7 @@ async def test_reconcile_populates_counters_and_unlocks(cfg, respx_router):
     ok = await forge.reconcile()
 
     assert ok is True
-    view = forge.state.view()
+    view = forge.state_view()
     assert view.locked is False
     assert view.open_branches == 2
     assert view.open_mrs == 1
@@ -127,7 +127,7 @@ async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
     ok = await forge.reconcile()
 
     assert ok is False
-    assert forge.state.view().locked is True
+    assert forge.state_view().locked is True
     await forge.upstream.aclose()
 
 
@@ -232,11 +232,11 @@ async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
     """reconcile() must make NO upstream call when GITLAB_MODE=off, and must unlock state."""
     cfg_off = Config(gitlab_mode="off")
     forge = _forge(cfg_off, sa=None)
-    assert forge.state.view().locked is True  # starts locked
+    assert forge.state_view().locked is True  # starts locked
 
     # No mock registered — any upstream call raises respx.MockTransportError.
     ok = await forge.reconcile()
 
     assert ok is True
-    assert forge.state.view().locked is False  # unlocked so the warden can serve (and deny)
+    assert forge.state_view().locked is False  # unlocked so the warden can serve (and deny)
     await forge.upstream.aclose()

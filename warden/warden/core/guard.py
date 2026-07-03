@@ -169,6 +169,13 @@ class Guard(ABC, Generic[IntentT]):
         """
         return self.cfg.project_allowed(project)
 
+    def state_view(self) -> StateView:
+        """Quota snapshot hook. Default: the core-only view (no domain state).
+        A guard backed by a domain (e.g. the forge's branch/MR counters)
+        overrides this to return the combined snapshot instead.
+        """
+        return self.state.view()
+
     async def startup(self) -> None:
         """One-time, pre-serve setup (§03.5/03.6) — e.g. resolving the
         service-account id. Default no-op; a guard overrides only if it needs
@@ -196,7 +203,7 @@ class Guard(ABC, Generic[IntentT]):
         started = time.monotonic()
 
         intent = await self.parse(request)
-        view = self.state.view()
+        view = self.state_view()
 
         decision = kernel_gates(intent, self.cfg, self.project_allowed)
         if decision is None:

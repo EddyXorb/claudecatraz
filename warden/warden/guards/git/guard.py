@@ -74,6 +74,9 @@ class GitGuard(Guard[GitIntent]):
             Route("/git/{project:path}/git-receive-pack", self.handle, methods=["POST"]),
         ]
 
+    def state_view(self) -> StateView:
+        return self.forge.state_view()
+
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for
         receive-pack — the untouched PACK payload streams through
@@ -142,7 +145,7 @@ class GitGuard(Guard[GitIntent]):
             ref = cmd.ref.removeprefix("refs/heads/")
             self.state.record_write("git", "push", ref)
             if cmd.is_create:
-                self.state.add_branch(intent.project, ref)
+                self.forge.forge_state.add_branch(intent.project, ref)
 
     async def forward(
         self, request: Request, intent: GitIntent, decision: Decision

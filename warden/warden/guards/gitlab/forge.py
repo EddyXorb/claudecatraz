@@ -20,8 +20,9 @@ from typing import Any, Callable, Optional
 
 from ...core.audit import AuditLog
 from ...core.config import Config, normalize_project
-from ...core.model import TokenKind
+from ...core.model import StateView, TokenKind
 from ...core.state import State
+from .state import ForgeState
 from .upstream import Upstream, project_id
 
 
@@ -38,6 +39,7 @@ class GitlabForge:
         self.cfg = cfg
         self.upstream = upstream
         self.state = state
+        self.forge_state = ForgeState(state.store)
         self.audit = audit
         self._clock = clock
         self.service_account_id: Optional[int] = None
@@ -101,6 +103,20 @@ class GitlabForge:
         project, resolved by the last successful :meth:`reconcile`."""
         return normalize_project(project) in self.project_id_aliases
 
+    # --- state view (§E) ---------------------------------------------------------
+    def state_view(self) -> StateView:
+        """Combined snapshot: core's fail-safe lock/writes counter plus this
+        domain's branch/MR counts — what :class:`~warden.core.guard.Guard`
+        subclasses that depend on this forge (git, REST) pass to ``decide``."""
+        if not self.state.is_reconciled():
+            return StateView(locked=True)
+        return StateView(
+            open_mrs=self.forge_state.open_mrs(),
+            open_branches=self.forge_state.open_branches(),
+            writes_last_hour=self.state.writes_last_hour(),
+            locked=False,
+        )
+
     # --- reconcile (W8.2) ------------------------------------------------------
     async def reconcile(self) -> bool:
         """Rebuild branch/MR counters from GitLab. Returns True on full success.
@@ -130,8 +146,8 @@ class GitlabForge:
                 ok = False
                 continue
             resolved_ids.append(numeric_id)
-            self.state.replace_branches(project, branches)
-            self.state.replace_mrs(project, mrs)
+            self.forge_state.replace_branches(project, branches)
+            self.forge_state.replace_mrs(project, mrs)
         # Teach the allowlist the numeric-id alias of each project so requests that
         # address /projects/<id>/… (instead of the path) are not wrongly R6-denied.
         # Forge state (project_id_aliases), never Config — Config is never mutated.

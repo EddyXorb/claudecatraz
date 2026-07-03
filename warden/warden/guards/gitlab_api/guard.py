@@ -68,6 +68,9 @@ class ApiGuard(Guard[ApiIntent]):
         resolved (GitLab treats path and id interchangeably)."""
         return self.cfg.project_allowed(project) or self.forge.project_allowed_by_id(project)
 
+    def state_view(self) -> StateView:
+        return self.forge.state_view()
+
     async def startup(self) -> None:
         await self.forge.resolve_service_account()
 
