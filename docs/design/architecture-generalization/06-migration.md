@@ -95,6 +95,11 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
    (inkl. `environ`/`render_instructions`), verhaltenserhaltend, von `tests/container/`
    abgedeckt. Danach Manifest + Profile (§05.3), `catraz`-CLI-Entkopplung und die
    **Adapter-Conformance-Harness** (§05.5) — sie ist die Abnahme dieses Schritts.
+   Zusätzlich (Maintainer-Entscheid, 2026-07): **persistenter Claude-State pro Repo**
+   (§05.6, `credentials.mode = "persistent"`): eigenes `claude login` im Dev-Container
+   statt geteilter Token-Familie mit dem Host, `.catraz/state/claude/` **selektiv**
+   writable gemountet (Credentials + Session-State, nie Settings/Hooks — A11) — fixt die
+   zuverlässigen `claude-remote`-Abbrüche nach OAuth-Token-Rotation.
 8. **Policy-by-Example-UX** (§04.4) — `catraz allow-endpoint --from-example`,
    Nutzer-Assertions in `.catraz/policy-tests/`. Reiner Komfort: das sicherheitstragende
    Startgate (Katalog-Sonden) kam schon mit Schritt 4.

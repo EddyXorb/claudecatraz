@@ -55,8 +55,9 @@ src/catraz/assets/agents/claude/
 name    = "claude"
 command = "claude"
 [credentials]
-subscription_source = "~/.claude/.credentials.json"   # was `catraz sync` importiert
+subscription_source = "~/.claude/.credentials.json"   # was `catraz sync` importiert (mode="sync")
 api_key_env         = "ANTHROPIC_API_KEY"
+mode                = "persistent"   # "sync" | "persistent" — Maintainer-Entscheid, siehe 05.6
 [modes]
 remote = true            # Remote-Control ist ein Claude-Feature → pro Agent gate-n
 [logs]
@@ -98,9 +99,29 @@ Red-Team-Suite (`tests/redteam/`) um die Agent-Dimension.
 
 ## 05.6 Was pro Agent ehrlich offen bleibt
 
-- **Credential-Refresh:** der Adapter deklariert, ob Refresh-Persistenz nötig ist; das
-  heutige „tmpfs verwirft Refresh, `catraz sync` heilt" ist Claude-Verhalten und darf nicht
-  stillschweigend auf andere Agenten übertragen werden.
+- **Credential-Refresh (Maintainer-Entscheid, 2026-07):** der Adapter deklariert seinen
+  Credential-Modus im Manifest (`credentials.mode`), mit zwei Ausprägungen:
+  - `sync` (heutiges Verhalten): `catraz sync` importiert die Host-Credentials read-only,
+    Refresh landet im tmpfs und stirbt mit dem Container. Nur für Kurzläufer tragfähig —
+    mit bekanntem Defekt: rotierende OAuth-Refresh-Tokens bilden mit dem Host **eine**
+    Token-Familie; wer zuerst refresht (Host oder Container), invalidiert die andere
+    Seite. Das erklärt die zuverlässigen `claude-remote`-Abbrüche nach wenigen Stunden.
+  - `persistent` (Default für Langläufer/`claude-remote`): einmaliges, **eigenes**
+    `claude login` im Dev-Container (Paste-URL-Flow) statt geteilter Token-Familie; der
+    Claude-State lebt in `.catraz/state/claude/` (0700) und wird writable in jeden
+    Dev-Container des Repos gemountet → persistenter State pro Catraz-Repo, Refresh
+    überlebt Container-Neustarts. **Selektiv, nie das ganze Home:** persistiert werden
+    Credentials (`.credentials.json`) und Session-/Projekt-State; Settings/Hooks/
+    Slash-Commands baut der Entrypoint weiterhin aus dem Image auf — ein voll-persistentes
+    `~/.claude` wäre eine Selbst-Reinfektions-Fläche (A11: eine kompromittierte Session
+    schriebe sich einen Hook, der jede künftige Session infiziert, über Neustarts hinweg).
+  - **Nebenläufigkeit:** mehrere Container auf demselben State-Ordner sind dieselbe
+    Situation wie mehrere Claude-Instanzen auf einem Host — dateibasierte Koordination
+    (flock wirkt über bind-mounts, ein Kernel; atomare renames), Session-Dateien pro UUID.
+    Rest-Risiko ist der gleichzeitige Token-Refresh zweier Container (Sekunden-Fenster,
+    alle paar Stunden) — akzeptiert; bei Bedarf später `--claude-state <name>` pro Instanz.
+  - `catraz doctor` prüft Mode-Konsistenz (persistenter Ordner vorhanden/Permissions);
+    eine CLI-Option unterbindet den Sync für `mode = "persistent"`-Läufe.
 - **Remote Control** ist ein Claude-Alleinstellungsmerkmal; `modes.remote=false` muss den
   `claude-remote`-Modus sauber verweigern (fail-closed statt kaputtem Daemon).
 - **AGENT.md-Äquivalent:** wohin Instruktionen müssen (CLAUDE.md vs. AGENTS.md vs. nichts)
