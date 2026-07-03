@@ -4,7 +4,7 @@ writer, O_APPEND, redaction-by-allowlist.
 
 **F6 fix.** Every guard used to build its own near-identical dict by hand
 (``git_proxy._audit``/``api_proxy._audit``). :class:`AuditEvent` is the one
-typed constructor now — :func:`core.guard.run_guarded` builds exactly one on
+typed constructor now — :meth:`core.guard.Guard.handle` builds exactly one on
 every pipeline exit (allow or deny) from the envelope fields every guard
 shares, plus whatever guard-specific extras :meth:`Guard.audit_fields`
 supplies (F6: "Aufrufer konstruieren das Event typisiert").
@@ -141,7 +141,7 @@ def build_event(
 ) -> dict[str, Any]:
     """Thin, dict-returning compatibility facade over :class:`AuditEvent` (F6:
     "build_event darf zur dünnen Fassade werden"). New code constructs an
-    :class:`AuditEvent` directly (:func:`core.guard.run_guarded` does); this
+    :class:`AuditEvent` directly (:meth:`core.guard.Guard.handle` does); this
     remains for callers that still want the plain-dict shape (and for the
     tests pinning that shape down byte for byte).
     """

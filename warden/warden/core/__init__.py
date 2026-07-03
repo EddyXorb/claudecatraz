@@ -2,7 +2,7 @@
 §03-guard-architektur.md, §06-migration.md Schritt 5).
 
 Everything a guard needs from the trust boundary that is *not itself*
-GitLab/git-specific: the pipeline template method (:func:`core.guard.run_guarded`)
+GitLab/git-specific: the pipeline template method (:meth:`core.guard.Guard.handle`)
 that guarantees A5's sequencing regardless of which guard runs, the shared
 policy value types (:mod:`core.model`), the rule registry, the capability
 vocabulary + ``FORBIDDEN`` invariant (§03.4), the typed audit event, durable
@@ -26,7 +26,6 @@ from .guard import (
     mode_gate_off,
     mode_gate_writes,
     project_gate,
-    run_guarded,
 )
 from .model import Decision, Intent, StateView, TokenKind
 from .path_template import compile_template
@@ -88,5 +87,4 @@ __all__ = [
     "qualify",
     "redact",
     "rule",
-    "run_guarded",
 ]

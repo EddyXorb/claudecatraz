@@ -5,7 +5,7 @@ The **vocabulary** and the compiled-in ``FORBIDDEN`` deny set are core-owned
 and guard-agnostic — every guard normalises its own, already-parsed intent to
 this small, closed vocabulary (what the request would *do*, independent of
 how it says so: a git ref-command, a REST body field, a SQL statement, …).
-:func:`core.guard.run_guarded` checks the result against :data:`FORBIDDEN`
+:meth:`core.guard.Guard.handle` checks the result against :data:`FORBIDDEN`
 before any guard-specific allow-logic runs (§03.2 pipeline step 6): if a
 request's capabilities intersect it, the request is denied, no matter which
 endpoint row or ref-check would otherwise have passed it. That is the fix for
@@ -93,7 +93,7 @@ def forbidden_check(caps: frozenset[Capability]) -> Optional[Decision]:
     Returns ``None`` when clear — the same "None ⇒ still passing" shape every
     per-endpoint/per-ref check in this codebase already uses, so callers can
     slot this in ahead of them without a different calling convention. The
-    kernel (:func:`core.guard.run_guarded`) runs this *before* any guard's own
+    kernel (:meth:`core.guard.Guard.handle`) runs this *before* any guard's own
     allow-logic (§03.4) — a hit here short-circuits regardless of what a
     matched endpoint row or ref-check would otherwise say.
     """

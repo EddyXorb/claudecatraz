@@ -21,7 +21,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from ...core.config import Config, normalize_project
-from ...core.guard import Guard, mode_gate_off, mode_gate_writes, project_gate, run_guarded
+from ...core.guard import Guard, mode_gate_off, mode_gate_writes, project_gate
 from ...core.model import Decision, StateView, TokenKind
 from ...errors import deny_json, git_reject_response
 from ..gitlab_api.context import AppContext
@@ -117,7 +117,7 @@ def _forward_encoding(request: Request) -> dict[str, str]:
 
 class GitGuard(Guard[GitPushIntent]):
     """The receive-pack write pipeline's hooks (§03.2) — used only via
-    :func:`core.guard.run_guarded` from :func:`receive_pack` below."""
+    :meth:`Guard.handle` from :func:`receive_pack` below."""
 
     # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
     # field used to be called ``channel``; the value itself is unchanged).
@@ -126,6 +126,7 @@ class GitGuard(Guard[GitPushIntent]):
         return "git"
 
     def __init__(self, ctx: AppContext) -> None:
+        super().__init__(ctx.cfg, ctx.state, ctx.audit)
         self.ctx = ctx
 
     async def parse(self, request: Request) -> GitPushIntent:
@@ -216,8 +217,8 @@ async def receive_pack(request: Request) -> Response:
 
     Data phase of ``git push``: the client sends ref-update commands followed by
     a packfile with the new objects. Runs through the kernel pipeline
-    (:func:`core.guard.run_guarded`) instead of hand-building the
+    (:meth:`core.guard.Guard.handle`) instead of hand-building the
     deny/record/forward sequence (F1's actual complaint about this handler).
     """
     ctx: AppContext = request.app.state.ctx
-    return await run_guarded(GitGuard(ctx), request, ctx.cfg, ctx.state, ctx.audit)
+    return await GitGuard(ctx).handle(request)

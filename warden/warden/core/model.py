@@ -48,7 +48,7 @@ class Intent(Protocol):
 
     * ``writes`` — derived by the guard's own parser (F3: "vom Parser
       abgeleitet, NICHT von der Decision"), never computed from a
-      :class:`Decision`. This is what lets :func:`core.guard.run_guarded`
+      :class:`Decision`. This is what lets :meth:`core.guard.Guard.handle`
       enforce the read-only mode-gate *before* ``enrich`` runs, so a write
       credential is structurally unreachable in read-only/off mode.
     * ``project`` — what the resource-allowlist gate (M6,

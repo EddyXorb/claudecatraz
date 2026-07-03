@@ -1,14 +1,13 @@
 """Kernel pipeline template method (§03.2, F1; docs/design/architecture-generalization,
 §03-guard-architektur.md §03.2, §06-migration.md Schritt 5).
 
-Before this module, ``api_proxy.handle`` and ``git_proxy.receive_pack`` each
-built the deny-short-circuit / record-before-forward / audit-on-every-path
-sequence by hand (F1). :func:`run_guarded` is the one place that sequence is
-built now — a guard supplies the parts (:class:`Guard`), the kernel owns the
-order, and a guard cannot reorder or skip a step because it never sees the
-sequence, only its own hooks.
+:class:`Guard` is the ABC every guard subclasses; :meth:`Guard.handle` is the
+one place the deny-short-circuit / record-before-forward / audit-on-every-path
+sequence is built — a guard supplies the parts (the abstract hooks below), the
+kernel owns the order, and a guard cannot reorder or skip a step because it
+never sees the sequence, only its own hooks.
 
-Sequence ``run_guarded`` guarantees, in this order:
+Sequence ``Guard.handle`` guarantees, in this order:
 
 1. ``guard.parse`` — transport → an :class:`~warden.core.model.Intent`. No
    credential is used yet; this is just shaping the already-received request.
@@ -43,7 +42,8 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Mapping, Optional, Protocol, TypeVar
+from abc import ABC, abstractmethod
+from typing import Any, Generic, Mapping, Optional, TypeVar
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -90,7 +90,7 @@ def project_gate(project: str, cfg: Config) -> Optional[Decision]:
 def kernel_gates(intent: Intent, cfg: Config) -> Optional[Decision]:
     """The guard-agnostic deny gates, in kernel order (module docstring, step 2).
 
-    One definition: :func:`run_guarded` runs this on every pipeline request,
+    One definition: :meth:`Guard.handle` runs this on every pipeline request,
     and each guard's ``full_decide`` composes it with the guard's pure
     ``decide`` so the startgate and unit tests exercise exactly the effective
     order — never a re-derived copy of it.
@@ -106,82 +106,92 @@ def kernel_gates(intent: Intent, cfg: Config) -> Optional[Decision]:
 IntentT = TypeVar("IntentT", bound=Intent)
 
 
-class Guard(Protocol[IntentT]):
-    """The parts a guard supplies to :func:`run_guarded` (§03.2/03.3).
+class Guard(ABC, Generic[IntentT]):
+    """The parts a guard supplies to :meth:`handle` (§03.2/03.3).
 
     ``name`` is the audit ``guard`` value (§06-migration.md Schritt 6, F11:
     the JSONL field used to be called ``channel``; the bare string values —
-    ``"git"``/``"api"`` — are unchanged). Every method below either does I/O
+    ``"git"``/``"api"`` — are unchanged). Every hook below either does I/O
     (parse/enrich/record/forward/deny_response) or is pure
     (capability_gate/decide) — only the pure half is what §03.4's capability
     invariant and default-deny guarantees rest on.
     """
 
+    def __init__(self, cfg: Config, state: State, audit: AuditLog) -> None:
+        self.cfg = cfg
+        self.state = state
+        self.audit = audit
+
     @property
+    @abstractmethod
     def name(self) -> str: ...
 
+    @abstractmethod
     async def parse(self, request: Request) -> IntentT: ...
 
+    @abstractmethod
     async def enrich(self, intent: IntentT) -> IntentT: ...
 
+    @abstractmethod
     def capability_gate(self, intent: IntentT, cfg: Config) -> Optional[Decision]: ...
 
+    @abstractmethod
     def decide(self, intent: IntentT, state: StateView, cfg: Config) -> Decision: ...
 
+    @abstractmethod
     def record(self, intent: IntentT, decision: Decision) -> None: ...
 
+    @abstractmethod
     async def forward(self, request: Request, intent: IntentT, decision: Decision) -> Response: ...
 
+    @abstractmethod
     def deny_response(self, intent: IntentT, decision: Decision, state: StateView) -> Response: ...
 
+    @abstractmethod
     def audit_fields(self, intent: IntentT) -> Mapping[str, Any]: ...
 
+    async def handle(self, request: Request) -> Response:
+        """The kernel (§03.2): guarantees the pipeline order regardless of guard.
 
-async def run_guarded(
-    guard: Guard[IntentT], request: Request, cfg: Config, state: State, audit: AuditLog
-) -> Response:
-    """The kernel (§03.2): guarantees the pipeline order regardless of guard.
+        Uses only ``self.cfg``/``self.state``/``self.audit`` — the resource-
+        agnostic collaborators (M0/M6 gates read ``cfg``; quota fail-safety
+        reads ``state``; A7 needs ``audit``), never a guard's own I/O clients
+        (upstream credentials, ownership caches, …), which stay encapsulated
+        in the guard subclass itself.
+        """
+        correlation_id = str(uuid.uuid4())
+        started = time.monotonic()
 
-    ``cfg``/``state``/``audit`` are passed explicitly rather than pulled off a
-    guard-specific context object — the kernel only needs the resource-
-    agnostic collaborators (M0/M6 gates read ``cfg``; quota fail-safety reads
-    ``state``; A7 needs ``audit``), never a guard's own I/O clients
-    (upstream credentials, ownership caches, …), which stay encapsulated in
-    the guard itself.
-    """
-    correlation_id = str(uuid.uuid4())
-    started = time.monotonic()
+        intent = await self.parse(request)
+        view = self.state.view()
 
-    intent = await guard.parse(request)
-    view = state.view()
+        decision = kernel_gates(intent, self.cfg)
+        if decision is None:
+            intent = await self.enrich(intent)
+            decision = self.capability_gate(intent, self.cfg)
+        if decision is None:
+            decision = self.decide(intent, view, self.cfg)
 
-    decision = kernel_gates(intent, cfg)
-    if decision is None:
-        intent = await guard.enrich(intent)
-        decision = guard.capability_gate(intent, cfg)
-    if decision is None:
-        decision = guard.decide(intent, view, cfg)
+        upstream_status: Optional[int]
+        if decision.allow:
+            self.record(intent, decision)
+            response = await self.forward(request, intent, decision)
+            upstream_status = response.status_code
+        else:
+            response = self.deny_response(intent, decision, view)
+            upstream_status = None
 
-    upstream_status: Optional[int]
-    if decision.allow:
-        guard.record(intent, decision)
-        response = await guard.forward(request, intent, decision)
-        upstream_status = response.status_code
-    else:
-        response = guard.deny_response(intent, decision, view)
-        upstream_status = None
-
-    audit.log(
-        AuditEvent(
-            guard=guard.name,
-            correlation_id=correlation_id,
-            method=intent.method,
-            project=intent.project,
-            decision=decision,
-            state=view,
-            started=started,
-            upstream_status=upstream_status,
-            extra=guard.audit_fields(intent),
+        self.audit.log(
+            AuditEvent(
+                guard=self.name,
+                correlation_id=correlation_id,
+                method=intent.method,
+                project=intent.project,
+                decision=decision,
+                state=view,
+                started=started,
+                upstream_status=upstream_status,
+                extra=self.audit_fields(intent),
+            )
         )
-    )
-    return response
+        return response

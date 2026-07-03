@@ -135,7 +135,7 @@ def decide(intent: GitPushIntent, state: StateView, cfg: Config) -> Decision:
 
 def full_decide(intent: GitPushIntent, state: StateView, cfg: Config) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
-    outside :func:`core.guard.run_guarded` (tests, and any offline "what would
+    outside :meth:`core.guard.Guard.handle` (tests, and any offline "what would
     happen to this push" evaluator) that need the *whole* effective decision,
     not just this module's slice — mirrors
     ``guards.gitlab_api.policy.full_decide``.

@@ -18,7 +18,7 @@ from starlette.responses import Response
 
 from ...core.audit import AuditEvent
 from ...core.config import Config
-from ...core.guard import Guard, run_guarded
+from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
 from ...errors import deny_json
@@ -40,7 +40,7 @@ def _needs_mr_owner(ep: CatalogEntry) -> bool:
 
 class ApiGuard(Guard[ApiIntent]):
     """The REST write pipeline's hooks (§03.2) — driven by
-    :func:`core.guard.run_guarded` from :func:`handle` below.
+    :meth:`Guard.handle` from :func:`handle` below.
     """
 
     # Audit ``guard`` value (§06-migration.md Schritt 6, F11: this JSONL
@@ -50,6 +50,7 @@ class ApiGuard(Guard[ApiIntent]):
         return "api"
 
     def __init__(self, ctx: AppContext) -> None:
+        super().__init__(ctx.cfg, ctx.state, ctx.audit)
         self.ctx = ctx
 
     async def parse(self, request: Request) -> ApiIntent:
@@ -155,7 +156,7 @@ class ApiGuard(Guard[ApiIntent]):
 
 async def handle(request: Request) -> Response:
     ctx: AppContext = request.app.state.ctx
-    return await run_guarded(ApiGuard(ctx), request, ctx.cfg, ctx.state, ctx.audit)
+    return await ApiGuard(ctx).handle(request)
 
 
 async def deny_graphql(request: Request) -> Response:

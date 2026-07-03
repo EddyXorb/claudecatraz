@@ -149,7 +149,7 @@ def _quota_check(ep: CatalogEntry, state: StateView, cfg: Config) -> Optional[De
 
 def full_decide(intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
-    outside :func:`core.guard.run_guarded` (the endpoint-catalog startgate,
+    outside :meth:`core.guard.Guard.handle` (the endpoint-catalog startgate,
     §04.4; tests) that need the *whole* effective decision, not just this
     module's slice — probes must also fail against the capability invariant,
     not just this guard's own checks, exactly as a real request would.
