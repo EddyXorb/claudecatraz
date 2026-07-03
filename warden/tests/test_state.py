@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from warden.state import (
+from warden.core.state import (
     BASE_SCHEMA_VERSION,
     CURRENT_SCHEMA_VERSION,
     WINDOW_SECONDS,
@@ -116,7 +116,7 @@ def test_fresh_db_is_created_at_current_schema_version():
 
 
 def test_migrations_span_exactly_base_to_current():
-    from warden.state import MIGRATIONS
+    from warden.core.state import MIGRATIONS
 
     versions = [m.version for m in MIGRATIONS]
     assert versions == sorted(versions), "migrations must be listed in order"

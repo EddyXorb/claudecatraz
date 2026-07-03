@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 
-from warden.pktline import FLUSH, pkt_line
+from warden.guards.git.pktline import FLUSH, pkt_line
 
 PROJ = "group%2Fproj"
 ZERO = "0" * 40

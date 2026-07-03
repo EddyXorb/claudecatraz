@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from warden.config import Config, ConfigError
-from warden.config_load import from_env
+from warden.core.config import Config, ConfigError
+from warden.core.config_load import from_env
 
 _MIN = {
     "ALLOWED_PROJECTS": "group/proj",

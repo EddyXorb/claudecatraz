@@ -8,11 +8,13 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from warden.api_proxy import _iid_from_path, _needs_mr_owner, _project_from_path
-from warden.audit import AuditLog
-from warden.catalog import DEFAULT_ENABLED
-from warden.catalog.config_parse import EndpointActivation
-from warden.catalog.entries import CATALOG
+from warden.core.audit import AuditLog
+from warden.guards.gitlab_api.catalog import DEFAULT_ENABLED
+from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
+from warden.guards.gitlab_api.catalog.entries import CATALOG
+from warden.guards.gitlab_api.guard import _needs_mr_owner
+from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
+from warden.guards.gitlab_api.parsing import project_from_path as _project_from_path
 
 PROJ = "group%2Fproj"
 
@@ -375,10 +377,10 @@ def _activated_client_ctx(cfg, respx_router):
     default activation, so this scenario needs its own wiring.
     """
     from warden.app import create_app
-    from warden.audit import AuditLog
-    from warden.context import AppContext
-    from warden.state import State
-    from warden.upstream import Upstream
+    from warden.core.audit import AuditLog
+    from warden.core.state import State
+    from warden.guards.gitlab_api.context import AppContext
+    from warden.guards.gitlab_api.upstream import Upstream
 
     activated_cfg = replace(
         cfg,

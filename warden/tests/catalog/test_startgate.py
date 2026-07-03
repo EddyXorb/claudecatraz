@@ -7,13 +7,18 @@ from __future__ import annotations
 
 import pytest
 
-from warden.catalog.activation import EffectiveTable, build_effective_table
-from warden.catalog.config_parse import EndpointActivation
-from warden.catalog.entries import CATALOG
-from warden.catalog.errors import StartgateFailure
-from warden.catalog.model import PROBE_PROJECT_PATH, CatalogEntry, DenyProbe, EndpointKind
-from warden.catalog.startgate import run_startgate
-from warden.config import Config
+from warden.core.config import Config
+from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
+from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
+from warden.guards.gitlab_api.catalog.entries import CATALOG
+from warden.guards.gitlab_api.catalog.errors import StartgateFailure
+from warden.guards.gitlab_api.catalog.model import (
+    PROBE_PROJECT_PATH,
+    CatalogEntry,
+    DenyProbe,
+    EndpointKind,
+)
+from warden.guards.gitlab_api.catalog.startgate import run_startgate
 
 
 @pytest.fixture

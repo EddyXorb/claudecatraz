@@ -7,10 +7,10 @@ from dataclasses import replace
 import httpx
 
 from warden.app import create_admin_app
-from warden.audit import AuditLog
-from warden.context import AppContext
-from warden.state import State
-from warden.upstream import Upstream
+from warden.core.audit import AuditLog
+from warden.core.state import State
+from warden.guards.gitlab_api.context import AppContext
+from warden.guards.gitlab_api.upstream import Upstream
 
 
 async def test_healthz_reports_reconcile_and_service_account(client):
@@ -69,7 +69,7 @@ async def test_policy_route_reports_the_effective_table(cfg):
 async def test_policy_route_reflects_activation_config(cfg, tmp_path):
     from dataclasses import replace
 
-    from warden.catalog.config_parse import EndpointActivation
+    from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
 
     activated = replace(
         cfg, endpoint_activation=EndpointActivation(enable=("mr.create", "branch.create"))

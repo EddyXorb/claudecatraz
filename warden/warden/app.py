@@ -1,4 +1,10 @@
-"""Starlette app + routing: API vs. git, agent port vs. admin port (W3, W4)."""
+"""Starlette app + routing: API vs. git, agent port vs. admin port (W3, W4).
+
+Transport wiring only (§03.3: ``app.py`` stays at the top of the package) —
+the handlers it routes to live in the guard packages
+(:mod:`warden.guards.git.guard`, :mod:`warden.guards.gitlab_api.guard`), the
+pipeline they run through in :mod:`warden.core.guard`.
+"""
 
 from __future__ import annotations
 
@@ -9,9 +15,10 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from . import api_proxy, git_proxy
-from .catalog import endpoint_table_report
-from .context import AppContext
+from .guards.git import guard as git_guard
+from .guards.gitlab_api import guard as api_guard
+from .guards.gitlab_api.catalog import endpoint_table_report
+from .guards.gitlab_api.context import AppContext
 
 # Static log-viewer page (O.4) — a package asset, not routing code (F7).
 _VIEWER_HTML_PATH = Path(__file__).parent / "static" / "viewer.html"
@@ -26,24 +33,24 @@ def create_app(ctx: AppContext) -> Starlette:
     # (https://gitlab.com/ → http://gitlab-warden:8080/git/) so the prefix is added
     # transparently at transport time without touching .git/config. See W3.1.
     routes = [
-        Route("/git/{project:path}/info/refs", git_proxy.advertise, methods=["GET"]),
-        Route("/git/{project:path}/git-upload-pack", git_proxy.upload_pack, methods=["POST"]),
-        Route("/git/{project:path}/git-receive-pack", git_proxy.receive_pack, methods=["POST"]),
+        Route("/git/{project:path}/info/refs", git_guard.advertise, methods=["GET"]),
+        Route("/git/{project:path}/git-upload-pack", git_guard.upload_pack, methods=["POST"]),
+        Route("/git/{project:path}/git-receive-pack", git_guard.receive_pack, methods=["POST"]),
         Route(
             "/api/v4/{rest:path}",
-            api_proxy.handle,
+            api_guard.handle,
             methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
         ),
         # GraphQL is a deliberate dead end (B5): never proxied, always 403 + audited
-        # — see api_proxy.deny_graphql and §06-migration.md's Anti-Ziele.
+        # — see guards.gitlab_api.guard.deny_graphql and §06-migration.md's Anti-Ziele.
         Route(
             "/api/graphql",
-            api_proxy.deny_graphql,
+            api_guard.deny_graphql,
             methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
         ),
         Route(
             "/api/graphql/{rest:path}",
-            api_proxy.deny_graphql,
+            api_guard.deny_graphql,
             methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
         ),
         Route("/healthz", _healthz, methods=["GET"]),

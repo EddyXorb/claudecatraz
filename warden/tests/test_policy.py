@@ -1,16 +1,34 @@
-"""Unit tests for the pure policy core (W14, §8.1): every rule R0–R6, default-deny."""
+"""Unit tests for the pure policy cores (W14, §8.1): every rule R0–R6, default-deny.
+
+§06-migration.md Schritt 5 split the channel-union ``policy.decide`` into the
+kernel gates (:func:`warden.core.guard.kernel_gates`) plus one pure ``decide``
+per guard. Each guard's ``full_decide`` composes exactly that sequence, so the
+:func:`decide` helper below dispatches on the intent type — the assertions are
+unchanged from the pre-split file.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from warden.config import Config
-from warden.model import ProxyRequest, StateView, TokenKind
-from warden.pktline import RefCommand
-from warden.policy import check_ref, decide
+from warden.core.config import Config
+from warden.core.model import Decision, StateView, TokenKind
+from warden.guards.git import policy as git_policy
+from warden.guards.git.intent import GitPushIntent
+from warden.guards.git.pktline import RefCommand
+from warden.guards.git.policy import check_ref
+from warden.guards.gitlab_api import policy as api_policy
+from warden.guards.gitlab_api.intent import ApiIntent
 
 ZERO = "0" * 40
 SHA = "a" * 40
+
+
+def decide(intent: ApiIntent | GitPushIntent, state: StateView, cfg: Config) -> Decision:
+    """Dispatch to the owning guard's full decision (kernel gates + guard decide)."""
+    if isinstance(intent, GitPushIntent):
+        return git_policy.full_decide(intent, state, cfg)
+    return api_policy.full_decide(intent, state, cfg)
 
 
 @pytest.fixture
@@ -33,9 +51,9 @@ def multi_prefix_cfg() -> Config:
     )
 
 
-def _api(method, path, **fields) -> ProxyRequest:
+def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ProxyRequest(channel="api", project=project, method=method, path=path, fields=fields)
+    return ApiIntent(project=project, method=method, path=path, fields=fields)
 
 
 # --- R1 / R6 -------------------------------------------------------------------
@@ -120,7 +138,7 @@ def test_b1_unknown_projectless_endpoint_default_denied(cfg):
 
 
 def test_r6_project_not_in_allowlist_denied(cfg):
-    req = ProxyRequest(channel="api", project="other/secret", method="GET", path="/projects/other%2Fsecret")
+    req = ApiIntent(project="other/secret", method="GET", path="/projects/other%2Fsecret")
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R6"
 
@@ -232,10 +250,9 @@ def test_locked_state_denies_all_writes(cfg):
     assert not d.allow and d.rule == "R5"
 
 
-# --- git channel (R2/R5) -------------------------------------------------------
-def _git(*cmds) -> ProxyRequest:
-    return ProxyRequest(
-        channel="git",
+# --- git guard (R2/R5) ---------------------------------------------------------
+def _git(*cmds) -> GitPushIntent:
+    return GitPushIntent(
         project="group/proj.git",
         ref_commands=[RefCommand(*c) for c in cmds],
     )
@@ -320,8 +337,7 @@ def test_git_tag_push_rejected_with_tag_message(cfg):
 
 
 def test_git_project_not_allowlisted_denied(cfg):
-    req = ProxyRequest(
-        channel="git",
+    req = GitPushIntent(
         project="other/x.git",
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
@@ -344,9 +360,10 @@ def test_mr_update_without_merge_intent_allowed(cfg):
     assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
 
 
-def test_unknown_channel_default_denied(cfg):
-    d = decide(ProxyRequest(channel="bogus", project=""), StateView(), cfg)
-    assert not d.allow and d.rule == "R6"
+# NOTE (§06 Schritt 5): the pre-split ``test_unknown_channel_default_denied``
+# is gone with the Channel enum itself — an "unknown channel" can no longer be
+# expressed: every request is parsed by exactly one guard into that guard's
+# own Intent type, and an unrouted path never reaches any decide at all.
 
 
 # --- R0: GITLAB_MODE gates -------------------------------------------------------
@@ -373,8 +390,7 @@ def test_off_denies_reads_and_writes():
 
     # git push
     d = decide(
-        ProxyRequest(
-            channel="git",
+        GitPushIntent(
             project="group/proj",
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
@@ -406,8 +422,7 @@ def test_read_only_denies_writes_allows_reads():
 
     # git push: denied R0
     d = decide(
-        ProxyRequest(
-            channel="git",
+        GitPushIntent(
             project="group/proj",
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),

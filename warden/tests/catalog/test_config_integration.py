@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from warden.catalog.entries import DEFAULT_ENABLED
-from warden.config import Config, ConfigError
-from warden.config_load import from_env
+from warden.core.config import Config, ConfigError
+from warden.core.config_load import from_env
+from warden.guards.gitlab_api.catalog.entries import DEFAULT_ENABLED
 
 _MIN_ENV = {
     "ALLOWED_PROJECTS": "group/proj",
@@ -57,10 +57,11 @@ def test_from_env_parses_overrides(tmp_path: Path):
     )
     cfg = from_env(_MIN_ENV, strict=True, toml_path=str(toml))
     entry = next(e for e in cfg.effective_endpoints.entries if e.id == "branch.create")
-    from warden.model import ProxyRequest, StateView
+    from warden.core.model import StateView
+    from warden.guards.gitlab_api.intent import ApiIntent
 
-    req = ProxyRequest(
-        channel="api", project="group/proj", method="POST",
+    req = ApiIntent(
+        project="group/proj", method="POST",
         path="/projects/group%2Fproj/repository/branches",
         fields={"branch": "claude/x-thing"},
     )

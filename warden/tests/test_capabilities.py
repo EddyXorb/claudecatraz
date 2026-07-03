@@ -3,24 +3,37 @@
 the cross-channel invariant that a FORBIDDEN hit denies with R4 regardless of
 channel or endpoint-specific checks.
 
-Schritt 4 moved the write-endpoint table into ``warden.catalog`` and took the
+Schritt 4 moved the write-endpoint table into the catalog package and took the
 merge endpoint out of it entirely (it is now a built-in deny invariant, not a
-catalog row — ``warden.catalog.builtin``) — this file's golden tables were
-updated accordingly; see ``tests/catalog/`` for the catalog/activation/
-startgate-specific tests Schritt 4 added.
+catalog row — ``catalog.builtin``); Schritt 5 split the vocabulary/FORBIDDEN
+set (kernel, ``warden.core.capabilities``) from the per-guard intent→capability
+mappings (``guards.git.policy.git_ref_capabilities``,
+``guards.gitlab_api.catalog.entries.api_capabilities``) — this file's golden
+tables were updated accordingly; see ``tests/catalog/`` for the catalog/
+activation/startgate-specific tests Schritt 4 added.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from warden.capabilities import FORBIDDEN, Capability, forbidden_check, git_ref_capabilities
-from warden.catalog import CATALOG, DEFAULT_ENABLED, CatalogEntry, EndpointKind, api_capabilities
-from warden.catalog.builtin import is_builtin_merge_endpoint
-from warden.config import Config
-from warden.model import ProxyRequest, StateView
-from warden.pktline import RefCommand
-from warden.policy import decide
+from warden.core.capabilities import FORBIDDEN, Capability, forbidden_check
+from warden.core.config import Config
+from warden.core.model import StateView
+from warden.guards.git import policy as git_policy
+from warden.guards.git.intent import GitPushIntent
+from warden.guards.git.pktline import RefCommand
+from warden.guards.git.policy import git_ref_capabilities
+from warden.guards.gitlab_api.catalog import (
+    CATALOG,
+    DEFAULT_ENABLED,
+    CatalogEntry,
+    EndpointKind,
+    api_capabilities,
+)
+from warden.guards.gitlab_api.catalog.builtin import is_builtin_merge_endpoint
+from warden.guards.gitlab_api.intent import ApiIntent
+from warden.guards.gitlab_api.policy import full_decide as api_decide
 
 ZERO = "0" * 40
 SHA = "a" * 40
@@ -32,9 +45,9 @@ def cfg() -> Config:
     return Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
 
 
-def _api(method: str, path: str, **fields: object) -> ProxyRequest:
+def _api(method: str, path: str, **fields: object) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ProxyRequest(channel="api", project=project, method=method, path=path, fields=fields)
+    return ApiIntent(project=project, method=method, path=path, fields=dict(fields))
 
 
 # --- the vocabulary itself ------------------------------------------------
@@ -267,34 +280,32 @@ def test_is_builtin_merge_endpoint(method, path, expected):
 
 
 def test_e2e_git_tag_push_denied_r4(cfg):
-    req = ProxyRequest(
-        channel="git",
+    req = GitPushIntent(
         project="group/proj",
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
-    d = decide(req, StateView(), cfg)
+    d = git_policy.full_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 
 
 def test_e2e_git_branch_delete_denied_r4(cfg):
-    req = ProxyRequest(
-        channel="git",
+    req = GitPushIntent(
         project="group/proj",
         ref_commands=[RefCommand(SHA, ZERO, "refs/heads/claude/feature")],
     )
-    d = decide(req, StateView(), cfg)
+    d = git_policy.full_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 
 
 def test_e2e_api_merge_endpoint_denied_r4(cfg):
-    d = decide(_api("PUT", "/projects/group%2Fproj/merge_requests/7/merge"), StateView(), cfg)
+    d = api_decide(_api("PUT", "/projects/group%2Fproj/merge_requests/7/merge"), StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 
 
 def test_e2e_api_state_event_merge_alias_denied_r4(cfg):
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", state_event="merge")
     req.mr_owner_ok = True
-    d = decide(req, StateView(), cfg)
+    d = api_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 
 
@@ -304,8 +315,8 @@ def test_e2e_capability_layer_denies_even_without_endpoint_checks(cfg):
     row — one that is *not* shaped like the built-in merge endpoint, so this
     genuinely exercises the capability layer and not ``is_builtin_merge_endpoint``
     — that declares the merge capability but has *no* checks at all is still
-    denied, because the capability layer runs before ``ep.checks`` in
-    ``policy._decide_api``.
+    denied, because the capability gate runs before the guard's own
+    ``decide``/``ep.checks`` (kernel sequence, §03.2).
     """
     hypothetical_row = CatalogEntry(
         id="hypothetical.merge_via_release",
@@ -318,22 +329,21 @@ def test_e2e_capability_layer_denies_even_without_endpoint_checks(cfg):
     )
     req = _api("POST", "/projects/group%2Fproj/releases")
     req.endpoint = hypothetical_row
-    d = decide(req, StateView(), cfg)
+    d = api_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
     assert "forbidden capability" in d.reason
 
 
 def test_e2e_capability_layer_denies_git_even_if_check_ref_logic_is_bypassed(cfg):
-    """Mirrors the API-side proof above for git: ``_decide_git`` runs the
-    capability check for every ref-command *before* the ``check_ref`` loop, so
-    a tag push is denied at that first pass — independent of whatever
-    ``check_ref`` itself would separately decide.
+    """Mirrors the API-side proof above for git: the capability gate runs for
+    every ref-command *before* the guard's ``check_ref`` loop (kernel
+    sequence, §03.2), so a tag push is denied at that first pass —
+    independent of whatever ``check_ref`` itself would separately decide.
     """
-    req = ProxyRequest(
-        channel="git",
+    req = GitPushIntent(
         project="group/proj",
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
-    d = decide(req, StateView(), cfg)
+    d = git_policy.full_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
     assert "forbidden capability" in d.reason  # came from the capability layer, not check_ref

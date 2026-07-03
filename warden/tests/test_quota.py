@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from warden.config import Config
-from warden.model import ProxyRequest
-from warden.policy import decide
-from warden.state import State
+from warden.core.config import Config
+from warden.core.state import State
+from warden.guards.gitlab_api.intent import ApiIntent
+from warden.guards.gitlab_api.policy import full_decide as decide
 
 
 class FakeClock:
@@ -19,9 +19,8 @@ class FakeClock:
         self.t += dt
 
 
-def _mr(cfg) -> ProxyRequest:
-    return ProxyRequest(
-        channel="api",
+def _mr(cfg) -> ApiIntent:
+    return ApiIntent(
         project="group/proj",
         method="POST",
         path="/projects/group%2Fproj/merge_requests",

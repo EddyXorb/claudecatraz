@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
-from warden.audit import _ALLOWED_FIELDS, AUDIT_SCHEMA_VERSION, AuditLog, build_event, redact
-from warden.model import Decision, StateView
+from warden.core.audit import _ALLOWED_FIELDS, AUDIT_SCHEMA_VERSION, AuditLog, build_event, redact
+from warden.core.model import Decision, StateView
 
 
 def test_redact_keeps_only_allowlisted_fields():

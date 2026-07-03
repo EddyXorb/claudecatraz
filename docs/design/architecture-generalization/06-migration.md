@@ -86,9 +86,50 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
    FORBIDDEN-Capabilities (bewusstes YAGNI — kein aktueller Eintrag braucht ihn; kommt mit
    dem ersten, z. B. `release.create`). `catraz allow-endpoint` + eine read-only
    `/policy`-Admin-Route (`catraz doctor --section endpoints`) sind die CLI-Front dafür.
-5. **Kernel-Extraktion + Intent-Split** (§03.2/03.3, inkl. `intent.writes` für das
+5. ✅ **Kernel-Extraktion + Intent-Split** (§03.2/03.3, inkl. `intent.writes` für das
    read-only-Gate) — reines Refactoring, von `test_api_proxy`/`test_git_proxy` abgedeckt;
    fixt F1/F3/F6; blockiert keinen Nutzerwert und wird deshalb *nicht* vorgezogen.
+   *(umgesetzt: `warden/core/` + `warden/guards/{git,gitlab_api}/`; Modulbaum + Sequenz →
+   `docs/design/agentic-workflow/02-warden.md`.)* Umsetzungsvermerk:
+   - **F1**: `core/guard.run_guarded` ist die Template-Method — Guards (`GitGuard`,
+     `ApiGuard`) liefern `parse/enrich/capability_gate/decide/record/forward/
+     deny_response/audit_fields` über ein generisches `Guard[IntentT]`-Protokoll und
+     sehen die Sequenz nie. `kernel_gates` (Mode-Gate off → read-only via
+     `intent.writes` → project_gate) ist die **eine** Definition der guard-agnostischen
+     Gates; die per-Guard-`full_decide` (fürs Startgate §04.4 und die
+     Policy-Unit-Tests) komponiert exakt dieselben Funktionen. git-receive-pack behält
+     seine Antwort-Sonderform über `Guard.deny_response` (per-Ref
+     `git_reject_response`); advertise/upload_pack und der GraphQL-Deny bleiben dünne
+     Handler außerhalb der Write-Pipeline, ihre Wiederholungen über
+     `mode_gate_off`/`mode_gate_writes`/`project_gate`/`deny_json` dedupliziert.
+   - **F3**: `ProxyRequest` + `Channel`-Enum ersatzlos entfernt — `core/model.Intent`
+     (Protokoll: `writes`/`project`/`method`) mit `GitPushIntent(ref_commands=…)` und
+     `ApiIntent(method, path, fields, endpoint, mr_owner_ok, …)` bei ihren Guards.
+     `intent.writes` kommt vom Parser (git: receive-pack ⇒ True; API: Methode ∉
+     GET/HEAD/OPTIONS), nie von der Decision — das read-only-Gate läuft dadurch **vor**
+     `enrich`, Write-Credential und Ownership-Lookup sind in off/read-only strukturell
+     unerreichbar (ersetzt die zwei manuellen Stellen `api_proxy.py:102`/
+     `git_proxy.py:62`). `capabilities.py` entsprechend geteilt: Vokabular +
+     `FORBIDDEN` + `forbidden_check` im Kernel, `git_ref_capabilities`/
+     `api_capabilities` bei ihren Guards.
+   - **F6**: `core/audit.AuditEvent` (frozen dataclass) ist der eine typisierte
+     Event-Konstruktor; die Pipeline loggt an genau einer Stelle, `build_event` nur
+     noch eine dünne dict-Fassade. JSONL byte-kompatibel: Feldnamen (`channel`,
+     `kind`, …), Werte (`"git"`/`"api"`) und `schema`-Version unverändert — der
+     channel→guard-Rename bleibt Schritt 6.
+   - **Bewusste, dokumentierte Grenzen**: `core/config.py` trägt weiter GitLab-Felder
+     (ehrlich eingeordnet im Modul-Docstring; Zerlegung in Kernel-Basis +
+     Guard-Fragmente = F4-Folgearbeit); der forge-agnostische git-Guard bezieht
+     `AppContext`/`Upstream` noch aus `guards/gitlab_api` (CredentialAdapter pro
+     Guard: §03.5, Schritt 9). Eine dokumentierte Verhaltensverschiebung: read-only
+     denied Writes jetzt direkt nach parse mit R0 (vorher konnte z. B. ein
+     nicht-allowlistetes Projekt zuerst R6 ziehen) — genau die §03.2-Präzisierung;
+     kein Test hing an der alten Reihenfolge. Der alte Test
+     `test_unknown_channel_default_denied` entfällt mit dem Channel-Enum selbst
+     (strukturell nicht mehr ausdrückbar); alle übrigen Assertions unverändert,
+     `test_api_proxy`/`test_git_proxy`/`test_git_e2e`/`redteam` nur mit
+     Import-Anpassungen. Einzige verbleibende Kompat-Fassade:
+     `warden/api_endpoints.py` (re-exportiert, definiert nichts neu).
 6. **Rename claude→agent im Warden** — jetzt trivial, weil Schritt 2 die Migrationen
    bereitstellt (State-Tabellen `claude_branches`/`claude_mrs`, Audit-Felder).
 7. **Agent-Layer: Entrypoint-Zerlegung** (§05.2) — generischer Entrypoint + Claude-Adapter

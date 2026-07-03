@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 
 import warden.__main__ as main_mod
-from warden.catalog import StartgateFailure
-from warden.config import Config, ConfigError
-from warden.state import SchemaError
+from warden.core.config import Config, ConfigError
+from warden.core.state import SchemaError
+from warden.guards.gitlab_api.catalog import StartgateFailure
 
 
 def test_main_exits_2_on_config_error(monkeypatch):

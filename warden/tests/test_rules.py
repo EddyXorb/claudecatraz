@@ -7,11 +7,9 @@ from __future__ import annotations
 
 import pytest
 
-from warden.config import Config
-from warden.model import ProxyRequest, StateView
-from warden.pktline import RefCommand
-from warden.policy import check_ref, decide
-from warden.rules import (
+from warden.core.config import Config
+from warden.core.model import StateView
+from warden.core.rules import (
     GITLAB_NAMESPACE,
     KERNEL_NAMESPACE,
     RULES,
@@ -20,6 +18,10 @@ from warden.rules import (
     qualify,
     rule,
 )
+from warden.guards.git.pktline import RefCommand
+from warden.guards.git.policy import check_ref
+from warden.guards.gitlab_api.intent import ApiIntent
+from warden.guards.gitlab_api.policy import full_decide as decide
 
 ZERO = "0" * 40
 SHA = "a" * 40
@@ -88,9 +90,9 @@ def cfg() -> Config:
     return Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
 
 
-def _api(method, path, **fields) -> ProxyRequest:
+def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ProxyRequest(channel="api", project=project, method=method, path=path, fields=fields)
+    return ApiIntent(project=project, method=method, path=path, fields=fields)
 
 
 # One representative request per rule id the policy can emit — a smoke test
@@ -120,7 +122,7 @@ def _api(method, path, **fields) -> ProxyRequest:
             cfg,
         ),
         lambda cfg: decide(
-            ProxyRequest(channel="api", project="other/x", method="GET", path="/projects/other%2Fx"),
+            ApiIntent(project="other/x", method="GET", path="/projects/other%2Fx"),
             StateView(),
             cfg,
         ),

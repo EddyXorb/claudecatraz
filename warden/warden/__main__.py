@@ -10,13 +10,13 @@ import sys
 import uvicorn
 
 from .app import create_admin_app, create_app
-from .audit import AuditLog
-from .catalog import StartgateFailure, run_startgate
-from .config import ConfigError
-from .config_load import from_env
-from .context import AppContext
-from .state import SchemaError, State
-from .upstream import Upstream
+from .core.audit import AuditLog
+from .core.config import ConfigError
+from .core.config_load import from_env
+from .core.state import SchemaError, State
+from .guards.gitlab_api.catalog import StartgateFailure, run_startgate
+from .guards.gitlab_api.context import AppContext
+from .guards.gitlab_api.upstream import Upstream
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:

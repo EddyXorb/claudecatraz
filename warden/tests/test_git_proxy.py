@@ -7,12 +7,12 @@ import base64
 import httpx
 
 from warden.app import create_app
-from warden.audit import AuditLog
-from warden.config import Config
-from warden.context import AppContext
-from warden.pktline import FLUSH, pkt_line
-from warden.state import State
-from warden.upstream import Upstream
+from warden.core.audit import AuditLog
+from warden.core.config import Config
+from warden.core.state import State
+from warden.guards.git.pktline import FLUSH, pkt_line
+from warden.guards.gitlab_api.context import AppContext
+from warden.guards.gitlab_api.upstream import Upstream
 
 ZERO = "0" * 40
 SHA1 = "1" * 40

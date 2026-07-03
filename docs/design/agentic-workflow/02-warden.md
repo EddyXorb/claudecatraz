@@ -8,43 +8,57 @@ Implementiert. Dev-Workflow → [`warden/README.md`](../../warden/README.md). Pr
 
 ## Module
 
+Seit §06-migration.md Schritt 5 (Kernel-Extraktion + Intent-Split, §03.2/03.3) ist das
+Package in einen guard-agnostischen Kernel (`core/`) und die zwei Guards (`guards/git`,
+`guards/gitlab_api`) getrennt; oben bleibt nur die Transport-Verdrahtung.
+
 ```
 warden/
 ├── Dockerfile                  # python:3.12-slim, non-root, read-only rootfs
 ├── pyproject.toml              # uv-managed, gepinnte Deps
 ├── warden/
 │   ├── __main__.py             # uvicorn-Bootstrap, Reconcile beim Start
-│   ├── app.py                  # Starlette-App, Routing API vs. git
-│   ├── config.py               # das typisierte, frozen Config-Objekt (Modell-Hälfte)
-│   ├── config_load.py          # Env + warden.toml → Config, harte fail-closed Validierung
-│   ├── model.py                # Policy-Datentypen (pure)
-│   ├── rules.py                # zentrale Regel-Registry R0–R6 + Meta-Regel-Zuordnung (B3, F11)  ← pure
-│   ├── capabilities.py         # Capability-Vokabular + FORBIDDEN + forbidden_check (§03.4, B2)  ← pure
-│   ├── policy.py               # decide(request, state, cfg) → Decision  ← pure
-│   ├── api_endpoints.py        # Kompat-Fassade auf warden.catalog (§06 Schritt 4)  ← pure
-│   ├── catalog/                # Endpoint-Katalog + Check-Registry + Aktivierung (§04, Schritt 4)
-│   │   ├── model.py            #   CatalogEntry/FieldSpec/DenyProbe/OverridableParam  ← pure
-│   │   ├── checks.py           #   Check-Registry (§04.1): field_has_prefix, owned_by_agent, …  ← pure
-│   │   ├── entries.py          #   CATALOG-Tabelle (§04.2) + api_capabilities/match_endpoint  ← pure
-│   │   ├── builtin.py          #   Merge-Endpoint: eingebaute Deny-Invariante, kein Katalog-Eintrag  ← pure
-│   │   ├── config_parse.py     #   [api.endpoints]-TOML-Form parsen (kein Config-Import)  ← pure
-│   │   ├── activation.py       #   Config × Katalog → effektive Tabelle (§04.3), fail-closed  ← pure
-│   │   ├── startgate.py        #   Deny-Sonden gegen die effektive Policy beim Start (§04.4)
-│   │   └── report.py           #   /policy-Admin-Route: JSON-Report der effektiven Tabelle
-│   ├── read_endpoints.py       # datengetriebene Read-Endpoint-Tabelle (B1)  ← pure
-│   ├── path_template.py        # {platzhalter}-Pfad → Regex, von Katalog+Read-Tabelle genutzt  ← pure
-│   ├── api_proxy.py            # REST-Reverse-Proxy (GET-Passthrough + Write-Filter)
-│   ├── git_proxy.py            # G1: 4 Smart-HTTP-Routen, Stream-Handling
-│   ├── pktline.py              # pkt-line-Parser (receive-pack-Kommandos)  ← pure
-│   ├── state.py                # SQLite-Zugriff: Quoten, Rate, Reconcile, Schema-Versionierung
-│   ├── context.py              # Runtime-Ctx + Reconcile-Logik
-│   ├── upstream.py             # httpx-Client, Token-Injektion
-│   ├── audit.py                # JSONL-Logger, ein Schreiber, Redaction, `schema`-Feld
-│   └── errors.py               # Deny-/git-Fehler-Antworten
+│   ├── app.py                  # Starlette-App, Routing API vs. git (Transport-Verdrahtung)
+│   ├── errors.py               # Deny-/git-Fehler-Antworten (deny_json, git_reject_response)
+│   ├── api_endpoints.py        # Kompat-Fassade auf guards.gitlab_api.catalog (§06 Schritt 4)
+│   ├── core/                   # KERNEL (§03.2/03.3) — kennt keine GitLab-Begriffe
+│   │   ├── guard.py            #   Guard-Protokoll + run_guarded-Pipeline + kernel_gates (F1)
+│   │   ├── model.py            #   Decision/StateView/TokenKind + Intent-Protokoll (F3)  ← pure
+│   │   ├── rules.py            #   zentrale Regel-Registry R0–R6 + Meta-Regeln (B3, F11)  ← pure
+│   │   ├── capabilities.py     #   Capability-Vokabular + FORBIDDEN + forbidden_check (§03.4)  ← pure
+│   │   ├── audit.py            #   AuditEvent (typisiert, F6) + JSONL-Logger, Redaction, `schema`
+│   │   ├── state.py            #   SQLite: Quoten, Rate, Schema-Versionierung
+│   │   ├── config.py           #   frozen Config-Wert (Modell-Hälfte; GitLab-Felder = dokumentierte
+│   │   │                       #   Layering-Schuld, Zerlegung bewusst NICHT Teil von Schritt 5)
+│   │   ├── config_load.py      #   Env + warden.toml → Config, harte fail-closed Validierung
+│   │   └── path_template.py    #   {platzhalter}-Pfad → Regex (beide Guard-Tabellen)  ← pure
+│   └── guards/
+│       ├── git/                # git Smart-HTTP — FORGE-AGNOSTISCH (§03.3)
+│       │   ├── intent.py       #   GitPushIntent (ref_commands; writes ≡ True)  ← pure
+│       │   ├── pktline.py      #   pkt-line-Parser (receive-pack-Kommandos)  ← pure
+│       │   ├── policy.py       #   check_ref/decide + git_ref_capabilities/capability_gate  ← pure
+│       │   └── guard.py        #   GitGuard-Hooks + dünne Read-Handler advertise/upload_pack
+│       └── gitlab_api/         # GitLab-REST-Guard (einziges Package mit MR-/iid-Vokabular)
+│           ├── intent.py       #   ApiIntent (method/path/fields/endpoint; writes = Methode ∉ Reads)  ← pure
+│           ├── parsing.py      #   pure Request-Form-Helfer (raw path/query, Feld-Extraktion, F12)
+│           ├── policy.py       #   decide (Reads/Write-Tabelle/Quota) + capability_gate + full_decide  ← pure
+│           ├── guard.py        #   ApiGuard-Hooks (parse/enrich/record/forward) + deny_graphql (B5)
+│           ├── read_endpoints.py  # datengetriebene Read-Endpoint-Tabelle (B1)  ← pure
+│           ├── catalog/        #   Endpoint-Katalog + Check-Registry + Aktivierung (§04, Schritt 4)
+│           │   ├── model.py    #     CatalogEntry/FieldSpec/DenyProbe/OverridableParam  ← pure
+│           │   ├── checks.py   #     Check-Registry (§04.1): field_has_prefix, owned_by_agent, …  ← pure
+│           │   ├── entries.py  #     CATALOG-Tabelle (§04.2) + api_capabilities/match_endpoint  ← pure
+│           │   ├── builtin.py  #     Merge-Endpoint: eingebaute Deny-Invariante, kein Katalog-Eintrag  ← pure
+│           │   ├── config_parse.py  # [api.endpoints]-TOML-Form parsen (kein Config-Import)  ← pure
+│           │   ├── activation.py    # Config × Katalog → effektive Tabelle (§04.3), fail-closed  ← pure
+│           │   ├── startgate.py     # Deny-Sonden gegen policy.full_decide beim Start (§04.4)
+│           │   └── report.py        # /policy-Admin-Route: JSON-Report der effektiven Tabelle
+│           ├── context.py      #   Runtime-Ctx + Reconcile-Logik (→ Guard-Methode: §03.5, Schritt 9)
+│           └── upstream.py     #   httpx-Client, Token-Injektion (GitLab-spezifisch, F9 → §03.5)
 └── tests/
     ├── test_rules.py           # Registry + "jede geloggte ID ist registriert"
     ├── test_capabilities.py    # Golden-Tests: Intent → Capability-Menge, FORBIDDEN-Invariante
-    ├── test_policy.py          # Unit (parametrisiert, jede Regel R0–R6)
+    ├── test_policy.py          # Unit (parametrisiert, jede Regel R0–R6, per full_decide)
     ├── test_pktline.py         # aufgezeichnete receive-pack-Bodies
     ├── test_api_proxy.py       # respx/MockTransport
     ├── test_git_e2e.py         # echtes git push gegen Wegwerf-Upstream
@@ -53,7 +67,11 @@ warden/
     └── redteam/                # docker-compose-basiert (→ 03-testing-redteam.md)
 ```
 
-`policy.py`, `pktline.py`, `model.py`, `capabilities.py`, `catalog/` (bis auf `startgate.py`, das `policy.decide` aufruft, aber selbst keine Ein-/Ausgabe hat), `read_endpoints.py`, `path_template.py` sind transport-frei und rein — direkt unit-testbar.
+Die als „pure" markierten Module sind transport-frei — direkt unit-testbar. Zwei ehrliche
+Schnittlinien-Notizen (Scope von Schritt 5 — verschoben, nicht vergessen): `core/config.py`
+trägt weiterhin GitLab-Felder (Zerlegung in Kernel-Basis + Guard-Fragmente ist F4-Folgearbeit),
+und der forge-agnostische git-Guard bezieht `AppContext`/`Upstream` noch aus `guards/gitlab_api`
+(eigener CredentialAdapter pro Guard: §03.5, Schritt 9).
 
 ---
 
@@ -93,11 +111,11 @@ Der Agent hält **kein** GitLab-Token. Kein `.netrc`.
 ## Request-Routing
 
 ```
-/git/{project:path}/info/refs           → git_proxy (GET)
-/git/{project:path}/git-upload-pack     → git_proxy (POST, lesen R1)
-/git/{project:path}/git-receive-pack    → git_proxy (POST, prüfen!)
-/api/v4/{rest:path}                     → api_proxy (alle Methoden)
-/api/graphql, /api/graphql/{rest:path}  → api_proxy.deny_graphql (immer 403, B5)
+/git/{project:path}/info/refs           → guards.git.guard.advertise (GET)
+/git/{project:path}/git-upload-pack     → guards.git.guard.upload_pack (POST, lesen R1)
+/git/{project:path}/git-receive-pack    → guards.git.guard.receive_pack (POST, Kernel-Pipeline!)
+/api/v4/{rest:path}                     → guards.gitlab_api.guard.handle (alle Methoden, Kernel-Pipeline)
+/api/graphql, /api/graphql/{rest:path}  → guards.gitlab_api.guard.deny_graphql (immer 403, B5)
 /healthz                                → (nur Port 9090)
 /policy                                 → catalog.report (nur Port 9090, read-only, §04.3)
 ```
@@ -106,11 +124,11 @@ GraphQL wird nie an den Upstream durchgereicht (B5, `docs/design/architecture-ge
 
 ---
 
-## Regel-Registry (`rules.py`)
+## Regel-Registry (`core/rules.py`)
 
-Seit §06-migration.md Schritt 2 (B3, F11) sind R0–R6 in `rules.py` zentral definiert —
-ID, zugeordnete Meta-Regel (M0–M6, §01-grundregeln.md B) und Kurzbeschreibung. `policy.py`,
-`api_endpoints.py`, `read_endpoints.py`, `api_proxy.py` und `git_proxy.py` referenzieren
+Seit §06-migration.md Schritt 2 (B3, F11) sind R0–R6 in `core/rules.py` zentral definiert —
+ID, zugeordnete Meta-Regel (M0–M6, §01-grundregeln.md B) und Kurzbeschreibung. Der Kernel
+(`core/guard.py`) und beide Guard-Packages referenzieren
 diese Konstanten statt Streuliteralen. Ein reservierter Kernel-Namespace (`core.*`, neben
 `gitlab.*` für diesen Guard) ist als Helfer (`rules.qualify`) vorbereitet, aber noch nicht
 aktiv — geloggt wird weiterhin die unqualifizierte Form (`"R4"`), bis der
@@ -129,14 +147,16 @@ IDs mehrdeutig macht.
 
 **B3-Fix:** Tag-Push und Branch-Delete liefen zuvor unter R2 (Branch-Namensraum), obwohl sie
 konzeptionell „irreversible Verben: niemals" (M4) sind — dieselbe Kategorie wie der
-Merge-Block. Beide loggen jetzt R4 (`policy.check_ref`). Das ist eine audit-sichtbare
+Merge-Block. Beide loggen jetzt R4 (`guards/git/policy.check_ref`). Das ist eine audit-sichtbare
 Änderung, deshalb an die Schema-Versionierung dieses Schritts gekoppelt (`audit.AUDIT_SCHEMA_VERSION`).
 
 ---
 
-## Capability-Invarianten-Ebene (`capabilities.py`)
+## Capability-Invarianten-Ebene (`core/capabilities.py`)
 
-Seit §06-migration.md Schritt 3 (§03.4, B2). Jeder Kanal normalisiert seinen bereits
+Seit §06-migration.md Schritt 3 (§03.4, B2); Vokabular + `FORBIDDEN` + `forbidden_check`
+liegen seit Schritt 5 im Kernel, die Intent→Capability-Abbildungen bei ihren Guards.
+Jeder Guard normalisiert seinen bereits
 geparsten Intent zusätzlich auf ein kleines, **geschlossenes** Capability-Vokabular —
 was der Request *bewirken würde*, unabhängig davon, wie er es sagt:
 
@@ -155,12 +175,12 @@ statt ergänzen). `escalates_privilege`/`destroys_data` haben heute noch keinen
 Erzeuger (kein DROP-TABLE-artiger GitLab-Call) — vorbereitet für §03.7 (Postgres-Guard:
 DDL/GRANT).
 
-**Intent→Capability-Abbildung pro Kanal:**
-- **git** (`capabilities.git_ref_capabilities`): trivial und exakt aus `RefCommand`
+**Intent→Capability-Abbildung pro Guard:**
+- **git** (`guards/git/policy.git_ref_capabilities`): trivial und exakt aus `RefCommand`
   abgeleitet — Delete (jeder Ref-Typ) ⇒ `deletes_ref`; nicht-löschender Push auf
   `refs/tags/*` ⇒ `creates_tag`; sonst Branch-Write: `creates_ref` bei Create, plus
   `writes_outside_namespace` außerhalb `branch_prefixes`.
-- **REST** (`api_endpoints.api_capabilities`): jede `WriteEndpoint`-Zeile deklariert
+- **REST** (`guards/gitlab_api/catalog/entries.api_capabilities`): jede Katalog-Zeile deklariert
   statische `capabilities` (vom Katalog-Autor im Code, nie vom Nutzer, §06.2). Die eine
   Ausnahme ist feld-abhängig: `PUT .../merge_requests/{iid}` trägt statisch die leere
   Menge (die Zeile editiert auch Titel/Beschreibung), aber `api_capabilities` fügt
@@ -168,31 +188,77 @@ DDL/GRANT).
   `not_merge_intent` bereits prüft, jetzt zusätzlich strukturell in der Capability-Ebene
   verankert.
 
-**Reihenfolge in `policy.decide`:** in `_decide_git`/`_decide_api` wird die Capability-
-Menge des Intents **vor** den Endpoint-/Ref-Checks gegen `FORBIDDEN` geprüft — ein Treffer
-denied sofort mit R4, unabhängig davon, was die kanalspezifischen Checks darunter
-entschieden hätten. Die bestehenden Spezialfälle (`always_deny` in der Merge-Zeile,
-Tag-/Delete-Checks in `check_ref`) bleiben als Defense-in-depth (A10) bestehen — die
-Invariante muss aber auch ohne sie greifen (golden-getestet in `test_capabilities.py`,
-u. a. mit einer hypothetischen Endpoint-Zeile ganz ohne Checks).
+**Reihenfolge:** Die Kernel-Pipeline (`core/guard.run_guarded`, s. u.) ruft die
+guard-spezifische `capability_gate`-Hook (die Abbildung + `forbidden_check`) **vor** dem
+Guard-`decide` — ein Treffer denied sofort mit R4, unabhängig davon, was die
+guard-spezifischen Checks darunter entschieden hätten. Die bestehenden Spezialfälle
+(die eingebaute Merge-Invariante, Tag-/Delete-Checks in `check_ref`) bleiben als
+Defense-in-depth (A10) bestehen — die Invariante muss aber auch ohne sie greifen
+(golden-getestet in `test_capabilities.py`, u. a. mit einer hypothetischen
+Endpoint-Zeile ganz ohne Checks).
 
 ---
 
-## Policy (`policy.py`)
+## Kernel-Pipeline + Intents (`core/guard.py`, §03.2, Schritt 5)
+
+Vor Schritt 5 bauten `api_proxy.handle` und `git_proxy.receive_pack` die
+sicherheitskritische Sequenz je von Hand (F1), und `ProxyRequest` war die
+Vereinigungsmenge beider Kanäle (F3). Jetzt besitzt der Kernel die Sequenz; die Guards
+liefern die Teile über ein Protokoll:
 
 ```python
-@dataclass(frozen=True)
-class Decision:
-    allow: bool
-    rule: str            # bare rule id ("R1".."R6"), Quelle: rules.py — fürs Audit-Log
-    reason: str
-    token: TokenKind     # READ | WRITE | NONE
+# core/model.py — was jeder geparste Intent dem Kernel zeigt (F3):
+class Intent(Protocol):
+    writes: bool     # vom PARSER abgeleitet, nie von der Decision
+    project: str     # für die Ressourcen-Allowlist (M6)
+    method: str      # Audit-Verb
 
-def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision: ...
+# guard-spezifische Ausprägungen (bei ihren Guards, nicht im Kernel):
+#   guards/git/intent.GitPushIntent        (ref_commands, head/rest-Stream; writes ≡ True)
+#   guards/gitlab_api/intent.ApiIntent     (method/path/fields/endpoint/mr_owner_ok;
+#                                           writes = Methode ∉ {GET, HEAD, OPTIONS})
+
+# core/guard.py — der Kernel besitzt die Pipeline, Guards liefern die Teile:
+class Guard(Protocol[IntentT]):
+    name: str                                        # Audit-Namespace ("git"/"api")
+    async def parse(self, request) -> IntentT: ...   # Transport → Intent
+    async def enrich(self, intent) -> IntentT: ...   # unreine Lookups (z. B. MR-Owner)
+    def capability_gate(self, intent, cfg) -> Decision | None: ...  # §03.4, pur
+    def decide(self, intent, state, cfg) -> Decision: ...           # pur, default-deny
+    def record(self, intent, decision) -> None: ...  # Quota-Verbuchung VOR forward
+    async def forward(self, request, intent, decision) -> Response: ...
+    def deny_response(self, intent, decision, state) -> Response: ...  # git: per-Ref-Reject
+    def audit_fields(self, intent) -> Mapping[str, Any]: ...
 ```
 
-**Default-deny.** Reihenfolge:
-1. Projekt in `ALLOWED_PROJECTS`? sonst `Deny(R6)`.
+**Sequenzgarantien von `run_guarded(guard, request, cfg, state, audit)`** — Guards sehen
+die Reihenfolge nicht und können sie deshalb nicht falsch bauen:
+
+1. `parse` (kein Credential angefasst), dann `kernel_gates` — **eine** Definition:
+   Mode-Gate `off` (R0) zuerst; dann das read-only-Gate über `intent.writes` (R0) —
+   **vor** `enrich`, damit Write-Credential und Ownership-Lookup in off/read-only
+   strukturell unerreichbar sind (ersetzt die zwei manuellen Stellen im alten
+   `api_proxy`/`git_proxy`); dann Ressourcen-Allowlist (`project_gate`, R6) — ebenfalls
+   vor `enrich`: kein Lookup für nicht-allowlistete Projekte.
+2. `enrich` (nur wenn alle Gates passiert sind).
+3. `capability_gate` (Capability-Invariante, §03.4) vor `decide`.
+4. `decide` (pur, guard-spezifisch, default-deny).
+5. **Audit auf jedem Ausgang** (allow wie deny), als typisiertes `AuditEvent` (F6) —
+   die Pipeline loggt an genau einer Stelle.
+6. Bei allow: `record` **vor** `forward` (§6.11); `forward` ist nur nach
+   `decision.allow` erreichbar. Bei deny: `guard.deny_response` — git liefert dort das
+   per-Ref-`report-status` (`git_reject_response`), REST das 403-JSON.
+
+Die dünnen Read-Handler (`advertise`, `upload_pack`) und der GraphQL-Deny bleiben
+außerhalb der Write-Pipeline (§03.2), nutzen aber dieselben core-Helfer
+(`mode_gate_off`/`mode_gate_writes`/`project_gate`/`deny_json`) statt eigener Kopien.
+Für Aufrufer außerhalb der Pipeline (Startgate §04.4, Policy-Unit-Tests) komponiert
+`full_decide` pro Guard exakt `kernel_gates → capability_gate → decide` — dieselben
+Funktionen, keine Zweitdefinition.
+
+**Default-deny, effektive Entscheidungsreihenfolge pro Guard:**
+1. Kernel: `off`-Gate (R0) → read-only-Gate für Writes (R0) → Projekt in
+   `ALLOWED_PROJECTS`? sonst `Deny(R6)`.
 2. git receive-pack: je Ref-Kommando **Capability-Invariante** (`FORBIDDEN`-Schnitt, R4,
    §03.4) zuerst, dann Präfix (`R2`) / Tag-Push- und Delete-Block (`R4`, Defense-in-depth) /
    Branch-Quota / Rate (`R5`).
@@ -201,8 +267,15 @@ def decide(req: ProxyRequest, state: StateView, cfg: Config) -> Decision: ...
    Metadaten (Projekt-/Gruppennamen, `/users`, `/version`, …) → `Allow(R1)`; inhaltsfähige
    projektlose Endpoints (globale/Gruppen-Suche mit `scope=blobs|commits|wiki_blobs|notes`,
    `/snippets`) und unbekannte projektlose Pfade → `Deny(R6)`.
-4. API Write: Endpoint-Match in Allowlist → **Capability-Invariante** (`FORBIDDEN`-Schnitt,
-   R4, §03.4) → Ownership-Check → Quota.
+4. API Write: eingebaute Merge-Invariante + **Capability-Invariante** (`FORBIDDEN`-Schnitt,
+   R4, §03.4, in `capability_gate`) → Endpoint-Match in effektiver Tabelle →
+   Ownership-Check → Quota.
+
+Bewusste (dokumentierte) Verhaltensverschiebung von Schritt 5: In read-only-Mode wird ein
+Write jetzt **direkt nach parse** R0-denied — vorher lief das read-only-Gate erst *nach*
+`decide`, sodass z. B. ein Write auf ein nicht-allowlistetes Projekt in read-only R6 statt
+R0 loggte. Genau diese Vorverlagerung ist die §03.2-Präzisierung (Write-Credential nie
+anfassen); kein Test hing an der alten Reihenfolge.
 
 ---
 
@@ -216,7 +289,7 @@ verstreuter Einzelfunktionen: `field_has_prefix(field)` (vereinigt die alten
 `src_branch_prefix`/`ref_prefix`, F10), `owned_by_agent` (früher `mr_owned_by_claude`, jetzt ein
 `RegisteredCheck` mit `needs={"mr_owner"}`), `field_not_equals(field, value)` (verallgemeinert
 `not_merge_intent`). `needs` ersetzt die alte Identitätsprüfung
-`mr_owned_by_claude in ep.checks` (F2) — `api_proxy._resolve_ownership` fragt stattdessen
+`mr_owned_by_claude in ep.checks` (F2) — `ApiGuard.enrich` fragt stattdessen
 `any("mr_owner" in check.needs for check in ep.checks)`.
 
 **Der Katalog (§04.2, `catalog/entries.py`).** Jeder Eintrag (`CatalogEntry`) trägt Methode +
@@ -266,10 +339,10 @@ Override ohne passenden `OverridableParam`, Override, der erweitert statt vereng
 Aktivierung eines Eintrags, dessen `capabilities` die `FORBIDDEN`-Menge schneiden (§04.2
 YAGNI — kein Taming-Mechanismus in diesem Schritt, siehe
 [`04-policy-erweiterbarkeit.md`](../architecture-generalization/04-policy-erweiterbarkeit.md)).
-`policy._decide_api` und `api_proxy._parse_request` matchen ausschließlich gegen
+`guards.gitlab_api.policy` und `ApiGuard.parse` matchen ausschließlich gegen
 `cfg.effective_endpoints.entries` — nie gegen `catalog.CATALOG` direkt.
 
-**F12-Fix:** `api_proxy._extract_fields` liest für einen gematchten Katalog-Eintrag nur die in
+**F12-Fix:** `guards.gitlab_api.parsing.extract_fields` liest für einen gematchten Katalog-Eintrag nur die in
 `decision_fields` deklarierten Felder, jeweils exakt aus der deklarierten Lage (Body/Query) —
 kein Merge mehr. Ein `source_branch`, das nur als Query-Parameter mitgeschickt wird, zählt für
 die Entscheidung als **nicht gesetzt**, obwohl das Forwarding den Querystring unverändert
@@ -282,7 +355,8 @@ nicht.
 
 **Startgate (§04.4, `catalog/startgate.py`).** Nach Config-Validierung, vor dem Öffnen der
 Ports (`__main__.py`): für jeden aktivierten Katalog-Eintrag laufen seine `deny_probes` gegen
-`policy.decide` mit einer synthetischen, entsperrten `StateView` — kein Netz, keine State-DB.
+`guards.gitlab_api.policy.full_decide` (Kernel-Gates + Guard-decide, exakt die
+Pipeline-Reihenfolge) mit einer synthetischen, entsperrten `StateView` — kein Netz, keine State-DB.
 Eine Sonde, die **erlaubt** würde, wirft `StartgateFailure` (Prozess-Exit 2, wie `ConfigError`).
 Zusätzlich laufen zwei globale Sonden der eingebauten Invarianten (`catalog.builtin.BUILTIN_DENY_PROBES`):
 der Merge-Endpoint, und `state_event=merge` unabhängig davon, ob `mr.update` aktiv ist.
@@ -295,7 +369,7 @@ Alles nicht explizit Erlaubte → default-deny + Audit. Lese-GETs werden mit Rea
 
 ---
 
-## git-Schreibpfad G1 (`git_proxy.py` + `pktline.py`)
+## git-Schreibpfad G1 (`guards/git/guard.py` + `guards/git/pktline.py`)
 
 Der Warden liest die pkt-line-Kommando-Sektion **vor** den PACK-Binärdaten, entscheidet, und streamt den unveränderten Body weiter. Kein bare-Repo, kein Mirror.
 
@@ -319,7 +393,7 @@ Protokoll-Details → [`warden/GIT_SERVER_REFERENCE.md`](../../warden/GIT_SERVER
 
 ---
 
-## State & Quoten (`state.py`)
+## State & Quoten (`core/state.py`)
 
 SQLite (WAL + `synchronous=FULL`), Volume-persistent.
 
@@ -364,7 +438,7 @@ benannter Apply-Funktion) hebt eine DB Version für Version an:
 
 ---
 
-## Credentials (`upstream.py`)
+## Credentials (`guards/gitlab_api/upstream.py`)
 
 Zwei Tokens, nur im Warden-Container:
 
@@ -403,7 +477,7 @@ Tokens kommen ausschließlich aus `.env` (niemals in `warden.toml`). Leere `allo
 
 ---
 
-## Logging (`audit.py`)
+## Logging (`core/audit.py`)
 
 Ein Schreiber (asyncio-Queue → einzelner Writer-Task), `O_APPEND`, eine vollständige JSON-Zeile pro Entscheidung. `Authorization`-Header und Token-Werte werden **nie** geloggt (Feld-Allowlist, nicht Blocklist). Rotation per rename+reopen. Fehler beim Logging → Entscheidung wird trotzdem durchgesetzt (fail-safe).
 

@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from warden.catalog import entries as entries_mod
-from warden.catalog.activation import EffectiveTable, build_effective_table
-from warden.catalog.config_parse import EndpointActivation
-from warden.catalog.entries import CATALOG, DEFAULT_ENABLED
-from warden.catalog.errors import CatalogConfigError
-from warden.catalog.model import CatalogEntry, EndpointKind
-from warden.config import Config
+from warden.core.config import Config
+from warden.guards.gitlab_api.catalog import entries as entries_mod
+from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
+from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
+from warden.guards.gitlab_api.catalog.entries import CATALOG, DEFAULT_ENABLED
+from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
+from warden.guards.gitlab_api.catalog.model import CatalogEntry, EndpointKind
 
 
 @pytest.fixture
@@ -119,17 +119,18 @@ def test_override_that_narrows_is_applied_and_enforced(cfg):
     )
     entry = next(e for e in table.entries if e.id == "branch.create")
     check = entry.checks[0]
-    from warden.model import ProxyRequest, StateView
+    from warden.core.model import StateView
+    from warden.guards.gitlab_api.intent import ApiIntent
 
-    req_ok = ProxyRequest(
-        channel="api", project="group/proj", method="POST",
+    req_ok = ApiIntent(
+        project="group/proj", method="POST",
         path="/projects/group%2Fproj/repository/branches",
         fields={"branch": "claude/only-this-x"},
     )
     assert check(req_ok, StateView(), cfg) is None  # narrower prefix satisfied
 
-    req_too_wide = ProxyRequest(
-        channel="api", project="group/proj", method="POST",
+    req_too_wide = ApiIntent(
+        project="group/proj", method="POST",
         path="/projects/group%2Fproj/repository/branches",
         fields={"branch": "claude/other"},  # inside the general namespace, NOT the override
     )
@@ -142,7 +143,7 @@ def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):
     # (test_capabilities.py pins that down) — this proves the *validation
     # branch itself* fires correctly for a hypothetical one that did, by
     # substituting a fake catalog.
-    from warden.capabilities import Capability
+    from warden.core.capabilities import Capability
 
     forbidden_entry = CatalogEntry(
         id="hypothetical.forbidden",
@@ -156,7 +157,7 @@ def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):
     monkeypatch.setattr(entries_mod, "CATALOG", CATALOG + (forbidden_entry,))
     # activation.py imported CATALOG by name at module load time — patch its
     # own binding too, exactly as a monkeypatch of a "from x import y" name.
-    import warden.catalog.activation as activation_mod
+    import warden.guards.gitlab_api.catalog.activation as activation_mod
 
     monkeypatch.setattr(activation_mod, "CATALOG", entries_mod.CATALOG)
 

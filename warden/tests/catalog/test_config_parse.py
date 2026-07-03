@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from warden.catalog.config_parse import (
+from warden.guards.gitlab_api.catalog.config_parse import (
     EndpointActivation,
     EndpointConfigError,
     parse_endpoint_activation,

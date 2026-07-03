@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import httpx
 
-from warden.audit import AuditLog
-from warden.config import Config
-from warden.context import AppContext
-from warden.state import State
-from warden.upstream import Upstream
+from warden.core.audit import AuditLog
+from warden.core.config import Config
+from warden.core.state import State
+from warden.guards.gitlab_api.context import AppContext
+from warden.guards.gitlab_api.upstream import Upstream
 
 
 def _ctx(cfg, *, sa=42, clock=None) -> AppContext:
