@@ -8,7 +8,7 @@ from pathlib import Path
 
 from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
 from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants
-from catraz import image, compose, auth
+from catraz import image, compose
 from catraz.ui import Out
 from catraz.commands.stack import _row_ready, _security_preflight, _wait_healthy, _print_urls
 from catraz.commands.setup import _auto_sync_if_needed

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from catraz.commands import setup
-from catraz.doctor import run_doctor, _doctor_fix, Findings, SECRETS
+from catraz.doctor import run_doctor, _doctor_fix, SECRETS
 from catraz.envfile import load_env
 from catraz.policy import _read_toml_allowed_projects
 from catraz.ui import Out

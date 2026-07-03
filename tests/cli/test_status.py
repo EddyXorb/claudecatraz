@@ -2,7 +2,7 @@
 import argparse
 import types
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 import pytest
 from catraz.commands import stack
 from catraz.ui import Out

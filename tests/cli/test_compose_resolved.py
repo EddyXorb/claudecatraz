@@ -2,10 +2,7 @@
 
 No Docker — monkeypatches compose.subprocess.run.
 """
-import json
-import os
 import stat
-import types
 from pathlib import Path
 from typing import Any
 import pytest

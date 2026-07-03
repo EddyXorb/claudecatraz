@@ -7,7 +7,6 @@ import pytest
 from catraz import image, compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
-from catraz.errors import EXIT_OK
 
 
 def _mock_cmd_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:

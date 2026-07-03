@@ -4,14 +4,12 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
-from typing import Any
 
-from catraz.errors import CliError, EXIT_OK, EXIT_GENERAL, EXIT_DOCTOR
-from catraz.compose import run as compose_run, compose_ps, assert_real_dirs, assert_invariants, _rc
+from catraz.errors import EXIT_OK, EXIT_GENERAL
+from catraz.compose import run as compose_run, compose_ps, _rc
 from catraz.doctor import run_doctor, print_findings, SECURITY_SECTIONS
-from catraz import auth, image, compose
+from catraz import compose
 from catraz.ui import Out
-from catraz.commands.setup import _auto_sync_if_needed
 
 
 def _row_ready(row: dict[str, str]) -> bool:

@@ -1,6 +1,5 @@
 """Workstream D — catraz init --from <path> tests."""
 import argparse
-import stat
 import types
 from pathlib import Path
 
@@ -160,7 +159,6 @@ def test_stage_inherited_overwrites_empty_destination(tmp_path: Path) -> None:
     (secrets / "gitlab_write_token").chmod(0o600)
 
     inherited = load_inherited(src)
-    from io import StringIO
     stage_inherited(cat, inherited, yes=False, out=Out(color=False))
 
     assert (secrets / "gitlab_read_token").read_text() == "glpat-src-read"

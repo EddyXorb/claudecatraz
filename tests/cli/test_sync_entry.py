@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 import pytest
 from catraz import cli
-from catraz.commands import setup
 from catraz.commands.setup import _sync as setup_sync
 from catraz.errors import CliError
 

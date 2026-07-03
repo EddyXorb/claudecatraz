@@ -1,5 +1,4 @@
 from pathlib import Path
-import pytest
 
 
 def test_ensure_gitignore_appends_once(tmp_path: Path) -> None:

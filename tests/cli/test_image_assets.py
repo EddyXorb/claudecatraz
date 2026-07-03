@@ -1,4 +1,3 @@
-from pathlib import Path
 from catraz.paths import asset_root
 
 

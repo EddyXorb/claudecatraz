@@ -1,6 +1,6 @@
-import hashlib, subprocess
+import hashlib
+import subprocess
 from pathlib import Path
-from catraz.paths import asset_root
 from catraz.envfile import load_env
 from catraz.errors import CliError, EXIT_DOCKER
 

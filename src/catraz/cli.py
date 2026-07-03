@@ -18,7 +18,7 @@ from pathlib import Path
 
 from catraz import __version__
 from catraz.errors import (
-    CliError, EXIT_OK, EXIT_GENERAL, EXIT_CONFIG, EXIT_DOCTOR, EXIT_DOCKER,
+    CliError, EXIT_OK, EXIT_GENERAL,
 )
 from catraz.doctor import DOCTOR_SECTIONS
 from catraz.ui import Out as Out  # also re-exported for tests that access cli.Out

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from catraz import image, compose as compose_mod, auth
+from catraz import image, compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
 

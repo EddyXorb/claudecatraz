@@ -9,8 +9,8 @@ Run:  python3 -m pytest tests/cli/ -q
 from pathlib import Path
 import pytest
 
-from catraz import cli, envfile, policy
-from catraz.compose import resolve_service, SERVICES
+from catraz import envfile, policy
+from catraz.compose import resolve_service
 from catraz.errors import CliError
 
 
