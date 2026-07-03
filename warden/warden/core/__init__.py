@@ -2,7 +2,8 @@
 
 Everything a guard needs from the trust boundary that is *not itself* GitLab/git-specific:
 the pipeline template method (:meth:`core.guard.Guard.handle`), shared policy value types
-(:mod:`core.model`), the rule registry, capability vocabulary, typed audit event, durable quota state.
+(:mod:`core.model`), the rule registry, capability vocabulary, typed audit event,
+durable quota state.
 
 No GitLab/git vocabulary lives here (``core.config.Config`` is the one documented exception).
 """

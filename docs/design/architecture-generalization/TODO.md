@@ -372,7 +372,7 @@ F); erst nach G angehen, wenn H/F den Katalog schon geschlankt haben.
   wäre die oben genannten "Vereinheitlichung zwischen read/write endpoints" automatisch erfüllt.
   Das ganze steht und fällt mit dem check ob es wirklich nur ein READONLY-token ist. Man könnte natürlich darauf vertrauen, dass nur GET Anfragen schon nichts ändern, aber das ist nicht sicher.
   Eventuell nur eine Liste mit gefährlichen GETs führen, gegen die dann gecheckt wird wenn man im Read-only branch ist. Mir ist klar,dass das die sicherheit auch nicht garantiert; wenn die api sich erweitert ist man aufgeschmissen. Alles natürlich unter der voraussetzung das eigentliche read-only token ist keins. Auf projektebene kann ja immer noch gefiltert werden entsprechend
-  der allowed projects wie bisher vor allen weiteren decisions; das schränkt zumindest den potenziellen zerstörungskreis ein.
+  der allowed projects wie bisher vor allen weiteren decisions; das schränkt zumindest den potenziellen zerstörungskreis ein. 
 
 - **Logging per `print(..., file=sys.stderr)`** in `context.py`/`__main__.py` statt
   eines Loggers — für eine Trust-Boundary-Komponente dünn; ein `logging`-Logger mit

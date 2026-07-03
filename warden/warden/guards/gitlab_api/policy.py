@@ -5,7 +5,8 @@ resource allowlist (R6) are now the kernel's job; capability invariant (R4) is
 exposed here as :func:`capability_gate` for the kernel, not re-checked in :func:`decide`.
 
 Rules enforced:
-  R1  Read pass-through  GET/HEAD/OPTIONS upstream with READ token; reads are "content, not visibility".
+  R1  Read pass-through  GET/HEAD/OPTIONS upstream with READ token; reads are
+      "content, not visibility".
   R3  API write filter   allowlisted write endpoints with ownership checks.
   R4  Irreversible verbs merge never permitted (caught by capability_gate first).
   R5  Quota & rate       max open MRs, max writes/hour; locked state denies (fail-safe).
@@ -77,7 +78,8 @@ def _decide_read(intent: ApiIntent) -> Decision:
 
 
 def decide(intent: ApiIntent, state: StateView, cfg: Config, effective: EffectiveTable) -> Decision:
-    """Default-deny guard-specific logic after kernel gates (reads vs. allowlist, ownership, quotas)."""
+    """Default-deny guard-specific logic after kernel gates (reads vs. allowlist,
+    ownership, quotas)."""
     if intent.method.upper() in ("GET", "HEAD", "OPTIONS"):
         return _decide_read(intent)
 
