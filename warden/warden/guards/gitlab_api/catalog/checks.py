@@ -36,19 +36,21 @@ def field_has_prefix(field: str) -> RegisteredCheck:
     return RegisteredCheck(name=f"field_has_prefix({field!r})", fn=check)
 
 
-def _owned_by_agent(intent: ApiIntent, state: StateView, cfg: Config) -> Optional[Decision]:
-    if intent.mr_owner_ok is True:
+def _mr_source_in_namespace(intent: ApiIntent, state: StateView, cfg: Config) -> Optional[Decision]:
+    if intent.mr_source_ok is True:
         return None
-    if intent.mr_owner_ok is None:
-        return Decision(False, R3, "MR ownership could not be verified")
-    return Decision(False, R3, "MR not owned by the service account")
+    if intent.mr_source_ok is None:
+        return Decision(False, R3, "MR source branch could not be verified")
+    return Decision(False, R3, "MR source_branch is outside the allowed branch namespace")
 
 
-# A singleton, not a factory: unparametrised and reused by every ownership-gated entry.
-# ``needs={"mr_owner"}`` allows the guard to ask "does any check need mr_owner?" instead
-# of comparing object identity against a hardcoded predicate.
-OWNED_BY_AGENT = RegisteredCheck(
-    name="owned_by_agent", fn=_owned_by_agent, needs=frozenset({"mr_owner"})
+# A singleton, not a factory: unparametrised and reused by every namespace-gated entry.
+# ``needs={"mr_owner"}`` allows the guard to ask "does any check need the MR lookup?"
+# instead of comparing object identity against a hardcoded predicate. The name
+# is a historical holdover from the author-based check this replaced (§07 Punkt 4);
+# it still just means "needs the iid → MR upstream lookup".
+MR_SOURCE_IN_NAMESPACE = RegisteredCheck(
+    name="mr_source_in_namespace", fn=_mr_source_in_namespace, needs=frozenset({"mr_owner"})
 )
 
 
@@ -70,6 +72,6 @@ def field_not_equals(field: str, value: object) -> RegisteredCheck:
 # config-facing introspection.
 CHECKS: Mapping[str, Callable[..., RegisteredCheck]] = {
     "field_has_prefix": field_has_prefix,
-    "owned_by_agent": lambda: OWNED_BY_AGENT,
+    "mr_source_in_namespace": lambda: MR_SOURCE_IN_NAMESPACE,
     "field_not_equals": field_not_equals,
 }

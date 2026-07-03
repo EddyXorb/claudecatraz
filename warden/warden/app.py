@@ -62,7 +62,6 @@ async def _healthz(request: Request) -> JSONResponse:
         {
             "status": "ok",
             "reconciled": ctx.state.is_reconciled(),
-            "service_account_id": ctx.forge.service_account_id,
         }
     )
 

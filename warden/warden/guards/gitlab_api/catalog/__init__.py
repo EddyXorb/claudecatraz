@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from .activation import EffectiveTable, build_effective_table
 from .builtin import is_builtin_merge_endpoint
-from .checks import CHECKS, OWNED_BY_AGENT, field_has_prefix, field_not_equals
+from .checks import CHECKS, MR_SOURCE_IN_NAMESPACE, field_has_prefix, field_not_equals
 from .config_parse import ApiEndpointsConfig, parse_api_endpoints
 from .entries import CATALOG, DEFAULT_ENABLED, api_capabilities, match_endpoint
 from .errors import CatalogConfigError
@@ -33,7 +33,7 @@ __all__ = [
     "EndpointKind",
     "FieldSpec",
     "Location",
-    "OWNED_BY_AGENT",
+    "MR_SOURCE_IN_NAMESPACE",
     "RegisteredCheck",
     "api_capabilities",
     "build_effective_table",

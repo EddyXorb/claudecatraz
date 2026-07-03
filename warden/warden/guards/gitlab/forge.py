@@ -1,7 +1,7 @@
-"""The GitLab forge: credentials, service-account, MR-ownership, and reconcile.
+"""The GitLab forge: credentials, MR source-branch lookup, and reconcile.
 
 :class:`GitForge` holds long-lived collaborators (config, upstream, state, audit),
-service-account id, MR-ownership cache, and project-id aliases. Reconcile rebuilds
+an MR source-branch-namespace cache, and project-id aliases. Reconcile rebuilds
 quota counters from GitLab truth at startup and periodically. Shared by git and
 REST-API guards; each owns its own Guard instance but both need this same forge
 state, making it a guard-agnostic collaborator.
@@ -10,7 +10,6 @@ state, making it a guard-agnostic collaborator.
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from typing import Any, Callable, Optional
 
@@ -42,7 +41,6 @@ class GitForge:
         self.forge_state = ForgeState(state.store)
         self.audit = audit
         self._clock = clock
-        self.service_account_id: Optional[int] = None
         # (project, iid) -> (ok, expires_at). Performance only, never security.
         self._owner_cache: dict[tuple[str, int], tuple[bool, float]] = {}
         self._owner_ttl = 30.0
@@ -51,30 +49,13 @@ class GitForge:
         # view of "which ids currently alias an allowlisted project" is refreshed.
         self.project_id_aliases: set[str] = set()
 
-    # --- service account -------------------------------------------------------
-    async def resolve_service_account(self) -> Optional[int]:
-        """Resolve and cache the write-token's user id once.
-
-        Returns None immediately when writes are disabled to prevent sending
-        the write token upstream in off/read-only mode.
-        """
-        if not self.cfg.writes_enabled:
-            return None
-        if self.service_account_id is not None:
-            return self.service_account_id
-        resp = await self.upstream.get_json("user", TokenKind.WRITE)
-        if resp.status_code == 200:
-            self.service_account_id = int(resp.json()["id"])
-        else:
-            print(
-                f"warden: could not resolve service account (GET /user → {resp.status_code})",
-                file=sys.stderr,
-            )
-        return self.service_account_id
-
     # --- ownership ---------------------------------------------------------------
-    async def mr_owned_by_agent(self, project: str, iid: int) -> Optional[bool]:
-        """True iff the MR is prefixed AND authored by the service account.
+    async def mr_source_in_namespace(self, project: str, iid: int) -> Optional[bool]:
+        """True iff the MR's ``source_branch`` lies in the allowed branch namespace.
+
+        Author-independent by design (§07 Punkt 4): blast-radius containment is
+        the branch namespace, not who opened the MR — a namespace branch is the
+        agent's exclusive push area regardless of author.
 
         Returns None when the lookup fails (→ policy denies, default-deny holds).
         """
@@ -83,7 +64,6 @@ class GitForge:
         if cached is not None and cached[1] > self._clock():
             return cached[0]
 
-        sa = await self.resolve_service_account()
         resp = await self.upstream.get_json(
             f"projects/{project_id(project)}/merge_requests/{iid}", TokenKind.READ
         )
@@ -91,8 +71,7 @@ class GitForge:
             return None
         mr = resp.json()
         source = mr.get("source_branch", "") or ""
-        author_id = (mr.get("author") or {}).get("id")
-        ok = self.cfg.in_branch_namespace(source) and sa is not None and author_id == sa
+        ok = self.cfg.in_branch_namespace(source)
         self._owner_cache[key] = (ok, self._clock() + self._owner_ttl)
         return ok
 
@@ -130,7 +109,6 @@ class GitForge:
             self.state.mark_reconciled()
             return True
 
-        sa = await self.resolve_service_account()
         ok = True
         resolved_ids: list[str] = []
         for project in self.cfg.allowed_projects:
@@ -138,7 +116,7 @@ class GitForge:
             try:
                 numeric_id = await self._resolve_project_id(pid)
                 branches = await self._list_agent_branches(pid)
-                mrs = await self._list_agent_mrs(pid, sa)
+                mrs = await self._list_agent_mrs(pid)
             except Exception as exc:  # keep state locked on any failure
                 log.error("reconcile failed for %s: %s", project, exc)
                 ok = False
@@ -184,10 +162,8 @@ class GitForge:
         branches = await self._get_paginated(f"projects/{pid}/repository/branches")
         return [b["name"] for b in branches if self.cfg.in_branch_namespace(b.get("name", ""))]
 
-    async def _list_agent_mrs(self, pid: str, sa: Optional[int]) -> list[tuple[int, str]]:
+    async def _list_agent_mrs(self, pid: str) -> list[tuple[int, str]]:
         path = f"projects/{pid}/merge_requests?state=opened"
-        if sa is not None:
-            path += f"&author_id={sa}"
         mrs = await self._get_paginated(path)
         return [
             (int(m["iid"]), m.get("state", "opened"))

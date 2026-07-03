@@ -156,7 +156,7 @@ class Guard(ABC, Generic[IntentT]):
         return self.state.view()
 
     async def startup(self) -> None:
-        """One-time, pre-serve setup (e.g. resolving service-account id).
+        """One-time, pre-serve setup.
 
         Default no-op; a guard overrides only if needed.
         """

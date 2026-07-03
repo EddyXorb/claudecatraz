@@ -1,4 +1,6 @@
-"""API reverse-proxy integration (W14, §8.1): passthrough, merge→403, ownership, no token leak."""
+"""API reverse-proxy integration (W14, §8.1): passthrough, merge→403,
+MR source-branch namespace, no token leak.
+"""
 
 from __future__ import annotations
 
@@ -71,19 +73,22 @@ async def test_create_mr_with_prefix_forwarded_with_write_token(client, respx_ro
     assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
-async def test_note_ownership_violation_denied(client, respx_router):
-    # MR lookup says the MR belongs to a different author.
+async def test_note_on_non_namespace_branch_denied(client, respx_router):
+    # MR lookup says the MR's source_branch is outside the allowed namespace —
+    # denied regardless of author (§07 Punkt 4).
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
+        return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
     resp = await client.post(f"/api/v4/projects/{PROJ}/merge_requests/7/notes", json={"body": "hi"})
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R3"
 
 
-async def test_note_on_owned_mr_allowed(client, respx_router):
+async def test_note_on_namespace_mr_allowed_even_with_foreign_author(client, respx_router):
+    # A colleague opened this MR from a claude/ branch and delegates the
+    # iteration to the agent — allowed, author-independent (§07 Punkt 4).
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     note = respx_router.route(method="POST", url__regex=r".*/merge_requests/7/notes$").mock(
         return_value=httpx.Response(201, json={"id": 1})
@@ -93,10 +98,11 @@ async def test_note_on_owned_mr_allowed(client, respx_router):
     assert note.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
-async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
-    # Inline diff comment (line-level review) on the bot's own MR — forwarded.
+async def test_inline_discussion_on_namespace_mr_allowed(client, respx_router):
+    # Inline diff comment (line-level review) on a namespace-branch MR — forwarded
+    # regardless of author (§07 Punkt 4).
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     disc = respx_router.route(method="POST", url__regex=r".*/merge_requests/7/discussions$").mock(
         return_value=httpx.Response(201, json={"id": "abc"})
@@ -116,9 +122,9 @@ async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
     assert disc.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
-async def test_inline_discussion_ownership_violation_denied(client, respx_router):
+async def test_inline_discussion_non_namespace_denied(client, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
+        return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions", json={"body": "nit"}
@@ -127,10 +133,13 @@ async def test_inline_discussion_ownership_violation_denied(client, respx_router
     assert resp.json()["rule"] == "R3"
 
 
-async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
-    # Reply under an existing discussion thread on the bot's own MR.
+async def test_discussion_reply_on_namespace_mr_allowed_even_with_foreign_author(
+    client, respx_router
+):
+    # Reply under an existing discussion thread on a namespace-branch MR opened
+    # by someone else — allowed, author-independent (§07 Punkt 4).
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     reply = respx_router.route(
         method="POST", url__regex=r".*/merge_requests/7/discussions/abc123/notes$"
@@ -143,9 +152,9 @@ async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
     assert reply.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
 
 
-async def test_discussion_reply_ownership_violation_denied(client, respx_router):
+async def test_discussion_reply_non_namespace_denied(client, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
+        return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions/abc123/notes",
@@ -395,7 +404,6 @@ def _activated_client_ctx(cfg, respx_router):
     state = State(":memory:")
     state.mark_reconciled()
     ctx = build_context(activated_cfg, Upstream(activated_cfg), state, AuditLog("-"))
-    ctx.forge.service_account_id = 42
     return ctx, create_app(ctx)
 
 

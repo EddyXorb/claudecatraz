@@ -13,14 +13,13 @@ from warden.core.state import State
 from warden.guards.gitlab.upstream import Upstream
 
 
-async def test_healthz_reports_reconcile_and_service_account(client):
-    # `client` serves the agent app with the reconciled state fixture + SA 42.
+async def test_healthz_reports_reconcile_status(client):
+    # `client` serves the agent app with the reconciled state fixture.
     resp = await client.get("/healthz")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["reconciled"] is True
-    assert body["service_account_id"] == 42
 
 
 async def _admin_client(ctx):

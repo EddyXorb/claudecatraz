@@ -65,9 +65,6 @@ class ApiGuard(Guard[ApiIntent]):
     def state_view(self) -> StateView:
         return self.forge.state_view()
 
-    async def startup(self) -> None:
-        await self.forge.resolve_service_account()
-
     async def reconcile(self) -> bool:
         return await self.forge.reconcile()
 
@@ -102,16 +99,16 @@ class ApiGuard(Guard[ApiIntent]):
         )
 
     async def enrich(self, intent: ApiIntent) -> ApiIntent:
-        """MR ownership lookup, only when the matched endpoint needs it.
+        """MR source-branch-namespace lookup, only when the matched endpoint needs it.
 
-        Reachable only once the kernel's read-only gate has already passed
-        — the write credential this transitively depends on (via
-        :meth:`~warden.guards.gitlab.forge.GitForge.resolve_service_account`)
-        is therefore never touched in off/read-only mode.
+        Reachable only once the kernel's read-only gate has already passed, so
+        this read-token lookup is never made in off mode.
         """
         ep = intent.endpoint
         if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
-            intent.mr_owner_ok = await self.forge.mr_owned_by_agent(intent.project, intent.iid)
+            intent.mr_source_ok = await self.forge.mr_source_in_namespace(
+                intent.project, intent.iid
+            )
         return intent
 
     def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:

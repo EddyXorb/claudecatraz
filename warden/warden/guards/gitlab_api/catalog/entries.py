@@ -15,7 +15,7 @@ from typing import Iterable, Mapping, Optional
 
 from ....core.capabilities import Capability
 from ....core.rules import R3
-from .checks import OWNED_BY_AGENT, field_has_prefix, field_not_equals
+from .checks import MR_SOURCE_IN_NAMESPACE, field_has_prefix, field_not_equals
 from .model import CatalogEntry, EndpointKind, FieldSpec, Location
 
 CATALOG: tuple[CatalogEntry, ...] = (
@@ -35,7 +35,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         id="mr.note",
         method="POST",
         template="/projects/{id}/merge_requests/{iid}/notes",
-        checks=(OWNED_BY_AGENT,),
+        checks=(MR_SOURCE_IN_NAMESPACE,),
         rule=R3,
         kind=EndpointKind.NOTE,
     ),
@@ -43,7 +43,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         id="mr.discussion",
         method="POST",
         template="/projects/{id}/merge_requests/{iid}/discussions",
-        checks=(OWNED_BY_AGENT,),
+        checks=(MR_SOURCE_IN_NAMESPACE,),
         rule=R3,
         kind=EndpointKind.NOTE,
     ),
@@ -51,7 +51,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         id="mr.discussion_reply",
         method="POST",
         template="/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes",
-        checks=(OWNED_BY_AGENT,),
+        checks=(MR_SOURCE_IN_NAMESPACE,),
         rule=R3,
         kind=EndpointKind.NOTE,
     ),
@@ -59,7 +59,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         id="mr.update",
         method="PUT",
         template="/projects/{id}/merge_requests/{iid}",
-        checks=(OWNED_BY_AGENT, field_not_equals("state_event", "merge")),
+        checks=(MR_SOURCE_IN_NAMESPACE, field_not_equals("state_event", "merge")),
         rule=R3,
         kind=EndpointKind.MR_UPDATE,
         # capabilities=∅ *statically* — the state_event=merge alias is
@@ -94,8 +94,9 @@ CATALOG: tuple[CatalogEntry, ...] = (
         rule=R3,
         kind=EndpointKind.ISSUE,
         # capabilities=∅: an issue is not a ref, a tag, or a merge — GitLab
-        # has no ownership concept to gate on before creation either (unlike
-        # an MR, there is no "MR the bot itself authored" check to reuse).
+        # has no branch-namespace concept to gate on before creation either
+        # (unlike an MR, there is no source_branch to check against the
+        # namespace).
     ),
 )
 

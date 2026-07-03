@@ -143,7 +143,6 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
     upstream = Upstream(cfg)
     audit = AuditLog("-")
     ctx = build_context(cfg, upstream, state, audit)
-    ctx.forge.service_account_id = 42
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://warden")

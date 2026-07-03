@@ -43,18 +43,14 @@ def state() -> State:
 def forge(cfg, state) -> GitForge:
     upstream = Upstream(cfg)
     audit = AuditLog("-")
-    forge = GitForge(cfg, upstream, state, audit)
-    forge.service_account_id = 42
-    return forge
+    return GitForge(cfg, upstream, state, audit)
 
 
 @pytest.fixture
 def ctx(cfg, state) -> AppContext:
     upstream = Upstream(cfg)
     audit = AuditLog("-")
-    ctx = build_context(cfg, upstream, state, audit)
-    ctx.forge.service_account_id = 42
-    return ctx
+    return build_context(cfg, upstream, state, audit)
 
 
 @pytest.fixture

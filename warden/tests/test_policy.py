@@ -178,14 +178,14 @@ def test_r2_create_mr_wrong_prefix_denied(cfg):
     assert not d.allow and d.rule == "R2"
 
 
-def test_r3_note_requires_ownership(cfg):
+def test_r3_note_requires_mr_source_in_namespace(cfg):
     req = _api("POST", "/projects/group%2Fproj/merge_requests/7/notes")
-    req.mr_owner_ok = True
+    req.mr_source_ok = True
     assert decide(req, StateView(), cfg).allow
-    req.mr_owner_ok = False
+    req.mr_source_ok = False
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R3"
-    req.mr_owner_ok = None  # unverifiable → default-deny
+    req.mr_source_ok = None  # unverifiable → default-deny
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R3"
 
@@ -225,20 +225,21 @@ def test_r4_merge_endpoint_always_denied(cfg):
 
 def test_r4_state_event_merge_alias_denied(cfg):
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", state_event="merge")
-    req.mr_owner_ok = True
+    req.mr_source_ok = True
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 
 
-def test_r3_mr_update_requires_ownership(cfg):
-    # mr.update's OWNED_BY_AGENT check (§04.2): editing an MR whose ownership
-    # can't be verified is denied — same check as mr.note/mr.discussion, but
-    # exercised on the update endpoint itself, not just the note endpoint.
+def test_r3_mr_update_requires_mr_source_in_namespace(cfg):
+    # mr.update's MR_SOURCE_IN_NAMESPACE check (§07 Punkt 4): editing an MR whose
+    # source_branch can't be verified as namespace is denied — same check as
+    # mr.note/mr.discussion, but exercised on the update endpoint itself, not
+    # just the note endpoint.
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="x")
-    req.mr_owner_ok = False
+    req.mr_source_ok = False
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R3"
-    req.mr_owner_ok = None  # unverifiable → default-deny
+    req.mr_source_ok = None  # unverifiable → default-deny
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R3"
 
@@ -392,7 +393,7 @@ def test_git_empty_push_denied(cfg):
 def test_mr_update_without_merge_intent_allowed(cfg):
     # The non-merge edit path: owned MR, no state_event=merge → allowed (R3).
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="new title")
-    req.mr_owner_ok = True
+    req.mr_source_ok = True
     d = decide(req, StateView(), cfg)
     assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
 

@@ -26,7 +26,7 @@ class ApiIntent(Intent):
     endpoint: Optional["CatalogEntry"] = None  # matched catalog entry (writes only)
     fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
     # Resolved by the guard's enrich() via an upstream lookup; None ⇒ unverifiable.
-    mr_owner_ok: Optional[bool] = None
+    mr_source_ok: Optional[bool] = None
     iid: Optional[int] = None  # merge_requests/{iid} from the path, if present
     body: bytes = b""  # raw request body, carried for forward()
     raw_query: str = ""  # exact wire query string, reattached only at forward()

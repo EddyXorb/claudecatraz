@@ -319,7 +319,7 @@ def test_e2e_api_merge_endpoint_denied_r4(cfg):
 
 def test_e2e_api_state_event_merge_alias_denied_r4(cfg):
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", state_event="merge")
-    req.mr_owner_ok = True
+    req.mr_source_ok = True
     d = api_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 

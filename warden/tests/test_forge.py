@@ -1,5 +1,5 @@
-"""forge.py (W6.2, W8.2, §6.11): reconcile pagination, fail-safe locking,
-MR-ownership rules and the ownership/service-account caches.
+"""forge.py (W6.2, W8.2, §6.11, §07 Punkt 4): reconcile pagination, fail-safe
+locking, and the MR source-branch-namespace rule + its cache.
 
 The pagination tests are the regression guard for the quota-undercount bug:
 listing stopped at the first 100 results, so a busy project counted too low and
@@ -17,12 +17,10 @@ from warden.guards.gitlab.forge import GitForge
 from warden.guards.gitlab.upstream import Upstream
 
 
-def _forge(cfg, *, sa=42, clock=None) -> GitForge:
+def _forge(cfg, *, clock=None) -> GitForge:
     st = State(":memory:")
     kwargs = {"clock": clock} if clock else {}
-    forge = GitForge(cfg, Upstream(cfg), st, AuditLog("-"), **kwargs)
-    forge.service_account_id = sa
-    return forge
+    return GitForge(cfg, Upstream(cfg), st, AuditLog("-"), **kwargs)
 
 
 # --- project_allowed_by_id (M6, moved from test_config.py's Config-level test:
@@ -58,7 +56,7 @@ async def test_list_branches_follows_every_page(forge, respx_router):
     await forge.upstream.aclose()
 
 
-async def test_list_mrs_paginates_filters_and_scopes_to_author(forge, respx_router):
+async def test_list_mrs_paginates_and_filters_by_namespace_author_independent(forge, respx_router):
     page1 = httpx.Response(
         200,
         json=[{"iid": 1, "state": "opened", "source_branch": "claude/x"}],
@@ -68,17 +66,23 @@ async def test_list_mrs_paginates_filters_and_scopes_to_author(forge, respx_rout
         200,
         json=[
             {"iid": 2, "state": "opened", "source_branch": "feature/y"},  # no prefix
-            {"iid": 3, "state": "opened", "source_branch": "claude/z"},
+            # foreign author, but namespace source_branch — still counted (§07 Punkt 4)
+            {
+                "iid": 3,
+                "state": "opened",
+                "source_branch": "claude/z",
+                "author": {"id": 999},
+            },
         ],
     )
     route = respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
         side_effect=[page1, page2]
     )
 
-    mrs = await forge._list_agent_mrs("group%2Fproj", 42)
+    mrs = await forge._list_agent_mrs("group%2Fproj")
 
-    assert mrs == [(1, "opened"), (3, "opened")]  # both pages, prefix-filtered
-    assert "author_id=42" in str(route.calls[0].request.url)  # only the SA's MRs
+    assert mrs == [(1, "opened"), (3, "opened")]  # both pages, namespace-filtered only
+    assert "author_id" not in str(route.calls[0].request.url)  # no author filter anymore
     await forge.upstream.aclose()
 
 
@@ -131,98 +135,58 @@ async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
     await forge.upstream.aclose()
 
 
-# --- MR ownership (W6.2) -------------------------------------------------------
-async def test_ownership_true_when_prefixed_and_authored_by_sa(forge, respx_router):
-    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
-    )
-    assert await forge.mr_owned_by_agent("group/proj", 7) is True
-    await forge.upstream.aclose()
-
-
-async def test_ownership_false_when_author_differs(forge, respx_router):
+# --- MR source-branch-namespace rule (W6.2, §07 Punkt 4) -----------------------
+async def test_mr_source_in_namespace_true_when_prefixed_regardless_of_author(forge, respx_router):
+    # A namespace source_branch is enough — the author (a foreign colleague here)
+    # no longer matters (§07 Punkt 4: blast-radius is the branch namespace).
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
-    assert await forge.mr_owned_by_agent("group/proj", 7) is False
+    assert await forge.mr_source_in_namespace("group/proj", 7) is True
     await forge.upstream.aclose()
 
 
-async def test_ownership_false_when_prefix_missing(forge, respx_router):
+async def test_mr_source_in_namespace_false_when_prefix_missing(forge, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
-    assert await forge.mr_owned_by_agent("group/proj", 7) is False
+    assert await forge.mr_source_in_namespace("group/proj", 7) is False
     await forge.upstream.aclose()
 
 
-async def test_ownership_none_when_lookup_fails(forge, respx_router):
+async def test_mr_source_in_namespace_none_when_lookup_fails(forge, respx_router):
     # None ⇒ the policy denies (default-deny holds); it must not be coerced to False/True.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(404)
     )
-    assert await forge.mr_owned_by_agent("group/proj", 7) is None
+    assert await forge.mr_source_in_namespace("group/proj", 7) is None
     await forge.upstream.aclose()
 
 
-async def test_ownership_cached_within_ttl_then_refetched(cfg, respx_router):
+async def test_mr_source_in_namespace_cached_within_ttl_then_refetched(cfg, respx_router):
     now = {"t": 1000.0}
     forge = _forge(cfg, clock=lambda: now["t"])
     route = respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
 
-    assert await forge.mr_owned_by_agent("group/proj", 7) is True
-    assert await forge.mr_owned_by_agent("group/proj", 7) is True
+    assert await forge.mr_source_in_namespace("group/proj", 7) is True
+    assert await forge.mr_source_in_namespace("group/proj", 7) is True
     assert route.call_count == 1  # second call served from the 30s cache
 
     now["t"] += 31  # past the TTL
-    assert await forge.mr_owned_by_agent("group/proj", 7) is True
+    assert await forge.mr_source_in_namespace("group/proj", 7) is True
     assert route.call_count == 2  # cache expired → refetched
-    await forge.upstream.aclose()
-
-
-# --- service account (W6.2) ----------------------------------------------------
-async def test_resolve_service_account_is_cached(cfg, respx_router):
-    forge = _forge(cfg, sa=None)
-    route = respx_router.route(method="GET", url__regex=r".*/user$").mock(
-        return_value=httpx.Response(200, json={"id": 77})
-    )
-    assert await forge.resolve_service_account() == 77
-    assert await forge.resolve_service_account() == 77
-    assert route.call_count == 1  # resolved once, then memoised
-    await forge.upstream.aclose()
-
-
-async def test_resolve_service_account_none_on_error(cfg, respx_router):
-    forge = _forge(cfg, sa=None)
-    respx_router.route(method="GET", url__regex=r".*/user$").mock(return_value=httpx.Response(403))
-    assert await forge.resolve_service_account() is None
     await forge.upstream.aclose()
 
 
 # --- GITLAB_MODE gates (mode-enforcement, step 6/7) ----------------------------
 
 
-async def test_resolve_service_account_no_upstream_call_when_writes_disabled(respx_router):
-    """resolve_service_account() must make NO upstream call in off or read-only mode."""
-    for mode in ("off", "read-only"):
-        cfg_mode = Config(
-            allowed_projects=("group/proj",),
-            read_token="r",
-            gitlab_mode=mode,
-        )
-        forge = _forge(cfg_mode, sa=None)
-        # No mock registered — any upstream call raises respx.MockTransportError.
-        result = await forge.resolve_service_account()
-        assert result is None, f"expected None in {mode} mode, got {result}"
-        await forge.upstream.aclose()
-
-
 async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
     """reconcile() must make NO upstream call when GITLAB_MODE=off, and must unlock state."""
     cfg_off = Config(gitlab_mode="off")
-    forge = _forge(cfg_off, sa=None)
+    forge = _forge(cfg_off)
     assert forge.state_view().locked is True  # starts locked
 
     # No mock registered — any upstream call raises respx.MockTransportError.
