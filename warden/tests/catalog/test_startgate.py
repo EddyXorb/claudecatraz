@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+import warden.guards.gitlab_api.catalog.probes as probes_mod
 from warden.core.config import Config
 from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
 from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
@@ -51,7 +52,7 @@ def test_empty_table_still_runs_builtin_global_probes(cfg):
     run_startgate(cfg, table)  # must not raise
 
 
-def test_a_probe_that_would_be_allowed_raises_startgate_failure(cfg):
+def test_a_probe_that_would_be_allowed_raises_startgate_failure(cfg, monkeypatch):
     bad_entry = CatalogEntry(
         id="bad.entry",
         method="POST",
@@ -59,7 +60,11 @@ def test_a_probe_that_would_be_allowed_raises_startgate_failure(cfg):
         checks=(),  # nothing gates this — the probe below is actually allowed
         rule="R3",
         kind=EndpointKind.ISSUE,
-        deny_probes=(
+    )
+    monkeypatch.setitem(
+        probes_mod.ENTRY_DENY_PROBES,
+        "bad.entry",
+        (
             DenyProbe(
                 description="misconfigured probe: this request is actually allowed",
                 method="POST",
@@ -73,7 +78,7 @@ def test_a_probe_that_would_be_allowed_raises_startgate_failure(cfg):
         run_startgate(cfg, table)
 
 
-def test_startgate_failure_names_the_probe_description(cfg):
+def test_startgate_failure_names_the_probe_description(cfg, monkeypatch):
     bad_entry = CatalogEntry(
         id="bad.entry",
         method="POST",
@@ -81,7 +86,11 @@ def test_startgate_failure_names_the_probe_description(cfg):
         checks=(),
         rule="R3",
         kind=EndpointKind.ISSUE,
-        deny_probes=(
+    )
+    monkeypatch.setitem(
+        probes_mod.ENTRY_DENY_PROBES,
+        "bad.entry",
+        (
             DenyProbe(
                 description="a very specific probe description",
                 method="POST",

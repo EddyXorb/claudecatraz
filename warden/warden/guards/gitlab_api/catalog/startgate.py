@@ -30,6 +30,7 @@ from .activation import EffectiveTable
 from .builtin import BUILTIN_DENY_PROBES
 from .errors import StartgateFailure
 from .model import PROBE_PROJECT, DenyProbe
+from .probes import ENTRY_DENY_PROBES
 
 # Mirrors guards.gitlab_api.parsing.project_from_path exactly — duplicated
 # rather than imported to avoid a load-time cycle (parsing.py imports the
@@ -101,7 +102,7 @@ def run_startgate(cfg: Config, table: EffectiveTable) -> None:
     """
     probe_cfg = _probe_config(cfg, table)
     for entry in table.entries:
-        for probe in entry.deny_probes:
+        for probe in ENTRY_DENY_PROBES.get(entry.id, ()):
             _run_probe(probe_cfg, entry.id, probe)
     for probe in BUILTIN_DENY_PROBES:
         _run_probe(probe_cfg, "<builtin>", probe)

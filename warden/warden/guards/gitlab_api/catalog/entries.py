@@ -10,7 +10,9 @@ precisely this set, unchanged. Anything else (``branch.create``,
 reachable when a ``warden.toml`` explicitly enables it (``activation.py``).
 
 The merge endpoint is deliberately **not** here — it is a built-in deny
-invariant (``builtin.py``), not an activatable row.
+invariant (``builtin.py``), not an activatable row. Each row's deny-probes
+live in ``probes.py``, keyed by entry id, so this table stays a legible
+one-row-per-endpoint list.
 """
 
 from __future__ import annotations
@@ -18,45 +20,9 @@ from __future__ import annotations
 from typing import Iterable, Mapping, Optional
 
 from ....core.capabilities import Capability
-from ....core.config import Config
-from ....core.model import Decision, StateView
-from ....core.rules import R2, R3
-from ..intent import ApiIntent
+from ....core.rules import R3
 from .checks import OWNED_BY_AGENT, field_has_prefix, field_not_equals
-from .model import (
-    OTHER_PROJECT_PATH,
-    PROBE_PROJECT_PATH,
-    CatalogEntry,
-    DenyProbe,
-    EndpointKind,
-    FieldSpec,
-    Location,
-    OverridableParam,
-    RegisteredCheck,
-)
-
-
-def _literal_branch_prefix_check(prefix: str) -> RegisteredCheck:
-    """Build the override replacement for ``branch.create``'s namespace check
-    (§04.3): a *literal* prefix, tighter than the deployment-wide
-    ``branch_prefixes`` union that :func:`field_has_prefix` otherwise checks.
-    """
-
-    def check(intent: ApiIntent, state: StateView, cfg: Config) -> Optional[Decision]:
-        value = intent.fields.get("branch", "")
-        if isinstance(value, str) and value.startswith(prefix):
-            return None
-        return Decision(False, R2, f"branch {value!r} outside required prefix {prefix!r}")
-
-    return RegisteredCheck(name=f"field_has_prefix('branch', literal={prefix!r})", fn=check)
-
-
-def _branch_prefix_is_narrower(cfg: Config, value: object) -> bool:
-    # An override prefix narrows the default iff everything it matches would
-    # already have matched the deployment's own namespace — reuses
-    # Config.in_branch_namespace instead of re-deriving the namespace rule.
-    return isinstance(value, str) and bool(value) and cfg.in_branch_namespace(value)
-
+from .model import CatalogEntry, EndpointKind, FieldSpec, Location
 
 CATALOG: tuple[CatalogEntry, ...] = (
     # --- default set (Schritt 3 behaviour, unchanged) ----------------------
@@ -70,14 +36,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         # capabilities=∅: creating an MR touches no git ref (the branch it
         # points at was already pushed separately) — honestly not creates_ref.
         decision_fields=(FieldSpec("source_branch", Location.BODY),),
-        deny_probes=(
-            DenyProbe(
-                description="source_branch outside the branch namespace is denied",
-                method="POST",
-                path=f"/projects/{PROBE_PROJECT_PATH}/merge_requests",
-                fields={"source_branch": "main", "target_branch": "main"},
-            ),
-        ),
     ),
     CatalogEntry(
         id="mr.note",
@@ -86,14 +44,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         checks=(OWNED_BY_AGENT,),
         rule=R3,
         kind=EndpointKind.NOTE,
-        deny_probes=(
-            DenyProbe(
-                description="a note on an MR whose ownership can't be verified is denied",
-                method="POST",
-                path=f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7/notes",
-                fields={"body": "hi"},
-            ),
-        ),
     ),
     CatalogEntry(
         id="mr.discussion",
@@ -102,14 +52,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         checks=(OWNED_BY_AGENT,),
         rule=R3,
         kind=EndpointKind.NOTE,
-        deny_probes=(
-            DenyProbe(
-                description="a discussion on an unverifiable MR is denied",
-                method="POST",
-                path=f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7/discussions",
-                fields={"body": "nit"},
-            ),
-        ),
     ),
     CatalogEntry(
         id="mr.discussion_reply",
@@ -118,17 +60,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         checks=(OWNED_BY_AGENT,),
         rule=R3,
         kind=EndpointKind.NOTE,
-        deny_probes=(
-            DenyProbe(
-                description="a discussion reply on an unverifiable MR is denied",
-                method="POST",
-                path=(
-                    f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7/"
-                    "discussions/abc123/notes"
-                ),
-                fields={"body": "done"},
-            ),
-        ),
     ),
     CatalogEntry(
         id="mr.update",
@@ -140,21 +71,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         # capabilities=∅ *statically* — the state_event=merge alias is
         # field-dependent, added by api_capabilities(), not declared here.
         decision_fields=(FieldSpec("state_event", Location.BODY),),
-        deny_probes=(
-            DenyProbe(
-                description="editing an MR whose ownership can't be verified is denied",
-                method="PUT",
-                path=f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7",
-                fields={"title": "x"},
-            ),
-            DenyProbe(
-                description="state_event=merge is denied even on the bot's own MR",
-                method="PUT",
-                path=f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7",
-                fields={"state_event": "merge"},
-                mr_owner_ok=True,
-            ),
-        ),
     ),
     CatalogEntry(
         id="pipeline.trigger",
@@ -164,14 +80,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         rule=R3,
         kind=EndpointKind.PIPELINE,
         decision_fields=(FieldSpec("ref", Location.BODY),),
-        deny_probes=(
-            DenyProbe(
-                description="triggering a pipeline on a protected ref is denied",
-                method="POST",
-                path=f"/projects/{PROBE_PROJECT_PATH}/pipeline",
-                fields={"ref": "main"},
-            ),
-        ),
     ),
     # --- extra, honestly-catalogued entries — NOT in DEFAULT_ENABLED --------
     CatalogEntry(
@@ -183,27 +91,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         kind=EndpointKind.BRANCH,
         capabilities=frozenset({Capability.CREATES_REF}),
         decision_fields=(FieldSpec("branch", Location.BODY),),
-        deny_probes=(
-            DenyProbe(
-                description="creating a branch outside the namespace via REST is denied",
-                method="POST",
-                path=f"/projects/{PROBE_PROJECT_PATH}/repository/branches",
-                fields={"branch": "main", "ref": "main"},
-            ),
-        ),
-        # §04.2/04.3: a deployment may narrow this entry's namespace check to
-        # a literal prefix tighter than the general branch_prefixes union —
-        # never wider. Demonstrates the override mechanism end to end; no
-        # default entry needs it (none of the shipped six take a literal
-        # prefix parameter to begin with).
-        overridable=(
-            OverridableParam(
-                key="branch_prefix",
-                check_index=0,
-                is_narrower=_branch_prefix_is_narrower,
-                rebuild=lambda cfg, value: _literal_branch_prefix_check(str(value)),
-            ),
-        ),
     ),
     CatalogEntry(
         id="issue.create",
@@ -215,19 +102,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         # capabilities=∅: an issue is not a ref, a tag, or a merge — GitLab
         # has no ownership concept to gate on before creation either (unlike
         # an MR, there is no "MR the bot itself authored" check to reuse).
-        deny_probes=(
-            DenyProbe(
-                # No entry-specific check exists to probe (checks=() by
-                # design) — this instead pins down the invariant every entry
-                # shares regardless of its own checks: the project boundary
-                # (R6) still applies. A future change that special-cased some
-                # catalog entries to skip project_gate would fail this.
-                description="the project boundary still applies with no entry-specific checks",
-                method="POST",
-                path=f"/projects/{OTHER_PROJECT_PATH}/issues",
-                fields={"title": "x"},
-            ),
-        ),
     ),
 )
 
@@ -268,9 +142,8 @@ def match_endpoint(
 
     ``entries`` is normally an
     :class:`~warden.guards.gitlab_api.catalog.activation.EffectiveTable`'s
-    ``.entries`` — the activated, override-applied subset — never
-    :data:`CATALOG` directly (§04.2/04.3: only the effective table may decide
-    a real request).
+    ``.entries`` — the activated subset — never :data:`CATALOG` directly
+    (§04.2/04.3: only the effective table may decide a real request).
     """
     path = path.rstrip("/")
     for ep in entries:

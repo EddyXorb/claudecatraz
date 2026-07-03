@@ -1,6 +1,5 @@
 """Config × Catalog → the effective table (§04.2/04.3): fail-closed
-validation of every activation rule, and the narrowing-only override
-mechanism.
+validation of every activation rule.
 """
 
 from __future__ import annotations
@@ -63,79 +62,6 @@ def test_duplicate_id_in_enable_list_is_tolerated(cfg):
 def test_unknown_id_in_enable_raises(cfg):
     with pytest.raises(CatalogConfigError, match="unknown catalog id"):
         build_effective_table(cfg, EndpointActivation(enable=("no.such.entry",)))
-
-
-def test_override_for_unknown_id_raises(cfg):
-    with pytest.raises(CatalogConfigError, match="unknown catalog id"):
-        build_effective_table(
-            cfg,
-            EndpointActivation(
-                enable=tuple(DEFAULT_ENABLED), overrides={"no.such.entry": {"x": "y"}}
-            ),
-        )
-
-
-def test_override_for_non_enabled_entry_raises(cfg):
-    with pytest.raises(CatalogConfigError, match="not in \\[api.endpoints\\].enable"):
-        build_effective_table(
-            cfg,
-            EndpointActivation(
-                enable=tuple(DEFAULT_ENABLED),  # branch.create NOT enabled
-                overrides={"branch.create": {"branch_prefix": "claude/x-"}},
-            ),
-        )
-
-
-def test_override_with_unknown_key_raises(cfg):
-    with pytest.raises(CatalogConfigError, match="no overridable parameter"):
-        build_effective_table(
-            cfg,
-            EndpointActivation(
-                enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
-                overrides={"branch.create": {"not_a_real_key": "x"}},
-            ),
-        )
-
-
-def test_override_that_widens_raises(cfg):
-    # "main" is not within cfg.branch_prefixes ("claude/") — widening, refused.
-    with pytest.raises(CatalogConfigError, match="does not narrow"):
-        build_effective_table(
-            cfg,
-            EndpointActivation(
-                enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
-                overrides={"branch.create": {"branch_prefix": "main"}},
-            ),
-        )
-
-
-def test_override_that_narrows_is_applied_and_enforced(cfg):
-    table = build_effective_table(
-        cfg,
-        EndpointActivation(
-            enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
-            overrides={"branch.create": {"branch_prefix": "claude/only-this-"}},
-        ),
-    )
-    entry = next(e for e in table.entries if e.id == "branch.create")
-    check = entry.checks[0]
-    from warden.core.model import StateView
-    from warden.guards.gitlab_api.intent import ApiIntent
-
-    req_ok = ApiIntent(
-        _project="group/proj", _method="POST",
-        path="/projects/group%2Fproj/repository/branches",
-        fields={"branch": "claude/only-this-x"},
-    )
-    assert check(req_ok, StateView(), cfg) is None  # narrower prefix satisfied
-
-    req_too_wide = ApiIntent(
-        _project="group/proj", _method="POST",
-        path="/projects/group%2Fproj/repository/branches",
-        fields={"branch": "claude/other"},  # inside the general namespace, NOT the override
-    )
-    d = check(req_too_wide, StateView(), cfg)
-    assert d is not None and not d.allow
 
 
 def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):

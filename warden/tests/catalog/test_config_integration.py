@@ -47,27 +47,6 @@ def test_from_env_parses_api_endpoints_enable(tmp_path: Path):
     assert ids == {"mr.create", "branch.create"}
 
 
-def test_from_env_parses_overrides(tmp_path: Path):
-    toml = tmp_path / "warden.toml"
-    toml.write_text(
-        "[api.endpoints]\n"
-        'enable = ["branch.create"]\n\n'
-        '[api.endpoints.overrides."branch.create"]\n'
-        'branch_prefix = "claude/x-"\n'
-    )
-    cfg = from_env(_MIN_ENV, strict=True, toml_path=str(toml))
-    entry = next(e for e in cfg.effective_endpoints.entries if e.id == "branch.create")
-    from warden.core.model import StateView
-    from warden.guards.gitlab_api.intent import ApiIntent
-
-    req = ApiIntent(
-        _project="group/proj", _method="POST",
-        path="/projects/group%2Fproj/repository/branches",
-        fields={"branch": "claude/x-thing"},
-    )
-    assert entry.checks[0](req, StateView(), cfg) is None
-
-
 def test_from_env_with_unknown_catalog_id_raises_config_error(tmp_path: Path):
     toml = tmp_path / "warden.toml"
     toml.write_text('[api.endpoints]\nenable = ["no.such.entry"]\n')

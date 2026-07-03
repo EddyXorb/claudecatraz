@@ -8,22 +8,20 @@ time inside ``from_env``) without a load-time cycle. Malformed shapes raise
 ``config.py`` re-wraps as ``ConfigError`` at that boundary, the same way it
 already re-wraps ``tomllib.TOMLDecodeError``.
 
-This module only parses *shape* (is ``enable`` a list of strings? is each
-override a table?). Whether an id actually exists in the catalog, and
-whether an override narrows or widens, is checked later against the catalog
+This module only parses *shape* (is ``enable`` a list of strings?). Whether
+an id actually exists in the catalog is checked later against the catalog
 itself — see ``activation.build_effective_table`` — because that check needs
-the catalog and (for narrowing proofs) a built ``Config``, neither of which
-this module may depend on.
+the catalog, which this module may not depend on.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Mapping, Optional
 
 
 class EndpointConfigError(ValueError):
-    """Malformed ``[api.endpoints]`` / ``[api.endpoints.overrides.*]`` shape."""
+    """Malformed ``[api.endpoints]`` shape."""
 
 
 @dataclass(frozen=True)
@@ -34,12 +32,11 @@ class EndpointActivation:
     the caller (``activation.build_effective_table``) then falls back to the
     catalog's default set, never an empty list. An *explicit* ``enable = []``
     and an *absent* section must stay distinguishable, or a bare
-    ``[api.endpoints]`` table with only an ``overrides`` sub-table would
-    silently disable every default entry (§04.3 behaviour preservation).
+    ``[api.endpoints]`` table would silently disable every default entry
+    (§04.3 behaviour preservation).
     """
 
     enable: Optional[tuple[str, ...]] = None
-    overrides: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
 
 def parse_endpoint_activation(file: Mapping[str, object]) -> EndpointActivation:
@@ -62,15 +59,4 @@ def parse_endpoint_activation(file: Mapping[str, object]) -> EndpointActivation:
             )
         enable = tuple(enable_raw)
 
-    overrides_raw = endpoints.get("overrides", {})
-    if not isinstance(overrides_raw, Mapping):
-        raise EndpointConfigError("warden.toml: [api.endpoints.overrides] must be a table")
-    overrides: dict[str, Mapping[str, object]] = {}
-    for entry_id, params in overrides_raw.items():
-        if not isinstance(entry_id, str) or not isinstance(params, Mapping):
-            raise EndpointConfigError(
-                f'warden.toml: [api.endpoints.overrides."{entry_id}"] must be a table'
-            )
-        overrides[entry_id] = dict(params)
-
-    return EndpointActivation(enable=enable, overrides=overrides)
+    return EndpointActivation(enable=enable)

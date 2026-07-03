@@ -25,10 +25,11 @@ from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R1
 from ...core.state import State
-from ...errors import deny_json, git_reject_response
+from ...errors import deny_json
 from ..gitlab.forge import GitlabForge
 from ..gitlab.upstream import stream_upstream
 from . import policy
+from .errors import git_reject_response
 from .intent import GitIntent
 from .pktline import capabilities, parse_commands, read_until_flush
 

@@ -25,7 +25,6 @@ def test_absent_endpoints_table_yields_default_activation():
 def test_enable_list_is_parsed_as_a_tuple():
     act = parse_endpoint_activation({"api": {"endpoints": {"enable": ["mr.create", "mr.note"]}}})
     assert act.enable == ("mr.create", "mr.note")
-    assert act.overrides == {}
 
 
 def test_explicit_empty_enable_list_is_distinguishable_from_absent():
@@ -35,20 +34,6 @@ def test_explicit_empty_enable_list_is_distinguishable_from_absent():
     assert act.enable == ()
 
 
-def test_overrides_are_parsed_as_nested_dicts():
-    act = parse_endpoint_activation(
-        {
-            "api": {
-                "endpoints": {
-                    "enable": ["branch.create"],
-                    "overrides": {"branch.create": {"branch_prefix": "claude/x-"}},
-                }
-            }
-        }
-    )
-    assert act.overrides == {"branch.create": {"branch_prefix": "claude/x-"}}
-
-
 @pytest.mark.parametrize(
     "file",
     [
@@ -56,8 +41,6 @@ def test_overrides_are_parsed_as_nested_dicts():
         {"api": {"endpoints": "not-a-table"}},
         {"api": {"endpoints": {"enable": "not-a-list"}}},
         {"api": {"endpoints": {"enable": [1, 2]}}},  # not all strings
-        {"api": {"endpoints": {"overrides": "not-a-table"}}},
-        {"api": {"endpoints": {"overrides": {"mr.create": "not-a-table"}}}},
     ],
 )
 def test_malformed_shapes_raise_endpoint_config_error(file):

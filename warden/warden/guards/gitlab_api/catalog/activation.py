@@ -18,7 +18,7 @@ is no partial/best-effort table.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Mapping
 
 from ....core.capabilities import FORBIDDEN
@@ -49,9 +49,7 @@ def build_effective_table(cfg: Config, activation: EndpointActivation) -> Effect
     """Build the effective table once. Raises :class:`CatalogConfigError` on
     any of the fail-closed validation rules from §04.3:
 
-    * an unknown catalog id in ``enable`` or in ``overrides``,
-    * an override for an id that is not (also) enabled,
-    * an override that widens instead of narrows a default,
+    * an unknown catalog id in ``enable``,
     * enabling an entry whose static capabilities intersect ``FORBIDDEN``
       (§04.2's deliberate YAGNI: no scoping-check taming mechanism exists yet).
     """
@@ -64,18 +62,6 @@ def build_effective_table(cfg: Config, activation: EndpointActivation) -> Effect
             f"warden.toml [api.endpoints].enable: unknown catalog id(s): "
             f"{', '.join(unknown_enabled)}"
         )
-
-    enabled_set = set(enable)
-    for entry_id in activation.overrides:
-        if entry_id not in catalog_by_id:
-            raise CatalogConfigError(
-                f"warden.toml [api.endpoints.overrides]: unknown catalog id {entry_id!r}"
-            )
-        if entry_id not in enabled_set:
-            raise CatalogConfigError(
-                f"warden.toml [api.endpoints.overrides.{entry_id!r}]: {entry_id!r} is not "
-                "in [api.endpoints].enable — overrides only apply to enabled entries"
-            )
 
     entries: list[CatalogEntry] = []
     enabled_via: dict[str, str] = {}
@@ -94,32 +80,7 @@ def build_effective_table(cfg: Config, activation: EndpointActivation) -> Effect
                 "mechanism exists yet for FORBIDDEN capabilities (§04.2 YAGNI); see "
                 "docs/design/architecture-generalization/04-policy-erweiterbarkeit.md"
             )
-        entry = _apply_overrides(entry, cfg, activation.overrides.get(entry_id, {}))
         entries.append(entry)
         enabled_via[entry_id] = "default" if entry_id in DEFAULT_ENABLED else f"config:{entry_id}"
 
     return EffectiveTable(entries=tuple(entries), enabled_via=enabled_via)
-
-
-def _apply_overrides(
-    entry: CatalogEntry, cfg: Config, overrides: Mapping[str, object]
-) -> CatalogEntry:
-    if not overrides:
-        return entry
-    by_key = {o.key: o for o in entry.overridable}
-    checks = list(entry.checks)
-    for key, value in overrides.items():
-        knob = by_key.get(key)
-        if knob is None:
-            raise CatalogConfigError(
-                f"warden.toml [api.endpoints.overrides.{entry.id!r}]: no overridable "
-                f"parameter {key!r} on this entry"
-            )
-        if not knob.is_narrower(cfg, value):
-            raise CatalogConfigError(
-                f"warden.toml [api.endpoints.overrides.{entry.id!r}].{key} = {value!r} "
-                "does not narrow the default — overrides may only restrict, never widen "
-                "(§04.2/04.3)"
-            )
-        checks[knob.check_index] = knob.rebuild(cfg, value)
-    return replace(entry, checks=tuple(checks))

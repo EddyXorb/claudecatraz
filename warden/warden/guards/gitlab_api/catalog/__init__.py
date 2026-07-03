@@ -12,6 +12,7 @@ directly:
 * ``builtin``     — the non-catalog merge deny invariant (§04.2)
 * ``config_parse``— ``[api.endpoints]`` TOML shape parsing (no Config dependency)
 * ``activation``  — Config × Catalog → the effective, request-matchable table (§04.3)
+* ``probes``      — deny-probes per entry id, kept out of the ``entries`` table (§04.4)
 * ``startgate``   — runs every activated entry's deny-probes at boot (§04.4)
 """
 
@@ -31,9 +32,9 @@ from .model import (
     EndpointKind,
     FieldSpec,
     Location,
-    OverridableParam,
     RegisteredCheck,
 )
+from .probes import ENTRY_DENY_PROBES
 from .report import endpoint_table_report
 from .startgate import run_startgate
 
@@ -46,6 +47,7 @@ __all__ = [
     "DEFAULT_ENABLED",
     "DenyProbe",
     "EffectiveTable",
+    "ENTRY_DENY_PROBES",
     "EndpointActivation",
     "EndpointConfigError",
     "EndpointKind",
@@ -53,7 +55,6 @@ __all__ = [
     "Location",
     "OTHER_PROJECT",
     "OWNED_BY_AGENT",
-    "OverridableParam",
     "PROBE_PROJECT",
     "RegisteredCheck",
     "StartgateFailure",

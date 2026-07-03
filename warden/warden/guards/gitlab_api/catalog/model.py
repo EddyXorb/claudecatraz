@@ -116,24 +116,6 @@ class DenyProbe:
 
 
 @dataclass(frozen=True)
-class OverridableParam:
-    """One override knob a catalog entry exposes (§04.2/04.3).
-
-    ``rebuild`` produces the replacement check for a validated override
-    value; ``is_narrower`` is the fail-closed proof that the new value cannot
-    possibly grant more than the default, checked *before* ``rebuild`` runs.
-    Both are plain functions of ``(Config, value)`` so a proof can lean on
-    e.g. ``Config.in_branch_namespace`` instead of re-deriving the namespace
-    rule for itself.
-    """
-
-    key: str
-    check_index: int
-    is_narrower: Callable[[Config, object], bool]
-    rebuild: Callable[[Config, object], RegisteredCheck]
-
-
-@dataclass(frozen=True)
 class CatalogEntry:
     """One row of the endpoint catalog (§04.2) — the unit a catalog PR adds.
 
@@ -153,8 +135,6 @@ class CatalogEntry:
     capabilities: frozenset[Capability] = frozenset()
     id: str = ""
     decision_fields: tuple[FieldSpec, ...] = ()
-    deny_probes: tuple[DenyProbe, ...] = ()
-    overridable: tuple[OverridableParam, ...] = ()
 
     @functools.cached_property
     def regex(self) -> re.Pattern[str]:

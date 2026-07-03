@@ -32,6 +32,7 @@ from warden.guards.gitlab_api.catalog import (
     api_capabilities,
 )
 from warden.guards.gitlab_api.catalog.builtin import is_builtin_merge_endpoint
+from warden.guards.gitlab_api.catalog.probes import ENTRY_DENY_PROBES
 from warden.guards.gitlab_api.intent import ApiIntent
 from warden.guards.gitlab_api.policy import full_decide as api_decide
 
@@ -243,7 +244,7 @@ def test_every_catalog_entry_has_an_id_and_at_least_one_deny_probe():
     # the startgate can never exercise — every row here must carry both.
     for ep in CATALOG:
         assert ep.id, f"catalog entry with empty id: {ep.method} {ep.template}"
-        assert ep.deny_probes, f"catalog entry {ep.id!r} has no deny probes"
+        assert ENTRY_DENY_PROBES.get(ep.id), f"catalog entry {ep.id!r} has no deny probes"
 
 
 def test_no_catalog_entry_declares_a_forbidden_capability():

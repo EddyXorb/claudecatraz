@@ -38,7 +38,6 @@ def endpoint_table_report(cfg: Config) -> dict[str, Any]:
                 "default": entry.id in DEFAULT_ENABLED,
                 "active": active_entry is not None,
                 "enabled_via": table.enabled_via.get(entry.id),
-                "overridable": sorted(o.key for o in entry.overridable),
                 "decision_fields": [
                     {"name": f.name, "location": f.location.value}
                     for f in entry.decision_fields
