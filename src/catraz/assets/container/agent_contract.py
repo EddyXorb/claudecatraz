@@ -12,6 +12,7 @@ machinery. §06.2 anti-goal A2 ("kein dynamisches Plugin-Laden") holds: the
 *build* already committed to exactly one adapter; nothing here loads code
 from a `.catraz/` config path.
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -41,6 +42,7 @@ class Secrets:
     unconditionally so the same compose file serves every profile); whether
     an adapter uses it is its own decision, read from its own manifest.
     """
+
     auth_mode: str
     subscription_ro_dir: Path | None
     persistent_state_dir: Path | None
@@ -56,6 +58,7 @@ class InstructionContext:
     ``AGENTS.md``, …). The Forge REST base is an explicit field, not prose an
     adapter has to hardcode — "der REST-Draht des Agenten ist Teil des
     Vertrags, nicht Prosa-Zufall" (§05.2)."""
+
     forge_rest_base: str
     branch_prefixes: tuple[str, ...]
     warden_toml_path: Path

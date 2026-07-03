@@ -1,6 +1,7 @@
 """Test that _run_sync honors CLAUDE_CREDENTIAL_SOURCE from the shell env —
 now passed straight to the adapter's `sync_from_host(source, home)` in-process
 (§05.2/§05.3), no subprocess indirection."""
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -23,10 +24,13 @@ class _RecordingAdapter:
         self.calls.append((source, home))
 
 
-def test_shell_env_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shell_env_credential_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """CLAUDE_CREDENTIAL_SOURCE in os.environ → passed as `source` to sync_from_host."""
     import catraz.commands.setup as setup
     from catraz.commands.setup import _sync as setup_sync
+
     monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
     root = _make_root(tmp_path / "project")
     adapter = _RecordingAdapter()
@@ -41,10 +45,13 @@ def test_shell_env_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert str(source) == "/custom/claude"
 
 
-def test_from_flag_overrides_shell_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_from_flag_overrides_shell_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """--from flag takes precedence over shell env CLAUDE_CREDENTIAL_SOURCE."""
     import catraz.commands.setup as setup
     from catraz.commands.setup import _sync as setup_sync
+
     monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
     root = _make_root(tmp_path / "project")
     adapter = _RecordingAdapter()

@@ -139,7 +139,12 @@ def test_forbidden_check_names_every_violated_capability():
         (ZERO, SHA, "refs/heads/claude/feature", {Capability.CREATES_REF}),
         # Branch create outside the namespace: both creates_ref and
         # writes_outside_namespace (neither forbidden by itself).
-        (ZERO, SHA, "refs/heads/main", {Capability.CREATES_REF, Capability.WRITES_OUTSIDE_NAMESPACE}),
+        (
+            ZERO,
+            SHA,
+            "refs/heads/main",
+            {Capability.CREATES_REF, Capability.WRITES_OUTSIDE_NAMESPACE},
+        ),
         # Fast-forward update (neither create nor delete) inside namespace:
         # no capability at all.
         (SHA, SHA2, "refs/heads/claude/feature", set()),
@@ -195,7 +200,12 @@ def _endpoint(template: str, method: str) -> CatalogEntry:
         ("POST", "/projects/{id}/pipeline", {"ref": "claude/x"}, set()),
         # Extra, non-default catalog entries (§04.2) — honestly catalogued
         # capabilities, golden-tested like every other row.
-        ("POST", "/projects/{id}/repository/branches", {"branch": "claude/x"}, {Capability.CREATES_REF}),
+        (
+            "POST",
+            "/projects/{id}/repository/branches",
+            {"branch": "claude/x"},
+            {Capability.CREATES_REF},
+        ),
         ("POST", "/projects/{id}/issues", {"title": "x"}, set()),
     ],
 )

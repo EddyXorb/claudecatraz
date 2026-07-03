@@ -1,4 +1,5 @@
 """Stack lifecycle commands: stop, status."""
+
 from __future__ import annotations
 
 import argparse
@@ -22,13 +23,23 @@ def _row_ready(row: dict[str, str]) -> bool:
 
 def _print_urls(out: Out) -> None:
     out.head("URLs")
-    print("  Remote Control:  " + out.cyan("https://claude.ai")
-          + out.dim("  (the agent 'claude-dev-env' registers there)"))
-    print("  Audit viewer:    " + out.cyan("catraz audit --web")
-          + out.dim("   (host-only, ephemeral loopback port)"))
+    print(
+        "  Remote Control:  "
+        + out.cyan("https://claude.ai")
+        + out.dim("  (the agent 'claude-dev-env' registers there)")
+    )
+    print(
+        "  Audit viewer:    "
+        + out.cyan("catraz audit --web")
+        + out.dim("   (host-only, ephemeral loopback port)")
+    )
     # `claude-remote` starts the agent daemon; plain `run` is the interactive one-off.
-    print("  Agent daemon:    " + out.cyan("catraz run claude-remote")
-          + out.dim("   ·   interactive: ") + out.cyan("catraz run"))
+    print(
+        "  Agent daemon:    "
+        + out.cyan("catraz run claude-remote")
+        + out.dim("   ·   interactive: ")
+        + out.cyan("catraz run")
+    )
 
 
 def _security_preflight(root: Path, out: Out) -> bool:
@@ -36,7 +47,9 @@ def _security_preflight(root: Path, out: Out) -> bool:
     return bool(print_findings(run_doctor(root, only=SECURITY_SECTIONS), out)[0])
 
 
-def _wait_healthy(root: Path, out: Out, prefix: list[str] | None = None, timeout: int = 120) -> None:
+def _wait_healthy(
+    root: Path, out: Out, prefix: list[str] | None = None, timeout: int = 120
+) -> None:
     out.info(f"• waiting for health (≤{timeout}s)…")
     deadline = time.time() + timeout
     while time.time() < deadline:

@@ -1,4 +1,5 @@
 """catraz.admin_client (§04.3): minimal HTTP-over-Unix-socket GET, zero deps."""
+
 from __future__ import annotations
 
 import http.server
@@ -15,7 +16,10 @@ UdsFixture = tuple[Path, "_UdsServer"]
 
 
 def test_admin_socket_path_layout(tmp_path: Path) -> None:
-    assert admin_socket_path(tmp_path) == tmp_path / ".catraz" / "state" / "warden" / "run" / "admin.sock"
+    assert (
+        admin_socket_path(tmp_path)
+        == tmp_path / ".catraz" / "state" / "warden" / "run" / "admin.sock"
+    )
 
 
 def test_get_json_raises_when_socket_missing(tmp_path: Path) -> None:

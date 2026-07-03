@@ -47,14 +47,18 @@ def get_json(root: Path, path: str, timeout: float = 3.0) -> Any:
     """
     sock_path = admin_socket_path(root)
     if not sock_path.exists():
-        raise AdminUnreachable(f"admin socket not found at {sock_path} — is the stack running?")
+        raise AdminUnreachable(
+            f"admin socket not found at {sock_path} — is the stack running?"
+        )
     conn = _UdsHTTPConnection(str(sock_path), timeout=timeout)
     try:
         conn.request("GET", path)
         resp = conn.getresponse()
         body = resp.read()
     except OSError as exc:
-        raise AdminUnreachable(f"could not reach the warden admin socket: {exc}") from exc
+        raise AdminUnreachable(
+            f"could not reach the warden admin socket: {exc}"
+        ) from exc
     finally:
         conn.close()
     if resp.status != 200:
@@ -62,4 +66,6 @@ def get_json(root: Path, path: str, timeout: float = 3.0) -> Any:
     try:
         return json.loads(body)
     except ValueError as exc:
-        raise AdminUnreachable(f"warden admin {path} returned invalid JSON: {exc}") from exc
+        raise AdminUnreachable(
+            f"warden admin {path} returned invalid JSON: {exc}"
+        ) from exc

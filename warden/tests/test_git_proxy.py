@@ -66,7 +66,9 @@ async def test_push_wrong_prefix_rejected_without_upstream(client, respx_router)
 async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router, ctx):
     body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
     route = respx_router.route(method="POST", url__regex=r".*/git-receive-pack$").mock(
-        return_value=httpx.Response(200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH))
+        return_value=httpx.Response(
+            200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH)
+        )
     )
     resp = await client.post(RECV, content=body)
     assert resp.status_code == 200
@@ -81,10 +83,7 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
     # reconcile row (``proj``) coexist → the branch is counted twice and the push
     # row is never pruned (R5 ``max_open_branches`` drift).
-    keys = [
-        r["project"]
-        for r in ctx.state.store.execute("SELECT project FROM agent_branches")
-    ]
+    keys = [r["project"] for r in ctx.state.store.execute("SELECT project FROM agent_branches")]
     assert keys == ["group/proj"]
 
 
@@ -113,7 +112,9 @@ async def test_push_forwards_content_encoding(client, respx_router):
     # gzip stays gzip: the Content-Encoding header is passed upstream untouched (W7.4).
     body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
     route = respx_router.route(method="POST", url__regex=r".*/git-receive-pack$").mock(
-        return_value=httpx.Response(200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH))
+        return_value=httpx.Response(
+            200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH)
+        )
     )
     resp = await client.post(RECV, content=body, headers={"content-encoding": "gzip"})
     assert resp.status_code == 200

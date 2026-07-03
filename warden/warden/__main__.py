@@ -35,10 +35,9 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
             print(f"warden: periodic reconcile error: {exc}", file=sys.stderr)
 
 
-#TODO: tidy up this function and split it into smaller functions. 
+# TODO: tidy up this function and split it into smaller functions.
 async def _serve() -> None:
     cfg = from_env()
-
 
     # Build the effective endpoint table (raises ConfigError on any fail-closed
     # activation-config problem) and run its startgate — every activated entry's
@@ -55,7 +54,7 @@ async def _serve() -> None:
             "The dev-env still starts for offline work.",
             file=sys.stderr,
         )
-    # TODO: this leaks from gitlab_api, should not be here. If is is really needed it can persist in the Guards that the build-context creates, but as part of the their 
+    # TODO: this leaks from gitlab_api, should not be here. If is is really needed it can persist in the Guards that the build-context creates, but as part of the their
     # initialization (make it a member of the guard class) without the context builder needing to know about it.
     upstream = Upstream(cfg)
     state = State(cfg.state_db_path)
@@ -80,7 +79,7 @@ async def _serve() -> None:
     admin_uds = os.environ.get("ADMIN_UDS")
     if admin_uds:
         with contextlib.suppress(FileNotFoundError):
-            os.unlink(admin_uds)                      # stale socket von Crash entfernen
+            os.unlink(admin_uds)  # stale socket von Crash entfernen
         admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
     else:
         admin_config = uvicorn.Config(

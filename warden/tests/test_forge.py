@@ -46,9 +46,9 @@ async def test_list_branches_follows_every_page(forge, respx_router):
         headers={"X-Next-Page": "2"},
     )
     page2 = httpx.Response(200, json=[{"name": "claude/z"}])  # no next-page header
-    route = respx_router.route(
-        method="GET", url__regex=r".*/repository/branches.*"
-    ).mock(side_effect=[page1, page2])
+    route = respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
+        side_effect=[page1, page2]
+    )
 
     branches = await forge._list_agent_branches("group%2Fproj")
 
@@ -71,9 +71,9 @@ async def test_list_mrs_paginates_filters_and_scopes_to_author(forge, respx_rout
             {"iid": 3, "state": "opened", "source_branch": "claude/z"},
         ],
     )
-    route = respx_router.route(
-        method="GET", url__regex=r".*/merge_requests\?.*"
-    ).mock(side_effect=[page1, page2])
+    route = respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
+        side_effect=[page1, page2]
+    )
 
     mrs = await forge._list_agent_mrs("group%2Fproj", 42)
 
@@ -134,9 +134,7 @@ async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
 # --- MR ownership (W6.2) -------------------------------------------------------
 async def test_ownership_true_when_prefixed_and_authored_by_sa(forge, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
     assert await forge.mr_owned_by_agent("group/proj", 7) is True
     await forge.upstream.aclose()
@@ -144,9 +142,7 @@ async def test_ownership_true_when_prefixed_and_authored_by_sa(forge, respx_rout
 
 async def test_ownership_false_when_author_differs(forge, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 999}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     assert await forge.mr_owned_by_agent("group/proj", 7) is False
     await forge.upstream.aclose()
@@ -154,9 +150,7 @@ async def test_ownership_false_when_author_differs(forge, respx_router):
 
 async def test_ownership_false_when_prefix_missing(forge, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "feature/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
     assert await forge.mr_owned_by_agent("group/proj", 7) is False
     await forge.upstream.aclose()
@@ -175,9 +169,7 @@ async def test_ownership_cached_within_ttl_then_refetched(cfg, respx_router):
     now = {"t": 1000.0}
     forge = _forge(cfg, clock=lambda: now["t"])
     route = respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
 
     assert await forge.mr_owned_by_agent("group/proj", 7) is True
@@ -204,14 +196,13 @@ async def test_resolve_service_account_is_cached(cfg, respx_router):
 
 async def test_resolve_service_account_none_on_error(cfg, respx_router):
     forge = _forge(cfg, sa=None)
-    respx_router.route(method="GET", url__regex=r".*/user$").mock(
-        return_value=httpx.Response(403)
-    )
+    respx_router.route(method="GET", url__regex=r".*/user$").mock(return_value=httpx.Response(403))
     assert await forge.resolve_service_account() is None
     await forge.upstream.aclose()
 
 
 # --- GITLAB_MODE gates (mode-enforcement, step 6/7) ----------------------------
+
 
 async def test_resolve_service_account_no_upstream_call_when_writes_disabled(respx_router):
     """resolve_service_account() must make NO upstream call in off or read-only mode."""

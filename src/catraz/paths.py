@@ -1,4 +1,5 @@
 """Asset + project-root resolution."""
+
 import importlib.resources as ir
 import os
 import shutil
@@ -9,9 +10,11 @@ from catraz.errors import CliError, EXIT_CONFIG
 
 
 def _cache_root() -> Path:
-    base = (os.environ.get("CATRAZ_CACHE_DIR")
-            or os.environ.get("XDG_CACHE_HOME")
-            or str(Path.home() / ".cache"))
+    base = (
+        os.environ.get("CATRAZ_CACHE_DIR")
+        or os.environ.get("XDG_CACHE_HOME")
+        or str(Path.home() / ".cache")
+    )
     return Path(base).expanduser() / "catraz" / __version__
 
 
@@ -31,7 +34,9 @@ def _source_signature(*roots: Path) -> str:
         if not r.exists():
             continue
         for dirpath, dirnames, filenames in os.walk(r):
-            dirnames[:] = [d for d in dirnames if d not in (".venv", "__pycache__", ".git")]
+            dirnames[:] = [
+                d for d in dirnames if d not in (".venv", "__pycache__", ".git")
+            ]
             for name in filenames:
                 if name.endswith(".pyc"):
                     continue
@@ -46,6 +51,7 @@ def _installed_sig() -> str:
     """Signature derived from the installed wheel's RECORD — changes on every reinstall."""
     try:
         from importlib.metadata import distribution
+
         record = distribution("catraz").read_text("RECORD") or ""
         return repr(hash(record))
     except Exception:
@@ -58,25 +64,35 @@ def asset_root() -> Path:
     dst = _cache_root()
     marker = dst / ".extracted"
     repo = _repo_root()
-    sig = (_source_signature(repo / "src/catraz/assets", repo / "warden",
-                             repo / "forward-proxy") if repo else _installed_sig())
+    sig = (
+        _source_signature(
+            repo / "src/catraz/assets", repo / "warden", repo / "forward-proxy"
+        )
+        if repo
+        else _installed_sig()
+    )
     if marker.exists():
-        if marker.read_text() == sig:          # source/wheel unchanged → trust cache
+        if marker.read_text() == sig:  # source/wheel unchanged → trust cache
             return dst
-        shutil.rmtree(dst / "assets", ignore_errors=True)   # stale cache → rebuild clean
+        shutil.rmtree(dst / "assets", ignore_errors=True)  # stale cache → rebuild clean
     (dst / "assets").mkdir(parents=True, exist_ok=True)
     pkg_assets = ir.files("catraz") / "assets"
-    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():   # installed wheel
+    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():  # installed wheel
         with ir.as_file(pkg_assets) as src:
             shutil.copytree(src, dst / "assets", dirs_exist_ok=True)
-    else:                                       # zero-install source tree
+    else:  # zero-install source tree
         assert repo, "cannot locate assets"
-        shutil.copytree(repo / "src/catraz/assets", dst / "assets",
-                        dirs_exist_ok=True, ignore=_IGNORE)
+        shutil.copytree(
+            repo / "src/catraz/assets",
+            dst / "assets",
+            dirs_exist_ok=True,
+            ignore=_IGNORE,
+        )
         for ctx in ("warden", "forward-proxy"):
-            shutil.copytree(repo / ctx, dst / "assets" / ctx,
-                            dirs_exist_ok=True, ignore=_IGNORE)
-    marker.write_text(sig)                      # store the signature we just extracted
+            shutil.copytree(
+                repo / ctx, dst / "assets" / ctx, dirs_exist_ok=True, ignore=_IGNORE
+            )
+    marker.write_text(sig)  # store the signature we just extracted
     return dst
 
 
@@ -100,9 +116,12 @@ def _assert_no_nested(root: Path) -> None:
     top = root / ".catraz"
     for dirpath, dirnames, _ in os.walk(root):
         if ".catraz" in dirnames and Path(dirpath) / ".catraz" != top:
-            raise CliError(f"nested .catraz at {Path(dirpath)/'.catraz'} — refuse", EXIT_CONFIG)
-        dirnames[:] = [d for d in dirnames
-                       if Path(dirpath) / d not in (top, root / ".git")]
+            raise CliError(
+                f"nested .catraz at {Path(dirpath) / '.catraz'} — refuse", EXIT_CONFIG
+            )
+        dirnames[:] = [
+            d for d in dirnames if Path(dirpath) / d not in (top, root / ".git")
+        ]
 
 
 def claude_home(root: Path) -> Path:

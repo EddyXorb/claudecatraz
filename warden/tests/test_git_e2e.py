@@ -64,9 +64,7 @@ def _make_backend_handler(project_root: str):
                 "REMOTE_USER": "tester",
                 "GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
             }
-            proc = subprocess.run(
-                ["git", "http-backend"], input=body, env=env, capture_output=True
-            )
+            proc = subprocess.run(["git", "http-backend"], input=body, env=env, capture_output=True)
             raw = proc.stdout
             header_blob, _, payload = raw.partition(b"\r\n\r\n")
             status = 200

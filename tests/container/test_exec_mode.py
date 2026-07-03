@@ -12,7 +12,9 @@ def _stub_bootstrap(ep: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("REQUIRE_AGENT_INSTRUCTIONS", raising=False)
 
 
-def test_exec_default_bash(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_adapter_cls: Any) -> None:
+def test_exec_default_bash(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_adapter_cls: Any
+) -> None:
     calls: list[tuple[str, list[str]]] = []
     _stub_bootstrap(ep, monkeypatch)
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
@@ -21,7 +23,9 @@ def test_exec_default_bash(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert calls == [("bash", ["bash"])]
 
 
-def test_exec_passthrough(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_adapter_cls: Any) -> None:
+def test_exec_passthrough(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_adapter_cls: Any
+) -> None:
     calls: list[tuple[str, list[str]]] = []
     _stub_bootstrap(ep, monkeypatch)
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: calls.append((prog, argv)))
@@ -30,16 +34,17 @@ def test_exec_passthrough(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert calls == [("ls", ["ls", "-la"])]
 
 
-def test_exec_configures_home_and_warden(ep: Any, tmp_path: Path,
-                                         monkeypatch: pytest.MonkeyPatch,
-                                         fake_adapter_cls: Any) -> None:
+def test_exec_configures_home_and_warden(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_adapter_cls: Any
+) -> None:
     """Shell lands in the same configured state as a one-off/remote run: the
     home is prepared and git is routed through the warden before exec."""
     seen: list[str] = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
     monkeypatch.setattr(ep, "install_host_gitconfig", lambda home: None)
-    monkeypatch.setattr(ep, "configure_git_warden",
-                        lambda: seen.append("configure_git_warden"))
+    monkeypatch.setattr(
+        ep, "configure_git_warden", lambda: seen.append("configure_git_warden")
+    )
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: seen.append("execvp"))
     monkeypatch.delenv("AUTH_MODE", raising=False)
     monkeypatch.delenv("REQUIRE_AGENT_INSTRUCTIONS", raising=False)

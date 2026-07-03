@@ -215,7 +215,9 @@ def test_r4_state_event_merge_alias_denied(cfg):
 
 
 def test_default_deny_unknown_write_endpoint(cfg):
-    d = decide(_api("DELETE", "/projects/group%2Fproj/repository/branches/claude%2Fx"), StateView(), cfg)
+    d = decide(
+        _api("DELETE", "/projects/group%2Fproj/repository/branches/claude%2Fx"), StateView(), cfg
+    )
     assert not d.allow and d.rule == "R3"
 
 
@@ -373,6 +375,7 @@ def test_mr_update_without_merge_intent_allowed(cfg):
 
 
 # --- R0: GITLAB_MODE gates -------------------------------------------------------
+
 
 def test_off_denies_reads_and_writes():
     """GITLAB_MODE=off: both reads and writes are denied (R0) — no GitLab traffic at all."""

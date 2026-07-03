@@ -111,7 +111,9 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
             sys.exit(f"error: could not render agent instructions: {exc}")
         return
     if not content and _env_true("REQUIRE_AGENT_INSTRUCTIONS"):
-        sys.exit("error: REQUIRE_AGENT_INSTRUCTIONS is set but rendered instructions are empty")
+        sys.exit(
+            "error: REQUIRE_AGENT_INSTRUCTIONS is set but rendered instructions are empty"
+        )
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content)
 
@@ -122,10 +124,14 @@ def _instruction_context() -> InstructionContext:
     # residue as the warden's own `branch_prefixes` default (§06-migration.md
     # Schritt 6): a namespace default, not an agent-identity check.
     prefixes = tuple(
-        p.strip() for p in (os.environ.get("WARDEN_BRANCH_PREFIX") or "").split(",") if p.strip()
+        p.strip()
+        for p in (os.environ.get("WARDEN_BRANCH_PREFIX") or "").split(",")
+        if p.strip()
     ) or ("claude/",)
     return InstructionContext(
-        forge_rest_base=os.environ.get("WARDEN_REST_URL", "http://gitlab-warden:8080/api/v4"),
+        forge_rest_base=os.environ.get(
+            "WARDEN_REST_URL", "http://gitlab-warden:8080/api/v4"
+        ),
         branch_prefixes=prefixes,
         warden_toml_path=Path("/etc/catraz/warden.toml"),
     )
@@ -138,7 +144,9 @@ def _resolve_secrets(home: Path, *, remote: bool) -> Secrets:
     return Secrets(
         auth_mode=mode,
         subscription_ro_dir=ro if ro.is_dir() else None,
-        persistent_state_dir=PERSISTENT_STATE_DIR if PERSISTENT_STATE_DIR.is_dir() else None,
+        persistent_state_dir=PERSISTENT_STATE_DIR
+        if PERSISTENT_STATE_DIR.is_dir()
+        else None,
         api_key_file=Path(api_key_file_env) if api_key_file_env else None,
         api_key_env_fallback=os.environ.get("ANTHROPIC_API_KEY", ""),
         remote=remote,
@@ -181,7 +189,9 @@ def cmd_start(adapter: AgentAdapter, home: Path) -> None:
     _bootstrap(adapter, home, remote=True)
     argv = adapter.remote_command()
     if argv is None:
-        sys.exit("error: this agent profile does not support remote-control mode (modes.remote=false)")
+        sys.exit(
+            "error: this agent profile does not support remote-control mode (modes.remote=false)"
+        )
     os.execvp(argv[0], argv)
 
 
@@ -200,18 +210,22 @@ def main() -> None:
     )
     default_home = os.environ.get("AGENT_HOME", str(Path.home() / ".agent-home"))
     parser.add_argument(
-        "--agent-home", default=default_home,
+        "--agent-home",
+        default=default_home,
         help="agent config directory [env: AGENT_HOME]",
     )
     sub = parser.add_subparsers(dest="command")
 
     sync = sub.add_parser("sync", help="Import host credentials into --agent-home")
     sync.add_argument(
-        "--agent-home", default=default_home,
+        "--agent-home",
+        default=default_home,
         help="Target directory [env: AGENT_HOME]",
     )
     sync.add_argument(
-        "--from", dest="source", default=None,
+        "--from",
+        dest="source",
+        default=None,
         help="Source credential dir (adapter-specific default env var, if any)",
     )
 

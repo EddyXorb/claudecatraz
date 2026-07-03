@@ -26,9 +26,7 @@ def git_reject_body(decisions: list[Decision], refs: list[str], *, sideband: boo
     return inner
 
 
-def git_reject_response(
-    decisions: list[Decision], refs: list[str], *, sideband: bool
-) -> Response:
+def git_reject_response(decisions: list[Decision], refs: list[str], *, sideband: bool) -> Response:
     return Response(
         content=git_reject_body(decisions, refs, sideband=sideband),
         media_type=GIT_RECEIVE_RESULT,

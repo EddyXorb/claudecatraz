@@ -1,6 +1,7 @@
 """catraz doctor's endpoint-catalog section (§04.3), in the style of
 tests/cli/test_doctor_gitlab.py.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

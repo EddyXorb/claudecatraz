@@ -74,9 +74,7 @@ async def test_create_mr_with_prefix_forwarded_with_write_token(client, respx_ro
 async def test_note_ownership_violation_denied(client, respx_router):
     # MR lookup says the MR belongs to a different author.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 999}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     resp = await client.post(f"/api/v4/projects/{PROJ}/merge_requests/7/notes", json={"body": "hi"})
     assert resp.status_code == 403
@@ -85,9 +83,7 @@ async def test_note_ownership_violation_denied(client, respx_router):
 
 async def test_note_on_owned_mr_allowed(client, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
     note = respx_router.route(method="POST", url__regex=r".*/merge_requests/7/notes$").mock(
         return_value=httpx.Response(201, json={"id": 1})
@@ -100,13 +96,11 @@ async def test_note_on_owned_mr_allowed(client, respx_router):
 async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
     # Inline diff comment (line-level review) on the bot's own MR — forwarded.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
-    disc = respx_router.route(
-        method="POST", url__regex=r".*/merge_requests/7/discussions$"
-    ).mock(return_value=httpx.Response(201, json={"id": "abc"}))
+    disc = respx_router.route(method="POST", url__regex=r".*/merge_requests/7/discussions$").mock(
+        return_value=httpx.Response(201, json={"id": "abc"})
+    )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions",
         json={
@@ -124,9 +118,7 @@ async def test_inline_discussion_on_owned_mr_allowed(client, respx_router):
 
 async def test_inline_discussion_ownership_violation_denied(client, respx_router):
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 999}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions", json={"body": "nit"}
@@ -138,9 +130,7 @@ async def test_inline_discussion_ownership_violation_denied(client, respx_router
 async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
     # Reply under an existing discussion thread on the bot's own MR.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(
-            200, json={"source_branch": "claude/x", "author": {"id": 42}}
-        )
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
     )
     reply = respx_router.route(
         method="POST", url__regex=r".*/merge_requests/7/discussions/abc123/notes$"
@@ -154,7 +144,9 @@ async def test_discussion_reply_on_owned_mr_allowed(client, respx_router):
 
 
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
-    resp = await client.post(f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"})
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"}
+    )
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R3"
 
@@ -252,9 +244,9 @@ async def test_unknown_projectless_endpoint_denied(client, respx_router):
 
 # --- F12: the query string reaches the upstream request, not just the decision -
 async def test_query_string_is_forwarded_upstream(client, respx_router):
-    route = respx_router.route(
-        method="GET", url__regex=r".*/merge_requests.*"
-    ).mock(return_value=httpx.Response(200, json=[]))
+    route = respx_router.route(method="GET", url__regex=r".*/merge_requests.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
     resp = await client.get(f"/api/v4/projects/{PROJ}/merge_requests?state=opened&per_page=50")
     assert resp.status_code == 200
     sent_url = route.calls.last.request.url
@@ -424,7 +416,9 @@ async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_route
     await ctx.forge.upstream.aclose()
 
 
-async def test_config_activated_entry_marked_in_audit_default_entry_is_not(cfg, respx_router, tmp_path):
+async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
+    cfg, respx_router, tmp_path
+):
     ctx, app = _activated_client_ctx(cfg, respx_router)
     # Redirect the existing AuditLog in place — the guards inside `app` were
     # already assembled (in _activated_client_ctx) around this exact object.

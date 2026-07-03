@@ -6,6 +6,7 @@ are different concerns). Co-located next to ``entrypoint.py`` in the built
 image (see ``assets/agents/<name>/layer.Dockerfile``) so a plain
 ``import git_routing`` resolves.
 """
+
 from __future__ import annotations
 
 import os

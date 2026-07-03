@@ -137,9 +137,7 @@ class ApiGuard(Guard[ApiIntent]):
     def record(self, intent: ApiIntent, decision: Decision) -> None:
         """Record the write *before* the upstream call (idempotency / fail-safe, §6.11)."""
         if decision.token == TokenKind.WRITE and intent.endpoint is not None:
-            self.state.record_write(
-                "api", intent.endpoint.kind, str(intent.iid or intent.project)
-            )
+            self.state.record_write("api", intent.endpoint.kind, str(intent.iid or intent.project))
 
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:
         # F12: the raw query is reattached here, at the transport boundary,

@@ -29,7 +29,9 @@ def _mr(cfg) -> ApiIntent:
 
 
 def test_n_writes_ok_then_block():
-    cfg = Config(allowed_projects=("group/proj",), read_token="r", write_token="w", max_writes_per_hour=3)
+    cfg = Config(
+        allowed_projects=("group/proj",), read_token="r", write_token="w", max_writes_per_hour=3
+    )
     clock = FakeClock()
     st = State(":memory:", clock=clock)
     st.mark_reconciled()
@@ -43,7 +45,9 @@ def test_n_writes_ok_then_block():
 
 
 def test_sliding_window_frees_budget_after_an_hour():
-    cfg = Config(allowed_projects=("group/proj",), read_token="r", write_token="w", max_writes_per_hour=2)
+    cfg = Config(
+        allowed_projects=("group/proj",), read_token="r", write_token="w", max_writes_per_hour=2
+    )
     clock = FakeClock()
     st = State(":memory:", clock=clock)
     st.mark_reconciled()

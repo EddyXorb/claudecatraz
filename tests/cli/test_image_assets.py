@@ -31,6 +31,14 @@ def test_claude_agent_manifest_present() -> None:
     """§05.3: agent.toml carries the fields the CLI reads instead of constants."""
     ar = asset_root() / "assets"
     manifest = (ar / "agents/claude/agent.toml").read_text()
-    for field in ('name', 'command', "subscription_source", "api_key_env",
-                  "mode", "remote", "debug_flag", "domains"):
+    for field in (
+        "name",
+        "command",
+        "subscription_source",
+        "api_key_env",
+        "mode",
+        "remote",
+        "debug_flag",
+        "domains",
+    ):
         assert field in manifest, f"agent.toml missing field: {field}"

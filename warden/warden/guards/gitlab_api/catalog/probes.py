@@ -37,10 +37,7 @@ ENTRY_DENY_PROBES: dict[str, tuple[DenyProbe, ...]] = {
         DenyProbe(
             description="a discussion reply on an unverifiable MR is denied",
             method="POST",
-            path=(
-                f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7/"
-                "discussions/abc123/notes"
-            ),
+            path=(f"/projects/{PROBE_PROJECT_PATH}/merge_requests/7/discussions/abc123/notes"),
             fields={"body": "done"},
         ),
     ),

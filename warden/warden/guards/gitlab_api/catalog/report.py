@@ -40,8 +40,7 @@ def endpoint_table_report(cfg: Config) -> dict[str, Any]:
                 "active": active_entry is not None,
                 "enabled_via": table.enabled_via.get(entry.id),
                 "decision_fields": [
-                    {"name": f.name, "location": f.location.value}
-                    for f in entry.decision_fields
+                    {"name": f.name, "location": f.location.value} for f in entry.decision_fields
                 ],
             }
         )

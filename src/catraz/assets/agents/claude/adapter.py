@@ -8,6 +8,7 @@ selected via the static registry in ``catraz.agents`` and baked into exactly
 one image per build (``layer.Dockerfile`` COPYs *this* file, nothing chooses
 between adapters at container runtime).
 """
+
 from __future__ import annotations
 
 import json
@@ -56,6 +57,7 @@ def _log_dir() -> Path:
 
 # ── prepare_home ─────────────────────────────────────────────────────────────
 
+
 def _seed_from_ro(home: Path, ro_dir: Path | None) -> dict[str, Any]:
     """`credentials.mode = "sync"` (or first-ever start before a persistent
     login): copy the read-only seed the host synced in. Returns the
@@ -69,6 +71,7 @@ def _seed_from_ro(home: Path, ro_dir: Path | None) -> dict[str, Any]:
             "and `claude login` inside the container)"
         )
     import shutil
+
     shutil.copy2(src, home / ".credentials.json")
     if (ro / ".claude.json").exists():
         return _read_json(ro / ".claude.json")
@@ -100,6 +103,7 @@ def _wire_persistent(home: Path, state_dir: Path) -> None:
     if not projects_link.is_symlink():
         if projects_link.exists():
             import shutil
+
             shutil.rmtree(projects_link)
         projects_link.symlink_to(projects_dir)
 
@@ -127,16 +131,24 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
     data["bypassPermissionsModeAccepted"] = True
     if secrets.remote:
         data["remoteDialogSeen"] = True
-    data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
+    data.setdefault("projects", {}).setdefault("/workspace", {})[
+        "hasTrustDialogAccepted"
+    ] = True
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
-    (home / "settings.json").write_text(json.dumps({
-        "theme": "dark",
-        "hasCompletedOnboarding": True,
-        "skipDangerousModePermissionPrompt": True,
-    }, indent=2))
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "hasCompletedOnboarding": True,
+                "skipDangerousModePermissionPrompt": True,
+            },
+            indent=2,
+        )
+    )
 
 
 # ── command / environ / remote_command ──────────────────────────────────────
+
 
 def command(argv: list[str]) -> list[str]:
     """§05.2 contract: argv for a one-off run."""
@@ -174,15 +186,20 @@ def remote_command() -> list[str] | None:
     debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(_log_dir() / "rc-debug.log")
     extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
     return [
-        m.command, "remote-control",
-        "--permission-mode", "bypassPermissions",  # keep-fixed (headless)
-        "--spawn", spawn,
-        m.debug_flag, debug,
+        m.command,
+        "remote-control",
+        "--permission-mode",
+        "bypassPermissions",  # keep-fixed (headless)
+        "--spawn",
+        spawn,
+        m.debug_flag,
+        debug,
         *extra,
     ]
 
 
 # ── render_instructions ──────────────────────────────────────────────────────
+
 
 def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
     """§05.2 contract: render this project's actual namespace prefix and
@@ -191,8 +208,7 @@ def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     prefix_example = ctx.branch_prefixes[0] if ctx.branch_prefixes else "claude/"
     content = (
-        template
-        .replace("__FORGE_REST_BASE__", ctx.forge_rest_base)
+        template.replace("__FORGE_REST_BASE__", ctx.forge_rest_base)
         .replace("__BRANCH_PREFIX_EXAMPLE__", prefix_example)
         .replace("__WARDEN_TOML_PATH__", str(ctx.warden_toml_path))
     )
@@ -201,17 +217,23 @@ def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
 
 # ── host-side credential sync (credentials.mode = "sync") ───────────────────
 
+
 def sync_from_host(source: Path | None, home: Path) -> None:
     """Copy `.credentials.json` (+ `.claude.json`) from the host `~/.claude`
     into `home` — the `catraz sync` path for `credentials.mode = "sync"`.
     Not part of the mandated §05.2 contract (entrypoint checks for it via
     ``getattr``); adapters that only support `persistent` mode may omit it.
     """
-    src_dir = (source or Path(os.environ.get("CLAUDE_CREDENTIAL_SOURCE") or "~/.claude")).expanduser()
+    src_dir = (
+        source or Path(os.environ.get("CLAUDE_CREDENTIAL_SOURCE") or "~/.claude")
+    ).expanduser()
     cred = src_dir / ".credentials.json"
     if not cred.exists():
-        sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
+        sys.exit(
+            f"error: {cred} not found — authenticate with `claude` on the host first"
+        )
     import shutil
+
     home.mkdir(parents=True, exist_ok=True)
     shutil.copy2(cred, home / ".credentials.json")
     # A custom config dir (e.g. ~/.claude2) keeps .claude.json INSIDE it; the default
@@ -223,8 +245,12 @@ def sync_from_host(source: Path | None, home: Path) -> None:
     if host_cj.exists():
         shutil.copy2(host_cj, dst_cj)
     elif not dst_cj.exists():
-        dst_cj.write_text(json.dumps(
-            {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2))
+        dst_cj.write_text(
+            json.dumps(
+                {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"},
+                indent=2,
+            )
+        )
     print(f"Credentials synced into {home}")
 
 

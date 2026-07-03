@@ -16,24 +16,31 @@ from catraz.errors import CliError
 
 # ── validate_project ────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("path", [
-    "group/project",
-    "group/sub/project",
-    "my_group/my_project",
-])
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "group/project",
+        "group/sub/project",
+        "my_group/my_project",
+    ],
+)
 def test_validate_project_accepts_full_paths(path: str) -> None:
     assert policy.validate_project(path) is None
 
 
-@pytest.mark.parametrize("path,fragment", [
-    ("group/*", "wildcard"),
-    ("group/**", "wildcard"),
-    ("*-ci", "wildcard"),
-    ("opt-ci", "full path"),          # leaf name → README's left-anchored trap
-    ("", "empty"),
-    ("/group/project", "slash"),
-    ("group/project/", "slash"),
-])
+@pytest.mark.parametrize(
+    "path,fragment",
+    [
+        ("group/*", "wildcard"),
+        ("group/**", "wildcard"),
+        ("*-ci", "wildcard"),
+        ("opt-ci", "full path"),  # leaf name → README's left-anchored trap
+        ("", "empty"),
+        ("/group/project", "slash"),
+        ("group/project/", "slash"),
+    ],
+)
 def test_validate_project_rejects_traps(path: str, fragment: str) -> None:
     reason = policy.validate_project(path)
     assert reason is not None
@@ -41,6 +48,7 @@ def test_validate_project_rejects_traps(path: str, fragment: str) -> None:
 
 
 # ── load_env / set_env_values round-trip ────────────────────────────────────────
+
 
 def test_load_env_strips_inline_comments(tmp_path: Path) -> None:
     p = tmp_path / ".env"
@@ -53,28 +61,30 @@ def test_load_env_strips_inline_comments(tmp_path: Path) -> None:
     )
     env = envfile.load_env(p)
     assert env["ANTHROPIC_API_KEY"] == "sk-test"
-    assert env["GITLAB_READ_TOKEN"] == "glpat-x"   # inline comment stripped
+    assert env["GITLAB_READ_TOKEN"] == "glpat-x"  # inline comment stripped
     assert env["DEV_UID"] == "1000"
     assert "a comment line" not in env
 
 
 def test_set_env_values_uncomments_and_updates(tmp_path: Path) -> None:
     p = tmp_path / ".env"
-    p.write_text(
-        "ANTHROPIC_API_KEY=\n"
-        "# WARDEN_ALLOWED_PROJECTS=\n"
-        "DEV_UID=1000\n"
+    p.write_text("ANTHROPIC_API_KEY=\n# WARDEN_ALLOWED_PROJECTS=\nDEV_UID=1000\n")
+    envfile.set_env_values(
+        p,
+        {
+            "ANTHROPIC_API_KEY": "sk-new",
+            "WARDEN_ALLOWED_PROJECTS": "group/sub/a,group/sub/b",
+        },
     )
-    envfile.set_env_values(p, {
-        "ANTHROPIC_API_KEY": "sk-new",
-        "WARDEN_ALLOWED_PROJECTS": "group/sub/a,group/sub/b",
-    })
     env = envfile.load_env(p)
     assert env["ANTHROPIC_API_KEY"] == "sk-new"
     assert env["WARDEN_ALLOWED_PROJECTS"] == "group/sub/a,group/sub/b"
     # Exactly one active line each — no duplicate from the commented seed.
-    active = [ln for ln in p.read_text().splitlines()
-              if ln.startswith("WARDEN_ALLOWED_PROJECTS=")]
+    active = [
+        ln
+        for ln in p.read_text().splitlines()
+        if ln.startswith("WARDEN_ALLOWED_PROJECTS=")
+    ]
     assert len(active) == 1
 
 
@@ -87,7 +97,12 @@ def test_set_env_values_appends_absent_key(tmp_path: Path) -> None:
 
 # ── allowed_projects precedence (.env override wins over warden.toml) ────────────
 
-def _project(tmp_path: Path, env_override: str | None = None, toml_projects: list[str] | None = None) -> dict[str, str]:
+
+def _project(
+    tmp_path: Path,
+    env_override: str | None = None,
+    toml_projects: list[str] | None = None,
+) -> dict[str, str]:
     (tmp_path / ".catraz" / "config").mkdir(parents=True, exist_ok=True)
     env = tmp_path / ".catraz" / ".env"
     lines = ["DEV_UID=1000"]
@@ -97,29 +112,39 @@ def _project(tmp_path: Path, env_override: str | None = None, toml_projects: lis
     if toml_projects is not None:
         arr = ", ".join(f'"{x}"' for x in toml_projects)
         (tmp_path / ".catraz" / "config" / "warden.toml").write_text(
-            f"allowed_projects = [{arr}]\n")
+            f"allowed_projects = [{arr}]\n"
+        )
     return envfile.load_env(env)
 
 
-def test_env_override_beats_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_override_beats_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
-    env = _project(tmp_path, env_override="group/sub/from-env",
-                   toml_projects=["group/sub/from-toml"])
+    env = _project(
+        tmp_path,
+        env_override="group/sub/from-env",
+        toml_projects=["group/sub/from-toml"],
+    )
     resolved, source = policy._resolve_allowed_projects(tmp_path, env)
     assert resolved == ["group/sub/from-env"]
     assert "override" in source
 
 
-def test_toml_used_when_no_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_toml_used_when_no_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
-    env = _project(tmp_path, env_override=None,
-                   toml_projects=["group/sub/a", "group/sub/b"])
+    env = _project(
+        tmp_path, env_override=None, toml_projects=["group/sub/a", "group/sub/b"]
+    )
     resolved, source = policy._resolve_allowed_projects(tmp_path, env)
     assert resolved == ["group/sub/a", "group/sub/b"]
     assert source == "warden.toml"
 
 
 # ── service aliases ─────────────────────────────────────────────────────────────
+
 
 def test_resolve_service_aliases() -> None:
     assert resolve_service("agent") == "claude-dev-env"
@@ -133,6 +158,7 @@ def test_resolve_service_unknown_raises() -> None:
 
 
 # ── secret masking never leaks the full value ───────────────────────────────────
+
 
 def test_mask_hides_value() -> None:
     assert envfile.mask("supersecrettoken").startswith("sup")

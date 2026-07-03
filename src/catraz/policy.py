@@ -1,4 +1,5 @@
 """validate_project, _resolve_allowed_projects, _read_toml_allowed_projects."""
+
 import os
 import re
 import urllib.parse
@@ -24,7 +25,9 @@ def validate_project(p: str) -> str | None:
 
 def _resolve_allowed_projects(root: Path, env: dict[str, str]) -> tuple[list[str], str]:
     """Env override wins over warden.toml (README §11 precedence)."""
-    ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
+    ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get(
+        "WARDEN_ALLOWED_PROJECTS", ""
+    )
     if ov.strip():
         return [p.strip() for p in ov.split(",") if p.strip()], ".env override"
     toml = root / ".catraz" / "config" / "warden.toml"
@@ -37,6 +40,7 @@ def _read_toml_allowed_projects(path: Path) -> list[str]:
     text = path.read_text()
     try:
         import tomllib  # py3.11+, read-only — we never write TOML
+
         return cast(list[str], tomllib.loads(text).get("allowed_projects", []))
     except ModuleNotFoundError:
         m = re.search(r"allowed_projects\s*=\s*\[(.*?)\]", text, re.S)
@@ -53,7 +57,9 @@ def _host_of(s: str) -> str:
     return (urllib.parse.urlsplit(s).hostname or "").lower()
 
 
-def _project_from_remote_url(url: str, gitlab_url: str = "https://gitlab.com") -> str | None:
+def _project_from_remote_url(
+    url: str, gitlab_url: str = "https://gitlab.com"
+) -> str | None:
     """Derive a GitLab project path (group/sub/project) from a git remote URL,
     iff its host matches *gitlab_url*'s host. Else (or on an invalid path) None.
 
@@ -105,6 +111,7 @@ def _discover_gitlab_projects(root: Path, gitlab_url: str) -> list[str]:
     *root* is always scanned; only the immediate-subdir sweep is capped (so a huge
     folder can't stall init). One level deep — deeper trees are out of scope."""
     import subprocess
+
     candidates = [root]
     try:
         subdirs = sorted(p for p in root.iterdir() if p.is_dir())
@@ -116,8 +123,9 @@ def _discover_gitlab_projects(root: Path, gitlab_url: str) -> list[str]:
     found: list[str] = []
     for d in candidates:
         try:
-            r = subprocess.run(["git", "-C", str(d), "remote", "-v"],
-                               capture_output=True, text=True)
+            r = subprocess.run(
+                ["git", "-C", str(d), "remote", "-v"], capture_output=True, text=True
+            )
         except FileNotFoundError:
             return found  # no git binary — nothing to discover
         if r.returncode != 0:
@@ -141,6 +149,7 @@ def set_toml_scalar(path: Path, key: str, value: str) -> None:
     escaping is always valid TOML.
     """
     import json as _json
+
     text = path.read_text(encoding="utf-8")
     serialized = _json.dumps(value)
     pat = re.compile(
@@ -165,6 +174,7 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
     key is absent the new assignment is appended.
     """
     import json as _json
+
     text = path.read_text(encoding="utf-8")
     serialized = _json.dumps(values)
     pat = re.compile(

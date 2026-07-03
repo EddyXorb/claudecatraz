@@ -23,7 +23,7 @@ class ApiIntent(Intent):
 
     _project: str
     _method: str
-    
+
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
     endpoint: Optional["CatalogEntry"] = None  # matched catalog entry (writes only)
     fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
@@ -37,11 +37,11 @@ class ApiIntent(Intent):
     def writes(self) -> bool:
         # §03.2: derived by the parser, never by a Decision.
         return self.method.upper() not in _READ_METHODS
-    
+
     @property
     def project(self) -> str:
         return self._project
-    
+
     @property
     def method(self) -> str:
         return self._method

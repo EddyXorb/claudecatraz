@@ -23,7 +23,12 @@ from ...core.model import TokenKind
 
 # Hop-by-hop headers that must not be forwarded verbatim.
 _DROP_REQUEST_HEADERS = {
-    "host", "authorization", "private-token", "content-length", "connection", "accept-encoding"
+    "host",
+    "authorization",
+    "private-token",
+    "content-length",
+    "connection",
+    "accept-encoding",
 }
 # content-encoding is dropped because the warden hands the client a *decoded* body
 # (httpx decompresses via .content / aiter_bytes). Forwarding a stale "gzip" header

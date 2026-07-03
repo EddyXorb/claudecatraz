@@ -148,9 +148,7 @@ class GitGuard(Guard[GitIntent]):
             if cmd.is_create:
                 self.forge.forge_state.add_branch(intent.project, ref)
 
-    async def forward(
-        self, request: Request, intent: GitIntent, decision: Decision
-    ) -> Response:
+    async def forward(self, request: Request, intent: GitIntent, decision: Decision) -> Response:
         if intent.operation == "advertise":
             resp = await self.forge.upstream.git_get(
                 intent.project,
@@ -192,9 +190,7 @@ class GitGuard(Guard[GitIntent]):
         )
         return stream_upstream(resp)
 
-    def deny_response(
-        self, intent: GitIntent, decision: Decision, state: StateView
-    ) -> Response:
+    def deny_response(self, intent: GitIntent, decision: Decision, state: StateView) -> Response:
         """Per-ref rejection for receive-pack (W7.3): the client sees which
         ref failed and why.
 

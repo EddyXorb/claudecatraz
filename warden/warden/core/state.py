@@ -143,9 +143,7 @@ class State:
         return int(row["c"])
 
     def is_reconciled(self) -> bool:
-        row = self._store.execute(
-            "SELECT value FROM meta WHERE key='last_reconcile'"
-        ).fetchone()
+        row = self._store.execute("SELECT value FROM meta WHERE key='last_reconcile'").fetchone()
         return row is not None
 
     def view(self) -> StateView:

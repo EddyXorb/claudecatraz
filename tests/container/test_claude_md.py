@@ -4,6 +4,7 @@ static-file) `install_claude_md` is now two layers — a generic
 REQUIRE_AGENT_INSTRUCTIONS, and the claude adapter's `render_instructions`
 that renders this project's actual namespace prefix + Warden REST base into
 the packaged template (not merely placing a static file)."""
+
 from pathlib import Path
 from typing import Any
 import pytest
@@ -21,28 +22,39 @@ def _ctx(ep: Any, **overrides: Any) -> Any:
 
 # ── claude adapter: render_instructions ─────────────────────────────────────
 
-def test_render_instructions_embeds_forge_base_and_prefix(ep: Any, tmp_path: Path,
-                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_render_instructions_embeds_forge_base_and_prefix(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     adapter = ep._load_adapter()
     dest, content = adapter.render_instructions(_ctx(ep))
     assert dest == tmp_path / ".claude" / "CLAUDE.md"
     assert "http://gitlab-warden:8080/api/v4" in content
     assert "claude/" in content
-    assert "__FORGE_REST_BASE__" not in content and "__BRANCH_PREFIX_EXAMPLE__" not in content
+    assert (
+        "__FORGE_REST_BASE__" not in content
+        and "__BRANCH_PREFIX_EXAMPLE__" not in content
+    )
 
 
-def test_render_instructions_uses_first_configured_prefix(ep: Any, tmp_path: Path,
-                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+def test_render_instructions_uses_first_configured_prefix(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     adapter = ep._load_adapter()
-    _, content = adapter.render_instructions(_ctx(ep, branch_prefixes=("bot/", "agent/")))
+    _, content = adapter.render_instructions(
+        _ctx(ep, branch_prefixes=("bot/", "agent/"))
+    )
     assert "bot/" in content
 
 
 # ── generic entrypoint: install_instructions (fail-closed contract) ─────────
 
-def test_install_writes_rendered_content(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_install_writes_rendered_content(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     adapter = ep._load_adapter()
     ep.install_instructions(adapter, _ctx(ep))
@@ -50,8 +62,9 @@ def test_install_writes_rendered_content(ep: Any, tmp_path: Path, monkeypatch: p
     assert dest.exists() and "gitlab-warden" in dest.read_text()
 
 
-def test_install_missing_not_required_is_silent(ep: Any, tmp_path: Path,
-                                                monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_missing_not_required_is_silent(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("REQUIRE_AGENT_INSTRUCTIONS", raising=False)
 
     class _BrokenAdapter:
@@ -61,8 +74,9 @@ def test_install_missing_not_required_is_silent(ep: Any, tmp_path: Path,
     ep.install_instructions(_BrokenAdapter(), _ctx(ep))  # must not raise
 
 
-def test_install_missing_required_exits(ep: Any, tmp_path: Path,
-                                        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_missing_required_exits(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REQUIRE_AGENT_INSTRUCTIONS", "true")
 
     class _BrokenAdapter:

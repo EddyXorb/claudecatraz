@@ -13,6 +13,7 @@ one static name -> asset-subdirectory mapping. `.catraz/.env`'s
 hard, fail-closed `CliError` — config never causes code to run that wasn't
 already shipped.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -54,7 +55,10 @@ def resolve_agent_profile(root: Path) -> str:
     """The active profile name for this project: `.catraz/.env`'s
     `AGENT_PROFILE`, defaulting to `claude`. Fails closed on an unregistered
     name — a typo must never silently fall back to a different agent."""
-    name = (load_env(root / ".catraz" / ".env").get("AGENT_PROFILE") or DEFAULT_AGENT_PROFILE).strip()
+    name = (
+        load_env(root / ".catraz" / ".env").get("AGENT_PROFILE")
+        or DEFAULT_AGENT_PROFILE
+    ).strip()
     if name not in AGENT_REGISTRY:
         raise CliError(
             f"unknown AGENT_PROFILE {name!r} — one of: {', '.join(sorted(AGENT_REGISTRY))}",
@@ -113,7 +117,8 @@ def load_adapter_module(profile: str) -> ModuleType:
     path = agent_dir(profile) / "adapter.py"
     if not path.exists():
         raise CliError(
-            f"adapter not found: {path} (corrupt cache? remove ~/.cache/catraz)", EXIT_CONFIG
+            f"adapter not found: {path} (corrupt cache? remove ~/.cache/catraz)",
+            EXIT_CONFIG,
         )
     spec = importlib.util.spec_from_file_location("agent_adapter", path)
     assert spec is not None and spec.loader is not None

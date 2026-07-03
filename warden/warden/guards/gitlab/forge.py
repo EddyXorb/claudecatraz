@@ -185,11 +185,7 @@ class GitForge:
 
     async def _list_agent_branches(self, pid: str) -> list[str]:
         branches = await self._get_paginated(f"projects/{pid}/repository/branches")
-        return [
-            b["name"]
-            for b in branches
-            if self.cfg.in_branch_namespace(b.get("name", ""))
-        ]
+        return [b["name"] for b in branches if self.cfg.in_branch_namespace(b.get("name", ""))]
 
     async def _list_agent_mrs(self, pid: str, sa: Optional[int]) -> list[tuple[int, str]]:
         path = f"projects/{pid}/merge_requests?state=opened"

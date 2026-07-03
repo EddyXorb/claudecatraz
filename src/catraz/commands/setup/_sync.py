@@ -66,11 +66,17 @@ def _run_sync(
     adapter = load_adapter_module(profile)
     sync = getattr(adapter, "sync_from_host", None)
     if sync is None:
-        raise CliError(f"agent profile {profile!r} has no host-credential sync", EXIT_GENERAL)
+        raise CliError(
+            f"agent profile {profile!r} has no host-credential sync", EXIT_GENERAL
+        )
 
     env = load_env(root / ".catraz" / ".env")
     home = claude_home(root)
-    src = source or os.environ.get("CLAUDE_CREDENTIAL_SOURCE") or env.get("CLAUDE_CREDENTIAL_SOURCE")
+    src = (
+        source
+        or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
+        or env.get("CLAUDE_CREDENTIAL_SOURCE")
+    )
     src_path = Path(src).expanduser() if src else None
     try:
         if quiet:
@@ -93,7 +99,10 @@ def _auto_sync_if_needed(root: Path, out: Out) -> None:
     host `claude` login); does NOT reflect the agent's live tmpfs token — only keeps the seed
     as fresh as the host.
     """
-    if load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription") != "subscription":
+    if (
+        load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription")
+        != "subscription"
+    ):
         return
     if _credentials_mode(root) == "persistent":
         return  # §05.6: persistent profiles have nothing to sync from the host

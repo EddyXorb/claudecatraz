@@ -12,6 +12,7 @@ identically to the rest of the suite in environments where Docker can't run
 The unit-level half of the harness (no Docker needed, runs everywhere) is
 `tests/container/test_adapter_conformance.py`.
 """
+
 import os
 import shutil
 import subprocess
@@ -46,8 +47,9 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     env = dict(os.environ, HOME=str(root))
     catraz = [sys.executable, "-m", "catraz"]
 
-    subprocess.run([*catraz, "-C", str(root), "init", "-y", "--skip-sync"],
-                   env=env, check=False)
+    subprocess.run(
+        [*catraz, "-C", str(root), "init", "-y", "--skip-sync"], env=env, check=False
+    )
 
     (root / ".catraz" / ".env").write_text(
         "AUTH_MODE=api_key\n"
@@ -58,16 +60,30 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         f"DEV_UID={os.getuid()}\n"
     )
 
-    subprocess.run([*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True)
+    subprocess.run(
+        [*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True
+    )
     yield root
     subprocess.run([*catraz, "-C", str(root), "stop"], env=env, check=False)
 
 
 def _compose_exec(live_stack: Path, *cmd: str) -> subprocess.CompletedProcess[str]:
-    return _run(["docker", "compose",
-                 "-f", str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
-                 "--project-directory", str(live_stack),
-                 "exec", "-T", "claude-dev-env", "sh", "-c", " ".join(cmd)])
+    return _run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(live_stack / ".catraz" / "assets" / "compose" / "docker-compose.yml"),
+            "--project-directory",
+            str(live_stack),
+            "exec",
+            "-T",
+            "claude-dev-env",
+            "sh",
+            "-c",
+            " ".join(cmd),
+        ]
+    )
 
 
 @pytest.mark.slow
@@ -84,9 +100,15 @@ def test_agent_process_env_carries_no_gitlab_token(live_stack: Path) -> None:
 def test_agent_home_has_no_gitlab_token_file(live_stack: Path) -> None:
     """No credential file under the agent's home mentions a GitLab token —
     prepare_home() must only ever write agent-model credentials."""
-    r = _compose_exec(live_stack, "grep -rl GITLAB_READ_TOKEN /home/dev/.claude 2>/dev/null; echo rc=$?")
+    r = _compose_exec(
+        live_stack,
+        "grep -rl GITLAB_READ_TOKEN /home/dev/.claude 2>/dev/null; echo rc=$?",
+    )
     assert r.returncode == 0
-    assert r.stdout.strip().splitlines()[-1] in ("rc=1", "rc=2")  # grep: no match (or dir gone)
+    assert r.stdout.strip().splitlines()[-1] in (
+        "rc=1",
+        "rc=2",
+    )  # grep: no match (or dir gone)
 
 
 @pytest.mark.slow
@@ -94,6 +116,9 @@ def test_git_insteadof_points_at_warden_not_gitlab_directly(live_stack: Path) ->
     """git_routing.configure_git_warden() must have rewired the canonical
     GitLab remote to the Warden — the agent's own git never talks to GitLab
     directly (§05.5 "git insteadOf zeigt auf den Warden")."""
-    r = _compose_exec(live_stack, "git config --global --get-all url.http://gitlab-warden:8080/git/.insteadOf")
+    r = _compose_exec(
+        live_stack,
+        "git config --global --get-all url.http://gitlab-warden:8080/git/.insteadOf",
+    )
     assert r.returncode == 0
     assert "gitlab.com" in r.stdout

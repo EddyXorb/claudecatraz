@@ -53,7 +53,8 @@ def _yes_apply_warden_policy(
     out: Out,
 ) -> None:
     raw_projects = (
-        os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
+        os.environ.get("WARDEN_ALLOWED_PROJECTS")
+        or env.get("WARDEN_ALLOWED_PROJECTS", "")
     ).strip()
     if raw_projects and warden_toml.exists():
         projects = [p.strip() for p in raw_projects.split(",") if p.strip()]
@@ -98,8 +99,12 @@ def _wizard_yes(
 
     inh_env = inherited.get("env", {}) if inherited else {}
 
-    auth_mode = (os.environ.get("AUTH_MODE") or inh_env.get("AUTH_MODE")
-                 or env.get("AUTH_MODE") or "subscription")
+    auth_mode = (
+        os.environ.get("AUTH_MODE")
+        or inh_env.get("AUTH_MODE")
+        or env.get("AUTH_MODE")
+        or "subscription"
+    )
     updates["AUTH_MODE"] = auth_mode
 
     mode = _yes_gitlab_mode({**inh_env, **env})  # inherited provides fallback
@@ -109,24 +114,32 @@ def _wizard_yes(
         mode = env_gitlab
     updates["GITLAB_MODE"] = mode
 
-    gitlab_url = (os.environ.get("GITLAB_URL", "").strip()
-                  or inh_env.get("GITLAB_URL", "")
-                  or env.get("GITLAB_URL", ""))
+    gitlab_url = (
+        os.environ.get("GITLAB_URL", "").strip()
+        or inh_env.get("GITLAB_URL", "")
+        or env.get("GITLAB_URL", "")
+    )
     if gitlab_url:
         updates["GITLAB_URL"] = gitlab_url
 
     _yes_apply_tokens(secrets_dir, auth_mode, out)
     _yes_apply_warden_policy(env, env_path, warden_toml, out)
 
-    base_image = (os.environ.get("BASE_IMAGE", "").strip()
-                  or inh_env.get("BASE_IMAGE", "")
-                  or env.get("BASE_IMAGE", "")).strip()
-    base_dockerfile = (os.environ.get("BASE_DOCKERFILE", "").strip()
-                       or inh_env.get("BASE_DOCKERFILE", "")
-                       or env.get("BASE_DOCKERFILE", "")).strip()
-    base_context = (os.environ.get("BASE_CONTEXT", "").strip()
-                    or inh_env.get("BASE_CONTEXT", "")
-                    or env.get("BASE_CONTEXT", "")).strip()
+    base_image = (
+        os.environ.get("BASE_IMAGE", "").strip()
+        or inh_env.get("BASE_IMAGE", "")
+        or env.get("BASE_IMAGE", "")
+    ).strip()
+    base_dockerfile = (
+        os.environ.get("BASE_DOCKERFILE", "").strip()
+        or inh_env.get("BASE_DOCKERFILE", "")
+        or env.get("BASE_DOCKERFILE", "")
+    ).strip()
+    base_context = (
+        os.environ.get("BASE_CONTEXT", "").strip()
+        or inh_env.get("BASE_CONTEXT", "")
+        or env.get("BASE_CONTEXT", "")
+    ).strip()
     if base_image:
         updates["BASE_IMAGE"] = base_image
         unset_env_keys(env_path, ["BASE_DOCKERFILE", "BASE_CONTEXT"])

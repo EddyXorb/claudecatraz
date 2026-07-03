@@ -2,6 +2,7 @@
 
 No Docker — monkeypatches compose.subprocess.run.
 """
+
 import stat
 from pathlib import Path
 from typing import Any
@@ -13,13 +14,16 @@ from catraz.paths import asset_root
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _make_root(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     root.mkdir()
     cat = root / ".catraz"
     cat.mkdir()
     (cat / "config").mkdir()
-    (cat / "config" / "warden.toml").write_text('allowed_projects = ["group/sub/proj"]\n')
+    (cat / "config" / "warden.toml").write_text(
+        'allowed_projects = ["group/sub/proj"]\n'
+    )
     (cat / ".env").write_text("AUTH_MODE=subscription\n")
     return root
 
@@ -36,14 +40,17 @@ networks:
 
 def _fake_subprocess_success(output: str = FAKE_CONFIG_OUTPUT) -> Any:
     """Return a fake subprocess module where run() succeeds with the given stdout."""
+
     class FakeProc:
         returncode: int = 0
         stdout: str = output
         stderr: str = ""
+
     class FakeSub:
         @staticmethod
         def run(cmd: Any, **k: Any) -> FakeProc:
             return FakeProc()
+
     return FakeSub()
 
 
@@ -52,16 +59,21 @@ def _fake_subprocess_fail() -> Any:
         returncode: int = 1
         stdout: str = ""
         stderr: str = "error"
+
     class FakeSub:
         @staticmethod
         def run(cmd: Any, **k: Any) -> FakeProc:
             return FakeProc()
+
     return FakeSub()
 
 
 # ── (a) success: file written at 0600, header present, prepare returns resolved prefix ──
 
-def test_generate_resolved_writes_file_at_0600(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_generate_resolved_writes_file_at_0600(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _make_root(tmp_path)
     monkeypatch.setattr(compose, "subprocess", _fake_subprocess_success())
     ok = compose.generate_resolved(root)
@@ -74,7 +86,9 @@ def test_generate_resolved_writes_file_at_0600(tmp_path: Path, monkeypatch: pyte
     assert FAKE_CONFIG_OUTPUT in content
 
 
-def test_prepare_render_true_returns_resolved_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prepare_render_true_returns_resolved_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _make_root(tmp_path)
     monkeypatch.setattr(compose, "subprocess", _fake_subprocess_success())
     prefix = compose.prepare(root, render=True)
@@ -86,7 +100,10 @@ def test_prepare_render_true_returns_resolved_prefix(tmp_path: Path, monkeypatch
 
 # ── (b) render RC≠0: returns _source_cmd prefix + warning ──
 
-def test_prepare_render_fail_returns_source_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+
+def test_prepare_render_fail_returns_source_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _make_root(tmp_path)
     monkeypatch.setattr(compose, "subprocess", _fake_subprocess_fail())
     prefix = compose.prepare(root, render=True)
@@ -96,12 +113,19 @@ def test_prepare_render_fail_returns_source_cmd(tmp_path: Path, monkeypatch: pyt
     assert "docker-compose.yml" in " ".join(prefix)
     # Warning should have been printed to stderr
     captured = capsys.readouterr()
-    assert "WARNING" in captured.err or "fallback" in captured.err.lower() or "stale" in captured.err
+    assert (
+        "WARNING" in captured.err
+        or "fallback" in captured.err.lower()
+        or "stale" in captured.err
+    )
 
 
 # ── (c) render=False with existing resolved.yml: returns resolved prefix ──
 
-def test_prepare_render_false_existing_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_prepare_render_false_existing_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _make_root(tmp_path)
     resolved = root / ".catraz/compose.resolved.yml"
     resolved.write_text("# existing\n")
@@ -112,7 +136,10 @@ def test_prepare_render_false_existing_resolved(tmp_path: Path, monkeypatch: pyt
 
 # ── (d) render=False, no resolved.yml: returns layered source, no side effects ──
 
-def test_prepare_render_false_no_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_prepare_render_false_no_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _make_root(tmp_path)
     # No resolved.yml
     prefix = compose.prepare(root, render=False)
@@ -121,6 +148,7 @@ def test_prepare_render_false_no_resolved(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 # ── (e) _source_cmd always includes the auth asset (unconditional -f) ──
+
 
 def test_source_cmd_includes_auth_asset_subscription(tmp_path: Path) -> None:
     root = _make_root(tmp_path)
@@ -139,11 +167,16 @@ def test_source_cmd_includes_auth_asset_api_key(tmp_path: Path) -> None:
 
 # ── (f) leak guard: resolved.yml is always written at 0600 ──
 
-def test_resolved_written_at_0600_even_with_sensitive_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_resolved_written_at_0600_even_with_sensitive_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Even if the config stdout contains sensitive-looking strings, resolved.yml stays 0600."""
     sensitive_output = "ANTHROPIC_API_KEY: sk-ant-secretvalue\nGITLAB: glpat-xxx\n"
     root = _make_root(tmp_path)
-    monkeypatch.setattr(compose, "subprocess", _fake_subprocess_success(sensitive_output))
+    monkeypatch.setattr(
+        compose, "subprocess", _fake_subprocess_success(sensitive_output)
+    )
     compose.generate_resolved(root)
     resolved = root / ".catraz/compose.resolved.yml"
     assert resolved.exists()

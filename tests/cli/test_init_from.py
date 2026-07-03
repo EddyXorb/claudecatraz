@@ -1,4 +1,5 @@
 """Workstream D — catraz init --from <path> tests."""
+
 import argparse
 import types
 from pathlib import Path
@@ -13,10 +14,15 @@ from catraz.ui import Out
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _make_source(tmp_path: Path, *, auth_mode: str = "subscription",
-                 gitlab_mode: str = "read-write",
-                 gitlab_url: str = "https://gitlab.example.com",
-                 dev_uid: str = "9999") -> Path:
+
+def _make_source(
+    tmp_path: Path,
+    *,
+    auth_mode: str = "subscription",
+    gitlab_mode: str = "read-write",
+    gitlab_url: str = "https://gitlab.example.com",
+    dev_uid: str = "9999",
+) -> Path:
     """Create a fully initialised source sandbox."""
     src = tmp_path / "src"
     src.mkdir()
@@ -24,7 +30,9 @@ def _make_source(tmp_path: Path, *, auth_mode: str = "subscription",
     cat.mkdir()
     (cat / "config").mkdir()
     (cat / "config" / "image").mkdir(parents=True)
-    (cat / "config" / "image" / "Dockerfile").write_text("FROM ubuntu:24.04\nRUN echo src\n")
+    (cat / "config" / "image" / "Dockerfile").write_text(
+        "FROM ubuntu:24.04\nRUN echo src\n"
+    )
     (cat / "config" / "warden.toml").write_text('allowed_projects = ["group/proj"]\n')
     (cat / "config" / "squid.conf").write_text("# squid src\n")
     (cat / "config" / "allowlist.txt").write_text("example.com\n")
@@ -60,25 +68,32 @@ def _make_dst(tmp_path: Path) -> Path:
 
 def _yes_args(init_from: str | None = None) -> argparse.Namespace:
     return argparse.Namespace(
-        yes=True, force=False, skip_sync=True,
-        dir=None, no_color=True, print_only=False,
+        yes=True,
+        force=False,
+        skip_sync=True,
+        dir=None,
+        no_color=True,
+        print_only=False,
         init_from=init_from,
     )
 
 
 def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr("catraz.commands.setup.run_doctor",
-                        lambda *a, **kw: types.SimpleNamespace(items=[]))
-    monkeypatch.setattr("catraz.commands.setup.print_findings",
-                        lambda *a, **kw: (0, 0))
+    monkeypatch.setattr(
+        "catraz.commands.setup.run_doctor",
+        lambda *a, **kw: types.SimpleNamespace(items=[]),
+    )
+    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
 
 # ── load_inherited unit tests ─────────────────────────────────────────────────
 
+
 def test_load_inherited_invalid_path(tmp_path: Path) -> None:
     """Missing .catraz raises CliError."""
     from catraz.errors import CliError
+
     with pytest.raises(CliError):
         load_inherited(tmp_path / "nonexistent")
 
@@ -86,6 +101,7 @@ def test_load_inherited_invalid_path(tmp_path: Path) -> None:
 def test_load_inherited_no_catraz_dir(tmp_path: Path) -> None:
     """A dir without .catraz/ raises CliError."""
     from catraz.errors import CliError
+
     with pytest.raises(CliError):
         load_inherited(tmp_path)
 
@@ -167,7 +183,10 @@ def test_stage_inherited_overwrites_empty_destination(tmp_path: Path) -> None:
 
 # ── -y (non-interactive) clone ────────────────────────────────────────────────
 
-def test_yes_clone_inherits_env_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_yes_clone_inherits_env_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """-y --from clones curated .env keys to the destination."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
@@ -179,7 +198,9 @@ def test_yes_clone_inherits_env_keys(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert env.get("GITLAB_URL") == "https://gitlab.example.com"
 
 
-def test_yes_clone_does_not_inherit_dev_uid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yes_clone_does_not_inherit_dev_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """-y --from must NOT inherit DEV_UID; it is set locally."""
     src = _make_source(tmp_path, dev_uid="9999")
     dst = _make_dst(tmp_path)
@@ -208,7 +229,9 @@ def test_yes_clone_copies_secrets_without_env_override(
     assert (secrets_dir / "gitlab_read_token").read_text() == "glpat-env-override"
 
 
-def test_yes_clone_copies_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yes_clone_copies_claude_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """-y --from copies secrets/claude/ without printing its contents."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
@@ -220,7 +243,9 @@ def test_yes_clone_copies_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "src-cred" in cred.read_text()
 
 
-def test_yes_clone_config_file_copied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yes_clone_config_file_copied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """-y --from copies config/image/Dockerfile from source."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
@@ -233,10 +258,15 @@ def test_yes_clone_config_file_copied(tmp_path: Path, monkeypatch: pytest.Monkey
 
 # ── interactive (no -y) clone — ordering regression ───────────────────────────
 
+
 def _interactive_args(init_from: str | None = None) -> argparse.Namespace:
     return argparse.Namespace(
-        yes=False, force=False, skip_sync=True,
-        dir=None, no_color=True, print_only=False,
+        yes=False,
+        force=False,
+        skip_sync=True,
+        dir=None,
+        no_color=True,
+        print_only=False,
         init_from=init_from,
     )
 
@@ -254,17 +284,24 @@ def test_interactive_clone_inherits_config_files(
     src = _make_source(tmp_path, gitlab_mode="off")  # off → wizard needs no tokens
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda p: "")     # accept inherited defaults
+    monkeypatch.setattr("builtins.input", lambda p: "")  # accept inherited defaults
     monkeypatch.setattr("getpass.getpass", lambda p: "")
     setup.cmd_init(dst, _interactive_args(str(src)), Out(color=False))
 
     cfg = dst / ".catraz" / "config"
-    assert "echo src" in (cfg / "image" / "Dockerfile").read_text(), "Dockerfile not inherited"
-    assert (cfg / "allowlist.txt").read_text() == "example.com\n", "allowlist not inherited"
-    assert (cfg / "squid.conf").read_text() == "# squid src\n", "squid.conf not inherited"
+    assert "echo src" in (cfg / "image" / "Dockerfile").read_text(), (
+        "Dockerfile not inherited"
+    )
+    assert (cfg / "allowlist.txt").read_text() == "example.com\n", (
+        "allowlist not inherited"
+    )
+    assert (cfg / "squid.conf").read_text() == "# squid src\n", (
+        "squid.conf not inherited"
+    )
 
 
 # ── secret never printed ──────────────────────────────────────────────────────
+
 
 def test_secret_never_echoed_to_stdout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -285,10 +322,16 @@ def test_secret_never_echoed_to_stdout(
 
 # ── error on invalid path ─────────────────────────────────────────────────────
 
-def test_invalid_from_path_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_invalid_from_path_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """--from pointing to a non-initialised dir raises CliError."""
     from catraz.errors import CliError
+
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
     with pytest.raises(CliError):
-        setup.cmd_init(dst, _yes_args(str(tmp_path / "does_not_exist")), Out(color=False))
+        setup.cmd_init(
+            dst, _yes_args(str(tmp_path / "does_not_exist")), Out(color=False)
+        )

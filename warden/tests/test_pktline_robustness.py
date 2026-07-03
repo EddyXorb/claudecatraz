@@ -21,6 +21,7 @@ async def _aiter(*chunks):
     for c in chunks:
         yield c
 
+
 ZERO = "0" * 40
 SHA = "1" * 40
 

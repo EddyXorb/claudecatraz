@@ -38,9 +38,7 @@ def test_from_env_with_no_toml_file_uses_default_set(tmp_path: Path):
 
 def test_from_env_parses_api_endpoints_enable(tmp_path: Path):
     toml = tmp_path / "warden.toml"
-    toml.write_text(
-        '[api.endpoints]\nenable = ["mr.create", "branch.create"]\n'
-    )
+    toml.write_text('[api.endpoints]\nenable = ["mr.create", "branch.create"]\n')
     cfg = from_env(_MIN_ENV, strict=True, toml_path=str(toml))
     assert cfg.endpoint_enable == ("mr.create", "branch.create")
     table = build_effective_table(cfg, cfg.endpoint_enable)

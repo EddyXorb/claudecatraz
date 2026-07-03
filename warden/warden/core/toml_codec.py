@@ -49,8 +49,7 @@ def decode(cls: type[T], mapping: Mapping[str, object], *, path: str = "") -> T:
         field_path = _field_path(path, name)
         if name not in mapping:
             has_default = (
-                f.default is not dataclasses.MISSING
-                or f.default_factory is not dataclasses.MISSING
+                f.default is not dataclasses.MISSING or f.default_factory is not dataclasses.MISSING
             )
             if not has_default:
                 raise ConfigError(f"{field_path}: missing required field")
