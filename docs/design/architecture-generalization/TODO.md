@@ -54,8 +54,11 @@
 ## Plan: Architektur-Ausbesserung
 
 Reihenfolge nach Abhängigkeit; jeder Schritt einzeln shipbar, bestehende Tests als
-Verhaltensnetz. A und F sind frei; B → C → D; E braucht D (Guard-Basisklasse als
-Aufhänger für Guard-State); G (Docstrings) zuletzt, weil vorher noch Code bewegt wird.
+Verhaltensnetz. A ist frei; B → C → D; E braucht D (Guard-Basisklasse als Aufhänger
+für Guard-State); H (Entfetten) nach C jederzeit; F (Dataclass-Config) braucht H
+(Overrides weg ⇒ Schema statisch typbar) und profitiert von D (Guard-eigene
+Config-Sektion); G (Docstrings) zuletzt, weil vorher noch Code bewegt wird.
+Ausführungsreihenfolge: A, B, C, D, E, H, F, G.
 
 ### A. `api_endpoints.py` ersatzlos löschen
 
@@ -103,10 +106,18 @@ Keine Importer, keine Ersatz-Fassade. Fertig-Kriterium: Modul weg, Testlauf grü
   `__main__`, ruft aber nur noch die Hooks.
 - `app.py`/`__main__.py` importieren danach kein Guard-Paket-Internum mehr:
   `create_app(guards, ctx)` sammelt `guard.routes()` ein (aus B/C), fertig.
+- **Harte Anforderung — Config-Mutation beenden:** `reconcile()` macht heute
+  `self.cfg = replace(cfg, allowed_project_ids=…)` — zur Laufzeit aufgelöste
+  numerische Projekt-Ids sind *State*, kein Config. Sobald Guards langlebig sind
+  (statt pro Request konstruiert), wäre das im Konstruktor gebundene `self.cfg`
+  stale und die Id-Allowlist leer. Fix: die Id-Aliase wandern in den Forge-State
+  (z. B. `ForgeState.project_id_aliases`), `project_gate` fragt dafür eine vom
+  Guard gelieferte Auflösung; `Config` bleibt ab Konstruktion wirklich eingefroren.
 - Offene Folge-Baustelle (nicht dieser Schritt): `Config.effective_endpoints` greift
   per Deferred-Import in den Katalog des gitlab_api-Guards — dieselbe Krankheit wie
   AppContext, umgekehrte Richtung. Kandidat: Aktivierungs-Parsing als Guard-Hook
   (`Guard.validate_config(cfg)`), Katalog-Zeug komplett raus aus `core/config.py`.
+  Wird in Schritt F (Dataclass-Config) miterledigt.
 
 ### E. Persistenz: Core verwaltet die DB, Domänen besitzen ihre Tabellen
 
@@ -123,14 +134,48 @@ Keine Importer, keine Ersatz-Fassade. Fertig-Kriterium: Modul weg, Testlauf grü
 - Fertig-Kriterium: `core/` enthält kein Wort GitLab/MR/Branch mehr; ein Guard ohne
   State braucht keinen; ein neuer Guard bekommt State ausschließlich über `StateStore`.
 
-### F. Vollständiges `warden.toml`-Beispiel in den Code
+### F. Config als transparente Dataclass + generischer TOML-Decoder
 
-- Ein komplettes, kommentiertes Beispiel (alle Sektionen: Modus, Projekte, Limits,
-  `[api.endpoints]`, Admin/Ports, Pfade) als Modul-Docstring-Block in
-  `core/config_load.py` — dort, wo geparst wird. Muss beim Lesen des Parsers das
-  Zielbild komplett zeigen.
-- Optional zusätzlich als `warden.toml.example` ins Paket, aber die kanonische Kopie
-  lebt im Code; ein Test parst das Beispiel durch `from_env`, damit es nicht driftet.
+Ersetzt das ursprünglich geplante handgeschriebene `warden.toml`-Beispiel: wenn das
+Schema eine verschachtelte Dataclass ist, *ist* das Schema die Doku — TOML-Tabellen
+bilden 1:1 auf die Dataclass-Struktur ab.
+
+- `core/toml_codec.py` (~60–80 Zeilen, keine neue Dependency — pydantic bleibt wegen
+  Dependency-Disziplin an der Trust Boundary draußen): generisches
+  `decode(cls, mapping) -> T`, rekursiv über `dataclasses.fields()` + Typ-Hints
+  (Primitive, `tuple[...]`, `Optional`, verschachtelte Dataclasses). Fail-closed:
+  unbekannter Key ⇒ `ConfigError`, fehlendes Pflichtfeld ⇒ `ConfigError`,
+  Typ-Mismatch ⇒ `ConfigError`.
+- Das Config-Schema wird verschachtelt und nach Besitz geschnitten: Core-Sektion
+  (Modus, Ports, Pfade, Limits) in `core/config.py`; die gitlab-spezifische Sektion
+  (Projekte, Branch-Namespace, `[api.endpoints]`-Aktivierung) als Dataclass im
+  Guard-/Forge-Paket, vom Guard über einen Hook beigesteuert
+  (`Guard.config_schema()` o.ä.). Damit fliegt der Deferred-Import-Trick
+  (`Config.effective_endpoints` → Katalog) aus `core/config.py` raus.
+- `catalog/config_parse.py` entfällt fast vollständig (mechanisches Mapping → Decoder);
+  die *semantische* Validierung bleibt wo sie ist: Mode ⇒ Token-Pflicht in
+  `config_load`, unbekannte Katalog-Ids/Capability-Verbote in `activation.py`.
+- Env-/Secret-Handling (`*_FILE`-Indirektion, Env-über-File-Präzedenz) bleibt
+  manuell in `config_load.py` — das ist kein TOML-Problem.
+- Kein handgepflegtes Beispiel mehr; stattdessen ein Test, der ein aus den
+  Dataclass-Defaults generiertes Minimal-TOML durch den Decoder round-trippt.
+- Voraussetzung: H (der Override-Mechanismus mit freien Keys ist die eine Stelle,
+  die sich nicht statisch typen lässt).
+
+### H. Entfetten: Override-Mechanismus raus, Probes auslagern, errors entflechten
+
+- **Override-Mechanismus löschen (YAGNI):** `OverridableParam`, `_apply_overrides`,
+  `is_narrower`/`rebuild`, der `[api.endpoints.overrides]`-Parser und der eine
+  Demo-Knopf `branch_prefix` auf `branch.create` („demonstrates the override
+  mechanism end to end; no default entry needs it") — ~150 Zeilen Mechanik plus
+  Tests für ein Feature ohne echten Nutzer. Die fail-closed-Validierung
+  „unbekannte Id in `enable`" und das Capability-Verbot bleiben.
+- **Deny-Probes aus `entries.py` auslagern** (eigenes `probes.py`, per Entry-Id
+  zugeordnet): `entries.py` wird wieder eine lesbare Tabelle — eine Zeile pro
+  Endpoint mit Methode/Template/Checks/Kind. Startgate-Mechanik unverändert
+  (sie ist tragend: Boot-Abbruch, wenn eine Probe durchginge).
+- **`git_reject_response` aus dem Root-`errors.py`** in den git-Guard verschieben;
+  Root behält nur das Guard-agnostische (`deny_json`).
 
 ### G. Docstring-Pass: konzise und selbstgenügend
 
@@ -140,5 +185,5 @@ Keine Importer, keine Ersatz-Fassade. Fertig-Kriterium: Modul weg, Testlauf grü
   bleibt — in einem Satz, aus sich heraus verständlich.
 - Faustregel: Docstring erklärt *was gilt und warum*, nie *was vorher war* oder
   *wo es dokumentiert ist*. Zielgröße: Modul-Docstrings ≤ 5 Zeilen, Methoden ≤ 3.
-- Zuletzt ausführen (nach A–E), damit der Pass nicht Text poliert, der ohnehin
-  verschoben oder gelöscht wird.
+- Zuletzt ausführen (nach allen anderen Schritten), damit der Pass nicht Text
+  poliert, der ohnehin verschoben oder gelöscht wird.
