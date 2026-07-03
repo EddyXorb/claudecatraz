@@ -13,14 +13,14 @@ import httpx
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.guards.gitlab.forge import GitlabForge
+from warden.guards.gitlab.forge import GitForge
 from warden.guards.gitlab.upstream import Upstream
 
 
-def _forge(cfg, *, sa=42, clock=None) -> GitlabForge:
+def _forge(cfg, *, sa=42, clock=None) -> GitForge:
     st = State(":memory:")
     kwargs = {"clock": clock} if clock else {}
-    forge = GitlabForge(cfg, Upstream(cfg), st, AuditLog("-"), **kwargs)
+    forge = GitForge(cfg, Upstream(cfg), st, AuditLog("-"), **kwargs)
     forge.service_account_id = sa
     return forge
 

@@ -1,7 +1,7 @@
 """The GitLab forge: credentials, service-account, MR-ownership and reconcile
 (W6.2, W8.2, §6.11).
 
-:class:`GitlabForge` holds the long-lived collaborators (config, upstream,
+:class:`GitForge` holds the long-lived collaborators (config, upstream,
 state, audit) plus the service-account id, the short-lived MR-ownership
 cache, and the numeric project-id aliases reconcile resolves. Reconcile
 rebuilds the quota counters from GitLab truth — at startup (before the agent
@@ -25,8 +25,8 @@ from ...core.state import State
 from .state import ForgeState
 from .upstream import Upstream, project_id
 
-
-class GitlabForge:
+# Generic Forge class, a forge is git + nice accessors around it, such as gitlab, github, codeberg,..
+class GitForge:
     def __init__(
         self,
         cfg: Config,

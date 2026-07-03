@@ -151,8 +151,8 @@ class State:
     def view(self) -> StateView:
         """Core-only snapshot for the policy. Locked until the first
         successful reconcile; open_mrs/open_branches default to 0 — a domain
-        (e.g. :class:`~warden.guards.gitlab.forge.GitlabForge`) fills those
-        via its own :meth:`~warden.guards.gitlab.forge.GitlabForge.state_view`.
+        (e.g. :class:`~warden.guards.gitlab.forge.GitForge`) fills those
+        via its own :meth:`~warden.guards.gitlab.forge.GitForge.state_view`.
         """
         if not self.is_reconciled():
             return StateView(locked=True)

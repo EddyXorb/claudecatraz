@@ -75,7 +75,7 @@ class Config:
         group prefixes (README doctrine). GitLab also accepts a project's
         numeric id interchangeably with its path; matching that form is a
         forge concept (the id is only known after reconcile talks to
-        GitLab) — see ``guards.gitlab.forge.GitlabForge.project_allowed_by_id``,
+        GitLab) — see ``guards.gitlab.forge.GitForge.project_allowed_by_id``,
         not this method.
         """
         project = normalize_project(project)

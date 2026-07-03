@@ -4,7 +4,7 @@ living in the same SQLite file as :mod:`warden.core.state` via the shared
 
 Named for what they track (the agent's own namespace-scoped branches/MRs,
 §03.5), not for a specific guard; both the git guard and the REST-API guard
-read this through :class:`~warden.guards.gitlab.forge.GitlabForge`.
+read this through :class:`~warden.guards.gitlab.forge.GitForge`.
 """
 
 from __future__ import annotations

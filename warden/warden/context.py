@@ -15,7 +15,7 @@ from .core.config import Config
 from .core.guard import Guard
 from .core.state import State
 from .guards.git.guard import GitGuard
-from .guards.gitlab.forge import GitlabForge
+from .guards.gitlab.forge import GitForge
 from .guards.gitlab.upstream import Upstream
 from .guards.gitlab_api.guard import ApiGuard, GraphqlGuard
 
@@ -25,7 +25,7 @@ class AppContext:
     cfg: Config
     state: State
     audit: AuditLog
-    forge: GitlabForge
+    forge: GitForge
     guards: list[Guard[Any]]
 
 
@@ -37,7 +37,7 @@ def build_context(cfg: Config, upstream: Upstream, state: State, audit: AuditLog
     ``GraphqlGuard`` gets no ``forge`` at all, since it never contacts
     upstream).
     """
-    forge = GitlabForge(cfg, upstream, state, audit)
+    forge = GitForge(cfg, upstream, state, audit)
     guards: list[Guard[Any]] = [
         GitGuard(cfg, state, audit, forge),
         ApiGuard(cfg, state, audit, forge),

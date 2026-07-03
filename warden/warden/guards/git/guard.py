@@ -5,7 +5,7 @@ per-operation inside its hooks, via :meth:`core.guard.Guard.handle`.
 
 The guard is forge-agnostic in its own logic (no GitLab vocabulary) but
 depends on :mod:`warden.guards.gitlab` (the forge domain) for the
-credential/transport collaborator (:class:`~warden.guards.gitlab.forge.GitlabForge`)
+credential/transport collaborator (:class:`~warden.guards.gitlab.forge.GitForge`)
 it needs to reach an upstream at all — the one honest exception §03.3 leaves
 in place, now an explicit dependency on a shared package instead of a borrow
 from the REST guard's own internals.
@@ -26,7 +26,7 @@ from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R1
 from ...core.state import State
 from ...errors import deny_json
-from ..gitlab.forge import GitlabForge
+from ..gitlab.forge import GitForge
 from ..gitlab.upstream import stream_upstream
 from . import policy
 from .errors import git_reject_response
@@ -64,7 +64,7 @@ class GitGuard(Guard[GitIntent]):
     def name(self) -> str:
         return "git"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitlabForge) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitForge) -> None:
         super().__init__(cfg, state, audit)
         self.forge = forge
 

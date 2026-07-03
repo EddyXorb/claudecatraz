@@ -22,7 +22,7 @@ from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
 from ...core.state import State
 from ...errors import deny_json
-from ..gitlab.forge import GitlabForge
+from ..gitlab.forge import GitForge
 from ..gitlab.upstream import stream_upstream
 from .catalog import CatalogEntry, EffectiveTable, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
@@ -49,7 +49,7 @@ class ApiGuard(Guard[ApiIntent]):
     def name(self) -> str:
         return "api"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitlabForge) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitForge) -> None:
         super().__init__(cfg, state, audit)
         self.forge = forge
         # §04.2/04.3: built once at construction, never rebuilt — the guard's
@@ -118,7 +118,7 @@ class ApiGuard(Guard[ApiIntent]):
 
         Reachable only once the kernel's read-only gate has already passed
         (§03.2) — the write credential this transitively depends on (via
-        :meth:`~warden.guards.gitlab.forge.GitlabForge.resolve_service_account`)
+        :meth:`~warden.guards.gitlab.forge.GitForge.resolve_service_account`)
         is therefore never touched in off/read-only mode, replacing the
         manual ``ctx.cfg.writes_enabled`` guard this method used to carry
         itself (pre-Schritt-5 ``api_proxy.py:102``).

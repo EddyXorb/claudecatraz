@@ -11,7 +11,7 @@ from warden.context import AppContext, build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.guards.gitlab.forge import GitlabForge
+from warden.guards.gitlab.forge import GitForge
 from warden.guards.gitlab.upstream import Upstream
 
 UPSTREAM = "https://gitlab.example"
@@ -40,10 +40,10 @@ def state() -> State:
 
 
 @pytest.fixture
-def forge(cfg, state) -> GitlabForge:
+def forge(cfg, state) -> GitForge:
     upstream = Upstream(cfg)
     audit = AuditLog("-")
-    forge = GitlabForge(cfg, upstream, state, audit)
+    forge = GitForge(cfg, upstream, state, audit)
     forge.service_account_id = 42
     return forge
 

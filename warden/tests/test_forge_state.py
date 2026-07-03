@@ -4,7 +4,7 @@ core state uses — split out of :mod:`test_state` when the branch/MR tables
 moved out of core.
 
 These counters are what the git/REST guards' R5 quotas read via
-:meth:`~warden.guards.gitlab.forge.GitlabForge.state_view`, so an off-by-one
+:meth:`~warden.guards.gitlab.forge.GitForge.state_view`, so an off-by-one
 here would directly mis-gate writes.
 """
 
