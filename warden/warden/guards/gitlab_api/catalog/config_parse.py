@@ -1,12 +1,11 @@
 """Parse ``[api.endpoints]`` out of the raw ``warden.toml`` dict (§04.2/04.3;
 docs/design/architecture-generalization/04-policy-erweiterbarkeit.md §04.2).
 
-Deliberately free of any dependency on :mod:`warden.core.config` — not even
-``ConfigError`` — so ``config.py`` can import this module (deferred, at call
-time inside ``from_env``) without a load-time cycle. Malformed shapes raise
-:class:`EndpointConfigError`, a plain ``ValueError`` subclass that
-``config.py`` re-wraps as ``ConfigError`` at that boundary, the same way it
-already re-wraps ``tomllib.TOMLDecodeError``.
+:class:`ApiEndpointsConfig` is the schema — decoded generically by
+:func:`warden.core.toml_codec.decode` rather than a hand-rolled parser.
+Malformed shapes raise :class:`warden.core.config.ConfigError` directly (the
+same exception the decoder itself raises), so callers no longer need to
+catch and re-wrap a catalog-local error at this boundary.
 
 This module only parses *shape* (is ``enable`` a list of strings?). Whether
 an id actually exists in the catalog is checked later against the catalog
@@ -19,13 +18,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
-
-class EndpointConfigError(ValueError):
-    """Malformed ``[api.endpoints]`` shape."""
+from ....core import toml_codec
+from ....core.config import ConfigError
 
 
 @dataclass(frozen=True)
-class EndpointActivation:
+class ApiEndpointsConfig:
     """Raw, catalog-agnostic shape of the ``[api.endpoints]`` config.
 
     ``enable`` is ``None`` when the section (or the whole file) is absent —
@@ -39,24 +37,20 @@ class EndpointActivation:
     enable: Optional[tuple[str, ...]] = None
 
 
-def parse_endpoint_activation(file: Mapping[str, object]) -> EndpointActivation:
-    """Parse the ``[api.endpoints]`` table out of a loaded ``warden.toml`` dict."""
+def parse_api_endpoints(file: Mapping[str, object]) -> ApiEndpointsConfig:
+    """Parse the ``[api.endpoints]`` table out of a loaded ``warden.toml`` dict.
+
+    Absent ``[api]`` or ``[api.endpoints]`` ⇒ ``ApiEndpointsConfig()`` (the
+    "use the catalog default set" marker) — only a *present* table is handed
+    to the decoder, so an absent section never has to satisfy any required
+    field.
+    """
     api = file.get("api", {})
     if not isinstance(api, Mapping):
-        raise EndpointConfigError("warden.toml: [api] must be a table")
+        raise ConfigError("warden.toml: [api] must be a table")
     endpoints = api.get("endpoints", {})
     if not isinstance(endpoints, Mapping):
-        raise EndpointConfigError("warden.toml: [api.endpoints] must be a table")
+        raise ConfigError("warden.toml: [api.endpoints] must be a table")
     if not endpoints:
-        return EndpointActivation()
-
-    enable: Optional[tuple[str, ...]] = None
-    if "enable" in endpoints:
-        enable_raw = endpoints["enable"]
-        if not isinstance(enable_raw, list) or not all(isinstance(x, str) for x in enable_raw):
-            raise EndpointConfigError(
-                "warden.toml: [api.endpoints].enable must be a list of strings"
-            )
-        enable = tuple(enable_raw)
-
-    return EndpointActivation(enable=enable)
+        return ApiEndpointsConfig()
+    return toml_codec.decode(ApiEndpointsConfig, endpoints, path="api.endpoints")

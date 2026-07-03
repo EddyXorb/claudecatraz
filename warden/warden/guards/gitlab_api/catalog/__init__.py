@@ -21,7 +21,7 @@ from __future__ import annotations
 from .activation import EffectiveTable, build_effective_table
 from .builtin import BUILTIN_DENY_PROBES, is_builtin_merge_endpoint
 from .checks import CHECKS, OWNED_BY_AGENT, field_has_prefix, field_not_equals
-from .config_parse import EndpointActivation, EndpointConfigError, parse_endpoint_activation
+from .config_parse import ApiEndpointsConfig, parse_api_endpoints
 from .entries import CATALOG, DEFAULT_ENABLED, api_capabilities, match_endpoint
 from .errors import CatalogConfigError, StartgateFailure
 from .model import (
@@ -42,14 +42,13 @@ __all__ = [
     "BUILTIN_DENY_PROBES",
     "CATALOG",
     "CHECKS",
+    "ApiEndpointsConfig",
     "CatalogConfigError",
     "CatalogEntry",
     "DEFAULT_ENABLED",
     "DenyProbe",
     "EffectiveTable",
     "ENTRY_DENY_PROBES",
-    "EndpointActivation",
-    "EndpointConfigError",
     "EndpointKind",
     "FieldSpec",
     "Location",
@@ -65,6 +64,6 @@ __all__ = [
     "field_not_equals",
     "is_builtin_merge_endpoint",
     "match_endpoint",
-    "parse_endpoint_activation",
+    "parse_api_endpoints",
     "run_startgate",
 ]

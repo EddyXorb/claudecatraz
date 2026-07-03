@@ -21,12 +21,9 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping, Optional
+from typing import Mapping, Optional
 
 from .config import Config, ConfigError
-
-if TYPE_CHECKING:  # only for annotations; the real import is deferred (see below)
-    from ..guards.gitlab_api.catalog.config_parse import EndpointActivation
 
 _VALID_MODES = frozenset({"off", "read-only", "read-write"})
 
@@ -48,22 +45,17 @@ def _split_csv(value: str) -> tuple[str, ...]:
     return tuple(p.strip() for p in value.split(",") if p.strip())
 
 
-def _parse_endpoint_activation(file: Mapping[str, object]) -> "EndpointActivation":
-    """Parse ``[api.endpoints]`` (§04.2/04.3). Deferred import — see
-    ``config._default_endpoint_activation`` for why the catalog package is
-    never imported at module scope here. Malformed shape ⇒ ``ConfigError``
-    (fail-closed startup abort), the same treatment as a malformed
-    ``warden.toml`` overall.
+def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ...]]:
+    """Parse ``[api.endpoints].enable`` (§04.2/04.3). Deferred import — the
+    gitlab_api guard package owns the ``[api.endpoints]`` schema; core stays
+    guard-agnostic at module-load time, only threading the parsed value
+    through to ``Config.endpoint_enable``. Malformed shape ⇒ ``ConfigError``
+    (fail-closed startup abort, raised directly by the decoder), the same
+    treatment as a malformed ``warden.toml`` overall.
     """
-    from ..guards.gitlab_api.catalog.config_parse import (
-        EndpointConfigError,
-        parse_endpoint_activation,
-    )
+    from ..guards.gitlab_api.catalog.config_parse import parse_api_endpoints
 
-    try:
-        return parse_endpoint_activation(file)
-    except EndpointConfigError as exc:
-        raise ConfigError(f"warden.toml: {exc}") from exc
+    return parse_api_endpoints(file).enable
 
 
 DEFAULT_TOML_PATH = "/etc/warden/warden.toml"
@@ -192,7 +184,7 @@ def from_env(
         admin_port=_int("ADMIN_PORT", 9090),
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
         gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
-        endpoint_activation=_parse_endpoint_activation(file),
+        endpoint_enable=_parse_endpoint_enable(file),
     )
 
     if strict:

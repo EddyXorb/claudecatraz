@@ -24,7 +24,7 @@ from ...core.state import State
 from ...errors import deny_json
 from ..gitlab.forge import GitlabForge
 from ..gitlab.upstream import stream_upstream
-from .catalog import CatalogEntry, match_endpoint
+from .catalog import CatalogEntry, EffectiveTable, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
 from .policy import capability_gate, decide
@@ -52,6 +52,10 @@ class ApiGuard(Guard[ApiIntent]):
     def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitlabForge) -> None:
         super().__init__(cfg, state, audit)
         self.forge = forge
+        # §04.2/04.3: built once at construction, never rebuilt — the guard's
+        # policy/proxy code matches requests against this table, never the
+        # catalog directly (F4 hygiene: no runtime rebuild, no drift).
+        self._effective: EffectiveTable = build_effective_table(cfg, cfg.endpoint_enable)
 
     def routes(self) -> list[Route]:
         return [
@@ -94,7 +98,7 @@ class ApiGuard(Guard[ApiIntent]):
         ep = (
             None
             if method in ("GET", "HEAD", "OPTIONS")
-            else match_endpoint(self.cfg.effective_endpoints.entries, method, rest_path)
+            else match_endpoint(self._effective.entries, method, rest_path)
         )
         fields = extract_fields(request, body, ep)
 
@@ -125,10 +129,10 @@ class ApiGuard(Guard[ApiIntent]):
         return intent
 
     def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:
-        return capability_gate(intent, cfg)
+        return capability_gate(intent, cfg, self._effective)
 
     def decide(self, intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
-        return decide(intent, state, cfg)
+        return decide(intent, state, cfg, self._effective)
 
     def record(self, intent: ApiIntent, decision: Decision) -> None:
         """Record the write *before* the upstream call (idempotency / fail-safe, §6.11)."""
@@ -174,7 +178,7 @@ class ApiGuard(Guard[ApiIntent]):
         """
         if intent.endpoint is None:
             return None
-        via = self.cfg.effective_endpoints.enabled_via.get(intent.endpoint.id)
+        via = self._effective.enabled_via.get(intent.endpoint.id)
         return via if via and via != "default" else None
 
 

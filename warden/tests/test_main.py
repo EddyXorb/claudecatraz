@@ -13,7 +13,7 @@ import pytest
 import warden.__main__ as main_mod
 from warden.core.config import Config, ConfigError
 from warden.core.state import SchemaError
-from warden.guards.gitlab_api.catalog import StartgateFailure
+from warden.guards.gitlab_api.catalog import CatalogConfigError, StartgateFailure
 
 
 def test_main_exits_2_on_config_error(monkeypatch):
@@ -31,6 +31,23 @@ def test_main_exits_2_on_schema_error(monkeypatch):
         raise SchemaError("state DB schema version 99 is newer than this warden build supports")
 
     monkeypatch.setattr(main_mod, "from_env", _raise)
+    with pytest.raises(SystemExit) as exc:
+        main_mod.main()
+    assert exc.value.code == 2
+
+
+def test_main_exits_2_on_catalog_config_error(monkeypatch):
+    # F: build_effective_table (called directly at the __main__ composition
+    # root, no more deferred Config.effective_endpoints) raises
+    # CatalogConfigError on an unknown [api.endpoints].enable id — this must
+    # abort exactly like any other fail-closed startup error, not surface as
+    # a raw traceback.
+    monkeypatch.setattr(main_mod, "from_env", lambda: Config())
+
+    def _raise(cfg, enable):
+        raise CatalogConfigError("unknown catalog id(s): no.such.entry")
+
+    monkeypatch.setattr(main_mod, "build_effective_table", _raise)
     with pytest.raises(SystemExit) as exc:
         main_mod.main()
     assert exc.value.code == 2

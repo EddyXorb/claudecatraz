@@ -16,7 +16,12 @@ from .core.config import ConfigError
 from .core.config_load import from_env
 from .core.state import SchemaError, State
 from .guards.gitlab.upstream import Upstream
-from .guards.gitlab_api.catalog import StartgateFailure, run_startgate
+from .guards.gitlab_api.catalog import (
+    CatalogConfigError,
+    StartgateFailure,
+    build_effective_table,
+    run_startgate,
+)
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:
@@ -38,7 +43,7 @@ async def _serve() -> None:
     # activated catalog entry's deny-probes, plus the built-in invariants'
     # global probes — before anything else. Pure, offline, no state DB / no
     # upstream: this is the earliest possible fail-closed abort point.
-    table = cfg.effective_endpoints
+    table = build_effective_table(cfg, cfg.endpoint_enable)
     run_startgate(cfg, table)
 
     if cfg.gitlab_enabled and not cfg.allowed_projects:
@@ -89,11 +94,12 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except (ConfigError, SchemaError, StartgateFailure) as exc:
-        # All three are fail-closed startup aborts (A9): bad config, a state
-        # DB this build cannot understand, or a catalog deny-probe that would
-        # have been allowed. None should ever surface as a traceback — a
-        # clean message and a non-zero exit is the contract.
+    except (ConfigError, CatalogConfigError, SchemaError, StartgateFailure) as exc:
+        # All four are fail-closed startup aborts (A9): bad config (shape or
+        # catalog-activation), a state DB this build cannot understand, or a
+        # catalog deny-probe that would have been allowed. None should ever
+        # surface as a traceback — a clean message and a non-zero exit is
+        # the contract.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

@@ -10,7 +10,6 @@ import pytest
 import warden.guards.gitlab_api.catalog.probes as probes_mod
 from warden.core.config import Config
 from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
-from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
 from warden.guards.gitlab_api.catalog.entries import CATALOG
 from warden.guards.gitlab_api.catalog.errors import StartgateFailure
 from warden.guards.gitlab_api.catalog.model import (
@@ -28,7 +27,7 @@ def cfg() -> Config:
 
 
 def test_default_table_passes_the_startgate(cfg):
-    table = build_effective_table(cfg, EndpointActivation())
+    table = build_effective_table(cfg, None)
     run_startgate(cfg, table)  # must not raise
 
 
@@ -41,7 +40,7 @@ def test_every_catalog_entry_individually_passes_its_own_probes(cfg):
 
 
 def test_full_catalog_activated_still_passes(cfg):
-    table = build_effective_table(cfg, EndpointActivation(enable=tuple(e.id for e in CATALOG)))
+    table = build_effective_table(cfg, tuple(e.id for e in CATALOG))
     run_startgate(cfg, table)
 
 

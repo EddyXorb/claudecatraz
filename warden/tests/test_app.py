@@ -76,11 +76,7 @@ async def test_policy_route_reports_the_effective_table(cfg):
 async def test_policy_route_reflects_activation_config(cfg, tmp_path):
     from dataclasses import replace
 
-    from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
-
-    activated = replace(
-        cfg, endpoint_activation=EndpointActivation(enable=("mr.create", "branch.create"))
-    )
+    activated = replace(cfg, endpoint_enable=("mr.create", "branch.create"))
     ctx = build_context(activated, Upstream(activated), State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/policy")

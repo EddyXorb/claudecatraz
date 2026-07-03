@@ -48,8 +48,10 @@ from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R1, R3, R4, R5, R6
 from .catalog import (
     CatalogEntry,
+    EffectiveTable,
     EndpointKind,
     api_capabilities,
+    build_effective_table,
     is_builtin_merge_endpoint,
     match_endpoint,
 )
@@ -57,7 +59,9 @@ from .intent import ApiIntent
 from .read_endpoints import match_read
 
 
-def capability_gate(intent: ApiIntent, cfg: Config) -> Optional[Decision]:
+def capability_gate(
+    intent: ApiIntent, cfg: Config, effective: EffectiveTable
+) -> Optional[Decision]:
     """§03.4 kernel hook (``core.guard.Guard.capability_gate``).
 
     Reads sit here trivially (``intent.writes`` is False, so this returns
@@ -72,9 +76,7 @@ def capability_gate(intent: ApiIntent, cfg: Config) -> Optional[Decision]:
         return None
     if is_builtin_merge_endpoint(intent.method, intent.path):
         return Decision(False, R4, "merge is never permitted")
-    ep = intent.endpoint or match_endpoint(
-        cfg.effective_endpoints.entries, intent.method, intent.path
-    )
+    ep = intent.endpoint or match_endpoint(effective.entries, intent.method, intent.path)
     if ep is None:
         return None  # no matched row ⇒ nothing to map; decide() default-denies R3
     return forbidden_check(api_capabilities(ep, intent.fields))
@@ -102,7 +104,7 @@ def _decide_read(intent: ApiIntent) -> Decision:
     return ep.decide(intent)
 
 
-def decide(intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
+def decide(intent: ApiIntent, state: StateView, cfg: Config, effective: EffectiveTable) -> Decision:
     """Default-deny (W5). Mode/project/capability gates already ran in the
     kernel (§03.2) by the time this is reached — this only holds what is
     genuinely guard-specific: reads vs. the write allowlist, ownership,
@@ -112,13 +114,11 @@ def decide(intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
         return _decide_read(intent)
 
     # Write methods: endpoint must be in the *effective* table (§04.3) —
-    # cfg.effective_endpoints, built once from Catalog × config, never the
-    # catalog itself — default-deny otherwise. The merge endpoint never
-    # reaches here (capability_gate denies it first); an unmatched write
-    # (including a hypothetical bypass of that gate) still default-denies R3.
-    ep = intent.endpoint or match_endpoint(
-        cfg.effective_endpoints.entries, intent.method, intent.path
-    )
+    # built once from Catalog × config, never the catalog itself —
+    # default-deny otherwise. The merge endpoint never reaches here
+    # (capability_gate denies it first); an unmatched write (including a
+    # hypothetical bypass of that gate) still default-denies R3.
+    ep = intent.endpoint or match_endpoint(effective.entries, intent.method, intent.path)
     if ep is None:
         return Decision(
             False, R3, f"write endpoint not in allowlist: {intent.method} {intent.path}"
@@ -151,6 +151,7 @@ def full_decide(
     intent: ApiIntent,
     state: StateView,
     cfg: Config,
+    effective: Optional[EffectiveTable] = None,
     project_allowed: Optional[Callable[[str], bool]] = None,
 ) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
@@ -159,13 +160,18 @@ def full_decide(
     module's slice — probes must also fail against the capability invariant,
     not just this guard's own checks, exactly as a real request would.
 
-    ``project_allowed`` defaults to ``cfg.project_allowed`` (the path-form
-    allowlist) — the same default a caller without a live
-    ``ApiGuard``/forge (the startgate, most tests) gets for free.
+    ``effective`` defaults to the table built fresh from ``cfg.endpoint_enable``
+    so a caller without a live ``ApiGuard`` (the startgate, most tests) still
+    gets the real effective table for free. ``project_allowed`` defaults to
+    ``cfg.project_allowed`` (the path-form allowlist) — the same default a
+    caller without a live ``ApiGuard``/forge (the startgate, most tests) gets
+    for free.
     """
+    if effective is None:
+        effective = build_effective_table(cfg, cfg.endpoint_enable)
     d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
     if d is None:
-        d = capability_gate(intent, cfg)
+        d = capability_gate(intent, cfg, effective)
     if d is None:
-        d = decide(intent, state, cfg)
+        d = decide(intent, state, cfg, effective)
     return d

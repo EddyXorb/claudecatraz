@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from ....core.config import Config
+from .activation import build_effective_table
 from .entries import CATALOG, DEFAULT_ENABLED
 
 
@@ -22,7 +23,7 @@ def endpoint_table_report(cfg: Config) -> dict[str, Any]:
     config actually activated it (§04.3's "Default-Satz + Aktivierungen +
     Overrides" — ``catraz doctor`` prints exactly this).
     """
-    table = cfg.effective_endpoints
+    table = build_effective_table(cfg, cfg.endpoint_enable)
     active_by_id = {e.id: e for e in table.entries}
     rows = []
     for entry in CATALOG:

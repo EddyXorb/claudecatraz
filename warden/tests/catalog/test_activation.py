@@ -9,7 +9,6 @@ import pytest
 from warden.core.config import Config
 from warden.guards.gitlab_api.catalog import entries as entries_mod
 from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
-from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
 from warden.guards.gitlab_api.catalog.entries import CATALOG, DEFAULT_ENABLED
 from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
 from warden.guards.gitlab_api.catalog.model import CatalogEntry, EndpointKind
@@ -24,21 +23,19 @@ def cfg() -> Config:
 
 
 def test_absent_section_activates_exactly_the_default_set(cfg):
-    table = build_effective_table(cfg, EndpointActivation())
+    table = build_effective_table(cfg, None)
     assert {e.id for e in table.entries} == DEFAULT_ENABLED
     assert all(v == "default" for v in table.enabled_via.values())
 
 
 def test_explicit_empty_enable_list_activates_nothing(cfg):
-    table = build_effective_table(cfg, EndpointActivation(enable=()))
+    table = build_effective_table(cfg, ())
     assert table.entries == ()
     assert table.enabled_via == {}
 
 
 def test_enable_list_can_add_a_non_default_entry(cfg):
-    table = build_effective_table(
-        cfg, EndpointActivation(enable=tuple(DEFAULT_ENABLED) + ("branch.create",))
-    )
+    table = build_effective_table(cfg, tuple(DEFAULT_ENABLED) + ("branch.create",))
     ids = {e.id for e in table.entries}
     assert ids == DEFAULT_ENABLED | {"branch.create"}
     assert table.enabled_via["branch.create"] == "config:branch.create"
@@ -47,12 +44,12 @@ def test_enable_list_can_add_a_non_default_entry(cfg):
 
 def test_enable_list_can_shrink_the_default_set(cfg):
     reduced = tuple(DEFAULT_ENABLED - {"pipeline.trigger"})
-    table = build_effective_table(cfg, EndpointActivation(enable=reduced))
+    table = build_effective_table(cfg, reduced)
     assert "pipeline.trigger" not in {e.id for e in table.entries}
 
 
 def test_duplicate_id_in_enable_list_is_tolerated(cfg):
-    table = build_effective_table(cfg, EndpointActivation(enable=("mr.create", "mr.create")))
+    table = build_effective_table(cfg, ("mr.create", "mr.create"))
     assert [e.id for e in table.entries] == ["mr.create"]
 
 
@@ -61,7 +58,7 @@ def test_duplicate_id_in_enable_list_is_tolerated(cfg):
 
 def test_unknown_id_in_enable_raises(cfg):
     with pytest.raises(CatalogConfigError, match="unknown catalog id"):
-        build_effective_table(cfg, EndpointActivation(enable=("no.such.entry",)))
+        build_effective_table(cfg, ("no.such.entry",))
 
 
 def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):
@@ -88,7 +85,7 @@ def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):
     monkeypatch.setattr(activation_mod, "CATALOG", entries_mod.CATALOG)
 
     with pytest.raises(CatalogConfigError, match="forbidden capabilities"):
-        build_effective_table(cfg, EndpointActivation(enable=("hypothetical.forbidden",)))
+        build_effective_table(cfg, ("hypothetical.forbidden",))
 
 
 def test_effective_table_is_a_frozen_dataclass():

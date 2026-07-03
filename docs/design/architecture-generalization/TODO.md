@@ -80,12 +80,15 @@ Erledigt (Fortsetzung):
 - ✅ **H** — Entfettet (`23a1b61`): Override-Mechanismus gelöscht, Deny-Probes
   nach `catalog/probes.py` ausgelagert, `git_reject_response` in `guards/git/errors.py`.
 
-Offen (Reihenfolge: F, G, danach die zwei neuen Vereinfachungs-Schritte H2, I):
+- ✅ **F** — Dataclass-Config + generischer TOML-Decoder (`core/toml_codec.py`).
+  Deferred-Import-Trick (`Config.effective_endpoints` → Katalog) aus
+  `core/config.py` entfernt (`core/` importiert nichts mehr aus `guards/`),
+  `catalog/config_parse.py` durch den Decoder ersetzt (`ApiEndpointsConfig`),
+  effektive Tabelle vom `ApiGuard` (`self._effective`) besessen und durch
+  Policy/Startgate gefädelt statt via `cfg.__dict__`-Hack.
 
-- 🔄 **F** — Dataclass-Config + generischer TOML-Decoder (in Arbeit). Kern-Ziel:
-  den Deferred-Import-Trick (`Config.effective_endpoints` → Katalog) aus
-  `core/config.py` entfernen und `catalog/config_parse.py` durch den Decoder
-  ersetzen.
+Offen (Reihenfolge: G, danach die zwei neuen Vereinfachungs-Schritte H2, I):
+
 - ⬜ **G** — Docstring-Pass (zuletzt vor den Vereinfachungs-Schritten).
 - ⬜ **H2** — Startgate abbauen (neu, siehe unten). Nach H ist sein einzig
   nicht-redundanter Wert (Deployment-Config validieren) weg.

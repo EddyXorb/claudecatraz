@@ -9,7 +9,6 @@ import httpx
 import pytest
 
 from warden.guards.gitlab_api.catalog import DEFAULT_ENABLED
-from warden.guards.gitlab_api.catalog.config_parse import EndpointActivation
 from warden.guards.gitlab_api.catalog.entries import CATALOG
 from warden.guards.gitlab_api.guard import _needs_mr_owner
 from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
@@ -387,7 +386,7 @@ def _activated_client_ctx(cfg, respx_router):
 
     activated_cfg = replace(
         cfg,
-        endpoint_activation=EndpointActivation(enable=tuple(DEFAULT_ENABLED) + ("branch.create",)),
+        endpoint_enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
     )
     state = State(":memory:")
     state.mark_reconciled()

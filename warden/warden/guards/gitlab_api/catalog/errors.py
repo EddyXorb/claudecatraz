@@ -2,11 +2,14 @@
 §04-policy-erweiterbarkeit.md, §06-migration.md Schritt 4).
 
 Kept separate from :mod:`warden.core.config` so the catalog package never
-needs a module-load-time import of ``core/config.py`` (and vice versa —
-``config.py`` only reaches into the catalog lazily, at call time; see its
-``from_env`` and ``Config.effective_endpoints``). A caller that wants a
-startup abort catches these and re-raises :class:`warden.core.config.ConfigError`
-at that boundary, exactly like ``tomllib.TOMLDecodeError`` is translated today.
+needs a module-load-time import of ``core/config.py``; ``core.config`` in
+turn imports nothing from this package at all — the gitlab_api guard is the
+only place that builds the effective table (``ApiGuard.__init__``,
+``__main__.py``, ``catalog.report``). A caller that wants a startup abort
+catches :class:`CatalogConfigError` directly (``__main__.py``'s composition
+root does) rather than re-raising it as
+:class:`warden.core.config.ConfigError` — the two are siblings, not one
+wrapping the other, now that no ``Config`` property builds this lazily.
 """
 
 from __future__ import annotations

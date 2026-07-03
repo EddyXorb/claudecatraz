@@ -44,27 +44,15 @@ def _project_from_probe_path(path: str) -> str:
     return urllib.parse.unquote(m.group(1)) if m else ""
 
 
-def _probe_config(cfg: Config, table: EffectiveTable) -> Config:
+def _probe_config(cfg: Config) -> Config:
     """A Config that mirrors *cfg*'s policy (namespace, quotas, mode) but
     always allowlists :data:`PROBE_PROJECT` — every probe path is built
     against that project, so a probe exercises the entry's own checks, not
     an incidental R6 project-boundary deny (except the probes that are
     deliberately *about* the project boundary — see ``entries.py``'s
     ``issue.create`` probe, which targets ``OTHER_PROJECT`` instead).
-
-    Also seeds ``effective_endpoints`` with *table* directly, the same way
-    :class:`functools.cached_property` itself would (``instance.__dict__``) —
-    ``guards.gitlab_api.policy.decide`` reads ``cfg.effective_endpoints``
-    internally, and the startgate must validate *exactly* the table it was
-    handed, not a table freshly rebuilt from ``cfg.endpoint_activation``. In
-    the real boot path (``__main__.py``) these are the same table by
-    construction; tests exercise ad-hoc tables that intentionally don't
-    correspond to any real ``[api.endpoints]`` config at all (§04.4 — a probe
-    must hold however the table was built).
     """
-    probe_cfg = replace(cfg, allowed_projects=(PROBE_PROJECT,))
-    probe_cfg.__dict__["effective_endpoints"] = table
-    return probe_cfg
+    return replace(cfg, allowed_projects=(PROBE_PROJECT,))
 
 
 def _probe_intent(probe: DenyProbe) -> ApiIntent:
@@ -78,15 +66,14 @@ def _probe_intent(probe: DenyProbe) -> ApiIntent:
     )
 
 
-def _run_probe(cfg: Config, entry_id: str, probe: DenyProbe) -> None:
+def _run_probe(cfg: Config, effective: EffectiveTable, entry_id: str, probe: DenyProbe) -> None:
     # Deferred import: ``..policy`` imports this catalog package (for the
     # entry/builtin tables), and this package's __init__ imports this module —
     # importing policy at module scope would close that loop during Python's
-    # import bootstrap. By probe time both modules are long since loaded
-    # (same pattern as ``core.config.effective_endpoints``).
+    # import bootstrap. By probe time both modules are long since loaded.
     from ..policy import full_decide
 
-    d = full_decide(_probe_intent(probe), StateView(), cfg)
+    d = full_decide(_probe_intent(probe), StateView(), cfg, effective)
     if d.allow:
         raise StartgateFailure(
             f"catalog entry {entry_id!r}: deny-probe {probe.description!r} "
@@ -97,12 +84,18 @@ def _run_probe(cfg: Config, entry_id: str, probe: DenyProbe) -> None:
 
 def run_startgate(cfg: Config, table: EffectiveTable) -> None:
     """Run every activated entry's deny-probes, plus the built-in global
-    probes, against the effective policy. Raises :class:`StartgateFailure`
-    on the first probe that would be allowed.
+    probes, against the effective policy — *table* itself, not a table
+    freshly rebuilt from ``cfg.endpoint_enable``: the startgate must validate
+    exactly what it was handed (in the real boot path, ``__main__.py``
+    builds both from the same call, so they agree by construction; tests
+    exercise ad-hoc tables that intentionally don't correspond to any real
+    ``[api.endpoints]`` config at all — §04.4, a probe must hold however the
+    table was built). Raises :class:`StartgateFailure` on the first probe
+    that would be allowed.
     """
-    probe_cfg = _probe_config(cfg, table)
+    probe_cfg = _probe_config(cfg)
     for entry in table.entries:
         for probe in ENTRY_DENY_PROBES.get(entry.id, ()):
-            _run_probe(probe_cfg, entry.id, probe)
+            _run_probe(probe_cfg, table, entry.id, probe)
     for probe in BUILTIN_DENY_PROBES:
-        _run_probe(probe_cfg, "<builtin>", probe)
+        _run_probe(probe_cfg, table, "<builtin>", probe)
