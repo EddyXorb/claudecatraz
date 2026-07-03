@@ -1,7 +1,8 @@
 """Check registry (§04.1, F2/F10; docs/design/architecture-generalization,
 §04-policy-erweiterbarkeit.md §04.1).
 
-Before this module the predicates were free functions in ``api_endpoints.py``:
+Before this module the predicates were free functions in the now-removed
+``api_endpoints.py`` compat facade:
 ``field_has_prefix`` was already parametrised but not registered under a
 stable name; ``mr_owned_by_claude`` and ``not_merge_intent`` were one-off,
 unparametrised functions duplicating what a generalised check could express
