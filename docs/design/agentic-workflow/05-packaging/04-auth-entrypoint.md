@@ -1,5 +1,17 @@
 # 04 — Auth-Modus (XOR) & Entrypoint-Umbau
 
+> **Update (§06-migration.md Schritt 7, Agent-Layer):** `build_home`/`cmd_start` aus
+> diesem historischen Commit sind seit Schritt 7 nicht mehr Teil von
+> `entrypoint.py` — die Credential-/Settings-Logik zog vollständig in
+> `assets/agents/claude/adapter.py` (`prepare_home`, hinter dem
+> agent-agnostischen `AgentAdapter`-Vertrag, §05.2 der
+> architecture-generalization-Doku). `entrypoint.py` selbst kennt heute weder
+> `.credentials.json` noch `.claude.json` — es reicht nur noch `Secrets`/
+> `InstructionContext` an den Adapter durch. `AUTH_MODE` (subscription/api_key)
+> und `doctor auth`/`check_auth` bleiben inhaltlich wie hier beschrieben; neu
+> dazugekommen ist `credentials.mode` (sync/persistent, §05.6) als zweite,
+> orthogonale Achse innerhalb von `subscription`.
+
 **Ziel:** Genau **ein** Auth-Modus aktiv (`subscription` ⊻ `api_key`); Claude-Home als
 RO-Einzeldateien + tmpfs; `.claude.json` immer provisioniert. **Voraussetzung:** Doc 03
 fertig (Compose mit tmpfs-Home-Platz, `assert_invariants`). **Konventionen:** Tests `uv run

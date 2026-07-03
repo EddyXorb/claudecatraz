@@ -10,10 +10,17 @@ RUN apt-get update && apt-get install -y python3 git curl ca-certificates gnupg 
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Resolve UID-1000 conflict (Ubuntu's `ubuntu` user), otherwise useradd fails:
 RUN (userdel -r ubuntu 2>/dev/null || true) && useradd -m -u ${DEV_UID} -s /bin/bash dev
+# Generic entrypoint + shared adapter contract (§05.2) — one copy, agent-agnostic.
 COPY container/entrypoint.py /entrypoint.py
-# NOTE: AGENT.md is intentionally NOT baked in. catraz mounts it read-only from the
-# asset cache into ~/.claude/.ro/CLAUDE.md at runtime (single source of truth); the
-# entrypoint copies it to the live ~/.claude/CLAUDE.md. See install_claude_md().
+COPY container/agent_contract.py /agent_contract.py
+COPY container/git_routing.py /git_routing.py
+# This agent's adapter + manifest (§05.3) — the ONE profile this image was built
+# for. Flattened next to entrypoint.py so `import agent_contract`/a fixed-path
+# load of `agent_adapter.py` resolves without any runtime adapter selection
+# (§06.2/A2: the build already committed to exactly one adapter).
+COPY agents/claude/adapter.py /agent_adapter.py
+COPY agents/claude/agent.toml /agent.toml
+COPY agents/claude/AGENT.md.tmpl /AGENT.md.tmpl
 ENV HOME=/home/dev
 WORKDIR /workspace
 ENTRYPOINT ["python3", "/entrypoint.py"]

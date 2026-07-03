@@ -162,7 +162,7 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
      Namespace-Präfixes (`branch_prefixes = ("claude/",)`), in Test-Fixtures/-Daten
      (Branch-Namen sind Daten, keine Identifier) und in historischen Kommentaren zur
      Versionsgeschichte.
-7. **Agent-Layer: Entrypoint-Zerlegung** (§05.2) — generischer Entrypoint + Claude-Adapter
+7. ✅ **Agent-Layer: Entrypoint-Zerlegung** (§05.2) — generischer Entrypoint + Claude-Adapter
    (inkl. `environ`/`render_instructions`), verhaltenserhaltend, von `tests/container/`
    abgedeckt. Danach Manifest + Profile (§05.3), `catraz`-CLI-Entkopplung und die
    **Adapter-Conformance-Harness** (§05.5) — sie ist die Abnahme dieses Schritts.
@@ -171,6 +171,85 @@ sind das Verhaltens-Netz. Jeder Schritt synchronisiert `docs/design/agentic-work
    statt geteilter Token-Familie mit dem Host, `.catraz/state/claude/` **selektiv**
    writable gemountet (Credentials + Session-State, nie Settings/Hooks — A11) — fixt die
    zuverlässigen `claude-remote`-Abbrüche nach OAuth-Token-Rotation.
+   *(umgesetzt: `src/catraz/assets/container/{entrypoint.py,agent_contract.py,
+   git_routing.py}` + `src/catraz/assets/agents/claude/{adapter.py,agent.toml,
+   layer.Dockerfile,AGENT.md.tmpl}` + `src/catraz/agents.py`.)* Umsetzungsvermerk:
+   - **Entrypoint-Zerlegung (§05.2):** `entrypoint.py` (242 Zeilen) trägt nur noch
+     UID-Drop, tmpfs-Home-Orchestrierung, `.catraz`-Shadow-Mount-Kontrakt (unverändert
+     aus Doc 03), Prozess-Exec und den generischen `install_instructions`-Fail-Closed-Gate
+     (`REQUIRE_AGENT_INSTRUCTIONS`, vormals `REQUIRE_CLAUDE_FILE`). Die git→Warden-Rewrites
+     (`configure_git_warden`/`install_host_gitconfig`, 100 % agent-agnostisch — kein
+     Claude-Bezug) zogen ins eigene Modul `git_routing.py` (Clean-Code-Budget:
+     `entrypoint.py` wäre sonst > 300 Zeilen). Der Vertrag selbst
+     (`AgentAdapter`-Protocol, `Secrets`, `InstructionContext`) liegt in
+     `agent_contract.py` — geteilt zwischen Entrypoint und jedem Adapter, geladen
+     per Pfad wie jedes andere Asset (nie per Package-Import, A2). Alle vier
+     Claude-spezifischen Funktionen aus dem alten Monolithen (Credential-Layout,
+     CLI-Kommando, Remote-Control, Instruktionen) leben jetzt in
+     `assets/agents/claude/adapter.py` (237 Zeilen) hinter `prepare_home`/`command`/
+     `environ`/`render_instructions`/`remote_command`. Eine per Adapter zusätzliche,
+     nicht im Vertrag stehende `sync_from_host`-Funktion deckt §05.6 `mode="sync"` ab
+     (Entrypoint prüft sie per `getattr`, fail-closed wenn abwesend).
+   - **Kein Laufzeit-Adapter-Switch (§06.2/A2):** die Auswahl passiert beim *Build*, nicht
+     zur Laufzeit — `docker-compose.yml`s `dockerfile:`-Feld interpoliert
+     `agents/${AGENT_PROFILE:-claude}/layer.Dockerfile`; dieses `COPY`t Entrypoint +
+     Vertrag + *genau ein* Adapter/Manifest/Template flach in ein Image-Verzeichnis.
+     `entrypoint.py` lädt `agent_adapter.py` daher immer von einem festen,
+     co-lokalisierten Pfad — keine Registry, kein `importlib` aus `.catraz`-Pfaden zur
+     Laufzeit im Container.
+   - **Manifest + Registry (§05.3):** `agent.toml` exakt mit den Feldern aus der Spec
+     (`name`, `command`, `[credentials]` `subscription_source`/`api_key_env`/`mode`,
+     `[modes] remote`, `[logs] debug_flag`, `[egress] domains`). Host-seitig liest
+     `src/catraz/agents.py` (145 Zeilen) das Manifest über die geteilte
+     `agent_contract.read_toml` (ODR, per-Pfad geladen) in ein typisiertes
+     `AgentManifest`; `AGENT_REGISTRY` ist die eine statische Name→Verzeichnis-Abbildung,
+     `resolve_agent_profile` liest `AGENT_PROFILE` aus `.catraz/.env` (Default `claude`)
+     und ist fail-closed bei unbekanntem Namen. `catraz sync` ruft den Adapter jetzt
+     **in-process** (`agents.load_adapter_module`) statt ihn per Subprozess über
+     `entrypoint.py sync` zu starten — Host-seitiger Sync brauchte nie einen Container,
+     der Subprozess-Umweg war ein Artefakt des alten Monolithen.
+   - **Egress (§05.4):** `agent.toml`s `[egress] domains` bleiben reine Deklaration;
+     nichts im CLI merged sie automatisch in `config/allowlist.txt` (unverändert, kein
+     Code dafür geschrieben — `catraz init` fasst die Squid-Allowlist heute ohnehin
+     nicht an).
+   - **§05.6 Persistenter State (Maintainer-Entscheid 2026-07):** `credentials.mode`
+     (`"sync"` | `"persistent"`, Default für claude: `"persistent"`). Bei `persistent`
+     symlinkt `adapter._wire_persistent` **nur** `.credentials.json` und `projects/`
+     (Session-/Projekt-State) aus `.catraz/state/claude/` (0700, read-write gemountet,
+     `paths.agent_state_dir`) in die tmpfs-Home; `settings.json`/`.claude.json` baut
+     `prepare_home` weiterhin frisch aus dem Image (A11 — kein voll-persistentes
+     `~/.claude`). Ein fehlendes Zieldateisystem beim allerersten Login ist kein Fehler
+     (dangling symlink, `claude login` erzeugt die Datei durchs Symlink hindurch).
+     `catraz sync`/`_auto_sync_if_needed` verweigern bzw. no-open bei `mode=persistent`
+     mit klarer Meldung (§05.6: „eine CLI-Option/klare Meldung unterbindet es" — hier die
+     Meldungs-Variante, am wenigsten überraschend, da sie den bestehenden
+     `catraz sync`-Befehl nicht verschwinden lässt). `catraz doctor`'s neue `agent`-Sektion
+     (vormals `claude`) prüft Mode-Konsistenz: Profil auflösbar, bei `persistent` der
+     State-Ordner vorhanden **und** 0700.
+   - **Adapter-Conformance-Harness (§05.5):** zweistufig wie spezifiziert.
+     Unit-Ebene `tests/container/test_adapter_conformance.py` läuft **parametrisiert über
+     die gesamte `AGENT_REGISTRY`** (heute nur `claude`, automatisch erweiterbar): kein
+     Forge-Credential in `environ()`/`prepare_home()`-Output, `environ()` setzt nur den
+     im eigenen Manifest deklarierten `api_key_env`-Schlüssel, `modes.remote=false` ⇒
+     `remote_command()` liefert `None` (geprüft durch eine am Staging-Manifest
+     umgeschaltete Kopie), `render_instructions()` zeigt auf die Warden-REST-Basis statt
+     einer direkten Forge-URL. Container-Ebene `tests/redteam/test_agent_adapter.py`
+     erweitert die bestehende docker-compose-Suite exakt nach ihrem eigenen Muster
+     (`@pytest.mark.slow`, `skipif` ohne Docker) — in dieser Umgebung ungetestet
+     (kein Docker), aber lauffähig angelegt.
+   - **Bewusste, dokumentierte Grenzen:** `catraz run`s Modusnamen (`claude`,
+     `claude-remote`, `shell`) und der Compose-Servicename `claude-dev-env` bleiben
+     wörtlich bestehen — das ist CLI-Vokabular/Service-Identität, keine
+     Credential-/Kommando-Konstante, und eine Umbenennung wäre ein eigenes, hier nicht
+     beauftragtes CLI-Redesign (würde u. a. `compose.py`, `commands/run.py`,
+     `commands/stack.py`, `commands/reload.py` und ein gutes Dutzend Tests anfassen).
+     `paths.claude_home()` (`.catraz/secrets/claude`, sync-Modus-Default) bleibt exakt
+     wie in Schritt 6 begründet: Default-Wert-Residuum des Default-Profils, nicht
+     Identifier-Kopplung. `doctor.py` überschreitet mit 551 Zeilen weiterhin das
+     300-Zeilen-Budget — das war bereits vor diesem Schritt so (508 Zeilen); eine saubere
+     Zerlegung ist durch Cross-Modul-Monkeypatching in den bestehenden GitLab-Check-Tests
+     erschwert (Aufrufer müssten auf paketqualifizierte Zugriffe umgestellt werden) und
+     wird als Folgearbeit ausgeflaggt statt hier riskant mit-erledigt.
 8. **Policy-by-Example-UX** (§04.4) — `catraz allow-endpoint --from-example`,
    Nutzer-Assertions in `.catraz/policy-tests/`. Reiner Komfort: das sicherheitstragende
    Startgate (Katalog-Sonden) kam schon mit Schritt 4.

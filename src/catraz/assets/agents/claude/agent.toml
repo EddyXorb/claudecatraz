@@ -1,0 +1,27 @@
+# agent.toml — the declarative rest of the Claude adapter (§05.3).
+#
+# Selected via `.catraz/.env`: AGENT_PROFILE=claude (default). The CLI reads
+# command / credential paths / debug flags from here instead of hardcoded
+# constants — see `catraz.agents.load_manifest`. Egress domains are a
+# *suggestion* only (§05.4) — catraz never merges them into the Squid
+# allowlist automatically.
+
+name    = "claude"
+command = "claude"
+
+[credentials]
+# What `catraz sync` imports for credentials.mode = "sync". Ignored entirely
+# in the default "persistent" mode (§05.6) — the adapter does its own
+# `claude login` flow against .catraz/state/claude/ instead.
+subscription_source = "~/.claude/.credentials.json"
+api_key_env         = "ANTHROPIC_API_KEY"
+mode                = "persistent"   # "sync" | "persistent" — Maintainer-Entscheid, 2026-07 (§05.6)
+
+[modes]
+remote = true            # Remote-Control is a Claude feature -> gated per agent
+
+[logs]
+debug_flag = "--debug-file"
+
+[egress]
+domains = ["api.anthropic.com", "statsig.anthropic.com"]   # §05.4 — NEVER auto-merged

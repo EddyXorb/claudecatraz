@@ -1,7 +1,11 @@
-import types
-import pytest
+"""`_run_sync` calls the resolved profile's adapter in-process (§05.2/§05.3) —
+no subprocess/entrypoint.py indirection (host-side sync never needs a
+container). See tests/container/test_sync.py for the adapter-level
+`sync_from_host` behaviour itself."""
 from pathlib import Path
-from catraz import cli, paths
+from typing import Any
+import pytest
+from catraz import cli
 from catraz.commands import setup
 from catraz.commands.setup import _sync as setup_sync
 from catraz.errors import CliError
@@ -12,21 +16,51 @@ def _seed(tmp_path: Path) -> None:
     (tmp_path / ".catraz/.env").write_text("AUTH_MODE=subscription\n")
 
 
-def test_run_sync_uses_asset_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture(autouse=True)
+def _sync_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
+
+
+class _FakeAdapter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, Any]] = []
+
+    def sync_from_host(self, source: Any, home: Any) -> None:
+        self.calls.append((source, home))
+
+
+def test_run_sync_calls_adapter_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed(tmp_path)
-    fake_assets = tmp_path / "cache"
-    entry = fake_assets / "assets/container/entrypoint.py"
-    entry.parent.mkdir(parents=True); entry.write_text("# tool")
-    monkeypatch.setattr(paths, "asset_root", lambda: fake_assets)   # local import → this is the live symbol
-    seen: dict[str, list[str]] = {}
-    monkeypatch.setattr(setup_sync.subprocess, "run",  # type: ignore[attr-defined]
-                        lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0))
+    fake = _FakeAdapter()
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: fake)
     cli._run_sync(tmp_path, cli.Out(color=False))
-    assert str(entry) in seen["cmd"]
+    assert len(fake.calls) == 1
+    _, home = fake.calls[0]
+    assert str(home).endswith("secrets/claude")
 
 
-def test_run_sync_raises_when_asset_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_sync_raises_when_adapter_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed(tmp_path)
-    monkeypatch.setattr(paths, "asset_root", lambda: tmp_path / "empty")
+
+    def boom(profile: str) -> Any:
+        raise CliError("adapter not found (corrupt cache?)", 1)
+
+    monkeypatch.setattr(setup_sync, "load_adapter_module", boom)
     with pytest.raises(CliError):
         cli._run_sync(tmp_path, cli.Out(color=False))
+
+
+def test_run_sync_propagates_adapter_failure_as_clierror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path)
+
+    class _FailingAdapter:
+        def sync_from_host(self, source: Any, home: Any) -> None:
+            import sys
+            sys.exit("error: no host credential found")
+
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: _FailingAdapter())
+    with pytest.raises(CliError) as ei:
+        cli._run_sync(tmp_path, cli.Out(color=False))
+    assert "no host credential found" in str(ei.value)

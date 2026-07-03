@@ -24,7 +24,7 @@ SECRETS = [
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "endpoints", "claude", "net", "auth", "base"]
+DOCTOR_SECTIONS = ["docker", "compose", "env", "tokens", "policy", "endpoints", "agent", "net", "auth", "base"]
 # Sections that gate the trust boundary — `up` always runs these, no opt-out.
 SECURITY_SECTIONS = ["docker", "compose", "env", "policy", "auth"]
 
@@ -345,19 +345,54 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
              f"{', '.join(r['id'] for r in inactive)}")
 
 
-def check_claude(root: Path, env: dict[str, str], f: Findings) -> None:
-    from catraz.paths import claude_home
+def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
+    """§05.3/§05.6 — active agent profile + credential-mode consistency.
+
+    `credentials.mode = "sync"` keeps the pre-Schritt-7 check (sandbox seed
+    present, not root-owned — the trap `entrypoint.py` hard-coded: Docker
+    auto-creates a bind target as root when the source file is missing).
+    `credentials.mode = "persistent"` (claude's default, §05.6) instead
+    checks the per-repo state dir itself: present, mode 0700.
+    """
+    from catraz.agents import load_manifest, resolve_agent_profile
+    from catraz.errors import CliError as _CliError
+    from catraz.paths import agent_state_dir, claude_home
+
+    try:
+        profile = resolve_agent_profile(root)
+        manifest = load_manifest(profile)
+    except _CliError as e:
+        f.bad("agent", str(e))
+        return
+    f.ok("agent", f"profile: {profile} (command: {manifest.command})")
+
+    if manifest.credentials_mode == "persistent":
+        state_dir = agent_state_dir(root, profile)
+        if not state_dir.is_dir():
+            f.bad("agent", f"{state_dir} missing", "run `catraz init` or `catraz doctor --fix`")
+            return
+        mode = state_dir.stat().st_mode & 0o777
+        if mode != 0o700:
+            f.bad("agent", f"{state_dir} has mode {oct(mode)}, expected 0700",
+                  f"chmod 0700 {state_dir}")
+        else:
+            f.ok("agent", f"{state_dir} present (0700)")
+        if (state_dir / ".credentials.json").exists():
+            f.ok("agent", "persistent credential present")
+        else:
+            f.ok("agent", "no persistent credential yet — `claude login` inside the container")
+        return
+
     home = claude_home(root)
     creds = home / ".credentials.json"
-    # The specific trap entrypoint.py hard-codes: Docker auto-created it as root.
     if home.exists() and home.stat().st_uid == 0 and os.getuid() != 0:
-        f.bad("claude", f"{home} owned by root (Docker auto-created it)",
+        f.bad("agent", f"{home} owned by root (Docker auto-created it)",
               f"sudo rm -rf {home} && mkdir -p {home} && catraz sync")
         return
     if not creds.exists():
-        f.bad("claude", f"no sandbox credential in {home}", "run `catraz sync`")
+        f.bad("agent", f"no sandbox credential in {home}", "run `catraz sync`")
     else:
-        f.ok("claude", "Claude sandbox credential present")
+        f.ok("agent", "sandbox credential present")
 
 
 def check_net(root: Path, f: Findings) -> None:
@@ -441,7 +476,7 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
     if "tokens" in sections: check_tokens(root, env, f)
     if "policy" in sections: check_policy(root, env, f)
     if "endpoints" in sections: check_endpoints(root, env, f)
-    if "claude" in sections: check_claude(root, env, f)
+    if "agent" in sections: check_agent(root, env, f)
     if "net" in sections: check_net(root, f)
     if "auth" in sections: check_auth(root, env, f)
     if "base" in sections: check_base(root, env, f)
@@ -464,7 +499,15 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     claude_secrets = cat / "secrets" / "claude"
     claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
     claude_secrets.chmod(0o700)
-    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid", "logs/claude"]:
+    # §05.3/§05.6: the active agent profile's persistent-state + debug-log dirs.
+    # Best-effort default ("claude") if AGENT_PROFILE is unset/unresolvable —
+    # `check_agent` is the authoritative validator, this is just dir plumbing.
+    profile = (env.get("AGENT_PROFILE") or "claude").strip() or "claude"
+    agent_state = cat / "state" / profile
+    agent_state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    agent_state.chmod(0o700)
+    for d in ["config", "state/warden/db", "state/warden/run", "logs/warden", "logs/squid",
+              f"logs/{profile}"]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
     secret_files = [f for f, _, _ in SECRETS]

@@ -1,5 +1,8 @@
-"""Test that _run_sync honors CLAUDE_CREDENTIAL_SOURCE from the shell env."""
+"""Test that _run_sync honors CLAUDE_CREDENTIAL_SOURCE from the shell env —
+now passed straight to the adapter's `sync_from_host(source, home)` in-process
+(§05.2/§05.3), no subprocess indirection."""
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 import pytest
 
@@ -12,69 +15,45 @@ def _make_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _stub_entrypoint(tmp_path: Path) -> Path:
-    """Write a stub entrypoint.py so _run_sync finds a real file."""
-    assets = tmp_path / "assets" / "container"
-    assets.mkdir(parents=True)
-    (assets / "entrypoint.py").write_text("# stub\n")
-    return tmp_path  # this is the asset_root
+class _RecordingAdapter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, Any]] = []
+
+    def sync_from_host(self, source: Any, home: Any) -> None:
+        self.calls.append((source, home))
 
 
 def test_shell_env_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLAUDE_CREDENTIAL_SOURCE in os.environ → passed as --from."""
+    """CLAUDE_CREDENTIAL_SOURCE in os.environ → passed as `source` to sync_from_host."""
     import catraz.commands.setup as setup
     from catraz.commands.setup import _sync as setup_sync
+    monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
     root = _make_root(tmp_path / "project")
-    asset_root = _stub_entrypoint(tmp_path / "cache")
-
-    captured: list[list[str]] = []
-
-    def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
-        captured.append(cmd)
-        r = MagicMock()
-        r.returncode = 0
-        return r
-
-    monkeypatch.setattr(setup_sync.subprocess, "run", fake_run)  # type: ignore[attr-defined]
-    from catraz import paths
-    monkeypatch.setattr(paths, "asset_root", lambda: asset_root)
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: adapter)
     monkeypatch.setenv("CLAUDE_CREDENTIAL_SOURCE", "/custom/claude")
 
     out = MagicMock()
     setup._run_sync(root, out)
 
-    assert len(captured) == 1
-    cmd = captured[0]
-    assert "--from" in cmd
-    idx = cmd.index("--from")
-    assert cmd[idx + 1] == "/custom/claude"
+    assert len(adapter.calls) == 1
+    source, _home = adapter.calls[0]
+    assert str(source) == "/custom/claude"
 
 
 def test_from_flag_overrides_shell_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--from flag takes precedence over shell env CLAUDE_CREDENTIAL_SOURCE."""
     import catraz.commands.setup as setup
     from catraz.commands.setup import _sync as setup_sync
+    monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
     root = _make_root(tmp_path / "project")
-    asset_root = _stub_entrypoint(tmp_path / "cache")
-
-    captured: list[list[str]] = []
-
-    def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
-        captured.append(cmd)
-        r = MagicMock()
-        r.returncode = 0
-        return r
-
-    monkeypatch.setattr(setup_sync.subprocess, "run", fake_run)  # type: ignore[attr-defined]
-    from catraz import paths
-    monkeypatch.setattr(paths, "asset_root", lambda: asset_root)
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: adapter)
     monkeypatch.setenv("CLAUDE_CREDENTIAL_SOURCE", "/shell/claude")
 
     out = MagicMock()
     setup._run_sync(root, out, source="/explicit/claude")
 
-    assert len(captured) == 1
-    cmd = captured[0]
-    assert "--from" in cmd
-    idx = cmd.index("--from")
-    assert cmd[idx + 1] == "/explicit/claude"
+    assert len(adapter.calls) == 1
+    source, _home = adapter.calls[0]
+    assert str(source) == "/explicit/claude"

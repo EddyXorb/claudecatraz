@@ -1,10 +1,12 @@
 # Sandbox — Context & Rules for the Agent
 
-> This file is the **harness documentation** of the `claude-dev-env` sandbox. catraz
-> mounts it read-only from the asset cache into `~/.claude/.ro/CLAUDE.md`, and
-> `entrypoint.py` copies it at container start to `~/.claude/CLAUDE.md` (user memory) —
-> so it applies to **every** mounted project. It does NOT belong in the project repo;
-> project-specific notes go in the CLAUDE.md of the respective `/workspace` project.
+> This file is the **harness documentation** of the `claude-dev-env` sandbox,
+> rendered per agent at container start (§05.2) — the adapter's
+> `render_instructions` fills in this project's actual Forge REST base and
+> branch namespace below, then the entrypoint writes it to `~/.claude/CLAUDE.md`
+> (user memory), so it applies to **every** mounted project. It does NOT
+> belong in the project repo; project-specific notes go in the CLAUDE.md of
+> the respective `/workspace` project.
 
 You are running as user `dev` in the container `claude-dev-env`. The `/workspace`
 folder is a **bind-mount** — the host (VSCode) and the agent share the same
@@ -35,9 +37,9 @@ work. The container always starts you there.
 outbound request must go through one of the two egress points:
 
 | Destination                  | Route                 | Configuration                                |
-| ---------------------------- | --------------------- | -------------------------------------------- |
+| ----------------------------- | --------------------- | -------------------------------------------- |
 | Internet (Research, Build)   | Forward-Proxy (Squid) | `http_proxy` / `https_proxy` already set     |
-| GitLab                       | Warden (when active)  | `git insteadOf` + `GITLAB_API_URL`           |
+| GitLab                       | Warden (when active)  | `git insteadOf` + REST base below             |
 
 **Allowed domains** (short list — full list: `config/allowlist.txt`):
 `.anthropic.com`, `.npmjs.org`, `.pypi.org`, `.crates.io`, `files.pythonhosted.org`,
@@ -58,22 +60,23 @@ You hold **no** GitLab token. This is intentional (security architecture §R6). 
 GitLab operations run exclusively through the **Warden** (`gitlab-warden:8080`), which
 holds all tokens and enforces the policy.
 
-### Your policy & limits — read `/etc/catraz/warden.toml`
+### Your policy & limits — read `__WARDEN_TOML_PATH__`
 
-Your active rules are not hardcoded — they live in **`/etc/catraz/warden.toml`** (mounted
+Your active rules are not hardcoded — they live in **`__WARDEN_TOML_PATH__`** (mounted
 read-only for you; the Warden enforces this same file). **Read it** to learn your real
 limits before you push or open MRs:
 
 - **`branch_prefixes`** — the list of prefixes your branches **must** carry (at least one) to
-  be pushable (R2) and to be allowed as an MR `source_branch` (R3). It defaults to
-  `["claude/"]`, **but it is configurable** — a project may set e.g. `["bot/", "agent/"]` (a
-  legacy single-value `branch_prefix = "..."` form may also appear). The examples below use
-  `claude/`; substitute whatever prefix your `warden.toml` actually specifies.
+  be pushable (R2) and to be allowed as an MR `source_branch` (R3). For this sandbox it
+  currently includes `__BRANCH_PREFIX_EXAMPLE__` (a legacy single-value
+  `branch_prefix = "..."` form may also appear). The examples below use
+  `__BRANCH_PREFIX_EXAMPLE__`; substitute whatever prefix your `warden.toml` actually specifies
+  if it differs.
 - **`allowed_projects`** — the only projects you may touch at all (R6); anything else is denied.
 - **`max_open_mrs` / `max_open_branches` / `max_writes_per_hour`** — your quotas (R5).
 
 ```bash
-cat /etc/catraz/warden.toml        # your branch_prefixes, allowed_projects and quotas
+cat __WARDEN_TOML_PATH__        # your branch_prefixes, allowed_projects and quotas
 ```
 
 ### GitLab runs through the Warden
@@ -82,26 +85,26 @@ cat /etc/catraz/warden.toml        # your branch_prefixes, allowed_projects and 
 
 ```bash
 git clone https://gitlab.com/group/project.git   # transparently routed through the Warden
-git fetch && git push origin claude/my-branch     # likewise
+git fetch && git push origin __BRANCH_PREFIX_EXAMPLE__my-branch     # likewise
 ```
 
-REST calls (create MR, trigger CI, etc.) directly against the Warden (`gitlab-warden:8080`):
+REST calls (create MR, trigger CI, etc.) directly against the Warden (`__FORGE_REST_BASE__`):
 
 ```bash
 # Create MR
-curl -sS "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests" \
+curl -sS "__FORGE_REST_BASE__/projects/<id>/merge_requests" \
   -H "Content-Type: application/json" \
-  -d '{"source_branch":"claude/my-branch","target_branch":"main","title":"..."}'
+  -d '{"source_branch":"__BRANCH_PREFIX_EXAMPLE__my-branch","target_branch":"main","title":"..."}'
 
 # Comment on an MR (top-level note)
-curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/notes" \
+curl -sS -X POST "__FORGE_REST_BASE__/projects/<id>/merge_requests/<iid>/notes" \
   -H "Content-Type: application/json" \
   -d '{"body":"looks good"}'
 
 # Inline code-review comment on a specific file/line (a "discussion" with a position).
 # Get base_sha/head_sha/start_sha from the MR's diff_refs:
 #   GET …/merge_requests/<iid>/changes  →  .diff_refs
-curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/discussions" \
+curl -sS -X POST "__FORGE_REST_BASE__/projects/<id>/merge_requests/<iid>/discussions" \
   -H "Content-Type: application/json" \
   -d '{"body":"this can overflow",
        "position":{"position_type":"text",
@@ -109,19 +112,19 @@ curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/
          "new_path":"src/main.rs","new_line":12}}'
 
 # Reply in an existing review thread
-curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>/discussions/<discussion_id>/notes" \
+curl -sS -X POST "__FORGE_REST_BASE__/projects/<id>/merge_requests/<iid>/discussions/<discussion_id>/notes" \
   -H "Content-Type: application/json" \
   -d '{"body":"fixed in the latest push"}'
 
 # Edit an MR (title / description / labels) or close it (state_event=close)
-curl -sS -X PUT "http://gitlab-warden:8080/api/v4/projects/<id>/merge_requests/<iid>" \
+curl -sS -X PUT "__FORGE_REST_BASE__/projects/<id>/merge_requests/<iid>" \
   -H "Content-Type: application/json" \
   -d '{"title":"Refactor X","description":"...","state_event":"close"}'
 
 # Trigger CI pipeline
-curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
+curl -sS -X POST "__FORGE_REST_BASE__/projects/<id>/pipeline" \
   -H "Content-Type: application/json" \
-  -d '{"ref":"claude/my-branch"}'
+  -d '{"ref":"__BRANCH_PREFIX_EXAMPLE__my-branch"}'
 
 # Merge — NOT allowed: the Warden answers 403 (R4) and sends no token upstream.
 #   PUT …/merge_requests/<iid>/merge        (also state_event=merge on the edit above)
@@ -129,7 +132,7 @@ curl -sS -X POST "http://gitlab-warden:8080/api/v4/projects/<id>/pipeline" \
 
 These are **every** write endpoint the Warden permits — anything else (e.g. creating
 branches/tags directly, editing project settings) is default-denied. You may create MRs
-and trigger CI only for `claude/*` branches (R2/R3), and comment/discuss/edit only on MRs
+and trigger CI only for `__BRANCH_PREFIX_EXAMPLE__*` branches (R2/R3), and comment/discuss/edit only on MRs
 **you** authored (R3); merging is never allowed (R4). The Warden expects **no auth** from
 the agent — token injection happens internally.
 
@@ -139,7 +142,7 @@ the body always matches the headers — no `--compressed`, no `gunzip`, no
 `Accept-Encoding` juggling needed. Just read the body:
 
 ```bash
-curl -sS "http://gitlab-warden:8080/api/v4/groups/<id>/projects"
+curl -sS "__FORGE_REST_BASE__/groups/<id>/projects"
 ```
 
 ### Warden not active (stage 01 / no Warden profile)
@@ -150,11 +153,11 @@ via the forward proxy (`git clone` / `git fetch`). Push will fail.
 ### Hard limits (Warden enforces, cannot be bypassed)
 
 | Allowed                                      | Forbidden                                                          |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| Push to `claude/*` branches                  | Push to `main`, `develop`, or branches without the `claude/` prefix |
-| Create MRs, comment, trigger CI              | Merge MRs (→ 403, always)                                          |
-| Read (API GETs, git fetch/clone)             | Read tokens from the environment (none present)                    |
-| Up to 5 open MRs at a time                   | More than 60 write actions/hour                                    |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| Push to `__BRANCH_PREFIX_EXAMPLE__*` branches  | Push to `main`, `develop`, or branches without an allowed prefix     |
+| Create MRs, comment, trigger CI                | Merge MRs (→ 403, always)                                          |
+| Read (API GETs, git fetch/clone)               | Read tokens from the environment (none present)                    |
+| Up to 5 open MRs at a time                     | More than 60 write actions/hour                                    |
 
 ---
 
@@ -163,24 +166,25 @@ via the forward proxy (`git clone` / `git fetch`). Push will fail.
 All tools are globally available on `PATH`:
 
 | Tool        | Version (from `.env`)  | Command                                  |
-| ----------- | ---------------------- | ---------------------------------------- |
-| Clang/LLVM  | `CLANG_VERSION`        | `clang++`, `clang-tidy`, `clang-format`  |
-| Rust        | `RUST_VERSION`         | `cargo`, `rustc`, `rustfmt`, `clippy`    |
-| Python / uv | `UV_VERSION`           | `python3`, `uv`, `uv run`, `uv sync`     |
-| Conan       | `CONAN_VERSION`        | `conan`                                  |
-| Node        | `NODE_VERSION`         | `node`, `npm`                            |
-| Claude Code | `CLAUDE_CODE_VERSION`  | `claude`                                 |
+| ----------- | ------------------------ | ------------------------------------------ |
+| Clang/LLVM  | `CLANG_VERSION`          | `clang++`, `clang-tidy`, `clang-format`    |
+| Rust        | `RUST_VERSION`           | `cargo`, `rustc`, `rustfmt`, `clippy`      |
+| Python / uv | `UV_VERSION`             | `python3`, `uv`, `uv run`, `uv sync`       |
+| Conan       | `CONAN_VERSION`          | `conan`                                    |
+| Node        | `NODE_VERSION`           | `node`, `npm`                              |
+| Claude Code | `CLAUDE_CODE_VERSION`    | `claude`                                   |
 
 Build traffic (cargo, pip, npm, conan) routes **automatically** through the forward
 proxy — no manual `--proxy` flag needed.
 
 ### Branch prefix
 
-All your own branches must start with one of the prefixes set in WARDEN_BRANCH_PREFIX
-(comma-separated if more than one is configured):
+All your own branches must start with one of the prefixes configured in
+`__WARDEN_TOML_PATH__`'s `branch_prefixes` (comma-separated if more than one is
+configured; this sandbox's current default is `__BRANCH_PREFIX_EXAMPLE__`):
 
 ```bash
-git checkout -b WARDEN_BRANCH_PREFIX/my-feature
+git checkout -b __BRANCH_PREFIX_EXAMPLE__my-feature
 ```
 
 Pushes to other branch names will be rejected by the Warden.

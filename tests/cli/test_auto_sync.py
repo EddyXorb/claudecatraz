@@ -1,4 +1,3 @@
-import types
 import pytest
 from pathlib import Path
 from typing import cast
@@ -30,6 +29,17 @@ def _make_seed_cred(tmp_path: Path) -> None:
     ch = paths.claude_home(tmp_path)
     ch.mkdir(parents=True, exist_ok=True)
     (ch / ".credentials.json").write_text("{}")
+
+
+@pytest.fixture(autouse=True)
+def _sync_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§05.6: the claude profile's default is credentials.mode=persistent,
+    which makes `_auto_sync_if_needed`/`_run_sync` a no-op / a refusal. These
+    tests exercise the `credentials.mode=sync` behaviour (the historical
+    host->sandbox seed refresh), so pin the mode explicitly rather than
+    relying on the shipped default — persistent-mode behaviour has its own
+    tests below (`TestPersistentModeSkipsSync`)."""
+    monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
 
 
 # ── _auto_sync_if_needed ───────────────────────────────────────────────────────
@@ -84,17 +94,46 @@ def test_api_key_mode_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 # ── _run_sync quiet plumbing ───────────────────────────────────────────────────
 
-def test_run_sync_quiet_toggles_capture_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_sync_quiet_suppresses_adapter_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    """quiet=True redirects the adapter's own stdout (e.g. `sync_from_host`'s
+    "Credentials synced into …" print) away from the terminal."""
     _seed_env(tmp_path)
-    fake = tmp_path / "cache"
-    entry = fake / "assets/container/entrypoint.py"
-    entry.parent.mkdir(parents=True); entry.write_text("# tool")
-    monkeypatch.setattr(paths, "asset_root", lambda: fake)
-    seen: dict[str, object] = {}
-    monkeypatch.setattr(setup_sync.subprocess, "run",  # type: ignore[attr-defined]
-                        lambda cmd, **k: seen.update(k) or types.SimpleNamespace(returncode=0))
+
+    class _PrintingAdapter:
+        def sync_from_host(self, source: object, home: object) -> None:
+            print("Credentials synced into somewhere")
+
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: _PrintingAdapter())
     setup._run_sync(tmp_path, cast(Out, _Out()), quiet=True)
-    assert seen.get("capture_output") is True
-    seen.clear()
+    assert "Credentials synced" not in capsys.readouterr().out
     setup._run_sync(tmp_path, cast(Out, _Out()), quiet=False)
-    assert seen.get("capture_output") is False
+    assert "Credentials synced" in capsys.readouterr().out
+
+
+# ── §05.6: credentials.mode=persistent skips/refuses sync ──────────────────────
+
+class TestPersistentModeSkipsSync:
+    """The claude profile's *shipped* default is credentials.mode=persistent
+    (§05.6, Maintainer-Entscheid 2026-07) — these run against the real
+    manifest, so they must NOT inherit the module's autouse `_sync_mode` pin."""
+
+    @pytest.fixture(autouse=True)
+    def _sync_mode(self) -> None:
+        """Shadows the module-level autouse `_sync_mode` fixture (same name,
+        class scope wins) for this class only — these tests are specifically
+        about the unpinned, shipped default, not the sync-mode pin."""
+        return None
+
+    def test_auto_sync_is_noop_for_persistent_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _seed_env(tmp_path)  # AUTH_MODE=subscription, no AGENT_PROFILE override -> default "claude"
+        called: dict[str, int] = {"n": 0}
+        monkeypatch.setattr(setup_sync, "_run_sync", lambda *a, **k: called.update(n=called["n"] + 1))
+        setup._auto_sync_if_needed(tmp_path, cast(Out, _Out()))
+        assert called["n"] == 0
+
+    def test_explicit_sync_refuses_with_clear_message(self, tmp_path: Path) -> None:
+        _seed_env(tmp_path)
+        with pytest.raises(CliError) as ei:
+            setup._run_sync(tmp_path, cast(Out, _Out()))
+        assert "persistent" in str(ei.value).lower()

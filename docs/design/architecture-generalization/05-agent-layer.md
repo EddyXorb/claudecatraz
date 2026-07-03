@@ -1,5 +1,11 @@
 # 05 — Austauschbarer Agent-Layer
 
+> **Umgesetzt in Schritt 7** (`docs/design/architecture-generalization/06-migration.md`):
+> `src/catraz/assets/container/{entrypoint.py,agent_contract.py,git_routing.py}` +
+> `src/catraz/assets/agents/claude/` + `src/catraz/agents.py`. Diese Datei bleibt die
+> Spezifikation; Umsetzungsdetails und bewusste Abweichungen stehen im
+> Umsetzungsvermerk zu Schritt 7.
+
 Der Base-Layer ist bereits austauschbar (`BASE_IMAGE`/`BASE_DOCKERFILE`). Für den
 Agent-Layer gilt nach Röst-Runde 1 eine ehrliche Neubewertung: **das Manifest ist die
 letzten 10 % — die eigentliche Arbeit ist die Zerlegung des Entrypoints.**

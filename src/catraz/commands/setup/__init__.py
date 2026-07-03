@@ -83,11 +83,18 @@ def _init_sync_credentials(
     root: Path, env_path: Path, args: argparse.Namespace, out: Out
 ) -> None:
     from catraz.paths import claude_home
+    from ._sync import _credentials_mode
     auth_mode = load_env(env_path).get("AUTH_MODE", "subscription")
     if args.skip_sync:
-        out.info("• --skip-sync: skipping Claude credential import")
+        out.info("• --skip-sync: skipping credential import")
+    elif auth_mode == "subscription" and _credentials_mode(root) == "persistent":
+        out.info(
+            "• this agent profile uses persistent credentials (§05.6) — "
+            "run `claude login` inside the container (`catraz run shell`) once; "
+            "state persists in .catraz/state/<profile>/"
+        )
     elif auth_mode == "subscription":
-        out.info("\n• importing Claude credentials (sync)…")
+        out.info("\n• importing credentials (sync)…")
         try:
             _run_sync(root, out)
         except CliError as e:

@@ -5,6 +5,16 @@
 
 Status: ⏳ geplant. Voraussetzung: Stufen 01/02 implementiert. Parallel zu Stufe 03 baubar.
 
+> **Update (§06-migration.md Schritt 7, Agent-Layer):** `doctor`'s `claude`-Sektion
+> heißt jetzt `agent` (`catraz doctor --section agent`) und prüft je nach
+> `credentials.mode` (§05.6) entweder die Sandbox-Seed-Credential (wie unten
+> beschrieben, Modus `sync`) oder Vorhandensein+Permissions von
+> `.catraz/state/<profile>/` (Modus `persistent`, claude's Default seit Schritt 7).
+> `catraz sync`/`entrypoint.py sync` bleiben für `mode=sync`-Profile gültig wie
+> beschrieben; für `mode=persistent` verweigert `catraz sync` mit einer klaren
+> Meldung (`claude login` im Container statt Host-Import). Neu:
+> `.catraz/.env`'s `AGENT_PROFILE` (Default `claude`, §05.3).
+
 ---
 
 ## 1. Motivation

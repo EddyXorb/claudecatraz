@@ -17,7 +17,8 @@ def _build_base(dockerfile: Path, context: Path | None = None) -> str:
         if r.returncode:
             raise CliError(
                 f"base build failed (Dockerfile {dockerfile}). "
-                "catraz's claude-layer uses apt-get and NodeSource — "
+                "catraz's agent layer (assets/agents/<profile>/layer.Dockerfile) "
+                "uses apt-get and NodeSource — "
                 "the base MUST be Debian/Ubuntu-based. "
                 "Alpine, RHEL, and other non-apt distros will fail here.",
                 EXIT_DOCKER,
