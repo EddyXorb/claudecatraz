@@ -128,6 +128,12 @@ Keine Importer, keine Ersatz-Fassade. Fertig-Kriterium: Modul weg, Testlauf grü
 
 ### D. `AppContext` zerlegen: Root-Kontext + Guard-eigener State
 
+- GitPushIntent/GitReadIntent vereinheitlichen zu einem Intent und
+   damit auch aus zwei Guards einenmachen.
+   Grundregel: immer nur einen guard je namespace (git, gitlab,...)
+   der alles übernimmt. Zum dispatchen kann er member helper haben,
+   aber es sollte gehen alles durch den üblichen flow zu schicken mit "handle";
+   wenn das nicht klappt muss handle noch mehr generalisiert werden, aber es MUSS durch ihn alles gehen
 - Neues `warden/context.py` (Root-Level): hält nur die generischen Kollaborateure
   (`cfg`, `state`, `audit`) plus die konstruierten Guard-Instanzen. Keine Logik.
 - `Upstream`, Service-Account-Resolution, Owner-Cache und Reconcile ziehen in die
@@ -153,6 +159,7 @@ Keine Importer, keine Ersatz-Fassade. Fertig-Kriterium: Modul weg, Testlauf grü
   AppContext, umgekehrte Richtung. Kandidat: Aktivierungs-Parsing als Guard-Hook
   (`Guard.validate_config(cfg)`), Katalog-Zeug komplett raus aus `core/config.py`.
   Wird in Schritt F (Dataclass-Config) miterledigt.
+
 
 ### E. Persistenz: Core verwaltet die DB, Domänen besitzen ihre Tabellen
 
