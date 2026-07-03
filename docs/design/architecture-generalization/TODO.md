@@ -187,3 +187,18 @@ bilden 1:1 auf die Dataclass-Struktur ab.
   *wo es dokumentiert ist*. Zielgröße: Modul-Docstrings ≤ 5 Zeilen, Methoden ≤ 3.
 - Zuletzt ausführen (nach allen anderen Schritten), damit der Pass nicht Text
   poliert, der ohnehin verschoben oder gelöscht wird.
+
+## Beobachtungen ohne eigenen Schritt (bei Gelegenheit)
+
+- **Zwei parallele Policy-Mechanismen:** die Read-Tabelle (`read_endpoints.py`,
+  `ReadCheck` liefert immer eine terminale Decision) und der Write-Catalog
+  (Checks liefern `Optional[Decision]`) haben unterschiedliche Formen — verteidigbar
+  (Reads haben keinen „denied unless proven"-Default pro Zeile), aber man muss zwei
+  Systeme lernen. Kandidat für Vereinheitlichung, wenn der zweite Guard kommt.
+- **Logging per `print(..., file=sys.stderr)`** in `context.py`/`__main__.py` statt
+  eines Loggers — für eine Trust-Boundary-Komponente dünn; ein `logging`-Logger mit
+  festem Format wäre angemessen (kein neues Dependency nötig).
+- **`startgate.py` dupliziert die Projekt-Regex** aus `parsing.py`, um einen
+  Import-Zyklus zu vermeiden — Symptom dafür, dass `parsing.py` zu viel vom Catalog
+  weiß (importiert ihn für `CatalogEntry`/`Location`). Entzerrt sich womöglich mit
+  F/H; danach prüfen, ob die Duplikation fallen kann.
