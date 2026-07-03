@@ -191,6 +191,14 @@ stderr-Strings von vorher prüfen — solche Assertions ggf. auf den Logger
 **Fertig-Kriterium.** Keine betrieblichen `print(stderr)` mehr im Warden;
 `.catraz/logs/warden/warden.log` füllt sich beim Lauf; Audit-Log unverändert.
 
+> **✅ ERLEDIGT** (Commit `feat(logging): Punkt 3`). Neues
+> `core/logging_setup.py::configure_logging()` (stderr + FileHandler auf
+> `cfg.log_path`, festes Format, Root INFO, idempotent). `cfg.log_path`-Feld
+> ergänzt; betriebliche prints in `__main__.py` + `guards/gitlab/forge.py` auf
+> Modul-Logger umgestellt. Bewusst *nicht* angefasst: `core/audit.py`-prints
+> (Audit-Subsystem) und der Startup-Abort-`print` (läuft vor `configure_logging`).
+> pytest/ruff/format/mypy grün.
+
 ---
 
 ## 4. Ownership-Lockerung: MR-Zugriff an Branch-Namespace statt an Autor binden
