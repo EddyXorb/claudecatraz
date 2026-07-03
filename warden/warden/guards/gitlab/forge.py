@@ -25,7 +25,9 @@ from ...core.state import State
 from .state import ForgeState
 from .upstream import Upstream, project_id
 
-# Generic Forge class, a forge is git + nice accessors around it, such as gitlab, github, codeberg,..
+
+# Generic Forge class, a forge is git + nice accessors around it, such as gitlab,
+# github, codeberg,..
 class GitForge:
     def __init__(
         self,

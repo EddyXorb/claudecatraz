@@ -1,4 +1,5 @@
-"""Kernel pipeline: template method for the deny-short-circuit / record-before-forward / audit sequence.
+"""Kernel pipeline: template method for the deny-short-circuit /
+record-before-forward / audit sequence.
 
 :class:`Guard` is the ABC every guard subclasses; :meth:`Guard.handle` is the
 one place the sequence is built — a guard supplies the parts (abstract hooks),
@@ -94,7 +95,8 @@ class Guard(ABC, Generic[IntentT]):
 
     ``name`` is the audit ``guard`` value (bare strings: ``"git"``/``"api"``).
     Each hook either does I/O (parse/enrich/record/forward/deny_response) or is pure
-    (capability_gate/decide) — only the pure half carries capability invariant and default-deny guarantees.
+    (capability_gate/decide) — only the pure half carries capability invariant and
+    default-deny guarantees.
     """
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog) -> None:

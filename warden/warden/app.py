@@ -3,7 +3,8 @@
 Generic assembly only: stays at the top of the package, free of guard internals.
 Each guard in ``ctx.guards`` supplies its own routes (:meth:`~warden.core.guard.Guard.routes`);
 this module never imports a concrete guard class, only :mod:`warden.context`'s guard-agnostic
-:class:`~warden.context.AppContext`. The pipeline every route runs through lives in :mod:`warden.core.guard`.
+:class:`~warden.context.AppContext`. The pipeline every route runs through lives
+in :mod:`warden.core.guard`.
 """
 
 from __future__ import annotations
