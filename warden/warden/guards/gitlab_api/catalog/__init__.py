@@ -21,13 +21,15 @@ from __future__ import annotations
 from .activation import EffectiveTable, build_effective_table
 from .builtin import is_builtin_merge_endpoint
 from .config_parse import ApiEndpointsConfig, parse_api_endpoints
-from .entries import CATALOG, DEFAULT_ENABLED, api_capabilities, match_endpoint
 from .errors import CatalogConfigError
 from .model import ClassifyFn, EndpointKind, FieldSpec, Location, ReadClass, Recognizer, ScopeKind
+from .read_endpoints import READ_ENDPOINTS
 from .report import endpoint_table_report
+from .write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS, api_capabilities, match_endpoint
 
 __all__ = [
-    "CATALOG",
+    "WRITE_ENDPOINTS",
+    "READ_ENDPOINTS",
     "ApiEndpointsConfig",
     "CatalogConfigError",
     "ClassifyFn",

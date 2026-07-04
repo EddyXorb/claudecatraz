@@ -11,7 +11,7 @@ from typing import Any
 
 from ....core.config import Config
 from .activation import build_effective_table
-from .entries import CATALOG, DEFAULT_ENABLED
+from .write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS
 
 
 def endpoint_table_report(cfg: Config) -> dict[str, Any]:
@@ -22,7 +22,7 @@ def endpoint_table_report(cfg: Config) -> dict[str, Any]:
     table = build_effective_table(cfg, cfg.endpoint_enable)
     active_by_id = {e.id: e for e in table.entries}
     rows = []
-    for entry in CATALOG:
+    for entry in WRITE_ENDPOINTS:
         active_entry = active_by_id.get(entry.id)
         assert entry.kind is not None, f"write catalog entry {entry.id!r} has no kind"
         rows.append(

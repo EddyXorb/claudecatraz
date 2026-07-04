@@ -24,7 +24,7 @@ from ....core.capabilities import Capability
 from ....core.rules import R3
 from .model import EndpointKind, FieldSpec, Location, Recognizer, ScopeKind
 
-CATALOG: tuple[Recognizer, ...] = (
+WRITE_ENDPOINTS: tuple[Recognizer, ...] = (
     # --- default set -----
     Recognizer(
         id="mr.create",

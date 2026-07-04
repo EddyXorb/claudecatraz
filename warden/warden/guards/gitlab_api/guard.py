@@ -215,6 +215,7 @@ class ApiGuard(Guard[ApiIntent]):
         return via if via and via != "default" else None
 
 
+# TODO: this belongs to the Gitlab API guard and should not be treated separately.
 class GraphqlGuard(Guard[GraphqlIntent]):
     """`/api/graphql` — always 403, never contacts upstream.
 

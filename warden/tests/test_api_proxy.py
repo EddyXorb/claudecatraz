@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from warden.guards.gitlab_api.catalog import DEFAULT_ENABLED
-from warden.guards.gitlab_api.catalog.entries import CATALOG
+from warden.guards.gitlab_api.catalog.write_endpoints import WRITE_ENDPOINTS
 from warden.guards.gitlab_api.guard import _needs_source_lookup
 from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
 from warden.guards.gitlab_api.parsing import project_from_path as _project_from_path
@@ -352,17 +352,17 @@ async def test_graphql_deny_is_audited(client, ctx, tmp_path):
 
 
 def test_needs_source_lookup_true_for_note_endpoint():
-    ep = next(e for e in CATALOG if e.id == "mr.note")
+    ep = next(e for e in WRITE_ENDPOINTS if e.id == "mr.note")
     assert _needs_source_lookup(ep)
 
 
 def test_needs_source_lookup_false_for_mr_create():
-    ep = next(e for e in CATALOG if e.id == "mr.create")
+    ep = next(e for e in WRITE_ENDPOINTS if e.id == "mr.create")
     assert not _needs_source_lookup(ep)
 
 
 def test_needs_source_lookup_false_for_entry_with_no_checks():
-    ep = next(e for e in CATALOG if e.id == "issue.create")
+    ep = next(e for e in WRITE_ENDPOINTS if e.id == "issue.create")
     assert not _needs_source_lookup(ep)
 
 

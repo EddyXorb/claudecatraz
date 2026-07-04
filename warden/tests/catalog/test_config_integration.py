@@ -13,8 +13,8 @@ import pytest
 from warden.core.config import Config, ConfigError
 from warden.core.config_load import from_env
 from warden.guards.gitlab_api.catalog.activation import build_effective_table
-from warden.guards.gitlab_api.catalog.entries import DEFAULT_ENABLED
 from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
+from warden.guards.gitlab_api.catalog.write_endpoints import DEFAULT_ENABLED
 
 _MIN_ENV = {
     "ALLOWED_PROJECTS": "group/proj",

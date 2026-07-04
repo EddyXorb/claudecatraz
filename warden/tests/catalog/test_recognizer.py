@@ -12,21 +12,21 @@ row genuinely has a classifier.
 
 from __future__ import annotations
 
-from warden.guards.gitlab_api.catalog.entries import CATALOG
 from warden.guards.gitlab_api.catalog.model import ReadClass, Recognizer, ScopeKind
-from warden.guards.gitlab_api.read_endpoints import READ_RECOGNIZERS
+from warden.guards.gitlab_api.catalog.read_endpoints import READ_ENDPOINTS
+from warden.guards.gitlab_api.catalog.write_endpoints import WRITE_ENDPOINTS
 
 # --- the write catalog: every row is BRANCH_NAMESPACE or QUOTA_BY_KIND -----
 
 
 def test_every_catalog_row_is_a_recognizer():
-    assert all(isinstance(ep, Recognizer) for ep in CATALOG)
+    assert all(isinstance(ep, Recognizer) for ep in WRITE_ENDPOINTS)
 
 
 def test_every_catalog_row_has_a_write_scope():
     # §07 Punkt 7's closed scope space: no CONTENT_EXPOSURE row belongs in the
     # write catalog — that scope is exclusively the read table's.
-    for ep in CATALOG:
+    for ep in WRITE_ENDPOINTS:
         assert ep.scope_kind in (ScopeKind.BRANCH_NAMESPACE, ScopeKind.QUOTA_BY_KIND)
         assert ep.classify is None
         assert ep.kind is not None
@@ -42,7 +42,7 @@ def test_branch_namespace_rows_declare_the_expected_namespace_field():
         "branch.create": "branch",
     }
     iid_lookup_ids = {"mr.note", "mr.discussion", "mr.discussion_reply", "mr.update"}
-    by_id = {ep.id: ep for ep in CATALOG}
+    by_id = {ep.id: ep for ep in WRITE_ENDPOINTS}
     for entry_id, field in literal_fields.items():
         ep = by_id[entry_id]
         assert ep.scope_kind is ScopeKind.BRANCH_NAMESPACE
@@ -54,7 +54,7 @@ def test_branch_namespace_rows_declare_the_expected_namespace_field():
 
 
 def test_issue_create_is_quota_by_kind_with_no_namespace_field():
-    ep = next(e for e in CATALOG if e.id == "issue.create")
+    ep = next(e for e in WRITE_ENDPOINTS if e.id == "issue.create")
     assert ep.scope_kind is ScopeKind.QUOTA_BY_KIND
     assert ep.namespace_field is None
 
@@ -64,7 +64,7 @@ def test_mr_update_has_no_leftover_state_event_check():
     # the FORBIDDEN capability layer (api_capabilities' field-dependent MERGES
     # alias) is the only thing standing between state_event=merge and a deny.
     # There is no `checks` attribute left on Recognizer at all to carry one.
-    ep = next(e for e in CATALOG if e.id == "mr.update")
+    ep = next(e for e in WRITE_ENDPOINTS if e.id == "mr.update")
     assert not hasattr(ep, "checks")
     assert ep.scope_kind is ScopeKind.BRANCH_NAMESPACE
     assert ep.namespace_field is None
@@ -74,7 +74,7 @@ def test_mr_update_has_no_leftover_state_event_check():
 
 
 def test_every_read_recognizer_is_content_exposure_with_a_classifier():
-    for ep in READ_RECOGNIZERS:
+    for ep in READ_ENDPOINTS:
         assert isinstance(ep, Recognizer)
         assert ep.scope_kind is ScopeKind.CONTENT_EXPOSURE
         assert ep.classify is not None
@@ -83,7 +83,7 @@ def test_every_read_recognizer_is_content_exposure_with_a_classifier():
 
 
 def test_read_recognizer_classify_returns_the_closed_read_class_vocabulary():
-    for ep in READ_RECOGNIZERS:
+    for ep in READ_ENDPOINTS:
         assert ep.classify is not None
         # A representative call per row — snippets/search rows are
         # request-dependent (search) or constant (snippets); either way the

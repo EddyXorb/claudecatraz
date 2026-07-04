@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .catalog.model import ReadClass, Recognizer, ScopeKind
-from .intent import ApiIntent
+from ..intent import ApiIntent
+from .model import ReadClass, Recognizer, ScopeKind
 
 # Search `scope` values that only return metadata (project/issue/MR/user
 # listings) — safe to pass through projectless (R1). Everything else,
@@ -67,7 +67,7 @@ def _search_scope_gate(intent: ApiIntent) -> tuple[ReadClass, str]:
     )
 
 
-READ_RECOGNIZERS: tuple[Recognizer, ...] = (
+READ_ENDPOINTS: tuple[Recognizer, ...] = (
     # --- Content-capable denies: listed first by convention (most specific/sensitive first) ---
     Recognizer(
         id="read.snippets",
@@ -222,7 +222,7 @@ def match_read(path: str) -> Optional[Recognizer]:
     method check would resolve.
     """
     path = path.rstrip("/")
-    for ep in READ_RECOGNIZERS:
+    for ep in READ_ENDPOINTS:
         if ep.regex.fullmatch(path):
             return ep
     return None

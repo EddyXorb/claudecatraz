@@ -44,8 +44,8 @@ from .catalog import (
     match_endpoint,
 )
 from .catalog.model import ReadClass
+from .catalog.read_endpoints import match_read
 from .intent import ApiIntent
-from .read_endpoints import match_read
 
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 
