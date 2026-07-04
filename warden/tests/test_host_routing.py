@@ -23,7 +23,7 @@ from warden.core.guard import host_gate
 from warden.core.model import Decision
 from warden.core.rules import R6
 from warden.core.state import State
-from warden.core.transport import UpstreamRouter, base_urls
+from warden.core.transport import UpstreamRouter, base_urls, for_each_host_project
 from warden.guards.git.guard import GitGuard
 
 PROJ = "group%2Fproj"
@@ -220,4 +220,64 @@ async def test_reconcile_branches_runs_per_host_with_same_project_path():
 
     assert ok is True
     assert guard.branch_state.open_branches() == 3  # 1 (gitlab.com) + 2 (my-gitlab.de)
+    await guard.router.aclose()
+
+
+# --- regression: a closed endpoint must never crash/lock the whole reconcile ---
+# `cfg.effective_hosts` still lists every configured endpoint's host, closed or
+# not (per-endpoint trimming is step 04) — `UpstreamRouter` never builds an
+# `Upstream` for a closed one, so `for_each_host_project` must tolerate the
+# resulting miss instead of KeyError-ing out of the whole loop (which would
+# leave the *other*, open hosts permanently unreconciled/fail-safe-locked too).
+
+
+async def test_for_each_host_project_skips_a_closed_endpoint_without_raising():
+    cfg = Config(
+        allowed_projects=("group/proj",),
+        git_endpoints=(
+            GitEndpoint(host="open.example", type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host="closed.example", type="gitlab", allowed_projects=("group/proj",)),
+        ),
+        git_credentials={"open.example": HostCredentials(read_token="r", write_token="w")},
+    )
+    assert cfg.access_mode("closed.example") == "closed"  # no credential at all
+    router = UpstreamRouter(cfg)
+    touched: list[tuple[str, str]] = []
+
+    async def fn(upstream, host, project) -> None:
+        touched.append((host, project))
+
+    ok = await for_each_host_project(cfg, router, "git", fn)
+
+    assert ok is True  # a closed endpoint is expected, not a reconcile failure
+    assert touched == [("open.example", "group/proj")]  # closed host never touched
+    await router.aclose()
+
+
+async def test_reconcile_completes_and_unlocks_when_one_of_two_endpoints_is_closed():
+    """End-to-end reproduction of the reported bug: before the fix,
+    `GitGuard.reconcile()` raised `KeyError` on the closed host, so it never
+    returned and `mark_reconciled` was never called — the *whole* guard
+    (including the open host) stayed fail-safe-locked forever."""
+    cfg = Config(
+        allowed_projects=("group/proj",),
+        state_db_path=":memory:",
+        git_endpoints=(
+            GitEndpoint(host="open.example", type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host="closed.example", type="gitlab", allowed_projects=("group/proj",)),
+        ),
+        git_credentials={"open.example": HostCredentials(read_token="r", write_token="w")},
+    )
+    state = State(":memory:")
+    guard = GitGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg))
+
+    with respx.mock(assert_all_called=False) as router:
+        router.route(
+            method="GET", url__regex=r"https://open\.example/api/v4/projects/.*branches.*"
+        ).mock(return_value=httpx.Response(200, json=[{"name": "claude/a"}]))
+        ok = await guard.reconcile()
+
+    assert ok is True
+    assert state.is_reconciled(guard.name)  # the guard actually unlocked
+    assert guard.branch_state.open_branches() == 1  # only the open host's branch counted
     await guard.router.aclose()

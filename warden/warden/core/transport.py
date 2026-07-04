@@ -286,13 +286,30 @@ async def for_each_host_project(
     domain-specific work (listing + replacing that guard's own state table);
     a combination whose ``fn`` raises is logged (using ``label`` — e.g.
     ``"git"``/``"api"`` — to tell the guards' log lines apart) and skipped,
-    never aborting the rest of the loop. Returns True only if every
+    never aborting the rest of the loop. Returns True only if every *open*
     combination completed without raising; False tells the caller to keep its
     state fail-closed-locked rather than trust an undercounted/stale view.
+
+    ``cfg.effective_hosts`` still lists every configured endpoint's host,
+    ``closed`` or not (step 04 is the one that trims it to open endpoints
+    only) — a ``closed`` host has no entry in ``router``'s map
+    (:class:`UpstreamRouter` skips it, §4.2/step 03), so :meth:`UpstreamRouter.for_host`
+    would raise ``KeyError`` for it. That is an *expected*, non-fatal state
+    (an operator can add an endpoint before its token is ready) — not the
+    same as ``fn`` raising — so it is skipped quietly and does **not** flip
+    ``ok`` to False: a closed host is unreachable via ``host_gate`` anyway
+    (R6), so it never needed reconciling, and treating it as a failure would
+    permanently fail-safe-lock the *whole* guard (every host) for as long as
+    any single endpoint stays closed — exactly the cross-endpoint blast
+    radius §4.2/step 02 was built to prevent.
     """
     ok = True
     for host in cfg.effective_hosts:
-        upstream = router.for_host(host)
+        try:
+            upstream = router.for_host(host)
+        except KeyError:
+            log.debug("%s reconcile: host %s has no open endpoint, skipping", label, host)
+            continue
         for project in cfg.allowed_projects:
             try:
                 await fn(upstream, host, project)
