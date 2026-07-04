@@ -166,7 +166,9 @@ class TestCheckTokensCrossCheck:
     """The four scenarios from 06-cli-doctor-init.md's "Tests" section — all
     warn (or ok), never a BAD finding; doctor must never block startup."""
 
-    def test_unlisted_host_token_warns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unlisted_host_token_warns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
         _write_grouped(
             tmp_path, "read_tokens", {"gitlab.com": "glpat-r", "typo.example": "glpat-t"}
@@ -190,7 +192,9 @@ class TestCheckTokensCrossCheck:
         )
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_write_without_read_warns_least_privilege(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_write_without_read_warns_least_privilege(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
         monkeypatch.setattr(doctor, "_probe_gitlab_tokens", lambda *a, **kw: None)
