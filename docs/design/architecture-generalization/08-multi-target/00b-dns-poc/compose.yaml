@@ -1,0 +1,16 @@
+services:
+  echo:
+    image: python:3-alpine
+    working_dir: /app
+    volumes:
+      - ./echo_server.py:/app/echo_server.py:ro
+    command: ["python3", "/app/echo_server.py"]
+    networks:
+      poc-net:
+        aliases: ["alpha.test", "beta.test"]
+  client:
+    image: alpine/git
+    entrypoint: ["sleep", "infinity"]
+    networks: ["poc-net"]
+networks:
+  poc-net: {}
