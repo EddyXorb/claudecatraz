@@ -206,8 +206,7 @@ def _assert_routed(status: int, body: str, host: str) -> None:
     rule R6), so a plain "not 403" is too weak; the 500 pins "routed, upstream
     just absent"."""
     assert status == 500, (
-        f"host {host!r} expected to route to its (absent) upstream -> 500, "
-        f"got {status}: {body}"
+        f"host {host!r} expected to route to its (absent) upstream -> 500, got {status}: {body}"
     )
 
 

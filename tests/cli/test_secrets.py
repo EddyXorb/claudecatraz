@@ -10,7 +10,6 @@ import pytest
 from catraz.commands import setup
 from catraz.doctor import run_doctor, _doctor_fix, SECRETS
 from catraz.envfile import load_env
-from catraz.policy import _read_toml_allowed_projects
 from catraz.ui import Out
 
 
@@ -149,7 +148,9 @@ def test_doctor_warns_endpoint_closed_on_empty_grouped_files(tmp_path: Path) -> 
     assert any(i[0] == "warn" and "gitlab.com" in i[2] and "closed" in i[2] for i in f.items)
 
 
-def test_doctor_ok_on_non_empty_grouped_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_ok_on_non_empty_grouped_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """doctor reports ok when a configured endpoint has both tokens set (probe
     skipped in unit tests)."""
     import catraz.doctor as doc
@@ -210,16 +211,13 @@ def test_cmd_init_yes_reads_tokens_from_env(
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_persists_warden_projects_from_env(
+def test_cmd_init_yes_clears_stale_warden_projects_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """--yes writes WARDEN_ALLOWED_PROJECTS from env to warden.toml (not .env).
-
-    Old cmd_init wrote to .env; new cmd_init uses warden.toml as the SSOT and
-    unsets any stale WARDEN_ALLOWED_PROJECTS from .env.
-    """
     root = _make_root(tmp_path)
-    monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
+    (root / ".catraz" / ".env").write_text(
+        "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
+    )
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
     monkeypatch.setattr(
         "catraz.commands.setup.run_doctor",
@@ -229,12 +227,6 @@ def test_cmd_init_yes_persists_warden_projects_from_env(
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
-    # Projects must now be in warden.toml
-    toml_path = root / ".catraz" / "config" / "warden.toml"
-    projects = _read_toml_allowed_projects(toml_path)
-    assert projects == ["group/proj-a", "group/proj-b"]
-
-    # WARDEN_ALLOWED_PROJECTS must NOT be written to .env
     env = load_env(root / ".catraz" / ".env")
     assert "WARDEN_ALLOWED_PROJECTS" not in env
 

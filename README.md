@@ -39,8 +39,8 @@ by the Warden on every git push and API call:
 | R6 | No token in the agent, network isolation | `agent-net internal` + Warden as the sole trust boundary |
 
 > **The push prefix is configurable — and can be a list.** `claude/` is only the default. Set
-> `branch_prefixes` in `.catraz/config/warden.toml` (or `WARDEN_BRANCH_PREFIX`, comma-separated)
-> to one or more prefixes; R2 then enforces the *union* of them. The legacy single-value form
+> `branch_prefixes` in `.catraz/config/warden.toml` to one or more prefixes; R2 then enforces
+> the *union* of them. The legacy single-value form
 > `branch_prefix = "..."` still works (treated as a one-element list). The list must be
 > non-empty and no entry may be empty, so pushes are always confined to a namespace you choose,
 > never to arbitrary or protected branches.
@@ -310,13 +310,9 @@ max_writes_per_hour = 60           # R5
 allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 ```
 
-> **Precedence — env overrides the file.** For each policy setting there is an optional
-> `WARDEN_*` env var (`WARDEN_BRANCH_PREFIX` (comma-separated for more than one prefix),
-> `WARDEN_MAX_OPEN_MRS`, `WARDEN_MAX_OPEN_BRANCHES`, `WARDEN_MAX_WRITES_PER_HOUR`,
-> `WARDEN_ALLOWED_PROJECTS`).
-> Set one (non-empty) to **override** `warden.toml` for that single setting; leave it
-> empty/unset to use the file. So a value is read from exactly one place at a time —
-> the env var if present, otherwise the toml.
+> **One setting, one source.** Edit `warden.toml` directly for every setting above (or use
+> `catraz allow` for `allowed_projects`). Secrets (GitLab tokens) and infra plumbing live in
+> `.env`/`.catraz/secrets/`.
 
 > **Applying changes.** The Warden and Squid read their config once at startup, so an edit
 > to `warden.toml`, `squid.conf`, `allowlist.txt`, or `.env` is inert until the container is
