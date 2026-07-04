@@ -1,5 +1,5 @@
-"""A host's effective actions × Catalog -> the effective table (§09 step 03):
-fail-closed validation of every activation rule.
+"""A host's effective actions × Catalog -> the effective table: fail-closed
+validation of every activation rule.
 """
 
 from __future__ import annotations
@@ -60,17 +60,17 @@ def test_duplicate_action_in_list_is_tolerated():
 
 
 def test_transport_actions_are_ignored_here():
-    # git.fetch/git.push gate nothing in the REST guard's table (§09 §2 Punkt 4,
-    # the git guard's own action gate consumes them) — they must never raise
-    # nor add a row.
+    # git.fetch/git.push gate nothing in the REST guard's table (the git
+    # guard's own action gate consumes them) — they must never raise nor add
+    # a row.
     table = build_effective_table(("git.fetch", "git.push", "mr.create"))
     assert {e.id for e in table.entries} == {"mr.create"}
 
 
 def test_read_table_is_untouched_by_actions():
-    # The REST-Read table (read_endpoints.py) is not action-addressable at all
-    # (§2 Punkt 4) — build_effective_table only ever touches WRITE_ENDPOINTS,
-    # never the read catalog, regardless of whether git.fetch is present.
+    # The REST-Read table (read_endpoints.py) is not action-addressable at
+    # all — build_effective_table only ever touches WRITE_ENDPOINTS, never
+    # the read catalog, regardless of whether git.fetch is present.
     from warden.guards.gitlab_api.catalog.read_endpoints import READ_ENDPOINTS
 
     with_fetch = build_effective_table(("git.fetch", "mr.create"))

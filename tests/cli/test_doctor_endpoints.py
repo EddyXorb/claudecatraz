@@ -1,5 +1,5 @@
-"""catraz doctor's endpoint-catalog section (§09 step 03: per-host report), in
-the style of tests/cli/test_doctor_gitlab.py.
+"""catraz doctor's endpoint-catalog section (per-host report), in the style
+of tests/cli/test_doctor_gitlab.py.
 """
 
 from __future__ import annotations

@@ -1,9 +1,8 @@
-"""``endpoint_table_report`` (§09 step 03): the ``/policy`` admin-route JSON
-shape must stay stable, per host, across the actions rebuild — the CLI
-(``catraz doctor``) parses this dict by key (``hosts``, ``id``, ``active``,
-``enabled_via`` — see ``tests/cli/test_doctor_endpoints.py`` in the sibling
-``catraz`` package), so a structural regression here would be a silent CLI
-break.
+"""``endpoint_table_report``: the ``/policy`` admin-route JSON shape must stay
+stable, per host — the CLI (``catraz doctor``) parses this dict by key
+(``hosts``, ``id``, ``active``, ``enabled_via`` — see
+``tests/cli/test_doctor_endpoints.py`` in the sibling ``catraz`` package), so
+a structural regression here would be a silent CLI break.
 """
 
 from __future__ import annotations
@@ -83,9 +82,9 @@ def test_report_branch_create_row_not_active_by_default():
 
 def test_report_mr_update_row_has_no_static_merges_capability():
     # api_capabilities() adds `merges` only field-dependently (state_event) —
-    # the static row itself must stay empty (§07 Punkt 7: no leftover
-    # field_not_equals check either, but that's a catalog-structure concern,
-    # covered in test_recognizer.py; this pins down the *reported* shape).
+    # the static row itself must stay empty (no leftover field_not_equals
+    # check either, but that's a catalog-structure concern, covered in
+    # test_recognizer.py; this pins down the *reported* shape).
     host_report = endpoint_table_report(_cfg())["hosts"][_HOST]
     row = next(r for r in host_report["catalog"] if r["id"] == "mr.update")
     assert row["capabilities"] == []

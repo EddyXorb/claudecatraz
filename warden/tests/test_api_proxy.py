@@ -472,7 +472,7 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
     await ctx.router.aclose()
 
 
-# --- §09 step 03: per-host effective tables, one guard, two hosts --------------
+# --- per-host effective tables, one guard, two hosts ---------------------------
 
 
 async def test_two_hosts_with_different_actions_behave_differently_on_the_same_guard():

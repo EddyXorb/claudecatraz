@@ -145,14 +145,14 @@ async def test_reconcile_branches_skips_a_closed_endpoint():
     await router.aclose()
 
 
-# --- reconcile is independent of `actions` (§09 §4, step 03) -------------------
+# --- reconcile is independent of `actions` --------------------------------------
 
 
 async def test_reconcile_ignores_a_host_with_no_git_push_action(respx_router):
     """A host whose effective actions are just ``git.fetch`` (no ``git.push``)
-    must still reconcile exactly like any other open endpoint (§09 §4:
-    reconcile only ever does GETs and is never gated by the action gate —
-    it doesn't even consult ``effective_actions``). A per-restart withdrawn
+    must still reconcile exactly like any other open endpoint: reconcile only
+    ever does GETs and is never gated by the action gate — it doesn't even
+    consult ``effective_actions``. A per-restart withdrawn
     ``git.push`` leaves existing branches untouched, only unable to grow."""
     cfg = Config(
         branch_prefixes=("claude/",),

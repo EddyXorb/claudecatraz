@@ -53,7 +53,7 @@ async def test_audit_tail_empty_when_log_missing(cfg, tmp_path):
 
 
 async def test_policy_route_reports_the_effective_table(cfg):
-    # §09 step 03: catraz doctor reads this per-host route.
+    # catraz doctor reads this per-host route.
     ctx = build_context(cfg, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/policy")

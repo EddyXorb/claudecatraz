@@ -1,7 +1,7 @@
-"""§09 step 04: `doctor`'s action/token coherence cross-checks (§4) — a static,
-host-side parse of `warden.toml` + the grouped token files, in the style of
-`tests/cli/test_doctor_gitlab.py`. All findings here are WARN, never BAD/fail
-(§4: action coherence problems are not security problems)."""
+"""`doctor`'s action/token coherence cross-checks — a static, host-side parse
+of `warden.toml` + the grouped token files, in the style of
+`tests/cli/test_doctor_gitlab.py`. All findings here are WARN, never BAD/fail:
+action coherence problems are not security problems."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _write_grouped(root: Path, filename: str, tokens: dict[str, str]) -> None:
 
 # ---------------------------------------------------------------------------
 # _effective_actions_for_host / _actions_valid_for_type — the reimplemented
-# cascade, mirroring warden.core.config.Config.effective_actions (§1.4, §3.2).
+# cascade, mirroring warden.core.config.Config.effective_actions.
 # ---------------------------------------------------------------------------
 
 
@@ -94,7 +94,7 @@ class TestReadGitEndpointsActions:
 
 
 # ---------------------------------------------------------------------------
-# check_action_coherence — the §4 per-host warnings.
+# check_action_coherence — the per-host warnings.
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ class TestCheckActionCoherence:
         assert not any(i[0] == doctor.BAD for i in f.items)
 
     def test_dead_quota_is_silent(self, tmp_path: Path) -> None:
-        """max_open_mrs set without mr.create is harmless (§4) — no warning at all."""
+        """max_open_mrs set without mr.create is harmless — no warning at all."""
         _write_config(
             tmp_path,
             "[git.rules]\nmax_open_mrs = 5\n\n"
@@ -216,7 +216,7 @@ class TestCheckActionCoherence:
         assert f.items == []
 
     def test_never_produces_bad(self, tmp_path: Path) -> None:
-        """Umbrella check for 'Nicht tun': action coherence is never a BAD finding."""
+        """Action coherence is never a BAD finding, even with several warnings stacked."""
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
