@@ -20,7 +20,6 @@ from catraz.commands import setup
 from catraz.envfile import load_env, unset_env_keys
 from catraz.policy import (
     _read_toml_allowed_projects,
-    remove_toml_key,
     set_toml_list,
     set_toml_scalar,
 )
@@ -153,6 +152,50 @@ class TestYesModeOff:
         assert original == after
 
 
+class TestMultiEndpointScaffold:
+    """06-cli-doctor-init.md "Tests": `init` scaffolds the grouped read_tokens/
+    write_tokens files (empty, 0600) and a parsable warden.toml carrying the
+    [git.rules]/[[git.endpoint]] taxonomy — alongside (not instead of) the
+    legacy per-token files the current single-target compose still mounts."""
+
+    def test_read_write_tokens_files_scaffolded_empty_0600(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        secrets_dir = root / ".catraz" / "secrets"
+        for fname in ("read_tokens", "write_tokens"):
+            p = secrets_dir / fname
+            assert p.exists(), f"missing: {fname}"
+            assert p.read_text() == ""
+            assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+    def test_existing_read_write_tokens_not_clobbered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        secrets_dir = root / ".catraz" / "secrets"
+        secrets_dir.mkdir(mode=0o700, exist_ok=True)
+        (secrets_dir / "read_tokens").write_text("gitlab.com glpat-existing\n")
+        (secrets_dir / "read_tokens").chmod(0o600)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        assert (secrets_dir / "read_tokens").read_text() == "gitlab.com glpat-existing\n"
+
+    def test_warden_toml_is_parsable_with_git_endpoint_taxonomy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tomllib
+
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        toml_path = root / ".catraz" / "config" / "warden.toml"
+        data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        assert "rules" in data.get("git", {})
+
+
 class TestYesModeReadOnly:
     """--yes with read token only → GITLAB_MODE=read-only."""
 
@@ -188,34 +231,6 @@ class TestYesModeReadOnly:
         # Existing write token must survive
         assert (secrets_dir / "gitlab_write_token").read_text() == "glpat-existing-write"
 
-    def test_warden_projects_from_env_written_to_toml(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        root = _make_root(tmp_path)
-        _patch_common(monkeypatch)
-        monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
-        monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
-        setup.cmd_init(root, _yes_args(), Out(color=False))
-        toml = root / ".catraz" / "config" / "warden.toml"
-        assert _read_toml_allowed_projects(toml) == ["group/proj-a", "group/proj-b"]
-        # Must NOT appear in .env
-        env = load_env(root / ".catraz" / ".env")
-        assert "WARDEN_ALLOWED_PROJECTS" not in env
-
-    def test_warden_branch_prefix_csv_written_as_list(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """WARDEN_BRANCH_PREFIX with multiple CSV entries is written as a TOML list."""
-        root = _make_root(tmp_path)
-        _patch_common(monkeypatch)
-        monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
-        monkeypatch.setenv("WARDEN_BRANCH_PREFIX", "claude/,bot/")
-        setup.cmd_init(root, _yes_args(), Out(color=False))
-        toml = root / ".catraz" / "config" / "warden.toml"
-        text = toml.read_text()
-        assert re.search(r'branch_prefixes\s*=\s*\[\s*"claude/"\s*,\s*"bot/"\s*\]', text)
-        assert not re.search(r"^\s*branch_prefix\s*=", text, re.M)
-
 
 class TestYesModeReadWrite:
     """--yes with both tokens → GITLAB_MODE=read-write."""
@@ -241,17 +256,16 @@ class TestYesModeReadWrite:
 
 
 class TestYesMigration:
-    """Stale WARDEN_* keys in .env must be removed after init writes to toml."""
+    """Stale WARDEN_* keys in .env are removed on init; policy comes from
+    warden.toml only."""
 
     def test_stale_env_key_removed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"
-        # Simulate old cmd_init writing WARDEN_ALLOWED_PROJECTS into .env
         env_path.write_text(
             "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
         )
-        monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/new-proj")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         env = load_env(env_path)
         assert "WARDEN_ALLOWED_PROJECTS" not in env
@@ -263,29 +277,9 @@ class TestYesMigration:
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"
         env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_BRANCH_PREFIX=old/\n")
-        monkeypatch.setenv("WARDEN_BRANCH_PREFIX", "new/")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         env = load_env(env_path)
         assert "WARDEN_BRANCH_PREFIX" not in env
-
-    def test_legacy_toml_scalar_migrated_to_list(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A pre-existing legacy `branch_prefix = "..."` in warden.toml (from an older
-        catraz version) must not survive alongside a freshly written `branch_prefixes`
-        list — the Warden's Config aborts if both are set."""
-        root = _make_root(tmp_path)
-        _patch_common(monkeypatch)
-        toml = root / ".catraz" / "config" / "warden.toml"
-        # Simulate an upgrade: strip the shipped list form, add the old scalar form.
-        remove_toml_key(toml, "branch_prefixes")
-        set_toml_scalar(toml, "branch_prefix", "old/")
-        monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
-        monkeypatch.setenv("WARDEN_BRANCH_PREFIX", "new/")
-        setup.cmd_init(root, _yes_args(), Out(color=False))
-        text = toml.read_text()
-        assert re.search(r'branch_prefixes\s*=\s*\[\s*"new/"\s*\]', text)
-        assert not re.search(r"^\s*branch_prefix\s*=", text, re.M)
 
 
 # ---------------------------------------------------------------------------

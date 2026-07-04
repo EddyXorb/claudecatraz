@@ -76,3 +76,11 @@ feat(config): warden.toml git.endpoint schema + rules cascade
 `warden.toml` wird über `[git.rules]` + `[[git.endpoint]]` geladen; `Config` trägt
 `git_rules`/`git_endpoints`; `effective_rules`/`endpoint_for`/`project_allowed` sind
 per-Host; `[git.urls]`/`host_order` sind weg; Fail-closed-Fälle greifen; Tests grün.
+
+## Status
+
+✅ Erledigt (Commit `60abceb`). Additiv umgesetzt: `[git.urls]`/`host_order` wurden
+**nicht** entfernt (das macht Schritt 03, sobald die Aufrufer umgehängt sind);
+`Config.project_allowed`/`allowed_hosts` blieben unter ihrem alten Namen erhalten,
+die neuen Endpoint-scoped Varianten heißen `git_project_allowed`/`git_allowed_hosts`,
+um Namenskollisionen mit noch nicht umgestellten Aufrufern zu vermeiden.

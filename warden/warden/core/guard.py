@@ -10,13 +10,18 @@ Sequence ``Guard.handle`` guarantees, in this order:
 
 1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
 2. :func:`kernel_gates` — guard-agnostic deny gates:
-   a. Mode-gate ``off`` — GitLab-disabled denies everything.
-   b. Host allowlist (§07 Punkt 8 follow-up) — default-deny for a ``Host``
-      header outside ``[git.urls] hosts``, inert (always allow) while that
-      section is unconfigured.
-   c. Mode-gate ``read-only`` — set by parser, never by :class:`~warden.core.model.Decision`.
-      Runs *before* ``enrich`` so credential-using lookups are unreachable in read-only/off mode.
-   d. Resource allowlist — enforced once, not per-guard, before ``enrich``.
+   a. Host allowlist (§2, §4.2) — default-deny for a ``Host`` header outside
+      the configured ``[[git.endpoint]]`` list, or whose endpoint currently
+      has no usable read credential (``access_mode`` is ``closed``); an empty
+      list denies every host. This is what denies a wholly unconfigured
+      deployment (the former ``GITLAB_MODE=off``) — there is no separate
+      global mode-gate anymore.
+   b. Mode-gate writes — a write is denied unless the target host's
+      ``access_mode`` (:meth:`~warden.core.config.Config.access_mode`) is
+      ``read-write``; a ``closed`` host never reaches this, host allowlist
+      already denied it. Runs *before* ``enrich`` so credential-using lookups
+      are unreachable on a read-only host.
+   c. Resource allowlist — enforced once, not per-guard, before ``enrich``.
 3. ``guard.enrich`` — unpure lookups a check declared it needs.
 4. Capability invariants (``core.capabilities.FORBIDDEN``) via :meth:`Guard.capability_gate`.
 5. ``guard.decide`` — pure, guard-specific, default-deny.
@@ -43,29 +48,32 @@ from .rules import R0, R6
 from .state import State
 
 
-def mode_gate_off(cfg: Config) -> Optional[Decision]:
-    """M0: deny every operation while GitLab is intentionally disabled."""
-    if not cfg.gitlab_enabled:
-        return Decision(False, R0, "GitLab disabled (GITLAB_MODE=off)")
-    return None
+def mode_gate_writes(host: str, cfg: Config) -> Optional[Decision]:
+    """M0: deny a write to a host whose access mode is not ``read-write``.
 
-
-def mode_gate_writes(cfg: Config) -> Optional[Decision]:
-    """M0: deny a write while the deployment is read-only (or off)."""
-    if not cfg.writes_enabled:
-        return Decision(False, R0, f"writes disabled (GITLAB_MODE={cfg.gitlab_mode})")
+    Per-host (step 05) — there is no more global mode. A ``closed`` host is
+    already denied earlier by :func:`host_gate` (R6), so by the time this
+    runs the only two possibilities left are ``read-only`` (deny) and
+    ``read-write`` (allow).
+    """
+    access = cfg.access_mode(host)
+    if access != "read-write":
+        return Decision(False, R0, f"writes disabled for host {host!r} (access_mode={access!r})")
     return None
 
 
 def host_gate(host: str, cfg: Config) -> Optional[Decision]:
-    """M6: default-deny for a ``Host`` header outside the multi-target
-    allowlist (§07 Punkt 8 follow-up, design spike section 2).
+    """M6: default-deny for a ``Host`` header outside the configured
+    ``[[git.endpoint]]`` list (§2, §07 Punkt 8 follow-up).
 
-    ``Config.host_allowed`` always returns ``True`` while ``allowed_hosts`` is
-    empty (single-target, the default and every deployment before
-    multi-target) — this gate only ever denies once an operator opts in via
-    ``[git.urls] hosts``. Guard-agnostic and kernel-owned like every other
-    gate in :func:`kernel_gates`, since every guard's request carries a host.
+    Real default-deny (step 03): an empty endpoint list denies every host, not
+    "allow everything" — an operator lists every routable host explicitly.
+    ``Config.host_allowed`` also denies a *known* host whose endpoint is
+    currently ``closed`` (no usable read credential), so a host that
+    ``UpstreamRouter.resolve`` would return ``None`` for is always denied here
+    first, never reaching a "kernel_gates already denied" assertion downstream.
+    Guard-agnostic and kernel-owned like every other gate in
+    :func:`kernel_gates`, since every guard's request carries a host.
     """
     if not cfg.host_allowed(host):
         return Decision(False, R6, f"host {host!r} not in the multi-target allowlist")
@@ -97,11 +105,9 @@ def kernel_gates(
     ``decide`` so unit tests exercise exactly the effective order — never a
     re-derived copy of it.
     """
-    denied = mode_gate_off(cfg)
-    if denied is None:
-        denied = host_gate(intent.host, cfg)
+    denied = host_gate(intent.host, cfg)
     if denied is None and intent.writes:
-        denied = mode_gate_writes(cfg)
+        denied = mode_gate_writes(intent.host, cfg)
     if denied is None:
         denied = project_gate(intent.project, project_allowed)
     return denied
@@ -168,13 +174,17 @@ class Guard(ABC, Generic[IntentT]):
         """
         return self.cfg.project_allowed(project)
 
-    def state_view(self) -> StateView:
+    def state_view(self, host: str) -> StateView:
         """Quota snapshot hook. Default: this guard's own core-only view (no
         domain state), locked until this guard reconciled. A guard backed by a
         domain (e.g. the git/REST-API branch/MR counters) overrides this to
         return the combined snapshot instead.
+
+        ``host`` is the request's raw ``Host`` header (step 04, state-keying):
+        the stateful quotas are per-endpoint now, so the snapshot must be
+        scoped to the endpoint the request is actually addressed to.
         """
-        return self.state.view(self.name)
+        return self.state.view(self.name, host)
 
     async def startup(self) -> None:
         """One-time, pre-serve setup.
@@ -200,7 +210,7 @@ class Guard(ABC, Generic[IntentT]):
         started = time.monotonic()
 
         intent = await self.parse(request)
-        view = self.state_view()
+        view = self.state_view(intent.host)
 
         decision = kernel_gates(intent, self.cfg, self.project_allowed)
         if decision is None:

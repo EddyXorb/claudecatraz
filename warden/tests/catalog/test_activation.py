@@ -16,7 +16,7 @@ from warden.guards.gitlab_api.catalog.write_endpoints import DEFAULT_ENABLED, WR
 
 @pytest.fixture
 def cfg() -> Config:
-    return Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
+    return Config(allowed_projects=("group/proj",))
 
 
 # --- default behaviour (§04.3 behaviour preservation) -----------------------

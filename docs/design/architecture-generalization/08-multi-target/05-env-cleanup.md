@@ -60,3 +60,54 @@ refactor(config): drop GITLAB_MODE/GITLAB_URL and env policy overrides
 
 `from_env` liest keine Policy-Overrides, kein `GITLAB_MODE`, kein `GITLAB_URL` mehr; die
 zugehörigen `Config`-Felder sind weg; Policy kommt allein aus `warden.toml`; Tests grün.
+
+## Status
+
+✅ Erledigt (this commit). Die wörtliche 4-Punkte-Liste (Overrides raus, `GITLAB_MODE`
+raus, `GITLAB_URL`/`implicit_host` bereits seit Schritt 03 weg, Rest-Env-Liste geprüft)
+war unvollständig — beim Nachvollziehen im Code fielen zwei notwendige Folgen auf, die die
+Liste nicht nennt, deren Nichtbeachtung aber sofort kaputten Code hinterlassen hätte:
+
+- **`core/guard.py` hatte zwei Kernel-Gates, die `cfg.gitlab_mode`/`gitlab_enabled`/
+  `writes_enabled` lasen.** `mode_gate_off` ist ersatzlos entfernt — es ist vollständig von
+  `host_gate` subsumiert (ein Endpoint ohne jedes Token ist `closed`, und `host_gate`
+  verweigert `closed`/unbekannte Hosts bereits per echtem Default-Deny, Schritt 03; ein
+  Deployment ganz ohne offene Endpoints verweigert damit bereits alles — das *ist* "off").
+  `mode_gate_writes` ist auf pro-Host umgehängt: `cfg.access_mode(intent.host) !=
+  "read-write"` verweigert einen Write; `closed` fängt `host_gate` vorher ab (Reihenfolge in
+  `kernel_gates` bleibt: `host_gate` → `mode_gate_writes` → `project_gate`).
+- **`core/config_load.py::_validate`** verzweigte auf `gitlab_mode` und verlangte
+  `cfg.read_token`/`cfg.write_token` (das alte *einzelne* Primär-Tokenpaar, populiert aus den
+  nackten `GITLAB_READ_TOKEN`/`GITLAB_WRITE_TOKEN`-Envs) je nach Modus. Grep bestätigte: diese
+  beiden Felder wurden seit Schritt 03 nirgends mehr im Laufzeitpfad gelesen — `UpstreamRouter`
+  baut ausschließlich aus `Config.git_credentials` (dem gruppierten `read_tokens`/
+  `write_tokens`-Mechanismus, Schritt 02). Beide Felder, ihre Env-Reads und die
+  Mode-Verzweigung in `_validate` waren reines Vestige. Beides ist jetzt weg; `_validate` prüft
+  nur noch bedingungslos Quoten-Positivität und die Branch-Prefix-Namespace-Sanity — kein
+  Credential/Allowlist-Erfordernis mehr, ein Deployment ohne jedes `[[git.endpoint]]` bootet
+  und verweigert alles über `host_gate` (fail-closed *degrade*, nie fail-stop, Schritt 02).
+- **Zwei weitere, von der Vorgabe nicht genannte Fundstellen** hätten mit `gitlab_enabled`
+  ebenfalls gebrochen: `guards/git/guard.py::reconcile`/`guards/gitlab_api/guard.py::reconcile`
+  hatten je ein `if not self.cfg.gitlab_enabled: ...; return True`, um im `off`-Fall den
+  Upstream-Call zu überspringen. Entfernt — `core.transport.for_each_host_project` iteriert
+  bereits über `cfg.effective_hosts`, das bei keinem konfigurierten Endpoint leer ist, und
+  liefert dann klaglos `ok=True` ohne jeden Upstream-Call zurück (Schritt 03); das
+  Kurzschluss-Verhalten war seit Schritt 03 bereits doppelt vorhanden, nur unter einem zweiten
+  Namen. Und `__main__.py`s Start-Warnung (`if cfg.gitlab_enabled and not cfg.allowed_projects`)
+  ist auf `if cfg.git_endpoints and not cfg.allowed_projects` umgestellt — sie warnt nur noch,
+  wenn mindestens ein Host-Endpoint konfiguriert ist, die Allowlist aber leer ist.
+- Die `MAX_*`-Wildcard-Vorgabe wurde auf `MAX_PUSH_BYTES` ausgeweitet, auch wenn der
+  Ist-Zustand-Absatz nur `MAX_OPEN_MRS`/`MAX_OPEN_BRANCHES`/`MAX_WRITES_PER_HOUR` nannte:
+  `MAX_PUSH_BYTES` ist derselbe Policy-Tunable-Typ und fällt unter denselben Wildcard-Wortlaut
+  ("`MAX_*`-Env-Reads … streichen") und unter das Ziel "keine Policy-Overrides mehr aus Env".
+- Testfolge: `warden/tests/test_config.py` komplett überarbeitet (kein `GITLAB_MODE`, keine
+  Env-Override-Tests mehr — stattdessen Tests, dass die alten Env-Vars wirkungslos sind;
+  `_MIN`-Konstante entfernt, da `_validate` kein Token/Allowlist-Erfordernis mehr hat). Jede
+  Fundstelle, die `Config(..., read_token=..., write_token=...)` als Top-Level-Kwargs benutzt
+  hat (⁓10 weitere Testdateien), musste angepasst werden — das Feld existiert nicht mehr,
+  `HostCredentials(read_token=..., write_token=...)` (pro Host, unverändert) bleibt der einzige
+  Ort dafür. `tests/test_policy.py`/`tests/test_git_proxy.py`s alte
+  `off`/`read-only`/`read-write`-Modus-Fixtures sind auf `git_credentials`-basierte
+  `closed`/`read-only`/`read-write`-Endpoints umgestellt; die `off`/`closed`-Fälle erwarten
+  jetzt `R6` (von `host_gate`) statt `R0` (von `mode_gate_off`) — eine echte
+  Verhaltensänderung, kein reines Test-Refactoring.

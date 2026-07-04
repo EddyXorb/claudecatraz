@@ -57,8 +57,9 @@ no TCP). Check `logs/squid/access.log` on the host if a request fails.
 ### No token in the container (by design)
 
 You hold **no** GitLab token. This is intentional (security architecture §R6). All
-GitLab operations run exclusively through the **Warden** (`gitlab-warden:8080`), which
-holds all tokens and enforces the policy.
+GitLab operations run exclusively through the **Warden**, which holds all tokens and
+enforces the policy — reachable at each configured git host itself (see below), not at
+a separate name.
 
 ### Your policy & limits — read `__WARDEN_TOML_PATH__`
 
@@ -88,7 +89,14 @@ git clone https://gitlab.com/group/project.git   # transparently routed through 
 git fetch && git push origin __BRANCH_PREFIX_EXAMPLE__my-branch     # likewise
 ```
 
-REST calls (create MR, trigger CI, etc.) directly against the Warden (`__FORGE_REST_BASE__`):
+This works identically for every configured git host — `gitlab.com`, a self-hosted
+`my-gitlab.de`, whatever `warden.toml` lists — not just the example above.
+
+REST calls (create MR, trigger CI, etc.) go directly against the Warden. The rule is the
+same for every configured host: for a git host `X`, the Warden's REST API is at
+`__FORGE_REST_BASE__` — substitute the actual hostname of the project's own git remote
+for `<host>` (e.g. `gitlab.com`, `my-gitlab.de`); same port, same `/api/v4` suffix,
+regardless of which host you're working against:
 
 ```bash
 # Create MR

@@ -31,11 +31,16 @@ __all__ = [
     "WINDOW_SECONDS",
 ]
 
-CURRENT_SCHEMA_VERSION: Final[int] = 2
+CURRENT_SCHEMA_VERSION: Final[int] = 3
 # v1 → v2 (§07 Punkt 8 follow-up): agent_branches/agent_mrs gained a `host`
-# column (part of the primary key) for multi-target state-keying — no
-# migration runs for it, an existing v1 DB is rejected instead (see
-# _check_and_stamp_schema_version). A fresh DB is built at v2 directly.
+# column (part of the primary key) for multi-target state-keying.
+# v2 → v3 (step 04, state-keying): `writes` gained a `host` column so the
+# rate-limit counter (`writes_last_hour`) can be scoped per-endpoint like
+# agent_branches/agent_mrs already are — a global writes-counter would let one
+# busy endpoint exhaust the rate limit for every other endpoint. No migration
+# runs for either bump: an existing older-versioned DB is rejected instead
+# (see _check_and_stamp_schema_version). A fresh DB is built at the current
+# version directly.
 
 
 class SchemaError(RuntimeError):
@@ -48,10 +53,12 @@ CREATE TABLE IF NOT EXISTS writes (
   id         INTEGER PRIMARY KEY,
   ts         REAL NOT NULL,
   guard      TEXT NOT NULL,
+  host       TEXT NOT NULL DEFAULT '',
   kind       TEXT NOT NULL,
   ref_or_iid TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_writes_ts ON writes(ts);
+CREATE INDEX IF NOT EXISTS idx_writes_host_ts ON writes(host, ts);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
@@ -160,19 +167,30 @@ class State:
         return self._store.schema_version()
 
     # --- recording -------------------------------------------------------------
-    def record_write(self, guard: str, kind: str, ref_or_iid: Optional[str] = None) -> None:
-        """Persist a write-record and fsync *before* the upstream call."""
+    def record_write(
+        self, guard: str, host: str, kind: str, ref_or_iid: Optional[str] = None
+    ) -> None:
+        """Persist a write-record and fsync *before* the upstream call.
+
+        ``host`` scopes the rate-limit counter per-endpoint (step 04) — see
+        :meth:`writes_last_hour`.
+        """
         self._store.execute(
-            "INSERT INTO writes (ts, guard, kind, ref_or_iid) VALUES (?, ?, ?, ?)",
-            (self._clock(), guard, kind, ref_or_iid),
+            "INSERT INTO writes (ts, guard, host, kind, ref_or_iid) VALUES (?, ?, ?, ?, ?)",
+            (self._clock(), guard, host, kind, ref_or_iid),
         )
         self._store.commit()
 
     # --- views -----------------------------------------------------------------
-    def writes_last_hour(self) -> int:
+    def writes_last_hour(self, host: str) -> int:
+        """Rolling write-rate counter, scoped to ``host`` (step 04): the
+        overridable ``max_writes_per_hour`` quota (:meth:`~.config.Config.effective_rules`)
+        is per-endpoint, so the counter it is checked against must be too — a
+        global count would let one busy endpoint exhaust every other
+        endpoint's rate limit."""
         cutoff = self._clock() - WINDOW_SECONDS
         row = self._store.execute(
-            "SELECT count(*) AS c FROM writes WHERE ts > ?", (cutoff,)
+            "SELECT count(*) AS c FROM writes WHERE host=? AND ts > ?", (host, cutoff)
         ).fetchone()
         return int(row["c"])
 
@@ -190,16 +208,19 @@ class State:
         ).fetchone()
         return row is not None
 
-    def view(self, guard: str) -> StateView:
+    def view(self, guard: str, host: str) -> StateView:
         """Core-only snapshot for the policy. Locked until ``guard`` first
         reconciles successfully; open_mrs/open_branches default to 0 — each
         guard fills its own domain count via its own ``state_view`` override (the
         git guard's :meth:`~warden.guards.git.guard.GitGuard.state_view`, the
         REST-API guard's :meth:`~warden.guards.gitlab_api.guard.ApiGuard.state_view`).
+
+        ``host`` scopes :meth:`writes_last_hour` to that endpoint (step 04) —
+        the caller passes the request's own host (see ``core.guard.Guard.handle``).
         """
         if not self.is_reconciled(guard):
             return StateView(locked=True)
-        return StateView(writes_last_hour=self.writes_last_hour(), locked=False)
+        return StateView(writes_last_hour=self.writes_last_hour(host), locked=False)
 
     # --- maintenance -----------------------------------------------------------
     def prune(self) -> None:

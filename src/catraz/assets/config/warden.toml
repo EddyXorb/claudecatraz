@@ -1,15 +1,9 @@
 # Warden — non-secret policy parameters. SOURCE OF TRUTH for these settings.
 # Host-editable, mounted read-only. Details: docs/design/agentic-workflow/02-warden.md (W10)
 #
-# Precedence: a matching env var in .catraz/.env OVERRIDES the value here when set
-# (non-empty):
-#   branch_prefixes     <- WARDEN_BRANCH_PREFIX  (comma-separated for more than one)
-#   max_open_mrs        <- WARDEN_MAX_OPEN_MRS
-#   max_open_branches   <- WARDEN_MAX_OPEN_BRANCHES
-#   max_writes_per_hour <- WARDEN_MAX_WRITES_PER_HOUR
-#   allowed_projects    <- WARDEN_ALLOWED_PROJECTS  (comma-separated)
-# Leave the env var empty/unset to use the value below. This file holds NO secrets:
-# the GitLab tokens live in .catraz/secrets/ (one file each, mounted as compose
+# One setting, one source: edit this file directly for every value below, or
+# use `catraz allow` for allowed_projects. This file holds NO secrets: the
+# GitLab tokens live in .catraz/secrets/ (one file each, mounted as compose
 # secrets); GITLAB_URL / GITLAB_MODE live in .catraz/.env — never put any here.
 
 # R2: only branches under one of these prefixes may be pushed (the allowed
@@ -23,3 +17,44 @@ max_writes_per_hour = 60                  # R5: max write actions per hour
 # Full paths of concrete projects only — NO wildcards/globs, NO partial/leaf names,
 # NO group prefixes. Empty = fail-closed (nothing allowed).
 allowed_projects    = []
+
+# --- Multi-target endpoint taxonomy (docs/design/architecture-generalization/
+# 08-multi-target.md) — this is the live, enforced way to reach one or more git
+# hosts through the Warden: DNS alias, git insteadOf rewrite, per-host REST
+# base, and host_gate/UpstreamRouter all key off the [[git.endpoint]] entries
+# below (§1-§4). [git.rules] holds the same domain-default knobs as the
+# top-level settings above (branch_prefixes, max_open_branches, max_open_mrs,
+# max_writes_per_hour, max_push_bytes), scoped to the endpoint model; each
+# [[git.endpoint]] table configures exactly one git host, with an optional
+# per-endpoint `rules = { ... }` overriding a [git.rules] default for that host
+# only (per-key merge, §3.3). Tokens are NEVER set here — they live in the
+# grouped .catraz/secrets/read_tokens / write_tokens files (<host> <token> per
+# line); an endpoint with no matching token simply runs closed (deny-all for
+# that host only), it never blocks startup or the other endpoints (§4.2).
+#
+# No [[git.endpoint]] at all = no host is routed/reachable through the Warden
+# (real default-deny, not "use the settings above instead") — the top-level
+# settings above remain a separate, domain-wide fallback the Warden still
+# reads for backward compatibility, not an implicit single endpoint.
+#
+# Implemented `type` values:
+#   "gitlab" — git + REST API (gitlab.com or self-hosted GitLab)
+#   "plain"  — git smart-HTTP only, no REST API assumed
+# "github" is reserved for a future guard — the Warden refuses to start if used.
+[git.rules]
+# branch_prefixes = ["claude/"]
+
+# Example — add one [[git.endpoint]] table per host. Each host gets its own
+# DNS alias + git/REST routing through the Warden automatically (no compose
+# edit needed) — see docs/design/architecture-generalization/
+# 08-multi-target/07-compose-and-agent-routing.md.
+# [[git.endpoint]]
+# host             = "gitlab.com"
+# type             = "gitlab"
+# allowed_projects = []
+#
+# [[git.endpoint]]
+# host             = "my-gitlab.example.com"
+# type             = "gitlab"
+# allowed_projects = []
+# rules            = { max_open_mrs = 20 }

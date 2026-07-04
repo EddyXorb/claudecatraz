@@ -26,16 +26,22 @@ async def _list_agent_branches(upstream: Upstream, cfg: Config, pid: str) -> lis
 async def reconcile_branches(
     cfg: Config, router: UpstreamRouter, branch_state: BranchState
 ) -> bool:
-    """Rebuild ``agent_branches`` for every allowed project, on every
-    configured host (§07 Punkt 8 follow-up, design spike section 4). Returns
-    True on full success.
+    """Rebuild ``agent_branches`` for every allowed project, on every *open*
+    configured endpoint (§07 Punkt 8 follow-up, design spike section 4; step 04
+    trims this to open endpoints). Returns True on full success.
 
-    ``cfg.effective_hosts`` is single-element (the implicit host) when
-    multi-target is inactive — identical iteration count/behaviour to before
-    the host dimension existed. The host×project loop and its fail-safe
-    (§6.11) handling live in :func:`~warden.core.transport.for_each_host_project`
-    (shared with the REST-API guard's :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs`);
-    this function supplies only the branch-listing/replace domain logic.
+    Iterates :attr:`~warden.core.config.Config.open_hosts` (not
+    ``cfg.effective_hosts``) — every configured endpoint whose
+    :meth:`~warden.core.config.Config.access_mode` is not ``"closed"``. A
+    closed endpoint has no usable read credential, is unreachable via
+    ``host_gate`` (R6) anyway, and never needed reconciling. A single-endpoint
+    deployment iterates that one host, identical behaviour to before the host
+    dimension existed. The host×project loop and its fail-safe (§6.11)
+    handling live in :func:`~warden.core.transport.for_each_host_project`
+    (shared with the REST-API guard's
+    :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs`), which trusts
+    that the ``hosts`` it is given are already open; this function supplies
+    only the branch-listing/replace domain logic.
     """
 
     async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
@@ -43,4 +49,4 @@ async def reconcile_branches(
         branches = await _list_agent_branches(upstream, cfg, pid)
         branch_state.replace_branches(host, project, branches)
 
-    return await for_each_host_project(cfg, router, "git", _reconcile_one)
+    return await for_each_host_project(cfg, router, cfg.open_hosts, "git", _reconcile_one)

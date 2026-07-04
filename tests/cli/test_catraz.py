@@ -91,46 +91,28 @@ def test_set_env_values_appends_absent_key(tmp_path: Path) -> None:
     assert envfile.load_env(p)["NEW_KEY"] == "value"
 
 
-# ── allowed_projects precedence (.env override wins over warden.toml) ────────────
+# ── allowed_projects resolution (single source: warden.toml, §3.5) ───────────────
 
 
-def _project(
-    tmp_path: Path,
-    env_override: str | None = None,
-    toml_projects: list[str] | None = None,
-) -> dict[str, str]:
-    (tmp_path / ".catraz" / "config").mkdir(parents=True, exist_ok=True)
-    env = tmp_path / ".catraz" / ".env"
-    lines = ["DEV_UID=1000"]
-    if env_override is not None:
-        lines.append(f"WARDEN_ALLOWED_PROJECTS={env_override}")
-    env.write_text("\n".join(lines) + "\n")
+def _project(tmp_path: Path, toml_projects: list[str] | None = None) -> None:
+    config = tmp_path / ".catraz" / "config"
+    config.mkdir(parents=True, exist_ok=True)
     if toml_projects is not None:
         arr = ", ".join(f'"{x}"' for x in toml_projects)
-        (tmp_path / ".catraz" / "config" / "warden.toml").write_text(
-            f"allowed_projects = [{arr}]\n"
-        )
-    return envfile.load_env(env)
+        (config / "warden.toml").write_text(f"allowed_projects = [{arr}]\n")
 
 
-def test_env_override_beats_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
-    env = _project(
-        tmp_path,
-        env_override="group/sub/from-env",
-        toml_projects=["group/sub/from-toml"],
-    )
-    resolved, source = policy._resolve_allowed_projects(tmp_path, env)
-    assert resolved == ["group/sub/from-env"]
-    assert "override" in source
-
-
-def test_toml_used_when_no_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
-    env = _project(tmp_path, env_override=None, toml_projects=["group/sub/a", "group/sub/b"])
-    resolved, source = policy._resolve_allowed_projects(tmp_path, env)
+def test_resolves_allowed_projects_from_toml(tmp_path: Path) -> None:
+    _project(tmp_path, toml_projects=["group/sub/a", "group/sub/b"])
+    resolved, source = policy._resolve_allowed_projects(tmp_path)
     assert resolved == ["group/sub/a", "group/sub/b"]
     assert source == "warden.toml"
+
+
+def test_resolves_empty_without_warden_toml(tmp_path: Path) -> None:
+    resolved, source = policy._resolve_allowed_projects(tmp_path)
+    assert resolved == []
+    assert source == "no warden.toml"
 
 
 # ── service aliases ─────────────────────────────────────────────────────────────

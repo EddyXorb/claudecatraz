@@ -12,7 +12,10 @@ import pytest
 
 def _ctx(ep: Any, **overrides: Any) -> Any:
     base = dict(
-        forge_rest_base="http://gitlab-warden:8080/api/v4",
+        # A generic per-host rule (§1.2/§07), not one concrete URL — "<host>" is
+        # a literal placeholder, same as the real default in
+        # entrypoint._instruction_context(). Never names the Warden container.
+        forge_rest_base="http://<host>:8080/api/v4",
         branch_prefixes=("claude/",),
         warden_toml_path=Path("/etc/catraz/warden.toml"),
     )
@@ -30,7 +33,8 @@ def test_render_instructions_embeds_forge_base_and_prefix(
     adapter = ep._load_adapter()
     dest, content = adapter.render_instructions(_ctx(ep))
     assert dest == tmp_path / ".claude" / "CLAUDE.md"
-    assert "http://gitlab-warden:8080/api/v4" in content
+    assert "http://<host>:8080/api/v4" in content
+    assert "gitlab-warden" not in content  # never leak the Warden's own container name
     assert "claude/" in content
     assert "__FORGE_REST_BASE__" not in content and "__BRANCH_PREFIX_EXAMPLE__" not in content
 
@@ -54,7 +58,7 @@ def test_install_writes_rendered_content(
     adapter = ep._load_adapter()
     ep.install_instructions(adapter, _ctx(ep))
     dest = tmp_path / ".claude" / "CLAUDE.md"
-    assert dest.exists() and "gitlab-warden" in dest.read_text()
+    assert dest.exists() and "http://<host>:8080/api/v4" in dest.read_text()
 
 
 def test_install_missing_not_required_is_silent(

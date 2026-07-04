@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-from catraz.envfile import load_env, unset_env_keys
+from catraz.envfile import unset_env_keys
 from catraz.policy import (
     _discover_gitlab_projects,
     _resolve_allowed_projects,
@@ -17,17 +17,14 @@ from ._secrets import _ensure_secret, _write_secret_value
 from ._wizard_yes import _VALID_GITLAB_MODES
 
 
-def _read_branch_prefix(env: dict[str, str], warden_toml: Path | None) -> str:
+def _read_branch_prefix(warden_toml: Path | None) -> str:
     """Current (first) branch prefix, shown as the wizard's default.
 
-    env override wins (first CSV entry), else warden.toml — either the new list
-    form (``branch_prefixes = [...]``) or the legacy scalar (``branch_prefix =
-    "..."``); the wizard only ever prompts for one, but must read whichever form
-    is on disk so the default reflects reality.
+    Reads warden.toml — either the new list form (``branch_prefixes =
+    [...]``) or the legacy scalar (``branch_prefix = "..."``); the wizard only
+    ever prompts for one, but must read whichever form is on disk so the
+    default reflects reality.
     """
-    ov = env.get("WARDEN_BRANCH_PREFIX", "").strip()
-    if ov:
-        return ov.split(",")[0].strip()
     if not warden_toml or not warden_toml.exists():
         return "claude/"
     text = warden_toml.read_text(encoding="utf-8")
@@ -154,13 +151,13 @@ def _prompt_secret_keep_or_replace(secrets_dir: Path, filename: str, label: str,
 
 def _prompt_allowed_projects(
     root: Path,
-    env: dict[str, str],
     warden_toml: Path,
+    env_path: Path,
     gitlab_url: str,
     args: argparse.Namespace,
     out: Out,
 ) -> None:
-    cur_proj, _ = _resolve_allowed_projects(root, env)
+    cur_proj, _ = _resolve_allowed_projects(root)
     if cur_proj and not args.force:
         out.info(f"\n  allowed projects already set: {', '.join(cur_proj)} — keeping.")
         return
@@ -191,17 +188,18 @@ def _prompt_allowed_projects(
             "work offline), but every GitLab op is denied until you add a "
             "project to allowed_projects in .catraz/config/warden.toml"
         )
+    unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS"])
 
 
-def _prompt_branch_prefix(env: dict[str, str], warden_toml: Path, env_path: Path, out: Out) -> None:
-    cur_prefix = _read_branch_prefix(env, warden_toml)
+def _prompt_branch_prefix(warden_toml: Path, env_path: Path, out: Out) -> None:
+    cur_prefix = _read_branch_prefix(warden_toml)
     prefix = out.ask("Branch prefix the agent may push to", cur_prefix or "claude/")
     if warden_toml.exists():
         set_toml_list(warden_toml, "branch_prefixes", [prefix])
         # Retire the legacy scalar key so it can't coexist with the list we just
         # wrote (Config aborts on both being set — one source of truth).
         remove_toml_key(warden_toml, "branch_prefix")
-    unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
+    unset_env_keys(env_path, ["WARDEN_BRANCH_PREFIX"])
 
 
 def _prompt_anthropic_key(
@@ -268,8 +266,8 @@ def _wizard_interactive(
         )
         updates["GITLAB_URL"] = url
         _prompt_gitlab_tokens(secrets_dir, mode, args, out, inherited)
-        _prompt_allowed_projects(root, env, warden_toml, url, args, out)
-        _prompt_branch_prefix(env, warden_toml, env_path, out)
+        _prompt_allowed_projects(root, warden_toml, env_path, url, args, out)
+        _prompt_branch_prefix(warden_toml, env_path, out)
     else:
         _ensure_secret(secrets_dir, "gitlab_read_token")
         _ensure_secret(secrets_dir, "gitlab_write_token")
@@ -277,7 +275,7 @@ def _wizard_interactive(
     if auth_mode == "api_key":
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
-    proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
+    proj_count, _ = _resolve_allowed_projects(root)
     url_part = (
         f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}" if mode != "off" else ""
     )

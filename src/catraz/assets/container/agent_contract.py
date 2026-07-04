@@ -57,7 +57,15 @@ class InstructionContext:
     adapter needs to render its instructions file (``CLAUDE.md``,
     ``AGENTS.md``, …). The Forge REST base is an explicit field, not prose an
     adapter has to hardcode — "der REST-Draht des Agenten ist Teil des
-    Vertrags, nicht Prosa-Zufall" (§05.2)."""
+    Vertrags, nicht Prosa-Zufall" (§05.2).
+
+    ``forge_rest_base`` is a **generic per-host rule**, not one concrete URL
+    (§1.2/§07 of ``08-multi-target.md``): a literal ``"<host>"`` placeholder
+    the rendered instructions ask the agent to substitute with whichever git
+    host it is actually talking to. One rule covers every configured
+    endpoint — no per-host enumeration/rendering needed — and the Warden's
+    own container name never has to appear in it.
+    """
 
     forge_rest_base: str
     branch_prefixes: tuple[str, ...]

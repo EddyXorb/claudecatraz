@@ -42,19 +42,21 @@ async def reconcile_mrs(
     cfg: Config, router: UpstreamRouter, mr_state: MrState
 ) -> tuple[bool, set[str]]:
     """Rebuild ``agent_mrs`` and the numeric-id alias set for every allowed
-    project, on every configured host (§07 Punkt 8 follow-up, design spike
-    section 4).
+    project, on every *open* configured endpoint (§07 Punkt 8 follow-up,
+    design spike section 4; step 04 trims this to open endpoints).
 
-    ``cfg.effective_hosts`` is single-element (the implicit host) when
-    multi-target is inactive — identical iteration count/behaviour to before
-    the host dimension existed. The numeric-id alias set is a plain union
-    across hosts (M6's project-id widening does not need to know which host
-    an id came from — ``ApiGuard.project_allowed`` only asks "is this id
+    Iterates :attr:`~warden.core.config.Config.open_hosts` (not
+    ``cfg.effective_hosts``) — see
+    :func:`~warden.guards.git.reconcile.reconcile_branches`'s docstring for
+    the full rationale, identical here. The numeric-id alias set is a plain
+    union across hosts (M6's project-id widening does not need to know which
+    host an id came from — ``ApiGuard.project_allowed`` only asks "is this id
     known", never "on which host"). Returns ``(ok, resolved_ids)``. The
     host×project loop and its fail-safe (§6.11) handling live in
     :func:`~warden.core.transport.for_each_host_project` (shared with the git
-    guard's :func:`~warden.guards.git.reconcile.reconcile_branches`); this
-    function supplies only the id-resolution/MR-listing/replace domain logic.
+    guard's :func:`~warden.guards.git.reconcile.reconcile_branches`), which
+    trusts that the ``hosts`` it is given are already open; this function
+    supplies only the id-resolution/MR-listing/replace domain logic.
     """
     resolved_ids: set[str] = set()
 
@@ -65,5 +67,5 @@ async def reconcile_mrs(
         resolved_ids.add(numeric_id)
         mr_state.replace_mrs(host, project, mrs)
 
-    ok = await for_each_host_project(cfg, router, "api", _reconcile_one)
+    ok = await for_each_host_project(cfg, router, cfg.open_hosts, "api", _reconcile_one)
     return ok, resolved_ids

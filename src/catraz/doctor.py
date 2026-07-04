@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -18,6 +19,13 @@ from catraz import image
 # Secrets the wizard collects (filename, human prompt, description). Order matters.
 # Secrets live in .catraz/secrets/<filename> (mode 0600), mounted into the warden
 # via compose secrets: at /run/secrets/<filename>. Never stored in .env.
+#
+# Legacy single-target pair — kept (not the new multi-target model doctor's own
+# checks now use, see check_tokens/read_tokens/write_tokens below) because
+# `assets/compose/docker-compose.yml` still mounts exactly these two files as
+# compose secrets for the single-target Warden; that cutover is
+# `07-compose-and-agent-routing.md`'s job, not this step's. See "## Status"
+# in `06-cli-doctor-init.md`.
 SECRETS = [
     (
         "gitlab_read_token",
@@ -201,50 +209,132 @@ def check_gitlab(env: dict[str, str], f: Findings) -> None:
         f.ok("tokens", f"GitLab endpoint: {url}")
 
 
+def _parse_grouped_tokens(text: str) -> dict[str, str]:
+    """Parse a grouped ``read_tokens``/``write_tokens`` file into ``host -> token``.
+
+    Same splitting rule as the Warden's Step 02 ``_parse_token_file``
+    (``warden/warden/core/config_load.py``): split on the first run of
+    whitespace, ``#``-comments and blank lines are skipped. Unlike the Warden,
+    a malformed line is skipped rather than raising — doctor warns, it never
+    aborts (see module docstring / "Nicht tun" in
+    ``docs/design/architecture-generalization/08-multi-target/06-cli-doctor-init.md``).
+    """
+    tokens: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split(None, 1)
+        if len(parts) != 2:
+            continue
+        tokens[parts[0]] = parts[1]
+    return tokens
+
+
+def _read_grouped_token_file(root: Path, filename: str) -> dict[str, str]:
+    """``host -> token`` map from ``.catraz/secrets/<filename>`` (``read_tokens``
+    or ``write_tokens``), or ``{}`` if the file is missing/unreadable."""
+    p = root / ".catraz" / "secrets" / filename
+    try:
+        text = p.read_text(encoding="utf-8") if p.exists() else ""
+    except OSError:
+        text = ""
+    return _parse_grouped_tokens(text)
+
+
+def _read_git_endpoints(root: Path) -> list[dict[str, str]]:
+    """``[[git.endpoint]]`` entries from ``.catraz/config/warden.toml``, as
+    ``{"host": ..., "type": ...}`` dicts.
+
+    Host-side and best-effort only: an absent file, unreadable file, invalid
+    TOML, or a missing/malformed ``[git.endpoint]`` array all yield ``[]``
+    (nothing to cross-check against) rather than raising — the Warden is the
+    fail-closed side that aborts startup on a genuinely malformed config
+    (see ``01-config-schema.md``); doctor only warns.
+    """
+    toml_path = root / ".catraz" / "config" / "warden.toml"
+    try:
+        text = toml_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    git = data.get("git")
+    if not isinstance(git, dict):
+        return []
+    raw_endpoints = git.get("endpoint")
+    if not isinstance(raw_endpoints, list):
+        return []
+    endpoints: list[dict[str, str]] = []
+    for raw in raw_endpoints:
+        if not isinstance(raw, dict):
+            continue
+        host = raw.get("host")
+        if not isinstance(host, str) or not host.strip():
+            continue
+        endpoint_type = raw.get("type")
+        endpoints.append(
+            {"host": host.strip(), "type": endpoint_type if isinstance(endpoint_type, str) else ""}
+        )
+    return endpoints
+
+
 def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
-    mode = _gitlab_mode(env)
-    secrets_dir = root / ".catraz" / "secrets"
+    """Cross-check the grouped ``read_tokens``/``write_tokens`` files against
+    the ``[[git.endpoint]]`` hosts configured in ``warden.toml`` (§4, §6 of
+    ``docs/design/architecture-generalization/08-multi-target.md``).
 
-    def _read_token(filename: str) -> str:
-        p = secrets_dir / filename
-        try:
-            return p.read_text(encoding="utf-8").strip() if p.exists() else ""
-        except OSError:
-            return ""
+    This is the host-side, friendly/explaining mirror of the Warden's
+    ``Config.access_mode(host)`` (``warden/warden/core/config.py``, Step 02):
+    same reasoning, same threshold, so the two sides don't drift — but doctor
+    only ever **warns**; the Warden is the side that actually enforces
+    (fail-closed, per-endpoint-degrade) an inconsistency. `doctor` never fails
+    the run because of a token/endpoint mismatch.
+    """
+    read_tokens = _read_grouped_token_file(root, "read_tokens")
+    write_tokens = _read_grouped_token_file(root, "write_tokens")
+    endpoints = _read_git_endpoints(root)
+    endpoint_hosts = {e["host"] for e in endpoints}
 
-    if mode == "off":
-        f.ok("tokens", "GitLab off — tokens not required")
+    if not endpoints and not read_tokens and not write_tokens:
+        f.ok("tokens", "no [[git.endpoint]] configured yet — add one to warden.toml")
         return
 
-    if mode == "read-only":
-        read_t = _read_token("gitlab_read_token")
-        write_t = _read_token("gitlab_write_token")
-        if not read_t:
-            f.bad("tokens", "gitlab_read_token is empty", "run `catraz init`")
-            return
-        if write_t:
+    # Case: a token for a host that matches no configured endpoint — probably a typo.
+    for host in sorted((set(read_tokens) | set(write_tokens)) - endpoint_hosts):
+        f.warn(
+            "tokens",
+            f"token for host {host!r} matches no [[git.endpoint]] in warden.toml "
+            "— probably a typo, the Warden ignores it",
+        )
+
+    for endpoint in endpoints:
+        host = endpoint["host"]
+        has_read = host in read_tokens
+        has_write = host in write_tokens
+        if not has_read and not has_write:
+            f.warn("tokens", f"endpoint {host!r} has no token — it will run closed")
+            continue
+        if has_write and not has_read:
+            # Least-privilege rationale — identical wording/reasoning to the Warden's
+            # Step 02 warning (config_load._warn_closed_endpoints): a write token is
+            # never used as a read fallback, so this endpoint is closed until a
+            # read-scoped token exists.
             f.warn(
                 "tokens",
-                "write token set but GITLAB_MODE=read-only — it will be ignored",
+                f"endpoint {host!r} has a write token but no read token — it will "
+                "run closed (least privilege: add a read-scoped token to "
+                "read_tokens for this host)",
             )
-        f.ok("tokens", "read token is set")
-        _probe_gitlab_tokens(root, env, f, [("read", "gitlab_read_token")])
-        return
+            continue
+        f.ok(
+            "tokens",
+            f"endpoint {host!r}: {'read-write' if has_write else 'read-only'} token set",
+        )
 
-    # read-write: current behaviour (both required, probe both)
-    missing = []
-    for filename, _, desc in SECRETS:
-        val = _read_token(filename)
-        if not val:
-            f.bad("tokens", f"{filename} is empty", "run `catraz init`")
-            missing.append(filename)
-    if missing:
-        return
-    f.ok("tokens", "both GitLab tokens are set")
-    _probe_gitlab_tokens(
-        root, env, f, [("read", "gitlab_read_token"), ("write", "gitlab_write_token")]
-    )
-    _probe_write_user_read(root, env, f)
+    _probe_gitlab_tokens(endpoints, read_tokens, write_tokens, f)
 
 
 def _gitlab_get(base: str, path: str, token: str, timeout: int = 5) -> dict[str, Any]:
@@ -255,82 +345,83 @@ def _gitlab_get(base: str, path: str, token: str, timeout: int = 5) -> dict[str,
 
 
 def _probe_gitlab_tokens(
-    root: Path,
-    env: dict[str, str],
+    endpoints: list[dict[str, str]],
+    read_tokens: dict[str, str],
+    write_tokens: dict[str, str],
     f: Findings,
-    tokens: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Best-effort online probe (P1 roast fix): catch expired/swapped/wrong-scope
-    tokens. Degrades silently to 'set/not set' when the host can't reach GitLab.
+    """Best-effort online probe, per configured endpoint token (lifted from the
+    old two-fixed-token probe, §6 point 3): catch expired/swapped/wrong-scope
+    tokens, one host at a time. Degrades silently to "not probed" when a host
+    can't be reached — never a hard failure.
 
-    tokens: list of (label, filename) pairs to probe. Defaults to both tokens.
+    Only ``type = "gitlab"`` endpoints have a defined REST surface to probe
+    (``personal_access_tokens/self``, ``/user``); ``plain`` endpoints are
+    git-smart-HTTP-only and are not probed online — the token-presence checks
+    in :func:`check_tokens` already cover them.
     """
-    base = env.get("GITLAB_URL", "https://gitlab.com")
-    secrets_dir = root / ".catraz" / "secrets"
+    for endpoint in endpoints:
+        if endpoint.get("type") != "gitlab":
+            continue
+        host = endpoint["host"]
+        base = f"https://{host}"
+        read_t = read_tokens.get(host, "")
+        write_t = write_tokens.get(host, "")
 
-    def _read_secret(filename: str) -> str:
-        p = secrets_dir / filename
-        try:
-            return p.read_text(encoding="utf-8").strip() if p.exists() else ""
-        except OSError:
-            return ""
+        if read_t and write_t and read_t == write_t:
+            f.warn("tokens", f"{host}: READ and WRITE token are identical — likely a paste mistake")
 
-    if tokens is None:
-        tokens = [("read", "gitlab_read_token"), ("write", "gitlab_write_token")]
-
-    token_values = [(label, _read_secret(filename)) for label, filename in tokens]
-
-    # Warn if read and write are identical (only meaningful when both are probed).
-    probed_labels = {label: val for label, val in token_values}
-    read_t = probed_labels.get("read", "")
-    write_t = probed_labels.get("write", "")
-    if read_t and write_t and read_t == write_t:
-        f.warn("tokens", "READ and WRITE token are identical — likely a paste mistake")
-
-    for label, token in token_values:
-        try:
-            me = _gitlab_get(base, "/api/v4/personal_access_tokens/self", token)
-        except urllib.error.HTTPError as e:
-            if e.code == 401:  # GitLab's unambiguous "this token is invalid/expired"
-                f.bad(
+        for label, token in (("read", read_t), ("write", write_t)):
+            if not token:
+                continue
+            try:
+                me = _gitlab_get(base, "/api/v4/personal_access_tokens/self", token)
+            except urllib.error.HTTPError as e:
+                if e.code == 401:  # GitLab's unambiguous "this token is invalid/expired"
+                    f.bad(
+                        "tokens",
+                        f"{host}: {label} token rejected (401)",
+                        "rotate the token — it's invalid or expired",
+                    )
+                else:
+                    # 403/407/5xx etc. can be the proxy or a scope quirk → don't over-claim.
+                    f.warn(
+                        "tokens",
+                        f"{host}: {label} token not probed (HTTP {e.code}) — online check "
+                        "skipped (likely because you chose a fine-grained scope)",
+                    )
+                continue
+            except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+                f.warn(
                     "tokens",
-                    f"{label} token rejected by {base} (401)",
-                    "rotate the token — it's invalid or expired",
+                    f"{host}: {label} token not probed ({type(e).__name__}) — offline, "
+                    "check skipped",
                 )
                 continue
-            # 403/407/5xx etc. can be the proxy or a scope quirk → don't over-claim.
-            f.warn(
-                "tokens",
-                f"{label} token not probed (HTTP {e.code}) — online check skipped (likely because you chose a fine-grained scope)",
-            )
-            return
-        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
-            f.warn(
-                "tokens",
-                f"{label} token not probed ({type(e).__name__}) — offline, check skipped",
-            )
-            return  # host is offline/blocked; don't spam the other token
-        scopes = me.get("scopes", [])
-        active = me.get("active", True)
-        if not active:
-            f.bad("tokens", f"{label} token is inactive/revoked", "rotate the token")
-            continue
-        f.ok("tokens", f"{label} token valid (scopes: {', '.join(scopes) or '∅'})")
-        if label == "read" and "api" in scopes:
-            f.warn(
-                "tokens",
-                "READ token carries the write 'api' scope — too broad (R6)",
-                "issue a read-only token (read_api, read_repository)",
-            )
-        if label == "write" and "api" not in scopes:
-            f.bad(
-                "tokens",
-                "WRITE token lacks the 'api' scope — pushes will fail",
-                "issue a token with the 'api' scope",
-            )
+            scopes = me.get("scopes", [])
+            active = me.get("active", True)
+            if not active:
+                f.bad("tokens", f"{host}: {label} token is inactive/revoked", "rotate the token")
+                continue
+            f.ok("tokens", f"{host}: {label} token valid (scopes: {', '.join(scopes) or '∅'})")
+            if label == "read" and "api" in scopes:
+                f.warn(
+                    "tokens",
+                    f"{host}: READ token carries the write 'api' scope — too broad (R6)",
+                    "issue a read-only token (read_api, read_repository)",
+                )
+            if label == "write" and "api" not in scopes:
+                f.bad(
+                    "tokens",
+                    f"{host}: WRITE token lacks the 'api' scope — pushes will fail",
+                    "issue a token with the 'api' scope",
+                )
+
+        if write_t:
+            _probe_write_user_read(host, base, write_t, f)
 
 
-def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None:
+def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> None:
     """The warden resolves its service-account id via `GET /user` with the WRITE
     token, and needs that id to enforce MR ownership (R3: comment / edit / close
     only your own MRs). Fine-grained PATs omit the **User: Read** permission by
@@ -338,17 +429,13 @@ def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None
     every ownership-gated write is denied R3 — while MR *creation* still works
     (it only checks the branch prefix). That asymmetry is a silent runtime trap;
     probe it explicitly so it surfaces at setup. Degrades quietly when offline."""
-    base = env.get("GITLAB_URL", "https://gitlab.com")
-    token = _read_secret_file(root, "gitlab_write_token")
-    if not token:
-        return
     try:
         me = _gitlab_get(base, "/api/v4/user", token)
     except urllib.error.HTTPError as e:
         if e.code == 403:
             f.bad(
                 "tokens",
-                "WRITE token cannot read its own user (GET /user → 403)",
+                f"{host}: WRITE token cannot read its own user (GET /user → 403)",
                 "the warden needs this to resolve its service account and enforce MR "
                 "ownership (R3) — comments and MR edits will be denied. Grant the token "
                 "the 'User: Read' (read_user) permission, or use a classic api-scope PAT",
@@ -356,31 +443,33 @@ def _probe_write_user_read(root: Path, env: dict[str, str], f: Findings) -> None
         elif e.code == 401:
             f.bad(
                 "tokens",
-                "WRITE token rejected on GET /user (401)",
+                f"{host}: WRITE token rejected on GET /user (401)",
                 "rotate the token — it's invalid or expired",
             )
         else:
             f.warn(
                 "tokens",
-                f"WRITE token GET /user not probed (HTTP {e.code}) — online check skipped",
+                f"{host}: WRITE token GET /user not probed (HTTP {e.code}) — online check skipped",
             )
         return
     except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
         f.warn(
             "tokens",
-            f"WRITE token GET /user not probed ({type(e).__name__}) — offline, check skipped",
+            f"{host}: WRITE token GET /user not probed ({type(e).__name__}) — offline, "
+            "check skipped",
         )
         return
     uid = me.get("id")
     if uid is not None:
         f.ok(
             "tokens",
-            f"WRITE token resolves its service account (GET /user → @{me.get('username')}, id {uid})",
+            f"{host}: WRITE token resolves its service account (GET /user → "
+            f"@{me.get('username')}, id {uid})",
         )
     else:
         f.warn(
             "tokens",
-            "WRITE token GET /user returned no id — MR ownership checks (R3) may fail",
+            f"{host}: WRITE token GET /user returned no id — MR ownership checks (R3) may fail",
         )
 
 
@@ -393,7 +482,7 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         return
     from catraz.policy import _resolve_allowed_projects, validate_project
 
-    resolved, source = _resolve_allowed_projects(root, env)
+    resolved, source = _resolve_allowed_projects(root)
     if not resolved:
         f.warn(
             "policy",
@@ -676,7 +765,11 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     ]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
-    secret_files = [f for f, _, _ in SECRETS]
+    # `read_tokens`/`write_tokens` (§4.1, §6): the grouped, multi-endpoint token
+    # files `doctor`/the Warden read `host -> token` from. Scaffolded unconditionally
+    # (like the legacy per-token SECRETS below) so `catraz init` always leaves a
+    # parseable, empty pair behind, mode 0600, ready for `<host> <token>` lines.
+    secret_files = ["read_tokens", "write_tokens"] + [f for f, _, _ in SECRETS]
     if mode == "api_key":
         secret_files.append("anthropic_api_key")
     for filename in secret_files:

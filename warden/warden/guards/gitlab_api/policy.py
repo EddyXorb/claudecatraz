@@ -129,7 +129,12 @@ def decide_scope(intent: ApiIntent, match: Recognizer, state: StateView, cfg: Co
         if denied is not None:
             return denied
 
-    quota = _quota_check(match, state, cfg)
+    rules = cfg.effective_rules(intent.host)  # step 04: per-endpoint quota ceiling
+    max_open_mrs, max_writes_per_hour = rules.max_open_mrs, rules.max_writes_per_hour
+    assert max_open_mrs is not None and max_writes_per_hour is not None, (
+        "effective_rules always resolves every field to a concrete built-in default"
+    )
+    quota = _quota_check(match, state, max_open_mrs, max_writes_per_hour)
     if quota is not None:
         return quota
     return Decision(True, match.rule, "ok", TokenKind.WRITE)
@@ -167,13 +172,20 @@ def _branch_namespace_check(
     return Decision(False, R3, "MR source_branch is outside the allowed branch namespace")
 
 
-def _quota_check(ep: Recognizer, state: StateView, cfg: Config) -> Optional[Decision]:
+def _quota_check(
+    ep: Recognizer, state: StateView, max_open_mrs: int, max_writes_per_hour: int
+) -> Optional[Decision]:
+    """``max_open_mrs``/``max_writes_per_hour`` are the endpoint's own resolved
+    ceilings (``Config.effective_rules(intent.host)``, step 04) — see
+    ``guards.git.policy.check_ref``'s docstring for why these are plain ints,
+    never a global ``Config`` field nor a raw (``Optional``-fielded)
+    ``GitRules``."""
     if state.locked:  # Fail-safe: never "empty = free"
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
-    if state.writes_last_hour >= cfg.max_writes_per_hour:
-        return Decision(False, R5, f"rate limit reached ({cfg.max_writes_per_hour}/h)")
-    if ep.kind == EndpointKind.MR and state.open_mrs >= cfg.max_open_mrs:
-        return Decision(False, R5, f"max open MRs reached ({cfg.max_open_mrs})")
+    if state.writes_last_hour >= max_writes_per_hour:
+        return Decision(False, R5, f"rate limit reached ({max_writes_per_hour}/h)")
+    if ep.kind == EndpointKind.MR and state.open_mrs >= max_open_mrs:
+        return Decision(False, R5, f"max open MRs reached ({max_open_mrs})")
     return None
 
 

@@ -19,8 +19,9 @@ import argparse
 import importlib.util
 import os
 import sys
+import tomllib
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent_contract import AgentAdapter, InstructionContext, Secrets  # noqa: E402
@@ -116,18 +117,36 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
     dest.write_text(content)
 
 
+def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:
+    """Best-effort ``branch_prefixes`` (or the legacy scalar ``branch_prefix``)
+    read from the mounted warden.toml, for the rendered instructions' example
+    only. A missing/unreadable/malformed file degrades to the ``claude/``
+    default rather than crashing the entrypoint before the agent even
+    starts."""
+    try:
+        data: dict[str, Any] = tomllib.loads(warden_toml_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return ("claude/",)
+    val = data.get("branch_prefixes")
+    if isinstance(val, list) and val and all(isinstance(p, str) for p in val):
+        return tuple(val)
+    scalar = data.get("branch_prefix")
+    if isinstance(scalar, str) and scalar:
+        return (scalar,)
+    return ("claude/",)
+
+
 def _instruction_context() -> InstructionContext:
-    # "claude/" is only the fallback when WARDEN_BRANCH_PREFIX is unset AND
-    # warden.toml can't be read from here — the same justified default-value
-    # residue as the warden's own `branch_prefixes` default (§06-migration.md
-    # Schritt 6): a namespace default, not an agent-identity check.
-    prefixes = tuple(
-        p.strip() for p in (os.environ.get("WARDEN_BRANCH_PREFIX") or "").split(",") if p.strip()
-    ) or ("claude/",)
+    warden_toml_path = Path("/etc/catraz/warden.toml")
     return InstructionContext(
-        forge_rest_base=os.environ.get("WARDEN_REST_URL", "http://gitlab-warden:8080/api/v4"),
-        branch_prefixes=prefixes,
-        warden_toml_path=Path("/etc/catraz/warden.toml"),
+        # A generic per-host RULE (§1.2), not one concrete URL: "<host>" is a
+        # literal placeholder the agent substitutes with whichever git host it
+        # is actually talking to — the same rule holds for every configured
+        # endpoint, so no host enumeration/rendering is needed here at all.
+        # The Warden's own container name never appears (§07 "Nicht tun").
+        forge_rest_base=os.environ.get("WARDEN_REST_URL", "http://<host>:8080/api/v4"),
+        branch_prefixes=_read_branch_prefixes(warden_toml_path),
+        warden_toml_path=warden_toml_path,
     )
 
 

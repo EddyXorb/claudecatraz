@@ -48,8 +48,8 @@ def _mock_projects_ok(router):
 
 async def test_reconcile_all_unlocks_every_guard_on_full_success(cfg, respx_router):
     ctx = _fresh_ctx(cfg)
-    assert _git(ctx).state_view().locked is True
-    assert _api(ctx).state_view().locked is True
+    assert _git(ctx).state_view("gitlab.example").locked is True
+    assert _api(ctx).state_view("gitlab.example").locked is True
 
     _mock_branches_ok(respx_router)
     _mock_projects_ok(respx_router)
@@ -60,8 +60,8 @@ async def test_reconcile_all_unlocks_every_guard_on_full_success(cfg, respx_rout
     ok = await ctx.reconcile_all()
 
     assert ok is True
-    assert _git(ctx).state_view().locked is False
-    assert _api(ctx).state_view().locked is False
+    assert _git(ctx).state_view("gitlab.example").locked is False
+    assert _api(ctx).state_view("gitlab.example").locked is False
     await ctx.router.aclose()
 
 
@@ -81,22 +81,24 @@ async def test_one_guards_permanent_failure_does_not_block_the_others(cfg, respx
     ok = await ctx.reconcile_all()
 
     assert ok is False  # aggregate: not everything reconciled
-    assert _git(ctx).state_view().locked is False  # git serves — unaffected
-    assert _api(ctx).state_view().locked is True  # only the broken guard denies
+    assert _git(ctx).state_view("gitlab.example").locked is False  # git serves — unaffected
+    assert _api(ctx).state_view("gitlab.example").locked is True  # only the broken guard denies
     await ctx.router.aclose()
 
 
-async def test_reconcile_all_unlocks_in_off_mode(respx_router):
-    # off mode makes no upstream call; every guard unlocks itself, so the warden
-    # opens the port and then denies ops.
-    ctx = _fresh_ctx(Config(gitlab_mode="off"))
+async def test_reconcile_all_unlocks_with_no_endpoints_configured(respx_router):
+    # No [[git.endpoint]] configured (the former "off" mode) makes no upstream
+    # call — the shared host×project loop is a no-op over an empty
+    # `effective_hosts` — so every guard unlocks itself, and the warden opens
+    # the port and then denies ops.
+    ctx = _fresh_ctx(Config())
 
     # No mock registered — any upstream call would raise respx.MockTransportError.
     ok = await ctx.reconcile_all()
 
     assert ok is True
-    assert _git(ctx).state_view().locked is False
-    assert _api(ctx).state_view().locked is False
+    assert _git(ctx).state_view("gitlab.example").locked is False
+    assert _api(ctx).state_view("gitlab.example").locked is False
     await ctx.router.aclose()
 
 
@@ -111,9 +113,11 @@ async def test_a_later_transient_failure_does_not_re_lock_a_reconciled_guard(cfg
 
     mrs.mock(return_value=httpx.Response(200, json=[]))
     assert await ctx.reconcile_all() is True
-    assert _api(ctx).state_view().locked is False
+    assert _api(ctx).state_view("gitlab.example").locked is False
 
     mrs.mock(return_value=httpx.Response(500))  # transient blip on a later cycle
     assert await ctx.reconcile_all() is False
-    assert _api(ctx).state_view().locked is False  # stays unlocked — latch not un-set
+    assert (
+        _api(ctx).state_view("gitlab.example").locked is False
+    )  # stays unlocked — latch not un-set
     await ctx.router.aclose()

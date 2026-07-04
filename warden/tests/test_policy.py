@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.model import Decision, StateView, TokenKind
 from warden.guards.git import policy as git_policy
 from warden.guards.git.intent import GitIntent
@@ -23,6 +23,13 @@ from warden.guards.gitlab_api.intent import ApiIntent
 
 ZERO = "0" * 40
 SHA = "a" * 40
+
+# Every intent below carries this Host (§2/step 03: `host_gate` is a real
+# kernel gate now, so a pure-policy test needs an actually-open endpoint, not
+# just an empty/no-op allowlist) — one constant so fixtures and intents agree.
+HOST = "gitlab.example"
+_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
+_OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
 
 
 def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Decision:
@@ -36,8 +43,8 @@ def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Deci
 def cfg() -> Config:
     return Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
 
 
@@ -47,14 +54,14 @@ def multi_prefix_cfg() -> Config:
     return Config(
         branch_prefixes=("claude/", "bot/"),
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
 
 
 def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ApiIntent(_project=project, _method=method, path=path, fields=fields)
+    return ApiIntent(_project=project, _method=method, path=path, fields=fields, _host=HOST)
 
 
 # --- R1 / R6 -------------------------------------------------------------------
@@ -139,7 +146,9 @@ def test_b1_unknown_projectless_endpoint_default_denied(cfg):
 
 
 def test_r6_project_not_in_allowlist_denied(cfg):
-    req = ApiIntent(_project="other/secret", _method="GET", path="/projects/other%2Fsecret")
+    req = ApiIntent(
+        _project="other/secret", _method="GET", path="/projects/other%2Fsecret", _host=HOST
+    )
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R6"
 
@@ -154,6 +163,7 @@ def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
         _method="POST",
         path="/projects/other%2Fsecret/issues",
         fields={"title": "x"},
+        _host=HOST,
     )
     d = api_policy.full_decide(req, StateView(), cfg, effective)
     assert not d.allow and d.rule == "R6"
@@ -289,6 +299,7 @@ def _git(*cmds) -> GitIntent:
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(*c) for c in cmds],
     )
 
@@ -367,7 +378,15 @@ def test_git_multiref_quota_accounts_within_batch(cfg):
 
 def test_git_tag_push_rejected_with_tag_message(cfg):
     # B3 fix: a tag push is an irreversible verb (M4) — R4, not R2.
-    d = check_ref(RefCommand(ZERO, SHA, "refs/tags/claude/v1"), StateView(), cfg)
+    rules = cfg.effective_rules(HOST)
+    assert rules.max_open_branches is not None and rules.max_writes_per_hour is not None
+    d = check_ref(
+        RefCommand(ZERO, SHA, "refs/tags/claude/v1"),
+        StateView(),
+        cfg,
+        rules.max_open_branches,
+        rules.max_writes_per_hour,
+    )
     assert not d.allow and d.rule == "R4" and "tag" in d.reason
 
 
@@ -377,6 +396,7 @@ def test_git_project_not_allowlisted_denied(cfg):
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
     d = decide(req, StateView(), cfg)
@@ -404,28 +424,29 @@ def test_mr_update_without_merge_intent_allowed(cfg):
 # own Intent type, and an unrouted path never reaches any decide at all.
 
 
-# --- R0: GITLAB_MODE gates -------------------------------------------------------
+# --- R6/R0: per-host access mode (the former GITLAB_MODE gates, step 05) -------
 
 
-def test_off_denies_reads_and_writes():
-    """GITLAB_MODE=off: both reads and writes are denied (R0) — no GitLab traffic at all."""
-    cfg_off = Config(
+def test_closed_host_denies_reads_and_writes():
+    """A host with no usable read token is `closed` (the former GITLAB_MODE=off):
+    both reads and writes are denied — by `host_gate`'s R6, before
+    `mode_gate_writes` (or any guard-specific decide) ever runs."""
+    cfg_closed = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
-        gitlab_mode="off",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials={},  # no tokens at all for this host -> closed
     )
     # API read
-    d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_off)
-    assert not d.allow and d.rule == "R0" and "off" in d.reason
+    d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_closed)
+    assert not d.allow and d.rule == "R6"
 
     # API write
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
         StateView(),
-        cfg_off,
+        cfg_closed,
     )
-    assert not d.allow and d.rule == "R0"
+    assert not d.allow and d.rule == "R6"
 
     # git push
     d = decide(
@@ -434,21 +455,23 @@ def test_off_denies_reads_and_writes():
             operation="receive-pack",
             _method="push",
             _writes=True,
+            _host=HOST,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),
-        cfg_off,
+        cfg_closed,
     )
-    assert not d.allow and d.rule == "R0"
+    assert not d.allow and d.rule == "R6"
 
 
-def test_read_only_denies_writes_allows_reads():
-    """GITLAB_MODE=read-only: reads pass (R1), writes are denied (R0)."""
+def test_read_only_host_denies_writes_allows_reads():
+    """A host with a read token but no write token is `read-only` (the former
+    GITLAB_MODE=read-only): reads pass (R1), writes are denied (R0) by the
+    per-host `mode_gate_writes`."""
     cfg_ro = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="",
-        gitlab_mode="read-only",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials={HOST: HostCredentials(read_token="r")},
     )
     # API read: allowed
     d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_ro)
@@ -469,6 +492,7 @@ def test_read_only_denies_writes_allows_reads():
             operation="receive-pack",
             _method="push",
             _writes=True,
+            _host=HOST,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),

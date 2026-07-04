@@ -10,13 +10,16 @@ and the policy could wrongly ``allow`` further writes.
 from __future__ import annotations
 
 import httpx
+import respx
 
 from warden.core.audit import AuditLog
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
 from warden.guards.git.guard import GitGuard
 from warden.guards.git.reconcile import reconcile_branches
+
+HOST = "gitlab.example"
 
 
 def _git_guard(cfg, state) -> GitGuard:
@@ -41,7 +44,9 @@ async def test_reconcile_branches_follows_every_page(cfg, state, respx_router):
     ok = await reconcile_branches(cfg, guard.router, guard.branch_state)
 
     assert ok is True
-    assert guard.branch_state.open_branches() == 2  # both pages, prefix-filtered ("main" dropped)
+    assert (
+        guard.branch_state.open_branches(HOST) == 2
+    )  # both pages, prefix-filtered ("main" dropped)
     assert "page=1" in str(route.calls[0].request.url)
     assert "page=2" in str(route.calls[1].request.url)
     await guard.router.aclose()
@@ -53,7 +58,7 @@ async def test_reconcile_populates_branch_counter_and_unlocks_own_view(cfg, resp
     # cross-guard isolation the per-guard lock guarantees).
     state = State(":memory:")
     guard = _git_guard(cfg, state)
-    assert guard.state_view().locked is True  # locked until this guard's first success
+    assert guard.state_view(HOST).locked is True  # locked until this guard's first success
 
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
         return_value=httpx.Response(200, json=[{"name": "claude/a"}, {"name": "claude/b"}])
@@ -62,7 +67,7 @@ async def test_reconcile_populates_branch_counter_and_unlocks_own_view(cfg, resp
     ok = await guard.reconcile()
 
     assert ok is True
-    view = guard.state_view()
+    view = guard.state_view(HOST)
     assert view.locked is False
     assert view.open_branches == 2
     await guard.router.aclose()
@@ -80,20 +85,60 @@ async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
     ok = await guard.reconcile()
 
     assert ok is False
-    assert guard.state_view().locked is True
+    assert guard.state_view(HOST).locked is True
     await guard.router.aclose()
 
 
-async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
-    """reconcile() must make NO upstream call when GITLAB_MODE=off, and unlock its own view."""
-    cfg_off = Config(gitlab_mode="off")
+async def test_reconcile_no_upstream_call_with_no_endpoints_configured(respx_router):
+    """reconcile() must make NO upstream call when no [[git.endpoint]] is configured
+    (the former GITLAB_MODE=off) — the shared host×project loop is simply a no-op
+    over an empty ``effective_hosts`` — and it must still unlock its own view."""
+    cfg_off = Config()
     state = State(":memory:")
     guard = _git_guard(cfg_off, state)
-    assert guard.state_view().locked is True  # starts locked
+    assert guard.state_view(HOST).locked is True  # starts locked
 
     # No mock registered — any upstream call raises respx.MockTransportError.
     ok = await guard.reconcile()
 
     assert ok is True
-    assert guard.state_view().locked is False  # unlocked so the warden can serve (and deny)
+    assert guard.state_view(HOST).locked is False  # unlocked so the warden can serve (and deny)
     await guard.router.aclose()
+
+
+# --- per-endpoint reconcile skips closed endpoints (step 04) -------------------
+
+
+async def test_reconcile_branches_skips_a_closed_endpoint():
+    """reconcile_branches iterates cfg.git_endpoints directly and must never
+    even attempt an upstream call for a closed one (no usable read
+    credential) — only the open endpoint's branches are listed/counted."""
+    open_host, closed_host = "open.example", "closed.example"
+    cfg = Config(
+        allowed_projects=("group/proj",),
+        git_endpoints=(
+            GitEndpoint(host=open_host, type="gitlab"),
+            GitEndpoint(host=closed_host, type="gitlab"),
+        ),
+        git_credentials={open_host: HostCredentials(read_token="r", write_token="w")},
+    )
+    assert cfg.access_mode(closed_host) == "closed"
+    router = UpstreamRouter(cfg)
+    branch_state = _git_guard(cfg, State(":memory:")).branch_state
+
+    # Two distinct hosts, neither the shared `respx_router` fixture's pinned
+    # base_url — a bare respx mock, exactly like test_host_routing.py's own
+    # multi-host tests. No mock for closed.example — any call to it would
+    # raise respx.MockTransportError, failing this test loudly if reconcile
+    # ever attempted to reach it.
+    with respx.mock(assert_all_called=False) as router_mock:
+        router_mock.route(
+            method="GET", url__regex=r"https://open\.example/api/v4/.*/branches.*"
+        ).mock(return_value=httpx.Response(200, json=[{"name": "claude/a"}]))
+
+        ok = await reconcile_branches(cfg, router, branch_state)
+
+    assert ok is True
+    assert branch_state.open_branches(open_host) == 1
+    assert branch_state.open_branches(closed_host) == 0
+    await router.aclose()

@@ -13,13 +13,16 @@ and the policy could wrongly ``allow`` further writes.
 from __future__ import annotations
 
 import httpx
+import respx
 
 from warden.core.audit import AuditLog
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
 from warden.guards.gitlab_api.guard import ApiGuard
 from warden.guards.gitlab_api.reconcile import reconcile_mrs
+
+HOST = "gitlab.example"
 
 
 def _api_guard(cfg) -> ApiGuard:
@@ -70,7 +73,7 @@ async def test_reconcile_mrs_paginates_and_filters_by_namespace_author_independe
 
     assert ok is True
     assert resolved_ids == {"12345"}
-    assert guard.mr_state.open_mrs() == 2  # both pages, namespace-filtered only
+    assert guard.mr_state.open_mrs(HOST) == 2  # both pages, namespace-filtered only
 
 
 # --- reconcile (W8.2 / §6.11) --------------------------------------------------
@@ -79,7 +82,7 @@ async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_rout
     # per-guard view — independent of the git guard (see test_reconcile_all.py for
     # the cross-guard isolation the per-guard lock guarantees).
     guard = _api_guard(cfg)
-    assert guard.state_view().locked is True  # locked until this guard's first success
+    assert guard.state_view(HOST).locked is True  # locked until this guard's first success
 
     respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
         return_value=httpx.Response(200, json={"id": 12345})
@@ -93,7 +96,7 @@ async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_rout
     ok = await guard.reconcile()
 
     assert ok is True
-    view = guard.state_view()
+    view = guard.state_view(HOST)
     assert view.locked is False
     assert view.open_mrs == 1
     # The numeric-id alias was resolved and added to the guard's alias set
@@ -116,20 +119,68 @@ async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
     ok = await guard.reconcile()
 
     assert ok is False
-    assert guard.state_view().locked is True
+    assert guard.state_view(HOST).locked is True
 
 
-# --- GITLAB_MODE gates (mode-enforcement, step 6/7) ----------------------------
+# --- no endpoints configured (the former GITLAB_MODE gates, step 6/7) ---------
 
 
-async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
-    """reconcile() must make NO upstream call when GITLAB_MODE=off, and unlock its own view."""
-    cfg_off = Config(gitlab_mode="off")
+async def test_reconcile_no_upstream_call_with_no_endpoints_configured(respx_router):
+    """reconcile() must make NO upstream call when no [[git.endpoint]] is configured
+    (the former GITLAB_MODE=off) — the shared host×project loop is simply a no-op
+    over an empty ``effective_hosts`` — and it must still unlock its own view."""
+    cfg_off = Config()
     guard = _api_guard(cfg_off)
-    assert guard.state_view().locked is True  # starts locked
+    assert guard.state_view(HOST).locked is True  # starts locked
 
     # No mock registered — any upstream call raises respx.MockTransportError.
     ok = await guard.reconcile()
 
     assert ok is True
-    assert guard.state_view().locked is False  # unlocked so the warden can serve (and deny)
+    assert guard.state_view(HOST).locked is False  # unlocked so the warden can serve (and deny)
+
+
+# --- per-endpoint reconcile skips closed endpoints (step 04) -------------------
+
+
+async def test_reconcile_mrs_skips_a_closed_endpoint():
+    """reconcile_mrs iterates cfg.git_endpoints directly and must never even
+    attempt an upstream call for a closed one (no usable read credential) —
+    only the open endpoint's MRs are listed/counted."""
+    open_host, closed_host = "open.example", "closed.example"
+    cfg = Config(
+        allowed_projects=("group/proj",),
+        git_endpoints=(
+            GitEndpoint(host=open_host, type="gitlab"),
+            GitEndpoint(host=closed_host, type="gitlab"),
+        ),
+        git_credentials={open_host: HostCredentials(read_token="r", write_token="w")},
+    )
+    assert cfg.access_mode(closed_host) == "closed"
+    router = UpstreamRouter(cfg)
+    mr_state = _api_guard(cfg).mr_state
+
+    # Two distinct hosts, neither the shared `respx_router` fixture's pinned
+    # base_url — a bare respx mock, exactly like test_host_routing.py's own
+    # multi-host tests. No mock for closed.example — any call to it would
+    # raise respx.MockTransportError, failing this test loudly if reconcile
+    # ever attempted to reach it.
+    with respx.mock(assert_all_called=False) as router_mock:
+        router_mock.route(
+            method="GET", url__regex=r"https://open\.example/api/v4/projects/[^/?]+$"
+        ).mock(return_value=httpx.Response(200, json={"id": 1}))
+        router_mock.route(
+            method="GET", url__regex=r"https://open\.example/api/v4/.*/merge_requests\?.*"
+        ).mock(
+            return_value=httpx.Response(
+                200, json=[{"iid": 1, "state": "opened", "source_branch": "claude/x"}]
+            )
+        )
+
+        ok, resolved_ids = await reconcile_mrs(cfg, router, mr_state)
+
+    assert ok is True
+    assert resolved_ids == {"1"}
+    assert mr_state.open_mrs(open_host) == 1
+    assert mr_state.open_mrs(closed_host) == 0
+    await router.aclose()

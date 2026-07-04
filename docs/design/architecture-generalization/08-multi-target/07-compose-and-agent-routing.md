@@ -69,3 +69,58 @@ DNS-Alias, `insteadOf`-Schema-Rewrite, gerenderte REST-Basis und `no_proxy` deck
 Endpoint-Hosts ab; die Secret-Mounts sind `read_tokens`/`write_tokens`; alte
 Policy-Env/`GITLAB_*` aus compose/`.env` entfernt; `warden.toml`-Asset im neuen Schema;
 Tests grün.
+
+## Status
+
+✅ Erledigt. Ein paar nicht-offensichtliche Entscheidungen, die vom wörtlichen Text
+abweichen bzw. ihn konkretisieren:
+
+- **Generische REST-Regel statt Host-Enumeration.** §1.2 verlangt "eine generische Regel
+  pro Host, ohne Warden-Namen zu leaken" — umgesetzt als **ein einziger, literaler
+  Platzhalter-String** `http://<host>:8080/api/v4` (`WARDEN_REST_URL` in
+  `docker-compose.yml`, Fallback in `entrypoint.py::_instruction_context`), den
+  `render_instructions` unverändert per `str.replace` einsetzt. `<host>` ist wörtlich zu
+  lesen — der Agent ersetzt es selbst durch den Host seines jeweiligen git-Remotes. Das
+  spart jede Host-Enumeration beim Rendern (die Regel ändert sich nie, egal wie viele
+  Endpoints konfiguriert sind) und hält `adapter.py` komplett unverändert; nur der
+  Text in `AGENT.md.tmpl` erklärt die Substitution. `agent_contract.py` dokumentiert das
+  jetzt explizit am `forge_rest_base`-Feld.
+- **git-Routing liest `warden.toml` selbst, kein neuer Env-Pfad.** `git_routing.py` parst
+  die Host-Liste direkt aus dem ohnehin schon gemounteten `/etc/catraz/warden.toml`
+  (derselbe Mount, den `_instruction_context` für die Policy-Anzeige nutzt) statt über
+  eine neue Env-Variable — ein Vertragsbruch weniger zwischen Compose und Container.
+  `configure_git_warden()` nimmt optional einen Pfad entgegen (Tests), Default ist der
+  reale Container-Pfad.
+- **DNS-Alias + `no_proxy` via generierte Compose-Fragment-Datei, nicht Env-Interpolation.**
+  Da Compose selbst keine variable-lange Host-Liste per `${VAR}`-Interpolation abbilden
+  kann, rendert `catraz.compose.write_hosts_fragment()` bei jedem `up`/`run`/`shell`/`down`
+  (`generate_resolved`, render=True-Pfad) eine kleine `.catraz/compose.hosts.yml` aus den
+  `[[git.endpoint]]`-Hosts — Alias auf `gitlab-warden`s `agent-net`-Mitgliedschaft +
+  `no_proxy`/`NO_PROXY` fürs Agent-Environment — und hängt sie als zusätzliche `-f`-Schicht
+  an `_source_cmd` an (existenzgeprüft wie das schon vorhandene
+  `compose.override.yml`, davor einsortiert, damit der User-Override weiter das letzte
+  Wort hat). `_source_cmd` selbst bleibt seiteneffektfrei (schreibt nichts) — das erhält
+  die dokumentierte "render=False: keine Seiteneffekte"-Garantie von `prepare()` für die
+  reinen Status/Logs-Pfade. **Nicht durch einen echten Compose-Lauf verifiziert** (kein
+  Docker in dieser Sandbox) — die Annahme ist, dass Compose eine Kurzform-`networks:
+  [agent-net, …]` im Basis-File und eine Langform `networks: {agent-net: {aliases:
+  [...]}}` im Override-File pro Netzwerkname deep-merged (dokumentiertes Compose-Verhalten).
+  Echte Erreichbarkeit prüft wie geplant Schritt 08.
+- **`warden.toml`-Asset: Kommentar korrigiert, Top-Level-Keys bewusst nicht angetastet.**
+  Der alte Kommentar ("additive preview, not yet enforced by any guard") war seit
+  Schritt 02–04 schlicht falsch (die Warden-Guards lesen `[[git.endpoint]]` längst) und
+  wurde entsprechend korrigiert. Die Top-Level-Legacy-Keys (`branch_prefixes`,
+  `allowed_projects`, `max_open_mrs`, …) blieben aktiv/unkommentiert stehen: der Wizard
+  (`commands/setup/_wizard_*.py`) schreibt weiterhin dorthin, und
+  `warden/warden/core/config_load.py` liest sie nach wie vor als eigenständigen,
+  domänenweiten Fallback (nicht Teil der `[git.rules]`/`[[git.endpoint]]`-Kaskade) — sie
+  vollständig zu entfernen hätte den Wizard kaputt gemacht, was explizit außerhalb des
+  Scopes dieses Schritts liegt (Schritt 06s eigener Status-Abschnitt hat die
+  Wizard/`doctor.py`-Migration bewusst auf "später" verschoben, nicht auf diesen Schritt).
+- **`doctor.py`/Wizard bewusst unverändert.** `GITLAB_MODE`/`GITLAB_URL` werden aus der
+  `.env`-Vorlage entfernt (§3.5), aber der Wizard schreibt sie weiterhin aktiv in die
+  echte `.catraz/.env` (unverändertes Verhalten, `envfile.set_env_values` hängt fehlende
+  Keys ans Dateiende an — keine Testbrüche). `doctor.check_gitlab`/`_gitlab_mode` bleiben
+  ebenfalls unangetastet. Das ist dieselbe additive Migrationslogik wie in Schritt 06:
+  compose/`.env`-Vorlage sind jetzt auf dem neuen Schema, der Wizard-Cutover ist explizit
+  nicht Teil dieses Schritts.

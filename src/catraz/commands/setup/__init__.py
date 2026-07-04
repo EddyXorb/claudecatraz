@@ -180,7 +180,7 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     warden_toml = cat / "config" / "warden.toml"
 
     if args.yes:
-        _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out, inherited)
+        _wizard_yes(env, env_path, secrets_dir, updates, out, inherited)
     else:
         _wizard_interactive(
             root, env, env_path, secrets_dir, warden_toml, updates, args, out, inherited
@@ -207,7 +207,6 @@ def cmd_sync(root: Path, args: argparse.Namespace, out: Out) -> int:
 def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.policy import (
         _read_toml_allowed_projects,
-        _resolve_allowed_projects,
         merge_allowed,
         set_toml_list,
         validate_project,
@@ -236,11 +235,5 @@ def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
 
     set_toml_list(warden_toml, "allowed_projects", merged)
     out.info(out.green(f"• allowed_projects now: {', '.join(merged)}"))
-
-    if _resolve_allowed_projects(root, load_env(root / ".catraz" / ".env"))[1] == ".env override":
-        out.warn(
-            "the WARDEN_ALLOWED_PROJECTS override (env or .env) currently shadows "
-            "warden.toml — this change won't take effect until that var is cleared"
-        )
     out.info("run `catraz reload` to apply to a running stack")
     return EXIT_OK

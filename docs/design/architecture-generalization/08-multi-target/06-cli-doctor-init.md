@@ -62,3 +62,23 @@ feat(cli): multi-endpoint doctor + init scaffolding
 `doctor` parst die gruppierten Token-Dateien, prüft sie gegen die Endpoints und **warnt**
 (Exit 0) bei allen drei Inkonsistenz-Fällen; `init` scaffoldet die neue Struktur; die alten
 Einzeldatei-Pfade sind weg; Tests grün.
+
+## Status
+
+✅ Erledigt. `doctor`s eigene Prüf-/Probe-Logik (`check_tokens`, `_probe_gitlab_tokens`,
+`_probe_write_user_read`) ist vollständig auf das neue Modell umgestellt — kein Lesen von
+`gitlab_read_token`/`gitlab_write_token` bleibt dort übrig, keine Gnadenfrist nötig, weil
+diese Prüfungen kein laufendes Deployment gaten (`doctor` blockiert ohnehin nie).
+
+Additiv geblieben, bewusst: `src/catraz/assets/compose/docker-compose.yml` mountet die
+beiden alten Dateien nach wie vor 1:1 als Compose-Secrets für den heutigen
+Single-Target-Warden (`GITLAB_READ_TOKEN_FILE`/`GITLAB_WRITE_TOKEN_FILE`); dieser Cutover
+ist explizit `07-compose-and-agent-routing.md`s Aufgabe (§4.1), nicht diese hier. Ein
+sofortiger, ersatzloser Entzug der beiden Dateien aus `_doctor_fix`/dem Wizard hätte jedes
+frische `catraz init` sofort kaputt gemacht (`docker compose up` scheitert ohne die
+gemounteten Quelldateien). Deshalb bleiben `doctor.SECRETS` und die
+Wizard-Dateien (`commands/setup/_wizard_yes.py`, `_wizard_interactive.py`) unverändert, und
+`_doctor_fix` scaffoldet jetzt **zusätzlich** die neuen `read_tokens`/`write_tokens`
+(leer, 0600) — genau wie Schritt 01/02 im Warden-Paket ihre alten Pfade additiv neben den
+neuen stehen ließen, bis der jeweilige Aufrufer (hier: Compose/Wizard, Schritt 07)
+umgehängt ist.
