@@ -48,7 +48,6 @@ ignore = ["ANN401"]  # allow `Any` where a typed shim would only add noise
 [tool.ruff.lint.per-file-ignores]
 # Tests may omit annotations and run long with fixture URLs / assert lines.
 "tests/**" = ["ANN", "E501"]
-"serve_test.py" = ["ANN", "E501"]
 
 [tool.mypy]
 # Type-check the trust boundary strictly; the proxy package must stay fully typed.
