@@ -9,14 +9,16 @@ forge-neutral :mod:`warden.core.transport`.
 
 from __future__ import annotations
 
-import logging
-
 from ...core.config import Config
 from ...core.model import TokenKind
-from ...core.transport import Upstream, UpstreamRouter, get_paginated, project_id
+from ...core.transport import (
+    Upstream,
+    UpstreamRouter,
+    for_each_host_project,
+    get_paginated,
+    project_id,
+)
 from .state import MrState
-
-log = logging.getLogger("warden")
 
 
 async def _resolve_project_id(upstream: Upstream, pid: str) -> str:
@@ -48,25 +50,20 @@ async def reconcile_mrs(
     the host dimension existed. The numeric-id alias set is a plain union
     across hosts (M6's project-id widening does not need to know which host
     an id came from — ``ApiGuard.project_allowed`` only asks "is this id
-    known", never "on which host"). Returns ``(ok, resolved_ids)``. Fail-safe
-    (§6.11): a project whose id resolution or MR listing fails on a given
-    host leaves that ``(host, project)`` row untouched and reports
-    ``ok=False``, so the caller keeps the core lock rather than trusting an
-    undercounted/stale view.
+    known", never "on which host"). Returns ``(ok, resolved_ids)``. The
+    host×project loop and its fail-safe (§6.11) handling live in
+    :func:`~warden.core.transport.for_each_host_project` (shared with the git
+    guard's :func:`~warden.guards.git.reconcile.reconcile_branches`); this
+    function supplies only the id-resolution/MR-listing/replace domain logic.
     """
-    ok = True
     resolved_ids: set[str] = set()
-    for host in cfg.effective_hosts:
-        upstream = router.for_host(host)
-        for project in cfg.allowed_projects:
-            pid = project_id(project)
-            try:
-                numeric_id = await _resolve_project_id(upstream, pid)
-                mrs = await _list_agent_mrs(upstream, cfg, pid)
-            except Exception as exc:  # keep state locked on any failure
-                log.error("api reconcile failed for %s@%s: %s", project, host, exc)
-                ok = False
-                continue
-            resolved_ids.add(numeric_id)
-            mr_state.replace_mrs(host, project, mrs)
+
+    async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
+        pid = project_id(project)
+        numeric_id = await _resolve_project_id(upstream, pid)
+        mrs = await _list_agent_mrs(upstream, cfg, pid)
+        resolved_ids.add(numeric_id)
+        mr_state.replace_mrs(host, project, mrs)
+
+    ok = await for_each_host_project(cfg, router, "api", _reconcile_one)
     return ok, resolved_ids

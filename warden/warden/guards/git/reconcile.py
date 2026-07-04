@@ -7,13 +7,15 @@ never depends on the REST-API guard's own reconcile.
 
 from __future__ import annotations
 
-import logging
-
 from ...core.config import Config
-from ...core.transport import Upstream, UpstreamRouter, get_paginated, project_id
+from ...core.transport import (
+    Upstream,
+    UpstreamRouter,
+    for_each_host_project,
+    get_paginated,
+    project_id,
+)
 from .state import BranchState
-
-log = logging.getLogger("warden")
 
 
 async def _list_agent_branches(upstream: Upstream, cfg: Config, pid: str) -> list[str]:
@@ -30,21 +32,15 @@ async def reconcile_branches(
 
     ``cfg.effective_hosts`` is single-element (the implicit host) when
     multi-target is inactive — identical iteration count/behaviour to before
-    the host dimension existed. Fail-safe (§6.11): a project whose branch
-    listing fails on a given host leaves that ``(host, project)`` counter
-    untouched and the overall result False, so the caller keeps the state
-    locked instead of trusting an undercounted/stale view.
+    the host dimension existed. The host×project loop and its fail-safe
+    (§6.11) handling live in :func:`~warden.core.transport.for_each_host_project`
+    (shared with the REST-API guard's :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs`);
+    this function supplies only the branch-listing/replace domain logic.
     """
-    ok = True
-    for host in cfg.effective_hosts:
-        upstream = router.for_host(host)
-        for project in cfg.allowed_projects:
-            pid = project_id(project)
-            try:
-                branches = await _list_agent_branches(upstream, cfg, pid)
-            except Exception as exc:  # keep state locked on any failure
-                log.error("git reconcile failed for %s@%s: %s", project, host, exc)
-                ok = False
-                continue
-            branch_state.replace_branches(host, project, branches)
-    return ok
+
+    async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
+        pid = project_id(project)
+        branches = await _list_agent_branches(upstream, cfg, pid)
+        branch_state.replace_branches(host, project, branches)
+
+    return await for_each_host_project(cfg, router, "git", _reconcile_one)

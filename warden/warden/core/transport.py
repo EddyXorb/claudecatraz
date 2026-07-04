@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import base64
 import dataclasses
-from typing import Any, AsyncIterator, Optional
+import logging
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 from urllib.parse import quote
 
 import httpx
@@ -20,6 +21,8 @@ from starlette.responses import StreamingResponse
 
 from .config import Config, normalize_project
 from .model import TokenKind
+
+log = logging.getLogger("warden")
 
 # Hop-by-hop headers that must not be forwarded verbatim.
 _DROP_REQUEST_HEADERS = {
@@ -256,3 +259,36 @@ async def get_paginated(upstream: Upstream, path: str) -> list[Any]:
         nxt = resp.headers.get("x-next-page", "")
         page = int(nxt) if nxt else 0
     return items
+
+
+async def for_each_host_project(
+    cfg: Config,
+    router: UpstreamRouter,
+    label: str,
+    fn: Callable[[Upstream, str, str], Awaitable[None]],
+) -> bool:
+    """Shared fail-safe reconcile loop (§6.11, §07 Punkt 8 follow-up): iterate
+    every configured host (``cfg.effective_hosts``) times every allowed
+    project, calling ``fn(upstream, host, project)`` for each combination.
+
+    Forge-neutral on purpose — both the git guard's branch reconcile and the
+    REST-API guard's MR reconcile had their own copy of this exact double
+    loop; this is the one definition, living in ``core`` so neither guard
+    depends on the other to get it (§07 Punkt 6). ``fn`` carries all the
+    domain-specific work (listing + replacing that guard's own state table);
+    a combination whose ``fn`` raises is logged (using ``label`` — e.g.
+    ``"git"``/``"api"`` — to tell the guards' log lines apart) and skipped,
+    never aborting the rest of the loop. Returns True only if every
+    combination completed without raising; False tells the caller to keep its
+    state fail-closed-locked rather than trust an undercounted/stale view.
+    """
+    ok = True
+    for host in cfg.effective_hosts:
+        upstream = router.for_host(host)
+        for project in cfg.allowed_projects:
+            try:
+                await fn(upstream, host, project)
+            except Exception as exc:  # keep state locked on any failure
+                log.error("%s reconcile failed for %s@%s: %s", label, project, host, exc)
+                ok = False
+    return ok
