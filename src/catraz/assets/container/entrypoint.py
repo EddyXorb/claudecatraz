@@ -125,7 +125,12 @@ def _instruction_context() -> InstructionContext:
         p.strip() for p in (os.environ.get("WARDEN_BRANCH_PREFIX") or "").split(",") if p.strip()
     ) or ("claude/",)
     return InstructionContext(
-        forge_rest_base=os.environ.get("WARDEN_REST_URL", "http://gitlab-warden:8080/api/v4"),
+        # A generic per-host RULE (§1.2), not one concrete URL: "<host>" is a
+        # literal placeholder the agent substitutes with whichever git host it
+        # is actually talking to — the same rule holds for every configured
+        # endpoint, so no host enumeration/rendering is needed here at all.
+        # The Warden's own container name never appears (§07 "Nicht tun").
+        forge_rest_base=os.environ.get("WARDEN_REST_URL", "http://<host>:8080/api/v4"),
         branch_prefixes=prefixes,
         warden_toml_path=Path("/etc/catraz/warden.toml"),
     )

@@ -1,8 +1,11 @@
 secrets:
-  gitlab_read_token:
-    file: ${PROJECT_DIR}/.catraz/secrets/gitlab_read_token
-  gitlab_write_token:
-    file: ${PROJECT_DIR}/.catraz/secrets/gitlab_write_token
+  # Grouped, forge-agnostic, one file per capability — `<host> <token>` per
+  # line (§4.1). Adding a host = one line here + one [[git.endpoint]] in
+  # warden.toml, never a compose edit.
+  read_tokens:
+    file: ${PROJECT_DIR}/.catraz/secrets/read_tokens
+  write_tokens:
+    file: ${PROJECT_DIR}/.catraz/secrets/write_tokens
 
 services:
   gitlab-warden:
@@ -14,26 +17,20 @@ services:
       dockerfile: Dockerfile
       args:
         DEV_UID: ${DEV_UID:-1000}
-    secrets: [gitlab_read_token, gitlab_write_token]
+    secrets: [read_tokens, write_tokens]
     environment:
-      # Tokens arrive via compose secrets (file-based, /run/secrets/…) — not env vars.
-      # The warden reads GITLAB_*_TOKEN_FILE first, then falls back to the bare var (11.1).
-      - GITLAB_READ_TOKEN_FILE=/run/secrets/gitlab_read_token
-      - GITLAB_WRITE_TOKEN_FILE=/run/secrets/gitlab_write_token
-      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
-      - GITLAB_MODE=${GITLAB_MODE:-read-write}
+      # Tokens arrive via compose secrets (file-based, /run/secrets/…) — not env
+      # vars. Grouped, host-keyed files (§4.1): the warden resolves each
+      # [[git.endpoint]] host's read/write token from these two files.
+      - READ_TOKENS_FILE=/run/secrets/read_tokens
+      - WRITE_TOKENS_FILE=/run/secrets/write_tokens
       # Admin/Viewer via Unix socket (Commit 2.4) — no subnet/no fixed IP anymore.
       # ADMIN_UDS is the authoritative source of the admin socket path.
       # The host-side CLI path (.catraz/state/warden/run/admin.sock in observe.py/doctor.py)
       # mirrors it by contract (bind-mount: host .catraz/state/warden/run → container /run/warden).
       - ADMIN_UDS=/run/warden/admin.sock
-      # Non-secret policy — SOURCE OF TRUTH is config/warden.toml. The vars below
-      # OVERRIDE the toml only when set (non-empty); leave empty to use warden.toml.
-      - ALLOWED_PROJECTS=${WARDEN_ALLOWED_PROJECTS:-}
-      - BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-}
-      - MAX_OPEN_MRS=${WARDEN_MAX_OPEN_MRS:-}
-      - MAX_OPEN_BRANCHES=${WARDEN_MAX_OPEN_BRANCHES:-}
-      - MAX_WRITES_PER_HOUR=${WARDEN_MAX_WRITES_PER_HOUR:-}
+      # Non-secret policy — SOURCE OF TRUTH is config/warden.toml exclusively
+      # ([git.rules] + [[git.endpoint]], §3.5): no env overrides left here.
     volumes:
       # Bind-mounts instead of named volumes → SQLite state + audit JSONL auditable
       # without Docker tools (W12). DEV_UID controls ownership so the host user can read.
@@ -127,15 +124,20 @@ services:
       - https_proxy=http://forward-proxy:${SQUID_PORT:-3128}
       - HTTP_PROXY=http://forward-proxy:${SQUID_PORT:-3128}
       - HTTPS_PROXY=http://forward-proxy:${SQUID_PORT:-3128}
-      # gitlab-warden directly (no proxy); loopback likewise.
-      - no_proxy=gitlab-warden,localhost,127.0.0.1
-      - NO_PROXY=gitlab-warden,localhost,127.0.0.1
-      # Canonical GitLab URL for the insteadOf rewrite to gitlab-warden (git_routing.py)
-      # and the REST base the rendered instructions point the agent at (§05.2).
-      # No token in the agent container (R6/W9.3).
-      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
-      - GITLAB_MODE=${GITLAB_MODE:-read-write}
-      - WARDEN_REST_URL=http://gitlab-warden:8080/api/v4
+      # Fallback only — loopback never goes through the proxy. catraz overwrites
+      # this (same key, later -f layer) with every configured [[git.endpoint]]
+      # host so REST calls to the Warden aren't intercepted by the forward
+      # proxy (§1.2); see compose.py's generated `.catraz/compose.hosts.yml`.
+      - no_proxy=localhost,127.0.0.1
+      - NO_PROXY=localhost,127.0.0.1
+      # Generic per-host REST rule (§1.2), not one concrete URL: "<host>" is a
+      # literal placeholder the rendered instructions ask the agent to
+      # substitute — the same rule holds for gitlab.com, a self-hosted
+      # instance, or any other configured [[git.endpoint]] host, so this
+      # never needs to change per host and never names the Warden container.
+      # No token in the agent container (R6/W9.3); host list + credentials
+      # live only in warden.toml/.catraz/secrets (§3.5).
+      - WARDEN_REST_URL=http://<host>:8080/api/v4
       - WARDEN_BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-}
       # The rendered instructions file (§05.2 render_instructions) is required by
       # default so a missing/misconfigured adapter fails loud in the entrypoint

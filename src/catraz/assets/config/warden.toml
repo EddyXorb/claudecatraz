@@ -25,14 +25,23 @@ max_writes_per_hour = 60                  # R5: max write actions per hour
 allowed_projects    = []
 
 # --- Multi-target endpoint taxonomy (docs/design/architecture-generalization/
-# 08-multi-target.md) — additive preview, not yet enforced by any guard; the
-# settings above are still what's live. [git.rules] holds the same
-# domain-default knobs as above (branch_prefixes, max_open_branches,
-# max_open_mrs, max_writes_per_hour, max_push_bytes), scoped to the endpoint
-# model; each [[git.endpoint]] table configures exactly one git host, with an
-# optional per-endpoint `rules = { ... }` overriding a [git.rules] default for
-# that host only. Tokens are NEVER set here — they live in the grouped
-# .catraz/secrets/read_tokens / write_tokens files (<host> <token> per line).
+# 08-multi-target.md) — this is the live, enforced way to reach one or more git
+# hosts through the Warden: DNS alias, git insteadOf rewrite, per-host REST
+# base, and host_gate/UpstreamRouter all key off the [[git.endpoint]] entries
+# below (§1-§4). [git.rules] holds the same domain-default knobs as the
+# top-level settings above (branch_prefixes, max_open_branches, max_open_mrs,
+# max_writes_per_hour, max_push_bytes), scoped to the endpoint model; each
+# [[git.endpoint]] table configures exactly one git host, with an optional
+# per-endpoint `rules = { ... }` overriding a [git.rules] default for that host
+# only (per-key merge, §3.3). Tokens are NEVER set here — they live in the
+# grouped .catraz/secrets/read_tokens / write_tokens files (<host> <token> per
+# line); an endpoint with no matching token simply runs closed (deny-all for
+# that host only), it never blocks startup or the other endpoints (§4.2).
+#
+# No [[git.endpoint]] at all = no host is routed/reachable through the Warden
+# (real default-deny, not "use the settings above instead") — the top-level
+# settings above remain a separate, domain-wide fallback the Warden still
+# reads for backward compatibility, not an implicit single endpoint.
 #
 # Implemented `type` values:
 #   "gitlab" — git + REST API (gitlab.com or self-hosted GitLab)
@@ -41,8 +50,17 @@ allowed_projects    = []
 [git.rules]
 # branch_prefixes = ["claude/"]
 
-# Example — add one [[git.endpoint]] table per host.
+# Example — add one [[git.endpoint]] table per host. Each host gets its own
+# DNS alias + git/REST routing through the Warden automatically (no compose
+# edit needed) — see docs/design/architecture-generalization/
+# 08-multi-target/07-compose-and-agent-routing.md.
 # [[git.endpoint]]
 # host             = "gitlab.com"
 # type             = "gitlab"
 # allowed_projects = []
+#
+# [[git.endpoint]]
+# host             = "my-gitlab.example.com"
+# type             = "gitlab"
+# allowed_projects = []
+# rules            = { max_open_mrs = 20 }

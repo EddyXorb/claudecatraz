@@ -44,3 +44,88 @@ def test_base_cmd_includes_override_when_present(tmp_path: Path) -> None:
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz/compose.override.yml").write_text("services: {}\n")
     assert str(tmp_path / ".catraz/compose.override.yml") in compose.base_cmd(tmp_path)
+
+
+# ── §07 — per-host DNS-alias/no_proxy compose fragment ──────────────────────
+
+
+def _write_endpoints(tmp_path: Path, hosts: list[str]) -> None:
+    config_dir = tmp_path / ".catraz" / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    lines = ["[git.rules]", ""]
+    for host in hosts:
+        lines += ["[[git.endpoint]]", f'host = "{host}"', 'type = "gitlab"', ""]
+    (config_dir / "warden.toml").write_text("\n".join(lines))
+
+
+def test_git_endpoint_hosts_reads_warden_toml(tmp_path: Path) -> None:
+    _write_endpoints(tmp_path, ["gitlab.com", "my-gitlab.de"])
+    assert compose._git_endpoint_hosts(tmp_path) == ["gitlab.com", "my-gitlab.de"]
+
+
+def test_git_endpoint_hosts_missing_file_is_empty(tmp_path: Path) -> None:
+    assert compose._git_endpoint_hosts(tmp_path) == []
+
+
+def test_git_endpoint_hosts_malformed_toml_is_empty(tmp_path: Path) -> None:
+    config_dir = tmp_path / ".catraz" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "warden.toml").write_text("not [ valid toml")
+    assert compose._git_endpoint_hosts(tmp_path) == []
+
+
+def test_render_hosts_fragment_lists_every_host_as_alias(tmp_path: Path) -> None:
+    text = compose.render_hosts_fragment(["gitlab.com", "my-gitlab.de"])
+    assert "- gitlab.com" in text
+    assert "- my-gitlab.de" in text
+    assert "agent-net" in text
+    # The compose *service* is necessarily named gitlab-warden (compose needs
+    # a key to attach the alias to) — the no-leak rule is about the agent's
+    # own remotes/rendered instructions, checked in test_claude_md.py /
+    # test_adapter_conformance.py, not about this internal compose wiring.
+
+
+def test_render_hosts_fragment_no_proxy_includes_every_host_plus_loopback(
+    tmp_path: Path,
+) -> None:
+    text = compose.render_hosts_fragment(["gitlab.com", "my-gitlab.de"])
+    assert "no_proxy=gitlab.com,my-gitlab.de,localhost,127.0.0.1" in text
+    assert "NO_PROXY=gitlab.com,my-gitlab.de,localhost,127.0.0.1" in text
+
+
+def test_render_hosts_fragment_empty_hosts_is_valid_shape(tmp_path: Path) -> None:
+    text = compose.render_hosts_fragment([])
+    assert "aliases: []" in text
+    assert "no_proxy=localhost,127.0.0.1" in text
+
+
+def test_write_hosts_fragment_writes_from_warden_toml(tmp_path: Path) -> None:
+    (tmp_path / ".catraz").mkdir()
+    _write_endpoints(tmp_path, ["gitlab.com"])
+    path = compose.write_hosts_fragment(tmp_path)
+    assert path == tmp_path / ".catraz" / "compose.hosts.yml"
+    assert "- gitlab.com" in path.read_text()
+
+
+def test_source_cmd_includes_hosts_fragment_when_present(tmp_path: Path) -> None:
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/compose.hosts.yml").write_text("services: {}\n")
+    assert str(tmp_path / ".catraz/compose.hosts.yml") in compose.base_cmd(tmp_path)
+
+
+def test_source_cmd_omits_hosts_fragment_when_absent(tmp_path: Path) -> None:
+    (tmp_path / ".catraz").mkdir()
+    cmd = compose.base_cmd(tmp_path)
+    assert str(tmp_path / ".catraz/compose.hosts.yml") not in cmd
+
+
+def test_source_cmd_orders_hosts_fragment_before_user_override(tmp_path: Path) -> None:
+    """The user's own compose.override.yml must be able to win over the
+    generated fragment (last -f layer wins on a merge conflict)."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/compose.hosts.yml").write_text("services: {}\n")
+    (tmp_path / ".catraz/compose.override.yml").write_text("services: {}\n")
+    cmd = compose.base_cmd(tmp_path)
+    hosts_idx = cmd.index(str(tmp_path / ".catraz/compose.hosts.yml"))
+    override_idx = cmd.index(str(tmp_path / ".catraz/compose.override.yml"))
+    assert hosts_idx < override_idx

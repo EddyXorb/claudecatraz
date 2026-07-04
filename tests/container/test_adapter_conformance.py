@@ -11,8 +11,8 @@ Checked here (no Docker required):
   - no Forge credential and no foreign-model credential in `environ()`'s
     output or anything `prepare_home()` writes,
   - `modes.remote = false` makes `remote_command()` deny fail-closed,
-  - `render_instructions()` points the agent at the Warden REST base, not a
-    direct Forge URL.
+  - `render_instructions()` points the agent at the generic per-host Warden
+    REST rule, not a direct Forge URL, and never names the Warden container.
 
 The container-level extension (docker-compose based, following the existing
 `tests/redteam/` pattern) lives in `tests/redteam/test_agent_adapter.py`.
@@ -157,14 +157,18 @@ def test_remote_false_denies_fail_closed(
 def test_render_instructions_points_at_warden_not_direct_forge(
     adapter: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """§07 — the rendered REST base is a generic per-host *rule*
+    (`http://<host>:8080/api/v4`, "<host>" a literal placeholder), never a
+    direct Forge URL and never the Warden's own container name."""
     monkeypatch.setattr(adapter.Path, "home", staticmethod(lambda: tmp_path))
     ctx = adapter.InstructionContext(
-        forge_rest_base="http://gitlab-warden:8080/api/v4",
+        forge_rest_base="http://<host>:8080/api/v4",
         branch_prefixes=("claude/",),
         warden_toml_path=Path("/etc/catraz/warden.toml"),
     )
     _, content = adapter.render_instructions(ctx)
-    assert "gitlab-warden" in content
+    assert "http://<host>:8080/api/v4" in content
+    assert "gitlab-warden" not in content  # never leak the Warden's own container name
     assert "https://gitlab.com/api/v4" not in content  # no direct-Forge REST base
 
 
