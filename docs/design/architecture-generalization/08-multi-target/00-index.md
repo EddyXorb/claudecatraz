@@ -17,7 +17,7 @@ raten.
 | 4 | [`04-state-keying.md`](04-state-keying.md) | §5 | 1, 3 | ✅ erledigt (c7cbfbf) |
 | 5 | [`05-env-cleanup.md`](05-env-cleanup.md) | §3.5 | 1, 2, 3 | ✅ erledigt (069aad9) |
 | 6 | [`06-cli-doctor-init.md`](06-cli-doctor-init.md) | §6 | 1, 2 | ✅ erledigt (acbfc87) |
-| 7 | [`07-compose-and-agent-routing.md`](07-compose-and-agent-routing.md) | §1.1, §1.2, §4.1 | 1–6 | offen |
+| 7 | [`07-compose-and-agent-routing.md`](07-compose-and-agent-routing.md) | §1.1, §1.2, §4.1 | 1–6 | ✅ erledigt (ea0dfdc) |
 | 8 | [`08-container-test.md`](08-container-test.md) | §8 | 1–7 | offen |
 
 Schritte 1–5 sind das Warden-Python-Paket (`warden/`), 6–8 die CLI-/Asset-Schicht
