@@ -91,19 +91,18 @@ class GitGuard(Guard[GitIntent]):
     async def reconcile(self) -> bool:
         """Rebuild the branch-quota counter from upstream truth (§07 Punkt 6, step 4).
 
-        Own reconcile, independent of the REST-API guard's MR reconcile — the
-        core lock (:meth:`~warden.core.state.State.mark_reconciled`) stays the
-        shared, core-owned fail-safe flag, only the domain counters split.
+        Own reconcile, independent of the REST-API guard's MR reconcile — rebuilds
+        only this guard's own branch counter and reports success. The shared core
+        lock is **not** touched here: it is a global fail-safe that only the
+        orchestrator (:meth:`~warden.context.AppContext.reconcile_all`) may set,
+        and only once every guard has reconciled — otherwise this guard's success
+        alone would unlock a view whose MR counters another guard left stale.
         """
         if not self.cfg.gitlab_enabled:
-            # off mode: skip all upstream calls; mark reconciled so the warden
-            # opens the agent port and denies ops (instead of staying fail-safe locked).
-            self.state.mark_reconciled()
+            # off mode: skip all upstream calls; report success so the orchestrator
+            # can open the agent port and deny ops (instead of staying fail-safe locked).
             return True
-        ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
-        if ok:
-            self.state.mark_reconciled()
-        return ok
+        return await reconcile_branches(self.cfg, self.router, self.branch_state)
 
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for receive-pack;

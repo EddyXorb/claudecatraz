@@ -47,10 +47,14 @@ async def test_reconcile_branches_follows_every_page(cfg, state, respx_router):
     await guard.router.aclose()
 
 
-async def test_reconcile_populates_branch_counter_and_unlocks(cfg, respx_router):
+async def test_reconcile_rebuilds_branch_counter_but_does_not_unlock_alone(cfg, respx_router):
+    # The shared core lock is an aggregate property: one guard's reconcile
+    # rebuilds its OWN counter but must NOT unlock on its own — the orchestrator
+    # (AppContext.reconcile_all) unlocks only when every guard succeeded. See
+    # test_reconcile_all.py for the unlock/stay-locked behaviour.
     state = State(":memory:")
     guard = _git_guard(cfg, state)
-    assert guard.state_view().locked is True  # locked until first successful reconcile
+    assert guard.state_view().locked is True  # locked until the orchestrator's first success
 
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
         return_value=httpx.Response(200, json=[{"name": "claude/a"}, {"name": "claude/b"}])
@@ -59,15 +63,14 @@ async def test_reconcile_populates_branch_counter_and_unlocks(cfg, respx_router)
     ok = await guard.reconcile()
 
     assert ok is True
-    view = guard.state_view()
-    assert view.locked is False
-    assert view.open_branches == 2
+    assert guard.branch_state.open_branches() == 2  # own counter rebuilt
+    assert guard.state_view().locked is True  # but still locked — unlock is not a guard's job
     await guard.router.aclose()
 
 
-async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
-    # Fail-safe (§6.11): a failed reconcile must NOT unlock the quota —
-    # "empty = all free" is exactly the failure we refuse.
+async def test_reconcile_failure_reports_false(cfg, respx_router):
+    # Fail-safe (§6.11): a failed reconcile reports False so the orchestrator
+    # keeps the shared lock engaged — "empty = all free" is what we refuse.
     state = State(":memory:")
     guard = _git_guard(cfg, state)
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
@@ -82,15 +85,13 @@ async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
 
 
 async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
-    """reconcile() must make NO upstream call when GITLAB_MODE=off, and must unlock state."""
+    """reconcile() must make NO upstream call when GITLAB_MODE=off, and report success."""
     cfg_off = Config(gitlab_mode="off")
     state = State(":memory:")
     guard = _git_guard(cfg_off, state)
-    assert guard.state_view().locked is True  # starts locked
 
     # No mock registered — any upstream call raises respx.MockTransportError.
     ok = await guard.reconcile()
 
-    assert ok is True
-    assert guard.state_view().locked is False  # unlocked so the warden can serve (and deny)
+    assert ok is True  # off-mode success; the orchestrator turns this into the unlock
     await guard.router.aclose()

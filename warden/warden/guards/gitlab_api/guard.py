@@ -96,17 +96,20 @@ class ApiGuard(Guard[ApiIntent]):
     async def reconcile(self) -> bool:
         """Rebuild the MR counter + numeric-id aliases from GitLab truth.
 
-        In ``off`` mode no upstream call is made — the warden marks itself
-        reconciled/unlocked so it can serve (and then deny) requests without
-        ever contacting GitLab.
+        Rebuilds only this guard's own MR counter/aliases and reports success.
+        The shared core lock is **not** touched here — only the orchestrator
+        (:meth:`~warden.context.AppContext.reconcile_all`) sets it, and only once
+        every guard has reconciled, so a git-only success can never unlock a view
+        whose MR counter this reconcile left stale.
+
+        In ``off`` mode no upstream call is made — the guard reports success so the
+        orchestrator can unlock and serve (then deny) requests without ever
+        contacting GitLab.
         """
         if not self.cfg.gitlab_enabled:
-            self.state.mark_reconciled()
             return True
         ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
         self.project_id_aliases = resolved_ids
-        if ok:
-            self.state.mark_reconciled()
         return ok
 
     async def parse(self, request: Request) -> ApiIntent:

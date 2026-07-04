@@ -37,6 +37,27 @@ class AppContext:
         await self.audit.stop()
         self.state.close()
 
+    async def reconcile_all(self) -> bool:
+        """Reconcile every guard, then mark the shared core lock reconciled
+        **iff all guards succeeded**.
+
+        The lock is a single, shared, global fail-safe: ``state.view().locked``
+        stays true until the *whole* system has a fresh view. A guard may only
+        rebuild its own domain counters here — it must not touch the shared lock
+        alone, or one guard's success (say the git branch reconcile) would unlock
+        the fail-safe while another guard's counters (the REST-API guard's MR
+        count) were left stale by a failed reconcile, letting it serve and quota
+        against an empty view. Only this orchestrator sees every guard, so only it
+        may set the lock. Once set (persisted), a later transient per-guard failure
+        does not re-lock — the latch means "has fully reconciled at least once".
+        """
+        ok = True
+        for g in self.guards:
+            ok = (await g.reconcile()) and ok
+        if ok:
+            self.state.mark_reconciled()
+        return ok
+
 
 def build_context(cfg: Config, state: State, audit: AuditLog) -> AppContext:
     """Assemble the transport and every shipped guard, then the root context.

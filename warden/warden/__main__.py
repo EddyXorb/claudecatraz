@@ -27,8 +27,7 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
         await asyncio.sleep(ctx.cfg.reconcile_interval_s)
         try:
             ctx.state.prune()
-            for g in ctx.guards:
-                await g.reconcile()
+            await ctx.reconcile_all()
         except Exception as exc:  # never crash the loop
             log.error("periodic reconcile error: %s", exc)
 
@@ -80,10 +79,7 @@ async def _serve() -> None:
     # and stays out of any individual guard (won't-do: see §07 Punkt 5).
     for g in ctx.guards:
         await g.startup()
-    ok = True
-    for g in ctx.guards:
-        ok = (await g.reconcile()) and ok
-    if not ok:
+    if not await ctx.reconcile_all():
         log.error("initial reconcile incomplete — state stays locked")
 
     await _run_servers(ctx)
