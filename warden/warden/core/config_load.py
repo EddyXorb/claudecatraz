@@ -24,9 +24,20 @@ import tomllib
 from pathlib import Path
 from typing import Mapping, Optional
 
-from .config import Config, ConfigError, HostCredentials
+from .config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
 
 _VALID_MODES = frozenset({"off", "read-only", "read-write"})
+_KNOWN_RULE_KEYS = frozenset(
+    {
+        "branch_prefixes",
+        "max_open_branches",
+        "max_open_mrs",
+        "max_writes_per_hour",
+        "max_push_bytes",
+    }
+)
+_IMPLEMENTED_ENDPOINT_TYPES = frozenset({"gitlab", "plain"})
+_RESERVED_ENDPOINT_TYPES = frozenset({"github"})
 
 
 def _secret(env: Mapping[str, str], name: str) -> str:
@@ -95,6 +106,119 @@ def _parse_git_url_hosts(file: Mapping[str, object]) -> tuple[str, ...]:
         if cleaned:
             seen[cleaned] = None  # dict preserves insertion order and de-dupes
     return tuple(seen)
+
+
+def _parse_rules(table: Mapping[str, object], context: str) -> GitRules:
+    """Parse a ``rules``-shaped table (``[git.rules]`` or an endpoint's inline
+    ``rules = {...}``) into a :class:`GitRules` override.
+
+    An absent key stays ``None`` (no opinion at this level); an unknown key is a
+    typo, not a silently-ignored setting, so it aborts startup.
+    """
+    unknown = set(table) - _KNOWN_RULE_KEYS
+    if unknown:
+        raise ConfigError(f"{context}: unknown key(s) {sorted(unknown)!r}")
+
+    branch_prefixes: Optional[tuple[str, ...]] = None
+    raw_prefixes = table.get("branch_prefixes")
+    if raw_prefixes is not None:
+        if not isinstance(raw_prefixes, list) or not all(isinstance(p, str) for p in raw_prefixes):
+            raise ConfigError(
+                f"{context}.branch_prefixes must be a list of strings, got {raw_prefixes!r}"
+            )
+        branch_prefixes = tuple(raw_prefixes)
+
+    ints: dict[str, Optional[int]] = {}
+    for key in ("max_open_branches", "max_open_mrs", "max_writes_per_hour", "max_push_bytes"):
+        val = table.get(key)
+        if val is not None and (not isinstance(val, int) or isinstance(val, bool)):
+            raise ConfigError(f"{context}.{key} must be an integer, got {val!r}")
+        ints[key] = val
+
+    return GitRules(
+        branch_prefixes=branch_prefixes,
+        max_open_branches=ints["max_open_branches"],
+        max_open_mrs=ints["max_open_mrs"],
+        max_writes_per_hour=ints["max_writes_per_hour"],
+        max_push_bytes=ints["max_push_bytes"],
+    )
+
+
+def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
+    """Parse one ``[[git.endpoint]]`` table entry into a :class:`GitEndpoint`."""
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"warden.toml [[git.endpoint]] #{index}: must be a table")
+
+    host = raw.get("host")
+    if not isinstance(host, str) or not host.strip():
+        raise ConfigError(f"warden.toml [[git.endpoint]] #{index}: host must be a non-empty string")
+    host = host.strip()
+
+    endpoint_type = raw.get("type")
+    if endpoint_type in _RESERVED_ENDPOINT_TYPES:
+        raise ConfigError(
+            f"warden.toml [[git.endpoint]] host={host!r}: type {endpoint_type!r} is not "
+            "implemented yet"
+        )
+    if not isinstance(endpoint_type, str) or endpoint_type not in _IMPLEMENTED_ENDPOINT_TYPES:
+        raise ConfigError(
+            f"warden.toml [[git.endpoint]] host={host!r}: unknown type {endpoint_type!r}, "
+            f"must be one of {sorted(_IMPLEMENTED_ENDPOINT_TYPES)!r}"
+        )
+
+    raw_projects = raw.get("allowed_projects", [])
+    if not isinstance(raw_projects, list) or not all(isinstance(p, str) for p in raw_projects):
+        raise ConfigError(
+            f"warden.toml [[git.endpoint]] host={host!r}: allowed_projects must be a list of "
+            f"strings, got {raw_projects!r}"
+        )
+
+    rules_table = raw.get("rules", {})
+    if not isinstance(rules_table, Mapping):
+        raise ConfigError(f"warden.toml [[git.endpoint]] host={host!r}: rules must be a table")
+
+    return GitEndpoint(
+        host=host,
+        type=endpoint_type,
+        allowed_projects=tuple(p.strip() for p in raw_projects if p.strip()),
+        rules=_parse_rules(rules_table, f"warden.toml [[git.endpoint]] host={host!r} rules"),
+    )
+
+
+def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint, ...]]:
+    """Parse ``[git.rules]`` (domain defaults) and ``[[git.endpoint]]`` (one entry
+    per host) into the endpoint-taxonomy config surface.
+
+    Fail-closed: an unknown ``type``, a duplicate ``host``, or an unknown key in
+    any ``rules`` table aborts startup rather than silently misconfiguring policy.
+    """
+    git = file.get("git", {})
+    if not isinstance(git, Mapping):
+        raise ConfigError("warden.toml: [git] must be a table")
+
+    rules_table = git.get("rules", {})
+    if not isinstance(rules_table, Mapping):
+        raise ConfigError("warden.toml: [git.rules] must be a table")
+    git_rules = _parse_rules(rules_table, "warden.toml [git.rules]")
+
+    raw_endpoints = git.get("endpoint", [])
+    if not isinstance(raw_endpoints, list):
+        raise ConfigError("warden.toml: [[git.endpoint]] must be an array of tables")
+
+    endpoints: list[GitEndpoint] = []
+    seen_hosts: dict[str, str] = {}
+    for index, raw in enumerate(raw_endpoints):
+        endpoint = _parse_endpoint(raw, index)
+        normalized = Config.normalize_host(endpoint.host)
+        if normalized in seen_hosts:
+            raise ConfigError(
+                f"warden.toml [[git.endpoint]]: duplicate host {endpoint.host!r} "
+                f"(already configured as {seen_hosts[normalized]!r})"
+            )
+        seen_hosts[normalized] = endpoint.host
+        endpoints.append(endpoint)
+
+    return git_rules, tuple(endpoints)
 
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9]")
@@ -262,6 +386,7 @@ def from_env(
     read_token = _secret(env, "GITLAB_READ_TOKEN")
     write_token = _secret(env, "GITLAB_WRITE_TOKEN")
     host_order = _parse_git_url_hosts(file)
+    git_rules, git_endpoints = _parse_git(file)
 
     cfg = Config(
         branch_prefixes=_tunable_branch_prefixes(
@@ -285,6 +410,8 @@ def from_env(
         endpoint_enable=_parse_endpoint_enable(file),
         host_order=host_order,
         host_credentials=_resolve_host_credentials(env, host_order, read_token, write_token),
+        git_rules=git_rules,
+        git_endpoints=git_endpoints,
     )
 
     if strict:

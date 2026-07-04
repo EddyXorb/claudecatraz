@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from warden.core.config import Config, ConfigError, HostCredentials
+from warden.core.config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
 from warden.core.config_load import _host_slug, from_env
 
 _MIN = {
@@ -525,3 +525,152 @@ def test_secret_file_empty_fails_validate(tmp_path):
             {**_MIN, "GITLAB_READ_TOKEN_FILE": str(f), "GITLAB_READ_TOKEN": ""},
             strict=True,
         )
+
+
+# --- [git.rules] + [[git.endpoint]] schema -------------------------------------
+# Endpoint taxonomy replacing [git.urls] hosts: parsing, the rules cascade, and
+# per-host lookups. Not yet wired into any request path.
+
+
+def test_git_endpoints_parsed_from_toml(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text(
+        "[git.rules]\n"
+        'branch_prefixes = ["claude/"]\n'
+        "max_open_mrs = 5\n"
+        "\n"
+        "[[git.endpoint]]\n"
+        'host = "gitlab.com"\n'
+        'type = "gitlab"\n'
+        'allowed_projects = ["acme/infra", "acme/app"]\n'
+        "\n"
+        "[[git.endpoint]]\n"
+        'host = "my-gitlab.de"\n'
+        'type = "gitlab"\n'
+        'allowed_projects = ["acme/infra"]\n'
+        'rules = { max_open_mrs = 20, branch_prefixes = ["claude/", "bot/"] }\n'
+        "\n"
+        "[[git.endpoint]]\n"
+        'host = "personal-gitserver.it"\n'
+        'type = "plain"\n'
+        'allowed_projects = ["me/dotfiles"]\n'
+    )
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.git_rules == GitRules(branch_prefixes=("claude/",), max_open_mrs=5)
+    assert len(cfg.git_endpoints) == 3
+
+    gitlab_com = cfg.endpoint_for("gitlab.com")
+    assert gitlab_com is not None
+    assert gitlab_com.type == "gitlab"
+    assert gitlab_com.allowed_projects == ("acme/infra", "acme/app")
+    assert gitlab_com.rules == GitRules()  # no override
+
+    my_gitlab = cfg.endpoint_for("my-gitlab.de")
+    assert my_gitlab is not None
+    assert my_gitlab.rules == GitRules(max_open_mrs=20, branch_prefixes=("claude/", "bot/"))
+
+    plain = cfg.endpoint_for("personal-gitserver.it")
+    assert plain is not None
+    assert plain.type == "plain"
+
+
+def test_effective_rules_endpoint_override_wins_per_key():
+    cfg = Config(
+        git_rules=GitRules(max_open_mrs=5, max_open_branches=10, branch_prefixes=("claude/",)),
+        git_endpoints=(
+            GitEndpoint(
+                host="my-gitlab.de",
+                type="gitlab",
+                rules=GitRules(max_open_mrs=20, branch_prefixes=("claude/", "bot/")),
+            ),
+        ),
+    )
+    rules = cfg.effective_rules("my-gitlab.de")
+    assert rules.max_open_mrs == 20  # endpoint override wins
+    assert rules.branch_prefixes == ("claude/", "bot/")  # list replaced, not merged
+    assert rules.max_open_branches == 10  # no override → domain default
+
+
+def test_effective_rules_falls_back_through_domain_to_builtin_default():
+    cfg = Config(git_rules=GitRules(max_open_mrs=7))
+    rules = cfg.effective_rules("unconfigured.example")  # no matching endpoint at all
+    assert rules.max_open_mrs == 7  # domain default
+    assert rules.max_open_branches == 10  # built-in default
+    assert rules.branch_prefixes == ("claude/",)  # built-in default
+    assert rules.max_writes_per_hour == 60  # built-in default
+    assert rules.max_push_bytes == 50 * 1024 * 1024  # built-in default
+
+
+def test_endpoint_for_and_git_allowed_hosts_are_normalised():
+    cfg = Config(
+        git_endpoints=(
+            GitEndpoint(host="gitlab.com", type="gitlab"),
+            GitEndpoint(host="my-gitlab.de", type="gitlab"),
+        )
+    )
+    assert cfg.git_allowed_hosts == frozenset({"gitlab.com", "my-gitlab.de"})
+    assert cfg.endpoint_for("GitLab.com:443") is not None
+    assert cfg.endpoint_for("evil.example") is None
+
+
+def test_git_project_allowed_is_scoped_per_endpoint_not_global():
+    """Two endpoints sharing a project path on different hosts stay separate —
+    one endpoint's allowlist must never leak to another host."""
+    cfg = Config(
+        git_endpoints=(
+            GitEndpoint(host="gitlab.com", type="gitlab", allowed_projects=("acme/infra",)),
+            GitEndpoint(host="my-gitlab.de", type="gitlab", allowed_projects=()),
+        )
+    )
+    assert cfg.git_project_allowed("gitlab.com", "acme/infra")
+    assert not cfg.git_project_allowed("my-gitlab.de", "acme/infra")
+    assert not cfg.git_project_allowed("unconfigured.example", "acme/infra")
+
+
+def test_git_endpoint_duplicate_host_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text(
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
+        '[[git.endpoint]]\nhost = "GitLab.com"\ntype = "gitlab"\n'
+    )
+    with pytest.raises(ConfigError, match="duplicate host"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_endpoint_unknown_type_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[[git.endpoint]]\nhost = "gitlab.com"\ntype = "bitbucket"\n')
+    with pytest.raises(ConfigError, match="unknown type"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_endpoint_github_type_is_reserved_not_implemented(tmp_path):
+    """`type = "github"` is a recognised but not-yet-implemented type — a clear,
+    distinct error, not silent acceptance of an unguarded forge."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[[git.endpoint]]\nhost = "github.com"\ntype = "github"\n')
+    with pytest.raises(ConfigError, match="not implemented"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_rules_unknown_key_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text("[git.rules]\nmax_open_mrz = 5\n")  # typo
+    with pytest.raises(ConfigError, match="unknown key"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_endpoint_rules_unknown_key_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text(
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nrules = { bogus_key = 1 }\n'
+    )
+    with pytest.raises(ConfigError, match="unknown key"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_endpoint_missing_host_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[[git.endpoint]]\ntype = "gitlab"\n')
+    with pytest.raises(ConfigError, match="host"):
+        from_env(_MIN, strict=True, toml_path=str(toml))

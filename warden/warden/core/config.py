@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass, field
-from typing import Mapping, Optional
+from typing import Mapping, Optional, TypeVar
 from urllib.parse import urlparse
+
+_T = TypeVar("_T")
 
 
 class ConfigError(RuntimeError):
@@ -40,6 +42,52 @@ def normalize_project(project: str) -> str:
     checks, REST project-ids, upstream URLs and state keys consistent (one
     definition), so a pushed branch is not counted twice in ``agent_branches``."""
     return project.removesuffix(".git").strip("/")
+
+
+def _cascade(override: Optional[_T], domain: Optional[_T], builtin: _T) -> _T:
+    """First set value in the override -> domain-default -> built-in-default chain."""
+    if override is not None:
+        return override
+    if domain is not None:
+        return domain
+    return builtin
+
+
+_DEFAULT_BRANCH_PREFIXES: tuple[str, ...] = ("claude/",)
+_DEFAULT_MAX_OPEN_MRS = 5
+_DEFAULT_MAX_OPEN_BRANCHES = 10
+_DEFAULT_MAX_WRITES_PER_HOUR = 60
+_DEFAULT_MAX_PUSH_BYTES = 50 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class GitRules:
+    """Overridable git policy knobs. ``None`` means "not set here" so a cascade
+    (endpoint override -> domain default -> built-in default) can tell that
+    apart from an explicit, deliberately narrow value."""
+
+    branch_prefixes: Optional[tuple[str, ...]] = None
+    max_open_branches: Optional[int] = None
+    max_open_mrs: Optional[int] = None
+    max_writes_per_hour: Optional[int] = None
+    max_push_bytes: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class GitEndpoint:
+    """One git host: its identity/scope (``host``, ``type``, ``allowed_projects``)
+    plus optional rule overrides. ``allowed_projects`` is always per-endpoint —
+    a project path is only unambiguous relative to the host it lives on."""
+
+    host: str
+    type: str
+    allowed_projects: tuple[str, ...] = ()
+    rules: GitRules = field(default_factory=GitRules)
+
+    def project_allowed(self, project: str) -> bool:
+        """Default-deny match against this endpoint's own ``allowed_projects``."""
+        project = normalize_project(project)
+        return any(project == allowed.strip("/") for allowed in self.allowed_projects)
 
 
 @dataclass(frozen=True)
@@ -83,6 +131,11 @@ class Config:
     # `host_order` is empty; populated by config_load, including an entry
     # for `host_order[0]` that mirrors read_token/write_token.
     host_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
+    # [git.rules] domain defaults and [[git.endpoint]] entries (one host each) —
+    # the endpoint-taxonomy replacement for host_order/allowed_hosts, not yet
+    # wired into any guard. Empty git_endpoints ⇒ no endpoints configured.
+    git_rules: GitRules = field(default_factory=GitRules)
+    git_endpoints: tuple[GitEndpoint, ...] = ()
 
     @property
     def gitlab_enabled(self) -> bool:
@@ -197,3 +250,53 @@ class Config:
         mode, where ``host_credentials`` is empty and ``host`` is always
         :attr:`implicit_host`."""
         return self.host_credentials.get(host, HostCredentials(self.read_token, self.write_token))
+
+    @functools.cached_property
+    def _endpoints_by_host(self) -> Mapping[str, GitEndpoint]:
+        """Normalised-host -> endpoint lookup, built once from ``git_endpoints``."""
+        return {self.normalize_host(e.host): e for e in self.git_endpoints}
+
+    def endpoint_for(self, host: str) -> Optional[GitEndpoint]:
+        """The configured endpoint for this host, or ``None`` if none matches."""
+        return self._endpoints_by_host.get(self.normalize_host(host))
+
+    @functools.cached_property
+    def git_allowed_hosts(self) -> frozenset[str]:
+        """Normalised hosts with a configured ``[[git.endpoint]]`` entry."""
+        return frozenset(self._endpoints_by_host)
+
+    def effective_rules(self, host: str) -> GitRules:
+        """Per-key cascade for ``host``: endpoint override, else ``git_rules``
+        domain default, else built-in default. A list override replaces the
+        domain list wholesale rather than merging with it."""
+        endpoint = self.endpoint_for(host)
+        override = endpoint.rules if endpoint is not None else GitRules()
+        domain = self.git_rules
+        return GitRules(
+            branch_prefixes=_cascade(
+                override.branch_prefixes, domain.branch_prefixes, _DEFAULT_BRANCH_PREFIXES
+            ),
+            max_open_branches=_cascade(
+                override.max_open_branches, domain.max_open_branches, _DEFAULT_MAX_OPEN_BRANCHES
+            ),
+            max_open_mrs=_cascade(
+                override.max_open_mrs, domain.max_open_mrs, _DEFAULT_MAX_OPEN_MRS
+            ),
+            max_writes_per_hour=_cascade(
+                override.max_writes_per_hour,
+                domain.max_writes_per_hour,
+                _DEFAULT_MAX_WRITES_PER_HOUR,
+            ),
+            max_push_bytes=_cascade(
+                override.max_push_bytes, domain.max_push_bytes, _DEFAULT_MAX_PUSH_BYTES
+            ),
+        )
+
+    def git_project_allowed(self, host: str, project: str) -> bool:
+        """Per-endpoint ``allowed_projects`` check, keyed by host.
+
+        An unconfigured host has no endpoint and is therefore denied — this is
+        the per-endpoint analogue of :meth:`project_allowed`'s global check.
+        """
+        endpoint = self.endpoint_for(host)
+        return endpoint is not None and endpoint.project_allowed(project)
