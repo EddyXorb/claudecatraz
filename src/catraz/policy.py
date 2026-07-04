@@ -1,6 +1,5 @@
 """validate_project, _resolve_allowed_projects, _read_toml_allowed_projects."""
 
-import os
 import re
 import urllib.parse
 from pathlib import Path
@@ -23,11 +22,8 @@ def validate_project(p: str) -> str | None:
     return None
 
 
-def _resolve_allowed_projects(root: Path, env: dict[str, str]) -> tuple[list[str], str]:
-    """Env override wins over warden.toml (README §11 precedence)."""
-    ov = os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
-    if ov.strip():
-        return [p.strip() for p in ov.split(",") if p.strip()], ".env override"
+def _resolve_allowed_projects(root: Path) -> tuple[list[str], str]:
+    """Resolve allowed_projects — the single source is warden.toml (§3.5)."""
     toml = root / ".catraz" / "config" / "warden.toml"
     if not toml.exists():
         return [], "no warden.toml"

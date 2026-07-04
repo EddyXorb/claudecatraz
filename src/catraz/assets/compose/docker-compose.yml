@@ -138,7 +138,6 @@ services:
       # No token in the agent container (R6/W9.3); host list + credentials
       # live only in warden.toml/.catraz/secrets (§3.5).
       - WARDEN_REST_URL=http://<host>:8080/api/v4
-      - WARDEN_BRANCH_PREFIX=${WARDEN_BRANCH_PREFIX:-}
       # The rendered instructions file (§05.2 render_instructions) is required by
       # default so a missing/misconfigured adapter fails loud in the entrypoint
       # instead of starting the agent without its user-memory. A bare `docker run`

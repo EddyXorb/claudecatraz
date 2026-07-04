@@ -4,7 +4,6 @@ from typing import Any
 
 from catraz.doctor import SECRETS
 from catraz.envfile import unset_env_keys
-from catraz.policy import remove_toml_key, set_toml_list, validate_project
 from catraz.ui import Out
 
 _VALID_GITLAB_MODES: tuple[str, ...] = ("off", "read-only", "read-write")
@@ -46,38 +45,7 @@ def _yes_apply_tokens(secrets_dir: Path, auth_mode: str, out: Out) -> None:
             p.chmod(0o600)
 
 
-def _yes_apply_warden_policy(
-    env: dict[str, str],
-    env_path: Path,
-    warden_toml: Path,
-    out: Out,
-) -> None:
-    raw_projects = (
-        os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
-    ).strip()
-    if raw_projects and warden_toml.exists():
-        projects = [p.strip() for p in raw_projects.split(",") if p.strip()]
-        valid: list[str] = []
-        for proj in projects:
-            reason = validate_project(proj)
-            if reason:
-                out.warn(f"  WARDEN_ALLOWED_PROJECTS: skipping {proj!r}: {reason}")
-            else:
-                valid.append(proj)
-        if valid:
-            set_toml_list(warden_toml, "allowed_projects", valid)
-            out.info(f"  • wrote {len(valid)} project(s) to warden.toml")
-
-    raw_prefix = (
-        os.environ.get("WARDEN_BRANCH_PREFIX") or env.get("WARDEN_BRANCH_PREFIX", "")
-    ).strip()
-    if raw_prefix and warden_toml.exists():
-        prefixes = [p.strip() for p in raw_prefix.split(",") if p.strip()]
-        set_toml_list(warden_toml, "branch_prefixes", prefixes)
-        # Retire the legacy scalar key so it can't coexist with the list we just
-        # wrote (Config aborts on both being set — one source of truth).
-        remove_toml_key(warden_toml, "branch_prefix")
-
+def _yes_clear_stale_policy_env(env_path: Path) -> None:
     unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
 
 
@@ -85,7 +53,6 @@ def _wizard_yes(
     env: dict[str, str],
     env_path: Path,
     secrets_dir: Path,
-    warden_toml: Path,
     updates: dict[str, str],
     out: Out,
     inherited: dict[str, Any] | None = None,
@@ -122,7 +89,7 @@ def _wizard_yes(
         updates["GITLAB_URL"] = gitlab_url
 
     _yes_apply_tokens(secrets_dir, auth_mode, out)
-    _yes_apply_warden_policy(env, env_path, warden_toml, out)
+    _yes_clear_stale_policy_env(env_path)
 
     base_image = (
         os.environ.get("BASE_IMAGE", "").strip()
