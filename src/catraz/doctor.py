@@ -20,12 +20,9 @@ from catraz import image
 # Secrets live in .catraz/secrets/<filename> (mode 0600), mounted into the warden
 # via compose secrets: at /run/secrets/<filename>. Never stored in .env.
 #
-# Legacy single-target pair — kept (not the new multi-target model doctor's own
-# checks now use, see check_tokens/read_tokens/write_tokens below) because
-# `assets/compose/docker-compose.yml` still mounts exactly these two files as
-# compose secrets for the single-target Warden; that cutover is
-# `07-compose-and-agent-routing.md`'s job, not this step's. See "## Status"
-# in `06-cli-doctor-init.md`.
+# Single-target pair, distinct from the grouped read_tokens/write_tokens files
+# used by check_tokens below: `assets/compose/docker-compose.yml` mounts these
+# two as compose secrets for the single-target Warden.
 SECRETS = [
     (
         "gitlab_read_token",
@@ -41,23 +38,22 @@ SECRETS = [
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-# --- Action vocabulary (§09 step 04) — a small, doctor-only mirror of the
-# Warden's action catalog + cascade (warden/warden/guards/gitlab_api/actions.py,
+# --- Action vocabulary — a small, doctor-only mirror of the Warden's action
+# catalog + cascade (warden/warden/guards/gitlab_api/actions.py,
 # warden/warden/core/config.py Config.effective_actions). catraz never imports
-# warden's Python (A2), it only ships it as a container asset, so this is
+# warden's Python, it only ships it as a container asset, so this is
 # reimplemented here rather than shared. Doctor only needs the vocabulary, the
-# write-set and the built-in default to reproduce the same per-host effective-
-# actions cascade for its §4 cross-checks — it does not need the full
+# write-set, and the built-in default to reproduce the same per-host
+# effective-actions cascade for its cross-checks — not the full
 # recognizer-level mapping the Warden owns.
 GIT_FETCH = "git.fetch"
 GIT_PUSH = "git.push"
 FORGE_ACTIONS: frozenset[str] = frozenset(
     {"mr.create", "mr.comment", "mr.update", "pipeline.trigger", "branch.create", "issue.create"}
 )
-# The full closed vocabulary (§1.2 table): git transport verbs + forge (REST) actions.
+# The full closed vocabulary: git transport verbs + forge (REST) actions.
 ALL_ACTIONS: frozenset[str] = FORGE_ACTIONS | {GIT_FETCH, GIT_PUSH}
-# Built-in default (§1.2 table, right column) — same six ids as the Warden's
-# guards.gitlab_api.actions.DEFAULT_ACTIONS.
+# Built-in default — same six ids as the Warden's guards.gitlab_api.actions.DEFAULT_ACTIONS.
 DEFAULT_ACTIONS: tuple[str, ...] = (
     GIT_FETCH,
     GIT_PUSH,
@@ -66,7 +62,7 @@ DEFAULT_ACTIONS: tuple[str, ...] = (
     "mr.update",
     "pipeline.trigger",
 )
-# Every action except git.fetch is a write (§4 bullet 1) — git.fetch is the only read.
+# Every action except git.fetch is a write — git.fetch is the only read.
 WRITE_ACTIONS: frozenset[str] = ALL_ACTIONS - {GIT_FETCH}
 _PLAIN_ACTIONS: frozenset[str] = frozenset({GIT_FETCH, GIT_PUSH})
 
@@ -169,8 +165,8 @@ def check_docker(f: Findings) -> None:
 
 def check_compose(root: Path, env: dict[str, str], f: Findings) -> None:
     """Sanity check that the warden — the trust boundary — resolves in the compose
-    config. It's unconditional now (no profile gate), so its absence means someone
-    edited it out; agent depends_on gitlab-warden, so the stack would fail closed."""
+    config: it's unconditional (no profile gate), so its absence means someone
+    edited it out; `agent` depends_on `gitlab-warden`, so the stack would fail closed."""
     if not which("docker"):
         f.warn("compose", "cannot confirm services (docker missing)")
         return
@@ -241,12 +237,10 @@ def check_gitlab(env: dict[str, str], f: Findings) -> None:
 def _parse_grouped_tokens(text: str) -> dict[str, str]:
     """Parse a grouped ``read_tokens``/``write_tokens`` file into ``host -> token``.
 
-    Same splitting rule as the Warden's Step 02 ``_parse_token_file``
+    Same splitting rule as the Warden's ``_parse_token_file``
     (``warden/warden/core/config_load.py``): split on the first run of
     whitespace, ``#``-comments and blank lines are skipped. Unlike the Warden,
-    a malformed line is skipped rather than raising — doctor warns, it never
-    aborts (see module docstring / "Nicht tun" in
-    ``docs/design/architecture-generalization/08-multi-target/06-cli-doctor-init.md``).
+    a malformed line is skipped rather than raising — doctor warns, it never aborts.
     """
     tokens: dict[str, str] = {}
     for line in text.splitlines():
@@ -307,7 +301,7 @@ def _parse_actions_list(raw: object) -> tuple[str, ...] | None:
 
 
 def _read_git_actions_default(root: Path) -> tuple[str, ...] | None:
-    """``[git].actions`` (the domain default, §1.4), or ``None`` if absent —
+    """``[git].actions`` (the domain default), or ``None`` if absent —
     the caller falls back to :data:`DEFAULT_ACTIONS` in that case, same
     "missing key != empty list" contract as the Warden's ``Config.git_actions``.
     """
@@ -324,8 +318,8 @@ def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
     Host-side and best-effort only: an absent file, unreadable file, invalid
     TOML, or a missing/malformed ``[git.endpoint]`` array all yield ``[]``
     (nothing to cross-check against) rather than raising — the Warden is the
-    fail-closed side that aborts startup on a genuinely malformed config
-    (see ``01-config-schema.md``); doctor only warns.
+    fail-closed side that aborts startup on a genuinely malformed config;
+    doctor only warns.
     """
     git = _load_git_table(root)
     if git is None:
@@ -352,7 +346,7 @@ def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
 
 
 def _actions_valid_for_type(endpoint_type: str) -> frozenset[str]:
-    """Mirrors the Warden's ``actions_valid_for_type`` (§3.2): a ``plain``
+    """Mirrors the Warden's ``actions_valid_for_type``: a ``plain``
     endpoint only has the two transport verbs; everything else (``gitlab``,
     or an unrecognized/blank type) gets the full vocabulary. Doctor is
     advisory — an unrecognized ``type`` here is not doctor's to re-police
@@ -367,7 +361,7 @@ def _actions_valid_for_type(endpoint_type: str) -> frozenset[str]:
 def _effective_actions_for_host(
     domain_actions: tuple[str, ...] | None, endpoint: dict[str, Any]
 ) -> tuple[str, ...]:
-    """Same cascade as the Warden's ``Config.effective_actions`` (§1.4, §3.2):
+    """Same cascade as the Warden's ``Config.effective_actions``:
     the endpoint's own ``actions`` if set — returned as-is, unfiltered (an
     explicit type-impossible id is the Warden loader's ``ConfigError`` to
     raise, not doctor's to re-check) — else the domain default, else the
@@ -384,11 +378,10 @@ def _effective_actions_for_host(
 
 def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
     """Cross-check the grouped ``read_tokens``/``write_tokens`` files against
-    the ``[[git.endpoint]]`` hosts configured in ``warden.toml`` (§4, §6 of
-    ``docs/design/architecture-generalization/08-multi-target.md``).
+    the ``[[git.endpoint]]`` hosts configured in ``warden.toml``.
 
     This is the host-side, friendly/explaining mirror of the Warden's
-    ``Config.access_mode(host)`` (``warden/warden/core/config.py``, Step 02):
+    ``Config.access_mode(host)`` (``warden/warden/core/config.py``):
     same reasoning, same threshold, so the two sides don't drift — but doctor
     only ever **warns**; the Warden is the side that actually enforces
     (fail-closed, per-endpoint-degrade) an inconsistency. `doctor` never fails

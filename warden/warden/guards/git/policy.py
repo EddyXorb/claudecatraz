@@ -6,13 +6,13 @@ Mode gate (R0) and the project resource allowlist (R6) are the kernel's job.
 Rules enforced:
   R2  git write limits   push only to branches under allowed <branch_prefix>.
   R4  Irreversible verbs tag pushes and branch deletes never permitted.
-  R5  Quota & rate       max open branches, max writes/hour, max push size (§07 Punkt 6.3);
+  R5  Quota & rate       max open branches, max writes/hour, max push size;
                          locked state denies (fail-safe).
-  R6  Action allowlist   :func:`action_gate` (§09 step 03): git.fetch/git.push
-                         must be in the host's effective actions — same rule
-                         id as the kernel's project allowlist, a second
-                         instance of the same "resource/action outside the
-                         configured boundary" meta-rule (M6).
+  R6  Action allowlist   :func:`action_gate`: git.fetch/git.push must be in
+                         the host's effective actions — same rule id as the
+                         kernel's project allowlist, both instances of the
+                         same "resource/action outside the configured
+                         boundary" meta-rule (M6).
 """
 
 from __future__ import annotations
@@ -53,21 +53,19 @@ def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
 
 
 def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
-    """§09 step 03: deny a git-transport operation whose mapped action
-    (:func:`~.actions.action_for_git_operation`, step 01) is missing from the
-    host's effective actions (:meth:`~warden.core.config.Config.effective_actions`,
-    step 02).
+    """Deny a git-transport operation whose mapped action
+    (:func:`~.actions.action_for_git_operation`) is missing from the host's
+    effective actions (:meth:`~warden.core.config.Config.effective_actions`).
 
-    Runs for **all three** operations — crucially ``advertise`` — so a
+    Runs for all three operations — crucially ``advertise`` — so a
     ``git.push``-disabled host is denied already at push discovery, before the
-    client ever sends the pack (§5 doctrine, same shape as the existing
-    ``_writes``/mode-gate path). ``advertise`` carries the requested backend in
-    ``intent.service``; :func:`~.actions.action_for_git_operation` reads it to
-    tell fetch-discovery from push-discovery apart.
+    client ever sends the pack (same shape as the mode-gate/``_writes`` path).
+    ``advertise`` carries the requested backend in ``intent.service``;
+    :func:`~.actions.action_for_git_operation` reads it to tell fetch-discovery
+    from push-discovery apart.
 
     Relies on :func:`~warden.core.guard.host_gate` (R6) having already run and
-    passed for ``intent.host`` (:func:`~warden.core.guard.kernel_gates`, before
-    this hook is reachable): a host with no ``[[git.endpoint]]`` entry is
+    passed for ``intent.host``: a host with no ``[[git.endpoint]]`` entry is
     denied there first. This matters because ``effective_actions`` cannot
     itself distinguish "no endpoint" from "endpoint inheriting the domain/
     built-in default" — both return the same non-empty default — so this gate
@@ -95,7 +93,7 @@ def check_ref(
     cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
 ) -> Decision:
     """``max_open_branches``/``max_writes_per_hour`` are the endpoint's own
-    resolved ceilings (``Config.effective_rules(intent.host)``, step 04) —
+    resolved ceilings (``Config.effective_rules(intent.host)``) —
     stateful quotas are per-endpoint, never a global ``Config`` field, so the
     caller resolves the cascade once per request and passes the concrete
     ints through (``GitRules``' fields are ``Optional`` — sentinels for the

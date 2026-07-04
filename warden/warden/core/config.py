@@ -7,10 +7,10 @@ neither half outgrows a readable file and the many ``Config`` importers
 (guards, catalog, tests) depend on the small value type, not on the loading
 machinery.
 
-There is no global "mode" anymore (step 05): access is derived per host from
-which of that host's tokens are present (:meth:`Config.access_mode`) — a
-deployment with no configured/open endpoints denies everything by simple
-absence, not by a declared ``off``.
+There is no global "mode": access is derived per host from which of that
+host's tokens are present (:meth:`Config.access_mode`) — a deployment with
+no configured/open endpoints denies everything by simple absence, not by a
+declared ``off``.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class HostCredentials:
-    """One host's resolved read/write tokens (§4), keyed by normalised host in
+    """One host's resolved read/write tokens, keyed by normalised host in
     ``Config.git_credentials``. Resolved from the grouped ``read_tokens``/
     ``write_tokens`` secret files — a host with no entry (or a missing read
     token) is simply ``closed`` (:meth:`Config.access_mode`), never a crash."""
@@ -86,11 +86,11 @@ class GitEndpoint:
     per-endpoint — a project path is only unambiguous relative to the host it
     lives on.
 
-    ``actions`` follows the same cascade contract as ``rules`` (§09 §1.4):
+    ``actions`` follows the same cascade contract as ``rules``:
     ``None`` means "no override, the domain default (``Config.git_actions``)
     or built-in default applies"; an explicit ``()`` means "this endpoint may
     do nothing" — a deliberately narrow value, never to be normalised into
-    ``None`` (the two must stay distinguishable, §09 §5)."""
+    ``None`` (the two must stay distinguishable)."""
 
     host: str
     type: str
@@ -110,8 +110,8 @@ class Config:
     max_open_mrs: int = 5
     max_open_branches: int = 10
     max_writes_per_hour: int = 60
-    # Cheap, no packfile-parsing push-size cap (§07 Punkt 6.3): checked against
-    # the receive-pack request's Content-Length before the body is streamed
+    # Cheap, no packfile-parsing push-size cap: checked against the
+    # receive-pack request's Content-Length before the body is streamed
     # upstream. Generous default so a normal push is never affected.
     max_push_bytes: int = 50 * 1024 * 1024
     allowed_projects: tuple[str, ...] = ()
@@ -123,13 +123,12 @@ class Config:
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"
     # [git.rules] domain defaults and [[git.endpoint]] entries (one host each) —
-    # the endpoint taxonomy that fully replaced the old `[git.urls] hosts`/
-    # `host_order` allowlist (step 03): every routable host is an explicit
-    # `GitEndpoint`, wired into `UpstreamRouter`/`host_gate` (core.transport,
-    # core.guard). Empty git_endpoints ⇒ no endpoints configured ⇒ every host
-    # is denied (real default-deny, not "feature off").
+    # every routable host is an explicit `GitEndpoint`, wired into
+    # `UpstreamRouter`/`host_gate` (core.transport, core.guard). Empty
+    # git_endpoints ⇒ no endpoints configured ⇒ every host is denied (real
+    # default-deny, not "feature off").
     git_rules: GitRules = field(default_factory=GitRules)
-    # [git].actions domain default (§09 §1.4). None ⇒ the key is absent from
+    # [git].actions domain default. None ⇒ the key is absent from
     # warden.toml, meaning the built-in default (guards.gitlab_api.actions.
     # DEFAULT_ACTIONS) applies — same "absent != empty" contract as git_rules'
     # individual fields, kept at the whole-list granularity since actions
@@ -145,7 +144,7 @@ class Config:
         """Default-deny match against ``ALLOWED_PROJECTS``, path form only.
 
         No prefix/subpath match — the allowlist names concrete projects, never
-        group prefixes (README doctrine). GitLab also accepts a project's
+        group prefixes. GitLab also accepts a project's
         numeric id interchangeably with its path; matching that form is a
         REST-API-guard concept (the id is only known after reconcile talks to
         GitLab) — see ``guards.gitlab_api.guard.ApiGuard.project_allowed``,
@@ -174,8 +173,8 @@ class Config:
         return host.split(":", 1)[0].strip().lower().rstrip(".")
 
     def host_allowed(self, host: str) -> bool:
-        """Host-header gate (§2), wired into the kernel path via
-        ``core.guard.host_gate``. Real default-deny (step 03): a host passes
+        """Host-header gate, wired into the kernel path via
+        ``core.guard.host_gate``. Real default-deny: a host passes
         only if it has a configured ``[[git.endpoint]]`` entry *and* that
         endpoint currently resolves to a usable read credential
         (:meth:`access_mode` is not ``"closed"``). An empty endpoint list
@@ -219,17 +218,16 @@ class Config:
     @property
     def effective_hosts(self) -> tuple[str, ...]:
         """Host list: every configured endpoint's normalised host, in
-        ``git_endpoints`` order — always "from the endpoints" (step 03), no
-        single-target fallback. Empty when no endpoint is configured. Includes
+        ``git_endpoints`` order. Empty when no endpoint is configured. Includes
         ``closed`` endpoints; see :attr:`open_hosts` for the per-endpoint
-        reconcile's trimmed variant (step 04)."""
+        reconcile's trimmed variant."""
         return tuple(self.normalize_host(e.host) for e in self.git_endpoints)
 
     @property
     def open_hosts(self) -> tuple[str, ...]:
         """:attr:`effective_hosts`, trimmed to endpoints that currently have a
-        usable read credential (step 04: per-endpoint reconcile). The single
-        definition shared by :func:`~warden.guards.git.reconcile.reconcile_branches`
+        usable read credential. The single definition shared by
+        :func:`~warden.guards.git.reconcile.reconcile_branches`
         and :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs` — a
         ``closed`` endpoint is unreachable via ``host_gate`` anyway (R6) and
         never needs reconciling (see :func:`~warden.core.transport.for_each_host_project`'s
@@ -269,14 +267,14 @@ class Config:
         )
 
     def effective_actions(self, host: str) -> tuple[str, ...]:
-        """Per-host action cascade (§09 §1.4), same ``_cascade`` mechanic as
+        """Per-host action cascade, same ``_cascade`` mechanic as
         :meth:`effective_rules`: the endpoint's own ``actions`` if set, else
         ``git_actions`` (the domain default), else the built-in default
-        (:data:`~warden.guards.gitlab_api.actions.DEFAULT_ACTIONS`, step 01).
+        (:data:`~warden.guards.gitlab_api.actions.DEFAULT_ACTIONS`).
         The list **replaces** completely — never merged, just like
         ``branch_prefixes``.
 
-        The ``type``-cut (§3.2) applies only to an *inherited* value: a
+        The ``type``-cut applies only to an *inherited* value: a
         ``plain`` endpoint that falls through to ``git_actions``/the built-in
         default is silently intersected with
         :func:`~warden.guards.gitlab_api.actions.actions_valid_for_type` for

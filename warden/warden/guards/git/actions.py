@@ -1,12 +1,11 @@
 """Action catalog, git side: the two git Smart-HTTP transport verbs.
 
-§09 §1.2/§5: ``git.fetch`` covers ``advertise`` (upload discovery) plus
-``upload-pack`` — a read; ``git.push`` covers ``advertise`` (push discovery)
-plus ``receive-pack`` — a write. :func:`action_for_git_operation` maps a
+``git.fetch`` covers ``advertise`` (upload discovery) plus ``upload-pack`` —
+a read; ``git.push`` covers ``advertise`` (push discovery) plus
+``receive-pack`` — a write. :func:`action_for_git_operation` maps a
 :class:`~.intent.GitIntent`'s ``operation``/``service`` pair onto one of the
-two. Defined and tested only here — the git-guard gate that denies a request
-whose action is missing from the host's effective actions is a later step
-(§09 04); nothing here wires into :class:`~.guard.GitGuard` yet.
+two; :func:`~.policy.action_gate` is the gate that denies a request whose
+action is missing from the host's effective actions.
 """
 
 from __future__ import annotations

@@ -169,8 +169,7 @@ class GitGuard(Guard[GitIntent]):
         return intent
 
     def capability_gate(self, intent: GitIntent, cfg: Config) -> Optional[Decision]:
-        """Runs before ``decide`` for every operation (kernel step 4, §07
-        Punkt 8): the action gate (§09 step 03) consults it first so a
+        """Runs :func:`~.policy.action_gate` first, for every operation, so a
         ``git.push``-disabled host is denied already at ``advertise`` — the
         push-discovery request, before the client sends the pack — not only
         at ``receive-pack``. The capability-invariant check (tag/merge/delete,
