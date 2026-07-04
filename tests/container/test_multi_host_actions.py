@@ -255,7 +255,9 @@ def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: s
     assert status == 403, f"host {host!r}: expected R5 state-locked deny, got {status}: {body}"
     payload = json.loads(body)
     assert payload["rule"] == "R5", f"expected rule R5, got {payload!r}"
-    assert "state locked" in payload["reason"], f"expected 'state locked' in reason, got {payload!r}"
+    assert "state locked" in payload["reason"], (
+        f"expected 'state locked' in reason, got {payload!r}"
+    )
 
 
 @pytest.mark.slow
@@ -274,9 +276,7 @@ def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
     passed (as opposed to `review-only`'s R3 "not enabled" for the same
     request shape).
     """
-    status, body = _probe(
-        live_stack, host=HOST_FULL, path=_git_advertise_path(PROJECT, push=True)
-    )
+    status, body = _probe(live_stack, host=HOST_FULL, path=_git_advertise_path(PROJECT, push=True))
     _assert_routed(status, body, HOST_FULL, "git.push (advertise-receive)")
 
     status, body = _probe(
@@ -359,7 +359,5 @@ def test_plain_endpoint_fetch_and_push_routed(live_stack: Stack) -> None:
     )
     _assert_routed(status, body, HOST_PLAIN, "git.fetch (advertise-upload)")
 
-    status, body = _probe(
-        live_stack, host=HOST_PLAIN, path=_git_advertise_path(PROJECT, push=True)
-    )
+    status, body = _probe(live_stack, host=HOST_PLAIN, path=_git_advertise_path(PROJECT, push=True))
     _assert_routed(status, body, HOST_PLAIN, "git.push (advertise-receive)")
