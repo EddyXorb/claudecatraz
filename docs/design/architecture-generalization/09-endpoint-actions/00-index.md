@@ -22,13 +22,13 @@ sagt „gleiche Ebene, keine Reihenfolge untereinander".
 
 | Ebene | Datei | Leitet ab aus | Hängt ab von | Status |
 | --- | --- | --- | --- | --- |
-| 01 | [`01-action-catalog.md`](01-action-catalog.md) | §1.2, §5 (Action-Katalog) | — | offen |
-| 01 | [`01-doctrine-amendment.md`](01-doctrine-amendment.md) | §1.3, §5 (Doktrin 08 §3.1) | — | offen |
-| 02 | [`02-config-actions.md`](02-config-actions.md) | §1, §3, §5 (Config) | 01 (Katalog) | offen |
-| 03 | [`03-rest-guard-per-host.md`](03-rest-guard-per-host.md) | §2, §5 (REST-Guard, `[api.endpoints]`-Entfall) | 01, 02 | offen |
-| 03 | [`03-git-action-gate.md`](03-git-action-gate.md) | §2, §5 (git-Guard) | 01, 02 | offen |
-| 04 | [`04-template-init-doctor.md`](04-template-init-doctor.md) | §4, §5 (Template/`init`/`doctor`) | 01–03 | offen |
-| 05 | [`05-container-test.md`](05-container-test.md) | §8 (Fertig-Kriterium) | 01–04 | offen |
+| 01 | [`01-action-catalog.md`](01-action-catalog.md) | §1.2, §5 (Action-Katalog) | — | ✅ erledigt (f2915a0) |
+| 01 | [`01-doctrine-amendment.md`](01-doctrine-amendment.md) | §1.3, §5 (Doktrin 08 §3.1) | — | ✅ erledigt (38d3b5b) |
+| 02 | [`02-config-actions.md`](02-config-actions.md) | §1, §3, §5 (Config) | 01 (Katalog) | ✅ erledigt (67edaa8) |
+| 03 | [`03-rest-guard-per-host.md`](03-rest-guard-per-host.md) | §2, §5 (REST-Guard, `[api.endpoints]`-Entfall) | 01, 02 | ✅ erledigt (b4e10f3) |
+| 03 | [`03-git-action-gate.md`](03-git-action-gate.md) | §2, §5 (git-Guard) | 01, 02 | ✅ erledigt (94059eb) |
+| 04 | [`04-template-init-doctor.md`](04-template-init-doctor.md) | §4, §5 (Template/`init`/`doctor`) | 01–03 | ✅ erledigt (cab1dc4) |
+| 05 | [`05-container-test.md`](05-container-test.md) | §8 (Fertig-Kriterium) | 01–04 | ✅ erledigt (a011552) |
 
 - **Ebene 01** — parallel: `01-action-catalog.md` (Warden-Python) **und**
   `01-doctrine-amendment.md` (reine Doku an 08 §3.1, ohne Code-Dep).
