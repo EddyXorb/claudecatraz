@@ -196,6 +196,42 @@ class TestMultiEndpointScaffold:
         data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
         assert "rules" in data.get("git", {})
 
+    def test_warden_toml_scaffolds_explicit_git_actions_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """§09 step 04: `init` sets `[git] actions = [...]` explicitly with the
+        full built-in default, plus the §1.2 vocabulary comment — and no
+        `[api.endpoints]` remnant."""
+        import tomllib
+
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        toml_path = root / ".catraz" / "config" / "warden.toml"
+        text = toml_path.read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+        assert data["git"]["actions"] == [
+            "git.fetch",
+            "git.push",
+            "mr.create",
+            "mr.comment",
+            "mr.update",
+            "pipeline.trigger",
+        ]
+        # Vocabulary comment documents both default and non-default actions.
+        for action in (
+            "git.fetch",
+            "git.push",
+            "mr.create",
+            "mr.comment",
+            "mr.update",
+            "pipeline.trigger",
+            "branch.create",
+            "issue.create",
+        ):
+            assert action in text
+        assert "[api.endpoints]" not in text
+
 
 class TestYesModeReadOnly:
     """--yes with read token only → GITLAB_MODE=read-only."""
