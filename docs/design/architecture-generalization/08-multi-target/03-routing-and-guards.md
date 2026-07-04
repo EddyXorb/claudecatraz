@@ -70,3 +70,28 @@ refactor(transport): route per endpoint, derive base-url by type
 `UpstreamRouter` baut Upstreams aus den Endpoints mit `type`-abgeleiteter Basis-URL;
 `resolve` liefert `None` für unbekannte/closed Hosts; `host_gate` ist echtes default-deny;
 `implicit_host`/`resolve_target_host`-Sonderfall/`api_url` sind weg; Tests grün.
+
+## Status
+
+✅ Erledigt (Commits `6734606`, `32bc43b`). Literal umgesetzt, kein additiver
+Zwischenschritt wie bei 01/02: `implicit_host`, `api_url`, `resolve_target_host`s
+Single-Target-Zweig, `UpstreamRouter`s Single-Upstream-Branch und `host_gate`s
+Allow-all-bei-leerer-Liste sind vollständig entfernt, nicht nur überlagert. Zusätzlich
+zur wörtlichen 4-Punkte-Liste wurden auch die alte `[git.urls]`/`host_order`-Maschinerie
+(`_parse_git_url_hosts`, `_host_slug`, `_resolve_host_credentials`,
+`_additional_host_credential_problems`, `Config.credentials_for`/`host_credentials`)
+ersatzlos entfernt — konsistent mit `00-index.md`s Grundregel „keine
+Rückwärtskompatibilität zur alten Form" und mit 01/02s eigenen Status-Notizen, die diese
+Aufräumung explizit „Schritt 03, sobald die Aufrufer umgehängt sind" zuschreiben.
+`GITLAB_MODE`/`gitlab_mode` blieben unangetastet (Scope von Schritt 05).
+
+**Nachträglich gefundener und gefixter Bug (Commit `32bc43b`):** Die erste Fassung ließ
+`Config.effective_hosts` weiterhin jeden Endpoint-Host auflisten (auch `closed`), während
+`UpstreamRouter` für `closed`-Endpoints keinen Upstream mehr baut. Der geteilte
+Reconcile-Loop (`for_each_host_project`) rief `router.for_host(host)` ungeschützt auf,
+was bei einem `closed`-Host einen unabgefangenen `KeyError` warf, den ganzen Loop abbrach
+und damit `mark_reconciled` nie erreichte — ein einzelner tokenloser Endpoint sperrte so
+dauerhaft den kompletten Guard für alle Hosts, im Widerspruch zu §4.2s
+Isolationsversprechen. Fix: `for_each_host_project` überspringt einen Host ohne
+Router-Eintrag jetzt geloggt, ohne `ok` auf `False` zu setzen. Regressionstests in
+`test_host_routing.py`.
