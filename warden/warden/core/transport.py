@@ -135,18 +135,17 @@ class Upstream:
 
 
 def _host_config(cfg: Config, host: str) -> Config:
-    """Build a host-scoped :class:`Config` clone for :class:`Upstream` construction
-    (§07 Punkt 8 follow-up, design spike section 2/3).
+    """Build a host-scoped :class:`Config` clone for :class:`Upstream` construction.
 
-    ``Upstream`` only ever reads ``api_url``/``git_base`` (a property derived
-    from ``api_url``)/``read_token``/``write_token`` off the ``Config`` it is
-    given — cloning via :func:`dataclasses.replace` keeps ``Upstream.__init__``
-    and every existing ``Upstream(cfg)`` call site (composition root, tests)
-    unchanged; only the values the clone carries differ. Base URL is derived
-    purely from the host (design spike §3: "Ein Host in der Allowlist bedeutet
-    also implizit auch seine URL-Form") — ``GITLAB_URL`` only matters for the
-    legacy single-target path (:class:`UpstreamRouter`'s single-``Upstream``
-    branch, built straight from ``cfg`` with no cloning).
+    ``Upstream`` only ever reads ``api_url``/``git_base``/``read_token``/
+    ``write_token`` off the ``Config`` it is given, so cloning via
+    :func:`dataclasses.replace` needs no changes to ``Upstream.__init__`` or
+    any existing ``Upstream(cfg)`` call site — only the values the clone
+    carries differ. Base URL is derived purely from the host: a host in the
+    allowlist implies its own URL form, independent of ``GITLAB_URL`` (which
+    only matters for the legacy single-target path — see
+    :class:`UpstreamRouter`'s single-``Upstream`` branch, built straight from
+    ``cfg`` with no cloning).
     """
     creds = cfg.credentials_for(host)
     return dataclasses.replace(

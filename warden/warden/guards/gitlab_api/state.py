@@ -7,14 +7,9 @@ Folded here from the now-dissolved ``guards.gitlab.state.ForgeState``
 :mod:`warden.guards.git.state`; this table is the REST-API guard's MR-quota
 domain only.
 
-Keyed by ``(host, project, iid)`` (§07 Punkt 8 follow-up, design spike
-section 4) for the same reason :mod:`warden.guards.git.state` is: two
-different hosts can coincidentally share a project path, and without the
-host in the key their MR ids would collide. :meth:`open_mrs` stays a
-**global**, unfiltered count — see that module's docstring for why. In
-single-target mode every row's ``host`` is the same constant value
-(``Config.implicit_host``), so this table behaves identically to the
-pre-host-column schema.
+Keyed by ``(host, project, iid)`` and kept a **global**, unfiltered
+:meth:`open_mrs` count for the same reasons :mod:`warden.guards.git.state`
+is — see that module's docstring, this table's shape mirrors it exactly.
 """
 
 from __future__ import annotations

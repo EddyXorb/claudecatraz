@@ -9,20 +9,9 @@ own domain table on the shared connection: branches in
 :class:`~warden.guards.git.state.BranchState`, MRs in
 :class:`~warden.guards.gitlab_api.state.MrState`.
 
-Schema versioning via SQLite's ``PRAGMA user_version``. Pre-1.0: no migration
-machinery — a DB is stamped at :data:`CURRENT_SCHEMA_VERSION` on first use
-(``CREATE TABLE IF NOT EXISTS`` builds the current shape directly). The value
-kept is fail-closed (A9): a DB stamped with *any* version other than
-:data:`CURRENT_SCHEMA_VERSION` (newer **or** older) raises :class:`SchemaError`
-rather than run against a shape this build did not create. Older-not-just-newer
-matters because ``CREATE TABLE IF NOT EXISTS`` only *creates* a table — it does
-not alter one that already exists under the old name/shape (§07 Punkt 8
-follow-up: adding a column to an existing table, e.g. ``agent_branches``'
-``host`` column, is exactly this case). A version bump therefore always means
-"this exact build's shape", and a mismatched existing DB must be rebuilt from
-scratch (delete the file) — consistent with "pre-1.0, state is disposable".
-A brand-new file (``user_version == 0``) is exempt: that is the ordinary
-bootstrap case, not a mismatch.
+Schema versioning via SQLite's ``PRAGMA user_version`` — fail-closed (A9), not
+migrated: see :meth:`StateStore._check_and_stamp_schema_version` for why a
+mismatched version aborts rather than alters the existing shape.
 """
 
 from __future__ import annotations
@@ -44,17 +33,14 @@ __all__ = [
 
 CURRENT_SCHEMA_VERSION: Final[int] = 2
 # v1 → v2 (§07 Punkt 8 follow-up): agent_branches/agent_mrs gained a `host`
-# column (part of the primary key) for multi-target state-keying. No
-# migration runs for it — see the module docstring: an existing v1 DB is
-# rejected fail-closed (SchemaError), not silently reused with a missing
-# column. A fresh DB (`user_version == 0`) is built at v2 directly.
+# column (part of the primary key) for multi-target state-keying — no
+# migration runs for it, an existing v1 DB is rejected instead (see
+# _check_and_stamp_schema_version). A fresh DB is built at v2 directly.
 
 
 class SchemaError(RuntimeError):
-    """Raised when the state DB's schema version does not match this build's
-    (newer, older, or otherwise incompatible) — fail-closed: this build must
-    never silently run against a shape it did not itself create, so it
-    refuses to start."""
+    """Raised when the state DB's schema version does not match this build's —
+    fail-closed (see :meth:`StateStore._check_and_stamp_schema_version`)."""
 
 
 _CORE_SCHEMA = """
@@ -81,14 +67,8 @@ class StateStore:
     one file, never a second connection.
 
     Checks and stamps the schema version at connect time, before any table
-    (core's or a domain's) is created: a fresh file has ``user_version == 0``
-    and gets stamped at :data:`CURRENT_SCHEMA_VERSION`; a DB already at
-    :data:`CURRENT_SCHEMA_VERSION` is left as-is; a DB stamped at *any other*
-    version — newer or older — raises :class:`SchemaError` (fail-closed, A9),
-    because ``CREATE TABLE IF NOT EXISTS`` cannot retrofit a new column onto
-    an existing table of the old shape (see the module docstring). The
-    caller's own ``CREATE TABLE IF NOT EXISTS`` then builds/confirms the
-    current shape on a fresh or already-current file.
+    (core's or a domain's) is created — see
+    :meth:`_check_and_stamp_schema_version` for the fail-closed rationale.
     """
 
     def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
@@ -102,6 +82,22 @@ class StateStore:
         self._check_and_stamp_schema_version()  # before any CREATE TABLE — see class docstring
 
     def _check_and_stamp_schema_version(self) -> None:
+        """Fail-closed schema-version gate (A9), run before any ``CREATE TABLE``.
+
+        Pre-1.0: no migration machinery — a DB is stamped at
+        :data:`CURRENT_SCHEMA_VERSION` on first use (``CREATE TABLE IF NOT
+        EXISTS`` builds the current shape directly). A DB stamped at *any*
+        other version — newer **or** older — raises :class:`SchemaError`
+        rather than run against a shape this build did not create.
+        Older-not-just-newer matters because ``CREATE TABLE IF NOT EXISTS``
+        only *creates* a table — it does not alter one that already exists
+        under the old shape (§07 Punkt 8 follow-up: adding a column to an
+        existing table, e.g. ``agent_branches``' ``host`` column, is exactly
+        this case). A mismatched existing DB must therefore be rebuilt from
+        scratch (delete the file) — consistent with "pre-1.0, state is
+        disposable". A brand-new file (``user_version == 0``) is exempt:
+        that is the ordinary bootstrap case, not a mismatch.
+        """
         user_version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
         if user_version not in (0, CURRENT_SCHEMA_VERSION):
             raise SchemaError(
