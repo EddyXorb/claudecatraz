@@ -1,13 +1,18 @@
 """git guard policy: pure, per-ref rules for a receive-pack push.
 
 Branch namespace, delete/tag defense-in-depth, quotas — everything genuinely git-specific.
-Mode gate (R0), resource allowlist (R6), and capability invariants (R4) are the kernel's job.
+Mode gate (R0) and the project resource allowlist (R6) are the kernel's job.
 
 Rules enforced:
   R2  git write limits   push only to branches under allowed <branch_prefix>.
   R4  Irreversible verbs tag pushes and branch deletes never permitted.
   R5  Quota & rate       max open branches, max writes/hour, max push size (§07 Punkt 6.3);
                          locked state denies (fail-safe).
+  R6  Action allowlist   :func:`action_gate` (§09 step 03): git.fetch/git.push
+                         must be in the host's effective actions — same rule
+                         id as the kernel's project allowlist, a second
+                         instance of the same "resource/action outside the
+                         configured boundary" meta-rule (M6).
 """
 
 from __future__ import annotations
@@ -19,7 +24,8 @@ from ...core.capabilities import Capability, forbidden_check
 from ...core.config import Config
 from ...core.guard import kernel_gates
 from ...core.model import Decision, StateView, TokenKind
-from ...core.rules import R2, R4, R5
+from ...core.rules import R2, R4, R5, R6
+from .actions import action_for_git_operation
 from .intent import GitIntent
 from .pktline import RefCommand
 
@@ -44,6 +50,33 @@ def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
     if not cfg.in_branch_namespace(ref):
         caps.add(Capability.WRITES_OUTSIDE_NAMESPACE)
     return frozenset(caps)
+
+
+def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
+    """§09 step 03: deny a git-transport operation whose mapped action
+    (:func:`~.actions.action_for_git_operation`, step 01) is missing from the
+    host's effective actions (:meth:`~warden.core.config.Config.effective_actions`,
+    step 02).
+
+    Runs for **all three** operations — crucially ``advertise`` — so a
+    ``git.push``-disabled host is denied already at push discovery, before the
+    client ever sends the pack (§5 doctrine, same shape as the existing
+    ``_writes``/mode-gate path). ``advertise`` carries the requested backend in
+    ``intent.service``; :func:`~.actions.action_for_git_operation` reads it to
+    tell fetch-discovery from push-discovery apart.
+
+    Relies on :func:`~warden.core.guard.host_gate` (R6) having already run and
+    passed for ``intent.host`` (:func:`~warden.core.guard.kernel_gates`, before
+    this hook is reachable): a host with no ``[[git.endpoint]]`` entry is
+    denied there first. This matters because ``effective_actions`` cannot
+    itself distinguish "no endpoint" from "endpoint inheriting the domain/
+    built-in default" — both return the same non-empty default — so this gate
+    must never be the first thing to see an unconfigured host.
+    """
+    action = action_for_git_operation(intent.operation, intent.service)
+    if action not in cfg.effective_actions(intent.host):
+        return Decision(False, R6, f"action {action!r} not enabled for host {intent.host!r}")
+    return None
 
 
 def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
@@ -139,6 +172,8 @@ def full_decide(
     ``guards.gitlab_api.policy.full_decide``.
     """
     d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
+    if d is None:
+        d = action_gate(intent, cfg)
     if d is None:
         d = capability_gate(intent, cfg)
     if d is None:
