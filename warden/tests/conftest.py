@@ -11,7 +11,7 @@ from warden.context import AppContext, build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.core.transport import Upstream
+from warden.core.transport import UpstreamRouter
 from warden.guards.gitlab_api.guard import ApiGuard
 
 UPSTREAM = "https://gitlab.example"
@@ -41,7 +41,7 @@ def state() -> State:
 
 @pytest.fixture
 def api_guard(cfg, state) -> ApiGuard:
-    return ApiGuard(cfg, state, AuditLog("-"), Upstream(cfg))
+    return ApiGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg))
 
 
 @pytest.fixture
@@ -62,4 +62,4 @@ async def client(ctx) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
         yield c
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()

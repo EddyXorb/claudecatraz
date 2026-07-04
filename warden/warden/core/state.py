@@ -11,10 +11,18 @@ own domain table on the shared connection: branches in
 
 Schema versioning via SQLite's ``PRAGMA user_version``. Pre-1.0: no migration
 machinery — a DB is stamped at :data:`CURRENT_SCHEMA_VERSION` on first use
-(``CREATE TABLE IF NOT EXISTS`` builds the current shape directly). The one
-value kept is fail-closed (A9): a DB stamped with a version *newer* than this
-build understands raises :class:`SchemaError` rather than run against an
-unknown shape.
+(``CREATE TABLE IF NOT EXISTS`` builds the current shape directly). The value
+kept is fail-closed (A9): a DB stamped with *any* version other than
+:data:`CURRENT_SCHEMA_VERSION` (newer **or** older) raises :class:`SchemaError`
+rather than run against a shape this build did not create. Older-not-just-newer
+matters because ``CREATE TABLE IF NOT EXISTS`` only *creates* a table — it does
+not alter one that already exists under the old name/shape (§07 Punkt 8
+follow-up: adding a column to an existing table, e.g. ``agent_branches``'
+``host`` column, is exactly this case). A version bump therefore always means
+"this exact build's shape", and a mismatched existing DB must be rebuilt from
+scratch (delete the file) — consistent with "pre-1.0, state is disposable".
+A brand-new file (``user_version == 0``) is exempt: that is the ordinary
+bootstrap case, not a mismatch.
 """
 
 from __future__ import annotations
@@ -34,13 +42,19 @@ __all__ = [
     "WINDOW_SECONDS",
 ]
 
-CURRENT_SCHEMA_VERSION: Final[int] = 1
+CURRENT_SCHEMA_VERSION: Final[int] = 2
+# v1 → v2 (§07 Punkt 8 follow-up): agent_branches/agent_mrs gained a `host`
+# column (part of the primary key) for multi-target state-keying. No
+# migration runs for it — see the module docstring: an existing v1 DB is
+# rejected fail-closed (SchemaError), not silently reused with a missing
+# column. A fresh DB (`user_version == 0`) is built at v2 directly.
 
 
 class SchemaError(RuntimeError):
-    """Raised when the state DB's schema version is newer than this build
-    understands — fail-closed: a downgrade must never silently run against a
-    shape it does not fully know, so it refuses to start."""
+    """Raised when the state DB's schema version does not match this build's
+    (newer, older, or otherwise incompatible) — fail-closed: this build must
+    never silently run against a shape it did not itself create, so it
+    refuses to start."""
 
 
 _CORE_SCHEMA = """
@@ -69,10 +83,12 @@ class StateStore:
     Checks and stamps the schema version at connect time, before any table
     (core's or a domain's) is created: a fresh file has ``user_version == 0``
     and gets stamped at :data:`CURRENT_SCHEMA_VERSION`; a DB already at
-    :data:`CURRENT_SCHEMA_VERSION` is left as-is; a DB stamped *newer* than
-    this build understands raises :class:`SchemaError` (fail-closed, A9) —
-    the caller's own ``CREATE TABLE IF NOT EXISTS`` then builds/confirms the
-    current shape.
+    :data:`CURRENT_SCHEMA_VERSION` is left as-is; a DB stamped at *any other*
+    version — newer or older — raises :class:`SchemaError` (fail-closed, A9),
+    because ``CREATE TABLE IF NOT EXISTS`` cannot retrofit a new column onto
+    an existing table of the old shape (see the module docstring). The
+    caller's own ``CREATE TABLE IF NOT EXISTS`` then builds/confirms the
+    current shape on a fresh or already-current file.
     """
 
     def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
@@ -87,10 +103,11 @@ class StateStore:
 
     def _check_and_stamp_schema_version(self) -> None:
         user_version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
-        if user_version > CURRENT_SCHEMA_VERSION:
+        if user_version not in (0, CURRENT_SCHEMA_VERSION):
             raise SchemaError(
-                f"state DB schema version {user_version} is newer than this warden "
-                f"build supports ({CURRENT_SCHEMA_VERSION}) — refusing to start (fail-closed)"
+                f"state DB schema version {user_version} does not match this warden "
+                f"build's schema ({CURRENT_SCHEMA_VERSION}) — refusing to start "
+                "(fail-closed); delete the state DB to rebuild it fresh"
             )
         # user_version == 0 (fresh file) or == CURRENT_SCHEMA_VERSION: nothing to
         # lift — the caller's CREATE TABLE IF NOT EXISTS builds the current shape.

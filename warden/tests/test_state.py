@@ -113,6 +113,24 @@ def test_future_schema_version_fails_closed(tmp_path):
         State(str(path))
 
 
+def test_older_schema_version_also_fails_closed(tmp_path):
+    """§07 Punkt 8 follow-up: a non-fresh DB stamped at an *older* version than
+    this build (e.g. v1, pre-``host``-column) must also abort, not be silently
+    re-stamped and reused — ``CREATE TABLE IF NOT EXISTS`` cannot retrofit the
+    new column onto the old-shaped ``agent_branches``/``agent_mrs`` tables.
+    Only a brand-new file (``user_version == 0``) is exempt (the bootstrap
+    case, not a mismatch)."""
+    assert CURRENT_SCHEMA_VERSION > 1, "test assumes an older stamped version exists"
+    path = tmp_path / "stale.db"
+    raw = sqlite3.connect(str(path))
+    raw.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION - 1}")
+    raw.commit()
+    raw.close()
+
+    with pytest.raises(SchemaError):
+        State(str(path))
+
+
 def test_reopening_a_current_db_is_idempotent(tmp_path):
     path = tmp_path / "state.db"
     st1 = State(str(path))

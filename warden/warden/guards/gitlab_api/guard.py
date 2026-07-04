@@ -25,7 +25,7 @@ from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
 from ...core.state import State
-from ...core.transport import Upstream, stream_upstream
+from ...core.transport import UpstreamRouter, stream_upstream
 from ...errors import deny_json
 from .catalog import EffectiveTable, Recognizer, ScopeKind, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
@@ -53,11 +53,11 @@ class ApiGuard(Guard[ApiIntent]):
     def name(self) -> str:
         return "api"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, transport: Upstream) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
         super().__init__(cfg, state, audit)
-        self.transport = transport
+        self.router = router
         self.mr_state = MrState(state.store)
-        self.ownership = MrOwnership(transport, cfg)
+        self.ownership = MrOwnership(router, cfg)
         # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
         # Guard state, not Config — Config stays immutable; only this guard's
         # view of "which ids currently alias an allowlisted project" is refreshed.
@@ -102,7 +102,7 @@ class ApiGuard(Guard[ApiIntent]):
         if not self.cfg.gitlab_enabled:
             self.state.mark_reconciled()
             return True
-        ok, resolved_ids = await reconcile_mrs(self.cfg, self.transport, self.mr_state)
+        ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
         self.project_id_aliases = resolved_ids
         if ok:
             self.state.mark_reconciled()
@@ -130,6 +130,7 @@ class ApiGuard(Guard[ApiIntent]):
         return ApiIntent(
             _project=project,
             _method=method,
+            _host=request.headers.get("host", ""),
             path=rest_path,
             endpoint=ep,
             fields=fields,
@@ -147,7 +148,7 @@ class ApiGuard(Guard[ApiIntent]):
         ep = intent.endpoint
         if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
             intent.mr_source_ok = await self.ownership.source_in_namespace(
-                intent.project, intent.iid
+                intent.host, intent.project, intent.iid
             )
         return intent
 
@@ -168,8 +169,10 @@ class ApiGuard(Guard[ApiIntent]):
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:
         # Raw query is reattached here at transport boundary only, never in intent.path
         # — matching/decision stay query-less.
+        transport = self.router.resolve(intent.host)
+        assert transport is not None, "kernel_gates already denied an unresolved host"
         path = f"{intent.path}?{intent.raw_query}" if intent.raw_query else intent.path
-        resp: httpx.Response = await self.transport.open_rest(
+        resp: httpx.Response = await transport.open_rest(
             intent.method,
             path,
             headers=dict(request.headers),
@@ -230,7 +233,11 @@ class GraphqlGuard(Guard[GraphqlIntent]):
         ]
 
     async def parse(self, request: Request) -> GraphqlIntent:
-        return GraphqlIntent(path=request.url.path, _method=request.method)
+        return GraphqlIntent(
+            path=request.url.path,
+            _method=request.method,
+            _host=request.headers.get("host", ""),
+        )
 
     async def enrich(self, intent: GraphqlIntent) -> GraphqlIntent:
         return intent

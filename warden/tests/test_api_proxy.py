@@ -420,7 +420,7 @@ async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_route
         )
     assert resp.status_code == 201
     assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()
 
 
 async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
@@ -433,7 +433,7 @@ async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_route
         )
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R2"
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()
 
 
 async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
@@ -467,4 +467,4 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
     mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
     assert branch_event["enabled_via"] == "config:branch.create"
     assert "enabled_via" not in mr_event  # default-activated entry: no marking
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()

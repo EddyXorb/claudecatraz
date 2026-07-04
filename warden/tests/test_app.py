@@ -34,7 +34,7 @@ async def test_audit_tail_returns_log_contents(cfg, tmp_path):
         resp = await c.get("/audit")
     assert resp.status_code == 200
     assert resp.text == '{"a":1}\n{"a":2}\n'
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()
 
 
 async def test_audit_tail_empty_when_log_missing(cfg, tmp_path):
@@ -48,7 +48,7 @@ async def test_audit_tail_empty_when_log_missing(cfg, tmp_path):
         resp = await c.get("/audit")
     assert resp.status_code == 200
     assert resp.text == ""
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()
 
 
 async def test_policy_route_reports_the_effective_table(cfg):
@@ -65,7 +65,7 @@ async def test_policy_route_reports_the_effective_table(cfg):
     branch_create = next(row for row in body["catalog"] if row["id"] == "branch.create")
     assert branch_create["default"] is False and branch_create["active"] is False
     assert body["builtin_deny"] == ["mr.merge"]
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()
 
 
 async def test_policy_route_reflects_activation_config(cfg, tmp_path):
@@ -81,7 +81,7 @@ async def test_policy_route_reflects_activation_config(cfg, tmp_path):
     assert branch_create["enabled_via"] == "config:branch.create"
     mr_note = next(row for row in body["catalog"] if row["id"] == "mr.note")
     assert mr_note["active"] is False  # not in this test's enable list
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()
 
 
 async def test_viewer_serves_the_static_html_page(cfg):
@@ -94,4 +94,4 @@ async def test_viewer_serves_the_static_html_page(cfg):
     assert resp.headers["content-type"].startswith("text/html")
     assert "Warden Audit Log" in resp.text
     assert "<script>" in resp.text
-    await ctx.upstream.aclose()
+    await ctx.router.aclose()

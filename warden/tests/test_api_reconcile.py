@@ -17,7 +17,7 @@ import httpx
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.core.transport import Upstream
+from warden.core.transport import UpstreamRouter
 from warden.guards.gitlab_api.guard import ApiGuard
 from warden.guards.gitlab_api.reconcile import reconcile_mrs
 
@@ -26,7 +26,7 @@ def _api_guard(cfg) -> ApiGuard:
     """A guard on its own fresh (never-reconciled) state — unlike the shared
     ``api_guard`` fixture (built on the pre-reconciled ``state`` fixture), so
     the lock/reconcile tests below see the real starting condition."""
-    return ApiGuard(cfg, State(":memory:"), AuditLog("-"), Upstream(cfg))
+    return ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
 
 
 # --- project_allowed (M6) -------------------------------------------------------
@@ -66,7 +66,7 @@ async def test_reconcile_mrs_paginates_and_filters_by_namespace_author_independe
         return_value=httpx.Response(200, json={"id": 12345})
     )
 
-    ok, resolved_ids = await reconcile_mrs(cfg, guard.transport, guard.mr_state)
+    ok, resolved_ids = await reconcile_mrs(cfg, guard.router, guard.mr_state)
 
     assert ok is True
     assert resolved_ids == {"12345"}

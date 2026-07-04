@@ -22,6 +22,11 @@ class GitIntent(Intent):
     # Audit-facing verb, not always an HTTP method: advertise→"GET",
     # upload-pack→"POST", receive-pack→"push" (kept for JSONL compatibility).
     _method: str
+    # Raw `Host` header, read by the guard's parse() (§07 Punkt 8 follow-up).
+    # `core.guard.host_gate` checks this against `Config.host_allowed`; the
+    # guard itself resolves the canonical host (for `UpstreamRouter`/state
+    # keys) via `Config.resolve_target_host(_host)`.
+    _host: str = ""
     # Set by the guard's parse(), never derived here: True for receive-pack
     # and for push discovery (advertise with ?service=git-receive-pack) — the
     # write token it needs must never reach upstream in read-only/off mode.
@@ -52,3 +57,7 @@ class GitIntent(Intent):
     @property
     def method(self) -> str:
         return self._method
+
+    @property
+    def host(self) -> str:
+        return self._host

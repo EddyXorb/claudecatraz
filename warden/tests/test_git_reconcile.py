@@ -14,13 +14,13 @@ import httpx
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.core.transport import Upstream
+from warden.core.transport import UpstreamRouter
 from warden.guards.git.guard import GitGuard
 from warden.guards.git.reconcile import reconcile_branches
 
 
 def _git_guard(cfg, state) -> GitGuard:
-    return GitGuard(cfg, state, AuditLog("-"), Upstream(cfg))
+    return GitGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg))
 
 
 async def test_reconcile_branches_follows_every_page(cfg, state, respx_router):
@@ -38,13 +38,13 @@ async def test_reconcile_branches_follows_every_page(cfg, state, respx_router):
     )
     guard = _git_guard(cfg, state)
 
-    ok = await reconcile_branches(cfg, guard.transport, guard.branch_state)
+    ok = await reconcile_branches(cfg, guard.router, guard.branch_state)
 
     assert ok is True
     assert guard.branch_state.open_branches() == 2  # both pages, prefix-filtered ("main" dropped)
     assert "page=1" in str(route.calls[0].request.url)
     assert "page=2" in str(route.calls[1].request.url)
-    await guard.transport.aclose()
+    await guard.router.aclose()
 
 
 async def test_reconcile_populates_branch_counter_and_unlocks(cfg, respx_router):
@@ -62,7 +62,7 @@ async def test_reconcile_populates_branch_counter_and_unlocks(cfg, respx_router)
     view = guard.state_view()
     assert view.locked is False
     assert view.open_branches == 2
-    await guard.transport.aclose()
+    await guard.router.aclose()
 
 
 async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
@@ -78,7 +78,7 @@ async def test_reconcile_failure_keeps_state_locked(cfg, respx_router):
 
     assert ok is False
     assert guard.state_view().locked is True
-    await guard.transport.aclose()
+    await guard.router.aclose()
 
 
 async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
@@ -93,4 +93,4 @@ async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
 
     assert ok is True
     assert guard.state_view().locked is False  # unlocked so the warden can serve (and deny)
-    await guard.transport.aclose()
+    await guard.router.aclose()

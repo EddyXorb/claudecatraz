@@ -21,6 +21,11 @@ class ApiIntent(Intent):
 
     _project: str
     _method: str
+    # Raw `Host` header, read by the guard's parse() (§07 Punkt 8 follow-up).
+    # `core.guard.host_gate` checks this against `Config.host_allowed`; the
+    # guard itself resolves the canonical host (for `UpstreamRouter`/state
+    # keys) via `Config.resolve_target_host(_host)`.
+    _host: str = ""
 
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
     endpoint: Optional["Recognizer"] = None  # matched catalog entry (writes only)
@@ -43,6 +48,10 @@ class ApiIntent(Intent):
     def method(self) -> str:
         return self._method
 
+    @property
+    def host(self) -> str:
+        return self._host
+
 
 @dataclass
 class GraphqlIntent(Intent):
@@ -50,6 +59,7 @@ class GraphqlIntent(Intent):
 
     path: str
     _method: str
+    _host: str = ""
 
     @property
     def writes(self) -> bool:
@@ -62,3 +72,7 @@ class GraphqlIntent(Intent):
     @property
     def method(self) -> str:
         return self._method
+
+    @property
+    def host(self) -> str:
+        return self._host

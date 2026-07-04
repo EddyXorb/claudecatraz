@@ -11,6 +11,7 @@ anything under ``guards.gitlab_api``.
 from __future__ import annotations
 
 import base64
+import dataclasses
 from typing import Any, AsyncIterator, Optional
 from urllib.parse import quote
 
@@ -128,6 +129,86 @@ class Upstream:
     @staticmethod
     def response_headers(resp: httpx.Response) -> dict[str, str]:
         return {k: v for k, v in resp.headers.items() if k.lower() not in _DROP_RESPONSE_HEADERS}
+
+
+def _host_config(cfg: Config, host: str) -> Config:
+    """Build a host-scoped :class:`Config` clone for :class:`Upstream` construction
+    (§07 Punkt 8 follow-up, design spike section 2/3).
+
+    ``Upstream`` only ever reads ``api_url``/``git_base`` (a property derived
+    from ``api_url``)/``read_token``/``write_token`` off the ``Config`` it is
+    given — cloning via :func:`dataclasses.replace` keeps ``Upstream.__init__``
+    and every existing ``Upstream(cfg)`` call site (composition root, tests)
+    unchanged; only the values the clone carries differ. Base URL is derived
+    purely from the host (design spike §3: "Ein Host in der Allowlist bedeutet
+    also implizit auch seine URL-Form") — ``GITLAB_URL`` only matters for the
+    legacy single-target path (:class:`UpstreamRouter`'s single-``Upstream``
+    branch, built straight from ``cfg`` with no cloning).
+    """
+    creds = cfg.credentials_for(host)
+    return dataclasses.replace(
+        cfg,
+        api_url=f"https://{host}/api/v4",
+        read_token=creds.read_token,
+        write_token=creds.write_token,
+    )
+
+
+class UpstreamRouter:
+    """Host → Upstream resolution (§07 Punkt 8 design spike, section 2),
+    shared by the git guard and the REST-API guard so neither re-derives its
+    own routing. One shared ``httpx.AsyncClient`` (connection pooling)
+    regardless of how many hosts are configured.
+
+    **Single-target default** (``cfg.host_order`` empty — no ``[git.urls]
+    hosts`` configured): :meth:`resolve` ignores the ``Host`` header entirely
+    and always returns the one ``Upstream`` built straight from ``cfg`` —
+    byte-for-byte the pre-multi-target behaviour, so an existing single-host
+    deployment sees no change no matter what a client's ``Host`` header says.
+
+    **Multi-target** (``cfg.host_order`` non-empty): :meth:`resolve` uses
+    ``Config.resolve_target_host`` (case/port/trailing-dot-insensitive,
+    default-deny) to map the request's ``Host`` header to one of the
+    pre-built per-host ``Upstream`` instances, or ``None`` on an unknown host.
+    """
+
+    def __init__(self, cfg: Config, *, client: Optional[httpx.AsyncClient] = None) -> None:
+        self._cfg = cfg
+        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
+        if not cfg.host_order:
+            self._single: Optional[Upstream] = Upstream(cfg, client=self._client)
+            self._by_host: dict[str, Upstream] = {}
+        else:
+            self._single = None
+            self._by_host = {
+                host: Upstream(_host_config(cfg, host), client=self._client)
+                for host in cfg.host_order
+            }
+
+    def resolve(self, host_header: str) -> Optional[Upstream]:
+        """Resolve the raw ``Host`` header to this request's ``Upstream``.
+
+        ``None`` means an unknown/unlisted host (default-deny) — the caller
+        must turn that into a denial, never fall back to some default
+        upstream. Never ``None`` in single-target mode (see class docstring).
+        """
+        target = self._cfg.resolve_target_host(host_header)
+        if target is None:
+            return None
+        if self._single is not None:
+            return self._single
+        return self._by_host.get(target)
+
+    def for_host(self, host: str) -> Upstream:
+        """Direct, non-header lookup for reconcile (§07 Punkt 8 follow-up):
+        ``host`` must come from ``cfg.effective_hosts`` — exactly the set
+        this router was built from, so the lookup never misses."""
+        if self._single is not None:
+            return self._single
+        return self._by_host[host]
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
 
 def stream_upstream(resp: httpx.Response) -> StreamingResponse:

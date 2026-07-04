@@ -20,7 +20,7 @@ from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R1
 from ...core.state import State
-from ...core.transport import Upstream, stream_upstream
+from ...core.transport import UpstreamRouter, stream_upstream
 from ...errors import deny_json
 from . import policy
 from .errors import git_reject_response
@@ -66,9 +66,9 @@ class GitGuard(Guard[GitIntent]):
     def name(self) -> str:
         return "git"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, transport: Upstream) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
         super().__init__(cfg, state, audit)
-        self.transport = transport
+        self.router = router
         self.branch_state = BranchState(state.store)
 
     def routes(self) -> list[Route]:
@@ -100,7 +100,7 @@ class GitGuard(Guard[GitIntent]):
             # opens the agent port and denies ops (instead of staying fail-safe locked).
             self.state.mark_reconciled()
             return True
-        ok = await reconcile_branches(self.cfg, self.transport, self.branch_state)
+        ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
         if ok:
             self.state.mark_reconciled()
         return ok
@@ -109,12 +109,14 @@ class GitGuard(Guard[GitIntent]):
         """Buffer only the pkt-line command section (KB-sized) for receive-pack;
         the untouched PACK payload streams through :attr:`GitIntent.rest`."""
         project = _project(request)
+        host = request.headers.get("host", "")
         if request.method == "GET":
             service = request.query_params.get("service", "git-upload-pack")
             return GitIntent(
                 _project=project,
                 operation="advertise",
                 _method="GET",
+                _host=host,
                 service=service,
                 _writes=(service == "git-receive-pack"),
             )
@@ -127,6 +129,7 @@ class GitGuard(Guard[GitIntent]):
                 _project=project,
                 operation="receive-pack",
                 _method="push",
+                _host=host,
                 _writes=True,
                 ref_commands=commands,
                 head=head,
@@ -142,6 +145,7 @@ class GitGuard(Guard[GitIntent]):
             _project=project,
             operation="upload-pack",
             _method="POST",
+            _host=host,
         )
 
     async def enrich(self, intent: GitIntent) -> GitIntent:
@@ -168,15 +172,19 @@ class GitGuard(Guard[GitIntent]):
         """
         if intent.operation != "receive-pack":
             return
+        host = self.cfg.resolve_target_host(intent.host)
+        assert host is not None, "kernel_gates already denied an unresolved host"
         for cmd in intent.ref_commands:
             ref = cmd.ref.removeprefix("refs/heads/")
             self.state.record_write("git", "push", ref)
             if cmd.is_create:
-                self.branch_state.add_branch(intent.project, ref)
+                self.branch_state.add_branch(host, intent.project, ref)
 
     async def forward(self, request: Request, intent: GitIntent, decision: Decision) -> Response:
+        transport = self.router.resolve(intent.host)
+        assert transport is not None, "kernel_gates already denied an unresolved host"
         if intent.operation == "advertise":
-            resp = await self.transport.git_get(
+            resp = await transport.git_get(
                 intent.project,
                 "info/refs",
                 params={"service": intent.service},
@@ -185,11 +193,11 @@ class GitGuard(Guard[GitIntent]):
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
-                headers=self.transport.response_headers(resp),
+                headers=transport.response_headers(resp),
                 media_type=resp.headers.get("content-type"),
             )
         if intent.operation == "upload-pack":
-            resp = await self.transport.git_post_stream(
+            resp = await transport.git_post_stream(
                 intent.project,
                 "git-upload-pack",
                 body=request.stream(),
@@ -206,7 +214,7 @@ class GitGuard(Guard[GitIntent]):
             async for chunk in intent.rest:
                 yield chunk
 
-        resp = await self.transport.git_post_stream(
+        resp = await transport.git_post_stream(
             intent.project,
             "git-receive-pack",
             body=body(),
