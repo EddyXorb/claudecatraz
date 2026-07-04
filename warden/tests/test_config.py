@@ -401,6 +401,20 @@ def test_git_urls_hosts_parsed_from_toml(tmp_path):
     assert cfg.host_order == ("gitlab.com", "my-gitlab.de")  # order preserved
 
 
+def test_git_urls_hosts_with_port_normalizes_like_an_incoming_host_header(tmp_path):
+    """Regression: an allowlist entry with a port (or trailing dot) must be
+    normalised the same way ``host_allowed``/``resolve_target_host`` normalise
+    an incoming ``Host`` header — otherwise it can never match and the host
+    is silently denied forever (two divergent normalisations bug)."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.internal:8443"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.host_order == ("gitlab.internal",)
+    assert cfg.allowed_hosts == frozenset({"gitlab.internal"})
+    assert cfg.host_allowed("gitlab.internal:8443")
+    assert cfg.host_allowed("GITLAB.INTERNAL")
+
+
 def test_git_urls_hosts_wrong_shape_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text('[git.urls]\nhosts = "gitlab.com"\n')

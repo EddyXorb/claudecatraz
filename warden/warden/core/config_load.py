@@ -70,9 +70,13 @@ def _parse_git_url_hosts(file: Mapping[str, object]) -> tuple[str, ...]:
     Absent ``[git]`` or ``[git.urls]`` ⇒ empty tuple — multi-target is
     inactive, ``Config.host_allowed`` then always allows (unchanged single-
     target behaviour). Present but malformed shape aborts startup (fail-closed,
-    consistent with every other ``warden.toml`` section). Entries are
-    lower-cased and stripped so ``Config.host_allowed``'s normalised
-    comparison always finds an exact match.
+    consistent with every other ``warden.toml`` section). Every entry is run
+    through :meth:`Config.normalize_host` — the *same* function
+    ``host_allowed``/``resolve_target_host`` apply to an incoming ``Host``
+    header — so an entry with a port or trailing dot (e.g.
+    ``"gitlab.internal:8443"``) still matches at request time instead of
+    silently never matching (there must be exactly one normalisation
+    definition, not two that can drift).
     """
     git = file.get("git", {})
     if not isinstance(git, Mapping):
@@ -87,7 +91,7 @@ def _parse_git_url_hosts(file: Mapping[str, object]) -> tuple[str, ...]:
         raise ConfigError(f"git.urls.hosts in warden.toml must be a list of strings, got {hosts!r}")
     seen: dict[str, None] = {}
     for h in hosts:
-        cleaned = h.strip().lower()
+        cleaned = Config.normalize_host(h)
         if cleaned:
             seen[cleaned] = None  # dict preserves insertion order and de-dupes
     return tuple(seen)
