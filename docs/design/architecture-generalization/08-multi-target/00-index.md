@@ -16,7 +16,7 @@ raten.
 | 3 | [`03-routing-and-guards.md`](03-routing-and-guards.md) | §1.1 (intern), §2 | 1, 2 | ✅ erledigt (6734606, 32bc43b) |
 | 4 | [`04-state-keying.md`](04-state-keying.md) | §5 | 1, 3 | offen |
 | 5 | [`05-env-cleanup.md`](05-env-cleanup.md) | §3.5 | 1, 2, 3 | offen |
-| 6 | [`06-cli-doctor-init.md`](06-cli-doctor-init.md) | §6 | 1, 2 | offen |
+| 6 | [`06-cli-doctor-init.md`](06-cli-doctor-init.md) | §6 | 1, 2 | ✅ erledigt (acbfc87) |
 | 7 | [`07-compose-and-agent-routing.md`](07-compose-and-agent-routing.md) | §1.1, §1.2, §4.1 | 1–6 | offen |
 | 8 | [`08-container-test.md`](08-container-test.md) | §8 | 1–7 | offen |
 
