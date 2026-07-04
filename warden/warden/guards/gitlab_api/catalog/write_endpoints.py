@@ -1,9 +1,11 @@
 """The endpoint catalog: every GitLab REST write endpoint the warden knows how to guard.
 
-Code defines the catalog; config activates entries. ``DEFAULT_ENABLED`` is the
-default set — a deployment with no ``[api.endpoints]`` section gets precisely this.
-Extra entries (``branch.create``, ``issue.create``) are catalogued and tested but
-only reachable when explicitly enabled via ``warden.toml``.
+Code defines the catalog; a host's effective ``actions`` (§09) activate entries.
+``DEFAULT_ENABLED`` is the default set — a host with no ``actions`` override
+anywhere in its cascade gets precisely this (the REST half of
+``guards.gitlab_api.actions.DEFAULT_ACTIONS``). Extra entries (``branch.create``,
+``issue.create``) are catalogued and tested but only reachable when a
+deployment's ``actions`` explicitly includes their action id.
 
 The merge endpoint is deliberately **not** here — it is a built-in deny invariant
 (``builtin.py``), not an activatable row.

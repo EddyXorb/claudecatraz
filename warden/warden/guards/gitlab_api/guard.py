@@ -28,7 +28,14 @@ from ...core.rules import R6
 from ...core.state import State
 from ...core.transport import UpstreamRouter, stream_upstream
 from ...errors import deny_json
-from .catalog import EffectiveTable, Recognizer, ScopeKind, build_effective_table, match_endpoint
+from .catalog import (
+    EMPTY_TABLE,
+    EffectiveTable,
+    Recognizer,
+    ScopeKind,
+    build_effective_table,
+    match_endpoint,
+)
 from .intent import ApiIntent, GraphqlIntent
 from .mr_namespace import MrNamespace
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
@@ -63,8 +70,14 @@ class ApiGuard(Guard[ApiIntent]):
         # Guard state, not Config — Config stays immutable; only this guard's
         # view of "which ids currently alias an allowlisted project" is refreshed.
         self.project_id_aliases: set[str] = set()
-        # Built once at construction, never rebuilt — no runtime rebuild, no drift.
-        self._effective: EffectiveTable = build_effective_table(cfg, cfg.endpoint_enable)
+        # Built once at construction, never rebuilt — no runtime rebuild, no drift
+        # (§09 §4). One table per configured host — a REST write allowed on one
+        # host can be denied on another, per that host's own effective actions
+        # (§09 §1.4).
+        self._effective_by_host: Mapping[str, EffectiveTable] = {
+            cfg.normalize_host(ep.host): build_effective_table(cfg.effective_actions(ep.host))
+            for ep in cfg.git_endpoints
+        }
 
     def routes(self) -> list[Route]:
         return [
@@ -74,6 +87,15 @@ class ApiGuard(Guard[ApiIntent]):
                 methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
             )
         ]
+
+    def _table_for(self, host: str) -> EffectiveTable:
+        """This host's effective table, or :data:`EMPTY_TABLE` if none is
+        configured — matches nothing, so every write default-denies rather
+        than crashing. A host with no ``[[git.endpoint]]`` entry can only
+        reach here before the kernel's ``host_gate`` has run: ``parse`` runs
+        ahead of it, same as :meth:`state_view` (see its docstring).
+        """
+        return self._effective_by_host.get(self.cfg.normalize_host(host), EMPTY_TABLE)
 
     def project_allowed(self, project: str) -> bool:
         """Check if project is allowed by path or numeric id (M6)."""
@@ -132,20 +154,21 @@ class ApiGuard(Guard[ApiIntent]):
         query = raw_query(request)
         method = request.method.upper()
         project = project_from_path(rest_path)
+        host = request.headers.get("host", "")
 
         body = b"" if method in ("GET", "HEAD", "OPTIONS") else await request.body()
-        # Match against the effective table only — never the catalog directly.
+        # Match against this host's effective table only — never the catalog directly.
         ep = (
             None
             if method in ("GET", "HEAD", "OPTIONS")
-            else match_endpoint(self._effective.entries, method, rest_path)
+            else match_endpoint(self._table_for(host).entries, method, rest_path)
         )
         fields = extract_fields(request, body, ep)
 
         return ApiIntent(
             _project=project,
             _method=method,
-            _host=request.headers.get("host", ""),
+            _host=host,
             path=rest_path,
             endpoint=ep,
             fields=fields,
@@ -169,10 +192,10 @@ class ApiGuard(Guard[ApiIntent]):
         return intent
 
     def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:
-        return capability_gate(intent, cfg, self._effective)
+        return capability_gate(intent, cfg, self._table_for(intent.host))
 
     def decide(self, intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
-        return decide(intent, state, cfg, self._effective)
+        return decide(intent, state, cfg, self._table_for(intent.host))
 
     def record(self, intent: ApiIntent, decision: Decision) -> None:
         """Record the write *before* the upstream call — fail-safe against crashes."""
@@ -222,7 +245,7 @@ class ApiGuard(Guard[ApiIntent]):
         """
         if intent.endpoint is None:
             return None
-        via = self._effective.enabled_via.get(intent.endpoint.id)
+        via = self._table_for(intent.host).enabled_via.get(intent.endpoint.id)
         return via if via and via != "default" else None
 
 

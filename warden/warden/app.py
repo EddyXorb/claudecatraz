@@ -84,10 +84,10 @@ async def _audit_tail(request: Request) -> Response:
 
 
 async def _policy(request: Request) -> JSONResponse:
-    """Read-only summary of the effective endpoint catalog (admin net only).
+    """Read-only summary of the effective endpoint catalog, per host (admin net only).
 
-    Every entry: whether part of the default set, whether activated.
-    ``catraz doctor``/``catraz allow-endpoint`` use this to show catalog ids and state.
+    Every entry: whether part of the default set, whether activated for that host.
+    ``catraz doctor`` uses this to show catalog ids and state.
     """
     ctx: AppContext = request.app.state.ctx
     return JSONResponse(endpoint_table_report(ctx.cfg))

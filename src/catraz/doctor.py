@@ -369,9 +369,7 @@ def _probe_gitlab_tokens(
         write_t = write_tokens.get(host, "")
 
         if read_t and write_t and read_t == write_t:
-            f.warn(
-                "tokens", f"{host}: READ and WRITE token are identical — likely a paste mistake"
-            )
+            f.warn("tokens", f"{host}: READ and WRITE token are identical — likely a paste mistake")
 
         for label, token in (("read", read_t), ("write", write_t)):
             if not token:
@@ -509,12 +507,16 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
 
 
 def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Effective endpoint-catalog table (§04.3): default set + activations.
+    """Effective endpoint-catalog table, per host (§09 step 03): default set +
+    activations for each configured ``[[git.endpoint]]``.
 
     A thin section — the actual report is fetched from the running warden's
-    read-only ``/policy`` admin route and formatted by ``catraz.endpoints``;
+    read-only ``/policy`` admin route (one section per host since the REST
+    guard's per-host actions rebuild) and formatted by ``catraz.endpoints``;
     doctor.py only wires it into the Findings list, so this module doesn't
     grow with the catalog (see ``catraz.endpoints.fetch_policy_report``).
+    The §4 action cross-checks (write_token / ``git.push`` coherence) are a
+    later step (04-template-init-doctor.md), not this one.
     """
     from catraz.admin_client import AdminUnreachable
     from catraz.endpoints import fetch_policy_report
@@ -532,19 +534,25 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
             "start the stack (`catraz run` / `catraz up`) to see it",
         )
         return
-    rows = report["catalog"]
-    active = [r for r in rows if r["active"]]
-    inactive = [r for r in rows if not r["active"]]
-    active_desc = ", ".join(
-        f"{r['id']}[{r['enabled_via']}]" if r["enabled_via"] != "default" else r["id"]
-        for r in active
-    )
-    f.ok("endpoints", f"{len(active)} active: {active_desc or '(none)'}")
-    if inactive:
-        f.ok(
-            "endpoints",
-            f"{len(inactive)} in catalog but not enabled: {', '.join(r['id'] for r in inactive)}",
+    hosts = report["hosts"]
+    if not hosts:
+        f.ok("endpoints", "no hosts configured yet")
+        return
+    for host, host_report in hosts.items():
+        rows = host_report["catalog"]
+        active = [r for r in rows if r["active"]]
+        inactive = [r for r in rows if not r["active"]]
+        active_desc = ", ".join(
+            f"{r['id']}[{r['enabled_via']}]" if r["enabled_via"] != "default" else r["id"]
+            for r in active
         )
+        f.ok("endpoints", f"{host}: {len(active)} active: {active_desc or '(none)'}")
+        if inactive:
+            f.ok(
+                "endpoints",
+                f"{host}: {len(inactive)} in catalog but not enabled: "
+                f"{', '.join(r['id'] for r in inactive)}",
+            )
 
 
 def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:

@@ -10,7 +10,7 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from warden.guards.gitlab_api.catalog import DEFAULT_ENABLED
+from warden.guards.gitlab_api.actions import DEFAULT_ACTIONS
 from warden.guards.gitlab_api.catalog.write_endpoints import WRITE_ENDPOINTS
 from warden.guards.gitlab_api.guard import _needs_source_lookup
 from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
@@ -397,9 +397,10 @@ def _activated_client_ctx(cfg, respx_router):
     from warden.core.audit import AuditLog
     from warden.core.state import State
 
+    endpoint = cfg.git_endpoints[0]
     activated_cfg = replace(
         cfg,
-        endpoint_enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
+        git_endpoints=(replace(endpoint, actions=tuple(DEFAULT_ACTIONS) + ("branch.create",)),),
     )
     state = State(":memory:")
     state.mark_reconciled("git")
@@ -468,4 +469,82 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
     mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
     assert branch_event["enabled_via"] == "config:branch.create"
     assert "enabled_via" not in mr_event  # default-activated entry: no marking
+    await ctx.router.aclose()
+
+
+# --- §09 step 03: per-host effective tables, one guard, two hosts --------------
+
+
+async def test_two_hosts_with_different_actions_behave_differently_on_the_same_guard():
+    # Host A keeps the built-in default (mr.create active); host B's own
+    # `actions` override is review-only (mr.comment only, no mr.create). Same
+    # ApiGuard instance, same running app — only `intent.host` differs.
+    # Two distinct upstream hosts, so this test opens its own respx mock
+    # (unscoped by base_url) rather than the shared single-host `respx_router`
+    # fixture (conftest.py, base_url pinned to the `cfg` fixture's one host).
+    import respx
+
+    from warden.app import create_app
+    from warden.context import build_context
+    from warden.core.audit import AuditLog
+    from warden.core.config import Config, GitEndpoint, HostCredentials
+    from warden.core.state import State
+
+    host_a, host_b = "full.example", "review-only.example"
+    cfg = Config(
+        branch_prefixes=("claude/",),
+        allowed_projects=("group/proj",),
+        state_db_path=":memory:",
+        git_endpoints=(
+            GitEndpoint(host=host_a, type="gitlab"),
+            GitEndpoint(host=host_b, type="gitlab", actions=("git.fetch", "mr.comment")),
+        ),
+        git_credentials={
+            host_a: HostCredentials(read_token="r", write_token="w"),
+            host_b: HostCredentials(read_token="r", write_token="w"),
+        },
+    )
+    state = State(":memory:")
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
+    ctx = build_context(cfg, state, AuditLog("-"))
+    app = create_app(ctx)
+    transport = httpx.ASGITransport(app=app)
+
+    async def _create_mr(host: str) -> httpx.Response:
+        async with httpx.AsyncClient(transport=transport, base_url=f"http://{host}") as c:
+            return await c.post(
+                f"/api/v4/projects/{PROJ}/merge_requests",
+                json={"source_branch": "claude/x", "target_branch": "main"},
+            )
+
+    async def _comment(host: str) -> httpx.Response:
+        async with httpx.AsyncClient(transport=transport, base_url=f"http://{host}") as c:
+            return await c.post(
+                f"/api/v4/projects/{PROJ}/merge_requests/1/notes",
+                json={"body": "hi"},
+            )
+
+    with respx.mock(assert_all_called=False) as router:
+        router.route(method="POST", url__regex=r".*/merge_requests$").mock(
+            return_value=httpx.Response(201, json={"iid": 1})
+        )
+        router.route(method="POST", url__regex=r".*/notes$").mock(
+            return_value=httpx.Response(201, json={"id": 1})
+        )
+        # mr.note's namespace check has no literal branch field — it resolves
+        # the MR's source_branch via an iid lookup first (`enrich()`).
+        router.route(method="GET", url__regex=r".*/merge_requests/1$").mock(
+            return_value=httpx.Response(200, json={"source_branch": "claude/x"})
+        )
+
+        mr_on_a = await _create_mr(host_a)
+        mr_on_b = await _create_mr(host_b)
+        comment_on_b = await _comment(host_b)
+
+    assert mr_on_a.status_code == 201  # host A: default actions include mr.create
+    assert mr_on_b.status_code == 403  # host B: mr.create not in its actions
+    assert mr_on_b.json()["rule"] == "R3"
+    assert comment_on_b.status_code == 201  # host B: mr.comment is active
+
     await ctx.router.aclose()

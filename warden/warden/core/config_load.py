@@ -55,18 +55,6 @@ def _secret(env: Mapping[str, str], name: str) -> str:
     return env.get(name, "")
 
 
-def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ...]]:
-    """Parse ``[api.endpoints].enable``.
-
-    Deferred import: gitlab_api guard owns the schema; core stays guard-agnostic,
-    only threading the parsed value through to ``Config.endpoint_enable``.
-    Malformed shape raises ``ConfigError`` (fail-closed startup abort).
-    """
-    from ..guards.gitlab_api.catalog.config_parse import parse_api_endpoints
-
-    return parse_api_endpoints(file).enable
-
-
 def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
     """Parse an ``actions`` list-key (``[git].actions`` or a per-endpoint
     ``actions``).
@@ -77,9 +65,8 @@ def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
     (§09 §5: an explicit empty list means "may do nothing", not "inherit").
 
     Fail-closed (§09 §3.1): not a list of strings, or an id outside the closed
-    vocabulary (typo protection), aborts startup. Deferred import for the same
-    reason as ``_parse_endpoint_enable``: the vocabulary is guard-owned, core
-    stays guard-agnostic at module-import time.
+    vocabulary (typo protection), aborts startup. Deferred import: the
+    vocabulary is guard-owned, core stays guard-agnostic at module-import time.
     """
     if raw is None:
         return None
@@ -408,7 +395,6 @@ def from_env(
         agent_port=_int("AGENT_PORT", 8080),
         admin_port=_int("ADMIN_PORT", 9090),
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
-        endpoint_enable=_parse_endpoint_enable(file),
         git_rules=git_rules,
         git_actions=git_actions,
         git_endpoints=git_endpoints,

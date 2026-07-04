@@ -53,35 +53,40 @@ async def test_audit_tail_empty_when_log_missing(cfg, tmp_path):
 
 
 async def test_policy_route_reports_the_effective_table(cfg):
-    # §04.3: catraz doctor / allow-endpoint read this route.
+    # §09 step 03: catraz doctor reads this per-host route.
     ctx = build_context(cfg, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/policy")
     assert resp.status_code == 200
     body = resp.json()
-    ids = {row["id"] for row in body["catalog"]}
+    host_report = body["hosts"]["gitlab.example"]
+    ids = {row["id"] for row in host_report["catalog"]}
     assert "mr.create" in ids and "branch.create" in ids
-    mr_create = next(row for row in body["catalog"] if row["id"] == "mr.create")
+    mr_create = next(row for row in host_report["catalog"] if row["id"] == "mr.create")
     assert mr_create["default"] is True and mr_create["active"] is True
-    branch_create = next(row for row in body["catalog"] if row["id"] == "branch.create")
+    branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
     assert branch_create["default"] is False and branch_create["active"] is False
     assert body["builtin_deny"] == ["mr.merge"]
     await ctx.router.aclose()
 
 
-async def test_policy_route_reflects_activation_config(cfg, tmp_path):
-    from dataclasses import replace
-
-    activated = replace(cfg, endpoint_enable=("mr.create", "branch.create"))
+async def test_policy_route_reflects_activation_config(cfg):
+    # A per-endpoint `actions` override changes only that host's section.
+    endpoint = cfg.git_endpoints[0]
+    activated = replace(
+        cfg,
+        git_endpoints=(replace(endpoint, actions=("mr.create", "branch.create")),),
+    )
     ctx = build_context(activated, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/policy")
     body = resp.json()
-    branch_create = next(row for row in body["catalog"] if row["id"] == "branch.create")
+    host_report = body["hosts"]["gitlab.example"]
+    branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
     assert branch_create["active"] is True
     assert branch_create["enabled_via"] == "config:branch.create"
-    mr_note = next(row for row in body["catalog"] if row["id"] == "mr.note")
-    assert mr_note["active"] is False  # not in this test's enable list
+    mr_note = next(row for row in host_report["catalog"] if row["id"] == "mr.note")
+    assert mr_note["active"] is False  # not in this endpoint's actions override
     await ctx.router.aclose()
 
 

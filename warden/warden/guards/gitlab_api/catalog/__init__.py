@@ -7,8 +7,7 @@ and ``app.py`` import ``warden.guards.gitlab_api.catalog`` rather than submodule
   ``FieldSpec``, ``Location``, …
 * ``entries``     — the write catalog table + ``api_capabilities``/``match_endpoint``
 * ``builtin``     — the merge endpoint's built-in deny invariant
-* ``config_parse``— ``[api.endpoints]`` TOML shape parsing
-* ``activation``  — Config × Catalog → effective, request-matchable table
+* ``activation``  — a host's effective actions × Catalog → effective, request-matchable table
 
 §07 Punkt 7 unified the former write-only ``CatalogEntry``/check-tuple shape
 and the read-table's always-terminal ``ReadCheck`` shape into one type,
@@ -18,9 +17,8 @@ vocabulary (``ScopeKind``) the one generic ``policy.decide_scope`` consumes.
 
 from __future__ import annotations
 
-from .activation import EffectiveTable, build_effective_table
+from .activation import EMPTY_TABLE, EffectiveTable, build_effective_table
 from .builtin import is_builtin_merge_endpoint
-from .config_parse import ApiEndpointsConfig, parse_api_endpoints
 from .errors import CatalogConfigError
 from .model import ClassifyFn, EndpointKind, FieldSpec, Location, ReadClass, Recognizer, ScopeKind
 from .read_endpoints import READ_ENDPOINTS
@@ -30,10 +28,10 @@ from .write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS, api_capabilities,
 __all__ = [
     "WRITE_ENDPOINTS",
     "READ_ENDPOINTS",
-    "ApiEndpointsConfig",
     "CatalogConfigError",
     "ClassifyFn",
     "DEFAULT_ENABLED",
+    "EMPTY_TABLE",
     "EffectiveTable",
     "EndpointKind",
     "FieldSpec",
@@ -46,5 +44,4 @@ __all__ = [
     "endpoint_table_report",
     "is_builtin_merge_endpoint",
     "match_endpoint",
-    "parse_api_endpoints",
 ]

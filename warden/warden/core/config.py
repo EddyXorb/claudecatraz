@@ -122,13 +122,6 @@ class Config:
     agent_port: int = 8080
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"
-    # The parsed [api.endpoints].enable list — plain data, catalog-agnostic.
-    # None ⇒ section absent, meaning "use the catalog's default set"; an
-    # explicit empty tuple disables every default entry. The gitlab_api guard
-    # owns turning this into the request-matchable table (see
-    # guards.gitlab_api.catalog.activation.build_effective_table) — config.py
-    # itself never looks at the catalog.
-    endpoint_enable: Optional[tuple[str, ...]] = None
     # [git.rules] domain defaults and [[git.endpoint]] entries (one host each) —
     # the endpoint taxonomy that fully replaced the old `[git.urls] hosts`/
     # `host_order` allowlist (step 03): every routable host is an explicit
@@ -293,9 +286,9 @@ class Config:
         type-impossible id in it is a ``ConfigError`` raised by the loader at
         config-build time (``core.config_load``), never silently dropped.
 
-        Deferred import (matching ``config_load._parse_endpoint_enable``):
-        the catalog is guard-owned, ``Config`` only threads the plain
-        ``tuple[str, ...]`` values through.
+        Deferred import (matching ``config_load._parse_actions``): the catalog
+        is guard-owned, ``Config`` only threads the plain ``tuple[str, ...]``
+        values through.
         """
         from ..guards.gitlab_api.actions import DEFAULT_ACTIONS, actions_valid_for_type
 

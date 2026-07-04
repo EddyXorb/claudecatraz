@@ -203,7 +203,7 @@ def full_decide(
     ``effective`` and ``project_allowed`` default to the real values for free.
     """
     if effective is None:
-        effective = build_effective_table(cfg, cfg.endpoint_enable)
+        effective = build_effective_table(cfg.effective_actions(intent.host))
     d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
     if d is None:
         d = capability_gate(intent, cfg, effective)
