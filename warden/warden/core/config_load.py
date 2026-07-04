@@ -57,6 +57,30 @@ def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ..
     return parse_api_endpoints(file).enable
 
 
+def _parse_git_url_hosts(file: Mapping[str, object]) -> frozenset[str]:
+    """Parse ``[git.urls].hosts`` (§07 Punkt 8 design spike: the host allowlist).
+
+    Absent ``[git]`` or ``[git.urls]`` ⇒ empty frozenset — multi-target is
+    inactive, ``Config.host_allowed`` then always allows (unchanged single-
+    target behaviour). Present but malformed shape aborts startup (fail-closed,
+    consistent with every other ``warden.toml`` section). Entries are
+    lower-cased and stripped so ``Config.host_allowed``'s normalised
+    comparison always finds an exact match.
+    """
+    git = file.get("git", {})
+    if not isinstance(git, Mapping):
+        raise ConfigError("warden.toml: [git] must be a table")
+    urls = git.get("urls", {})
+    if not isinstance(urls, Mapping):
+        raise ConfigError("warden.toml: [git.urls] must be a table")
+    if "hosts" not in urls:
+        return frozenset()
+    hosts = urls["hosts"]
+    if not isinstance(hosts, list) or not all(isinstance(h, str) for h in hosts):
+        raise ConfigError(f"git.urls.hosts in warden.toml must be a list of strings, got {hosts!r}")
+    return frozenset(h.strip().lower() for h in hosts if h.strip())
+
+
 DEFAULT_TOML_PATH = "/etc/warden/warden.toml"
 
 
@@ -185,6 +209,7 @@ def from_env(
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
         gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
         endpoint_enable=_parse_endpoint_enable(file),
+        allowed_hosts=_parse_git_url_hosts(file),
     )
 
     if strict:

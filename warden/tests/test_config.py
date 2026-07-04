@@ -350,6 +350,72 @@ def test_secret_file_missing_raises(tmp_path):
         )
 
 
+# --- allowed_hosts / host_allowed (§07 Punkt 8 design spike) -------------------
+# NOT yet wired into any request path — see
+# docs/design/architecture-generalization/08-multi-target.md. These tests cover
+# only the Config-level primitive: parsing + the pure allow/deny predicate.
+
+
+def test_host_allowed_empty_allowlist_allows_anything():
+    """Default (no [git.urls] configured) ⇒ feature off, no behaviour change."""
+    cfg = Config()
+    assert cfg.allowed_hosts == frozenset()
+    assert cfg.host_allowed("gitlab.com")
+    assert cfg.host_allowed("anything.example")
+    assert cfg.host_allowed("")
+
+
+def test_host_allowed_nonempty_allowlist_is_default_deny():
+    cfg = Config(allowed_hosts=frozenset({"gitlab.com", "my-gitlab.de"}))
+    assert cfg.host_allowed("gitlab.com")
+    assert cfg.host_allowed("my-gitlab.de")
+    assert not cfg.host_allowed("evil.example")
+    assert not cfg.host_allowed("")
+
+
+def test_host_allowed_normalizes_case_port_and_trailing_dot():
+    cfg = Config(allowed_hosts=frozenset({"gitlab.com"}))
+    assert cfg.host_allowed("GitLab.com")
+    assert cfg.host_allowed("gitlab.com:443")
+    assert cfg.host_allowed("gitlab.com.")
+
+
+def test_git_urls_hosts_absent_section_yields_empty_allowlist(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('allowed_projects = ["group/proj"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.allowed_hosts == frozenset()
+    assert cfg.host_allowed("anything.example")
+
+
+def test_git_urls_hosts_parsed_from_toml(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "My-Gitlab.DE"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.allowed_hosts == frozenset({"gitlab.com", "my-gitlab.de"})  # normalised
+
+
+def test_git_urls_hosts_wrong_shape_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = "gitlab.com"\n')
+    with pytest.raises(ConfigError, match="git.urls.hosts"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_section_wrong_shape_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text("git = 1\n")
+    with pytest.raises(ConfigError, match=r"\[git\]"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_urls_section_wrong_shape_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text("[git]\nurls = 1\n")
+    with pytest.raises(ConfigError, match=r"\[git\.urls\]"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
 def test_secret_file_empty_fails_validate(tmp_path):
     """(d) *_FILE → empty file → _validate raises the existing 'required' error."""
     f = tmp_path / "rt"

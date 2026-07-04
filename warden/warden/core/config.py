@@ -57,6 +57,13 @@ class Config:
     # guards.gitlab_api.catalog.activation.build_effective_table) — config.py
     # itself never looks at the catalog.
     endpoint_enable: Optional[tuple[str, ...]] = None
+    # The parsed [git.urls].hosts allowlist (§07 Punkt 8 design spike,
+    # docs/design/architecture-generalization/08-multi-target.md). Empty
+    # (default) means the feature is inactive: single implicit target,
+    # behaviour unchanged from before multi-target. NOT YET wired into the
+    # request/kernel path — see the spike's "Umsetzungsschnitt dieser PR" for
+    # why a half-connected gate would be actively misleading.
+    allowed_hosts: frozenset[str] = frozenset()
 
     @property
     def gitlab_enabled(self) -> bool:
@@ -92,3 +99,18 @@ class Config:
         and reconcile filters call this instead of comparing directly.
         """
         return any(name.startswith(prefix) for prefix in self.branch_prefixes)
+
+    def host_allowed(self, host: str) -> bool:
+        """Host-header allowlist gate (§07 Punkt 8 design spike, not yet wired
+        into any request path — see ``08-multi-target.md``).
+
+        Empty ``allowed_hosts`` (the default, and every deployment before
+        multi-target) means the feature is off: always ``True``, no behaviour
+        change. A non-empty allowlist switches to strict default-deny: only a
+        listed host (case-insensitive, trailing dot and ``:port`` stripped)
+        passes — everything else, including an empty ``host``, is denied.
+        """
+        if not self.allowed_hosts:
+            return True
+        normalized = host.split(":", 1)[0].strip().lower().rstrip(".")
+        return bool(normalized) and normalized in self.allowed_hosts
