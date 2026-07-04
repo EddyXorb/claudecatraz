@@ -13,7 +13,6 @@ from __future__ import annotations
 import functools
 from dataclasses import dataclass, field
 from typing import Literal, Mapping, Optional, TypeVar
-from urllib.parse import urlparse
 
 _T = TypeVar("_T")
 
@@ -24,11 +23,10 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class HostCredentials:
-    """One host's resolved read/write tokens (§07 Punkt 8 follow-up, design
-    spike section 3). Every configured host gets an entry — including the
-    first-listed one, whose tokens are simply an alias of the legacy
-    ``GITLAB_READ_TOKEN``/``GITLAB_WRITE_TOKEN`` — so guard code never has to
-    special-case "the primary host"."""
+    """One host's resolved read/write tokens (§4), keyed by normalised host in
+    ``Config.git_credentials``. Resolved from the grouped ``read_tokens``/
+    ``write_tokens`` secret files — a host with no entry (or a missing read
+    token) is simply ``closed`` (:meth:`Config.access_mode`), never a crash."""
 
     read_token: str = ""
     write_token: str = ""
@@ -104,7 +102,6 @@ class Config:
     # upstream. Generous default so a normal push is never affected.
     max_push_bytes: int = 50 * 1024 * 1024
     allowed_projects: tuple[str, ...] = ()
-    api_url: str = "https://gitlab.com/api/v4"
     read_token: str = ""
     write_token: str = ""
     reconcile_interval_s: int = 300
@@ -122,26 +119,17 @@ class Config:
     # guards.gitlab_api.catalog.activation.build_effective_table) — config.py
     # itself never looks at the catalog.
     endpoint_enable: Optional[tuple[str, ...]] = None
-    # [git.urls].hosts allowlist, in configured order (§07 Punkt 8 design
-    # spike, docs/design/architecture-generalization/08-multi-target.md) —
-    # host_order[0] is the host GITLAB_READ_TOKEN/GITLAB_WRITE_TOKEN alias
-    # (see `host_credentials`), and the order `UpstreamRouter`/reconcile
-    # iterate in. Empty (default) ⇒ multi-target inactive, single implicit
-    # target, unchanged behaviour. `allowed_hosts` (below) is derived from
-    # this field, not stored separately.
-    host_order: tuple[str, ...] = ()
-    # Per-host resolved tokens, keyed by normalised host. Empty when
-    # `host_order` is empty; populated by config_load, including an entry
-    # for `host_order[0]` that mirrors read_token/write_token.
-    host_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
     # [git.rules] domain defaults and [[git.endpoint]] entries (one host each) —
-    # the endpoint-taxonomy replacement for host_order/allowed_hosts, not yet
-    # wired into any guard. Empty git_endpoints ⇒ no endpoints configured.
+    # the endpoint taxonomy that fully replaced the old `[git.urls] hosts`/
+    # `host_order` allowlist (step 03): every routable host is an explicit
+    # `GitEndpoint`, wired into `UpstreamRouter`/`host_gate` (core.transport,
+    # core.guard). Empty git_endpoints ⇒ no endpoints configured ⇒ every host
+    # is denied (real default-deny, not "feature off").
     git_rules: GitRules = field(default_factory=GitRules)
     git_endpoints: tuple[GitEndpoint, ...] = ()
     # Per-endpoint tokens resolved from the grouped read_tokens/write_tokens
-    # files, keyed by normalised host. Backs access_mode(); not yet wired into
-    # any guard.
+    # files, keyed by normalised host. Backs access_mode() and
+    # UpstreamRouter's per-endpoint credentials.
     git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
 
     @property
@@ -153,10 +141,6 @@ class Config:
     def writes_enabled(self) -> bool:
         """True only in read-write mode — never in off or read-only."""
         return self.gitlab_mode == "read-write"
-
-    @property
-    def git_base(self) -> str:
-        return self.api_url.removesuffix("/api/v4")
 
     def project_allowed(self, project: str) -> bool:
         """Default-deny match against ``ALLOWED_PROJECTS``, path form only.
@@ -179,30 +163,6 @@ class Config:
         """
         return any(name.startswith(prefix) for prefix in self.branch_prefixes)
 
-    @functools.cached_property
-    def allowed_hosts(self) -> frozenset[str]:
-        """Membership set :meth:`host_allowed` checks, derived from
-        ``host_order`` (§07 Punkt 8 follow-up) — one stored field, not two
-        kept in sync by hand. Each entry is run through :meth:`normalize_host`
-        so a differently-cased/ported/dotted ``host_order`` entry still
-        matches the same normalised incoming ``Host`` header."""
-        return frozenset(self.normalize_host(h) for h in self.host_order)
-
-    def host_allowed(self, host: str) -> bool:
-        """Host-header allowlist gate (§07 Punkt 8 design spike), wired into
-        the kernel path via ``core.guard.host_gate``.
-
-        Empty ``allowed_hosts`` (the default, and every deployment before
-        multi-target) means the feature is off: always ``True``, no behaviour
-        change. A non-empty allowlist switches to strict default-deny: only a
-        listed host (case-insensitive, trailing dot and ``:port`` stripped)
-        passes — everything else, including an empty ``host``, is denied.
-        """
-        if not self.allowed_hosts:
-            return True
-        normalized = self.normalize_host(host)
-        return bool(normalized) and normalized in self.allowed_hosts
-
     @staticmethod
     def normalize_host(host: str) -> str:
         """Case/port/trailing-dot-insensitive host normalisation.
@@ -214,49 +174,34 @@ class Config:
         """
         return host.split(":", 1)[0].strip().lower().rstrip(".")
 
-    @property
-    def implicit_host(self) -> str:
-        """The single-target state/reconcile host key, derived from
-        ``api_url``/``GITLAB_URL`` (§07 Punkt 8 follow-up, design spike
-        section 4, last paragraph). Used only when ``host_order`` is empty —
-        a stable, deterministic value that does not depend on what ``Host``
-        header a client happens to send, so single-target behaviour never
-        changes because of a client detail multi-target introduced.
+    def host_allowed(self, host: str) -> bool:
+        """Host-header gate (§2), wired into the kernel path via
+        ``core.guard.host_gate``. Real default-deny (step 03): a host passes
+        only if it has a configured ``[[git.endpoint]]`` entry *and* that
+        endpoint currently resolves to a usable read credential
+        (:meth:`access_mode` is not ``"closed"``). An empty endpoint list
+        (or an entirely unlisted host, or a listed-but-tokenless one) is
+        denied — there is no "empty allowlist ⇒ allow everything" fallback.
         """
-        return urlparse(self.api_url).hostname or ""
-
-    @property
-    def effective_hosts(self) -> tuple[str, ...]:
-        """Non-empty host list reconcile iterates over (§07 Punkt 8
-        follow-up): ``host_order`` when multi-target is configured, otherwise
-        the single ``implicit_host`` — reconcile and state keys never see an
-        empty host list."""
-        return self.host_order or (self.implicit_host,)
+        normalized = self.normalize_host(host)
+        return (
+            bool(normalized)
+            and normalized in self.git_allowed_hosts
+            and self.access_mode(normalized) != "closed"
+        )
 
     def resolve_target_host(self, header: str) -> Optional[str]:
         """The canonical host key for state/reconcile/Upstream lookup, given
-        a raw incoming ``Host`` header (§07 Punkt 8 follow-up).
+        a raw incoming ``Host`` header.
 
-        Single-target (``host_order`` empty): always :attr:`implicit_host`,
-        independent of what the client sent — behaviour-neutral for every
-        deployment before multi-target. Multi-target: the normalised header
-        if it is a listed host, else ``None`` (unknown host — the caller must
-        deny, never fabricate a key for it; ``core.guard.host_gate`` already
-        denies this case earlier in the pipeline, so callers past that point
-        should never actually observe ``None``).
+        The normalised header if it names a configured endpoint, else
+        ``None`` (unknown host — the caller must deny, never fabricate a key
+        for it; ``core.guard.host_gate`` already denies this case earlier in
+        the pipeline, so callers past that point should never actually
+        observe ``None``).
         """
-        if not self.host_order:
-            return self.implicit_host
         normalized = self.normalize_host(header)
-        return normalized if normalized in self.allowed_hosts else None
-
-    def credentials_for(self, host: str) -> HostCredentials:
-        """This host's read/write tokens. Falls back to the primary
-        ``read_token``/``write_token`` for any host not present in
-        ``host_credentials`` — which is exactly what happens in single-target
-        mode, where ``host_credentials`` is empty and ``host`` is always
-        :attr:`implicit_host`."""
-        return self.host_credentials.get(host, HostCredentials(self.read_token, self.write_token))
+        return normalized if normalized in self.git_allowed_hosts else None
 
     @functools.cached_property
     def _endpoints_by_host(self) -> Mapping[str, GitEndpoint]:
@@ -271,6 +216,15 @@ class Config:
     def git_allowed_hosts(self) -> frozenset[str]:
         """Normalised hosts with a configured ``[[git.endpoint]]`` entry."""
         return frozenset(self._endpoints_by_host)
+
+    @property
+    def effective_hosts(self) -> tuple[str, ...]:
+        """Host list reconcile iterates over: every configured endpoint's
+        normalised host, in ``git_endpoints`` order — always "from the
+        endpoints" (step 03), no single-target fallback. Empty when no
+        endpoint is configured. Reconcile does not yet skip ``closed``
+        endpoints here (that per-endpoint iteration is step 04)."""
+        return tuple(self.normalize_host(e.host) for e in self.git_endpoints)
 
     def effective_rules(self, host: str) -> GitRules:
         """Per-key cascade for ``host``: endpoint override, else ``git_rules``

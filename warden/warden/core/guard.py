@@ -11,9 +11,8 @@ Sequence ``Guard.handle`` guarantees, in this order:
 1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
 2. :func:`kernel_gates` — guard-agnostic deny gates:
    a. Mode-gate ``off`` — GitLab-disabled denies everything.
-   b. Host allowlist (§07 Punkt 8 follow-up) — default-deny for a ``Host``
-      header outside ``[git.urls] hosts``, inert (always allow) while that
-      section is unconfigured.
+   b. Host allowlist (§2) — default-deny for a ``Host`` header outside the
+      configured ``[[git.endpoint]]`` list; an empty list denies every host.
    c. Mode-gate ``read-only`` — set by parser, never by :class:`~warden.core.model.Decision`.
       Runs *before* ``enrich`` so credential-using lookups are unreachable in read-only/off mode.
    d. Resource allowlist — enforced once, not per-guard, before ``enrich``.
@@ -58,14 +57,17 @@ def mode_gate_writes(cfg: Config) -> Optional[Decision]:
 
 
 def host_gate(host: str, cfg: Config) -> Optional[Decision]:
-    """M6: default-deny for a ``Host`` header outside the multi-target
-    allowlist (§07 Punkt 8 follow-up, design spike section 2).
+    """M6: default-deny for a ``Host`` header outside the configured
+    ``[[git.endpoint]]`` list (§2, §07 Punkt 8 follow-up).
 
-    ``Config.host_allowed`` always returns ``True`` while ``allowed_hosts`` is
-    empty (single-target, the default and every deployment before
-    multi-target) — this gate only ever denies once an operator opts in via
-    ``[git.urls] hosts``. Guard-agnostic and kernel-owned like every other
-    gate in :func:`kernel_gates`, since every guard's request carries a host.
+    Real default-deny (step 03): an empty endpoint list denies every host, not
+    "allow everything" — an operator lists every routable host explicitly.
+    ``Config.host_allowed`` also denies a *known* host whose endpoint is
+    currently ``closed`` (no usable read credential), so a host that
+    ``UpstreamRouter.resolve`` would return ``None`` for is always denied here
+    first, never reaching a "kernel_gates already denied" assertion downstream.
+    Guard-agnostic and kernel-owned like every other gate in
+    :func:`kernel_gates`, since every guard's request carries a host.
     """
     if not cfg.host_allowed(host):
         return Decision(False, R6, f"host {host!r} not in the multi-target allowlist")

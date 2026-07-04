@@ -13,7 +13,7 @@ import httpx
 from warden.core.transport import UpstreamRouter
 from warden.guards.gitlab_api.mr_namespace import MrNamespace
 
-HOST = "gitlab.example"  # matches the `cfg` fixture's api_url host (conftest.py)
+HOST = "gitlab.example"  # matches the `cfg` fixture's `[[git.endpoint]]` host (conftest.py)
 
 
 def _mr_namespace(cfg, *, clock=None) -> MrNamespace:
@@ -49,11 +49,9 @@ async def test_source_in_namespace_none_when_lookup_fails(cfg, respx_router):
 
 
 async def test_source_in_namespace_none_when_host_unresolvable(cfg):
-    # An unknown host must fail closed, never fabricate a lookup for it.
-    from dataclasses import replace
-
-    multi_cfg = replace(cfg, host_order=("gitlab.example",))
-    mr_namespace = _mr_namespace(multi_cfg)
+    # An unknown host must fail closed, never fabricate a lookup for it — the
+    # `cfg` fixture only configures a `[[git.endpoint]]` for HOST.
+    mr_namespace = _mr_namespace(cfg)
     assert await mr_namespace.source_in_namespace("evil.example", "group/proj", 7) is None
 
 

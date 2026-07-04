@@ -8,7 +8,9 @@ keeping app.py/__main__.py free of guard-policy internals.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
+
+import httpx
 
 from .core.audit import AuditLog
 from .core.config import Config
@@ -56,7 +58,9 @@ class AppContext:
         return ok
 
 
-def build_context(cfg: Config, state: State, audit: AuditLog) -> AppContext:
+def build_context(
+    cfg: Config, state: State, audit: AuditLog, *, client: Optional[httpx.AsyncClient] = None
+) -> AppContext:
     """Assemble the transport and every shipped guard, then the root context.
 
     The one place that decides which guards exist and what each is given —
@@ -66,8 +70,13 @@ def build_context(cfg: Config, state: State, audit: AuditLog) -> AppContext:
     (§07 Punkt 6, §07 Punkt 8 follow-up), built here and shared (one
     connection pool, regardless of host count) by the git guard and the
     REST-API guard — neither guard depends on the other to reach it.
+
+    ``client`` is an escape hatch for tests that need a non-default
+    ``httpx.AsyncClient`` (e.g. a real end-to-end test whose upstream serves
+    a self-signed cert); every production caller omits it and gets
+    ``UpstreamRouter``'s own default client.
     """
-    router = UpstreamRouter(cfg)
+    router = UpstreamRouter(cfg, client=client)
     guards: list[Guard[Any]] = [
         GitGuard(cfg, state, audit, router),
         ApiGuard(cfg, state, audit, router),

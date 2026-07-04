@@ -13,9 +13,9 @@ in the key a push on one would silently share/overwrite the other's row.
 quota it feeds (``max_open_branches``) was already a single cross-project cap
 before hosts existed, so a multi-host deployment simply extends that same cap
 across every configured host, consistent with "one Warden process, one trust
-boundary" (§07 Punkt 8, section 1). In single-target mode (no ``[git.urls]
-hosts``) every row's ``host`` is the same constant value
-(``Config.implicit_host``), so this table is behaviourally identical to the
+boundary" (§07 Punkt 8, section 1). A deployment with a single
+``[[git.endpoint]]`` simply has every row's ``host`` equal to that one
+endpoint's host, so this table is behaviourally identical to the
 pre-host-column schema.
 """
 

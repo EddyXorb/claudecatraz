@@ -30,9 +30,9 @@ async def reconcile_branches(
     configured host (§07 Punkt 8 follow-up, design spike section 4). Returns
     True on full success.
 
-    ``cfg.effective_hosts`` is single-element (the implicit host) when
-    multi-target is inactive — identical iteration count/behaviour to before
-    the host dimension existed. The host×project loop and its fail-safe
+    ``cfg.effective_hosts`` is every configured ``[[git.endpoint]]``'s host
+    (step 03) — a single-endpoint deployment iterates one host, identical
+    behaviour to before the host dimension existed. The host×project loop and its fail-safe
     (§6.11) handling live in :func:`~warden.core.transport.for_each_host_project`
     (shared with the REST-API guard's :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs`);
     this function supplies only the branch-listing/replace domain logic.

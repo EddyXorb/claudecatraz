@@ -414,7 +414,7 @@ async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_route
     route = respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
         return_value=httpx.Response(201, json={"name": "claude/x"})
     )
-    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+    async with httpx.AsyncClient(transport=transport, base_url="http://gitlab.example") as c:
         resp = await c.post(
             f"/api/v4/projects/{PROJ}/repository/branches",
             json={"branch": "claude/x", "ref": "claude/y"},
@@ -427,7 +427,7 @@ async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_route
 async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
     ctx, app = _activated_client_ctx(cfg, respx_router)
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+    async with httpx.AsyncClient(transport=transport, base_url="http://gitlab.example") as c:
         resp = await c.post(
             f"/api/v4/projects/{PROJ}/repository/branches",
             json={"branch": "main", "ref": "main"},
@@ -453,7 +453,7 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
         return_value=httpx.Response(201, json={"iid": 1})
     )
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
+    async with httpx.AsyncClient(transport=transport, base_url="http://gitlab.example") as c:
         await c.post(
             f"/api/v4/projects/{PROJ}/repository/branches",
             json={"branch": "claude/x", "ref": "claude/y"},

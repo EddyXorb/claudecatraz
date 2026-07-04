@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from warden.core.capabilities import FORBIDDEN, Capability, forbidden_check
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.model import StateView
 from warden.guards.git import policy as git_policy
 from warden.guards.git.intent import GitIntent
@@ -41,14 +41,23 @@ SHA = "a" * 40
 SHA2 = "b" * 40
 
 
+HOST = "gitlab.example"
+
+
 @pytest.fixture
 def cfg() -> Config:
-    return Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
+    return Config(
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+        git_endpoints=(GitEndpoint(host=HOST, type="gitlab"),),
+        git_credentials={HOST: HostCredentials(read_token="r", write_token="w")},
+    )
 
 
 def _api(method: str, path: str, **fields: object) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ApiIntent(_project=project, _method=method, path=path, fields=dict(fields))
+    return ApiIntent(_project=project, _method=method, path=path, fields=dict(fields), _host=HOST)
 
 
 # --- the vocabulary itself ------------------------------------------------
@@ -295,6 +304,7 @@ def test_e2e_git_tag_push_denied_r4(cfg):
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
@@ -307,6 +317,7 @@ def test_e2e_git_branch_delete_denied_r4(cfg):
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(SHA, ZERO, "refs/heads/claude/feature")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)
@@ -361,6 +372,7 @@ def test_e2e_capability_layer_denies_git_even_if_check_ref_logic_is_bypassed(cfg
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
     )
     d = git_policy.full_decide(req, StateView(), cfg)

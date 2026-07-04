@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.model import Decision, StateView, TokenKind
 from warden.guards.git import policy as git_policy
 from warden.guards.git.intent import GitIntent
@@ -23,6 +23,13 @@ from warden.guards.gitlab_api.intent import ApiIntent
 
 ZERO = "0" * 40
 SHA = "a" * 40
+
+# Every intent below carries this Host (§2/step 03: `host_gate` is a real
+# kernel gate now, so a pure-policy test needs an actually-open endpoint, not
+# just an empty/no-op allowlist) — one constant so fixtures and intents agree.
+HOST = "gitlab.example"
+_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
+_OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
 
 
 def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Decision:
@@ -38,6 +45,8 @@ def cfg() -> Config:
         allowed_projects=("group/proj",),
         read_token="r",
         write_token="w",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
 
 
@@ -49,12 +58,14 @@ def multi_prefix_cfg() -> Config:
         allowed_projects=("group/proj",),
         read_token="r",
         write_token="w",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
 
 
 def _api(method, path, **fields) -> ApiIntent:
     project = "group/proj" if "/projects/" in path else ""
-    return ApiIntent(_project=project, _method=method, path=path, fields=fields)
+    return ApiIntent(_project=project, _method=method, path=path, fields=fields, _host=HOST)
 
 
 # --- R1 / R6 -------------------------------------------------------------------
@@ -139,7 +150,9 @@ def test_b1_unknown_projectless_endpoint_default_denied(cfg):
 
 
 def test_r6_project_not_in_allowlist_denied(cfg):
-    req = ApiIntent(_project="other/secret", _method="GET", path="/projects/other%2Fsecret")
+    req = ApiIntent(
+        _project="other/secret", _method="GET", path="/projects/other%2Fsecret", _host=HOST
+    )
     d = decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R6"
 
@@ -154,6 +167,7 @@ def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
         _method="POST",
         path="/projects/other%2Fsecret/issues",
         fields={"title": "x"},
+        _host=HOST,
     )
     d = api_policy.full_decide(req, StateView(), cfg, effective)
     assert not d.allow and d.rule == "R6"
@@ -289,6 +303,7 @@ def _git(*cmds) -> GitIntent:
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(*c) for c in cmds],
     )
 
@@ -377,6 +392,7 @@ def test_git_project_not_allowlisted_denied(cfg):
         operation="receive-pack",
         _method="push",
         _writes=True,
+        _host=HOST,
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
     d = decide(req, StateView(), cfg)
@@ -414,6 +430,8 @@ def test_off_denies_reads_and_writes():
         read_token="r",
         write_token="w",
         gitlab_mode="off",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
     # API read
     d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_off)
@@ -434,6 +452,7 @@ def test_off_denies_reads_and_writes():
             operation="receive-pack",
             _method="push",
             _writes=True,
+            _host=HOST,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),
@@ -449,6 +468,8 @@ def test_read_only_denies_writes_allows_reads():
         read_token="r",
         write_token="",
         gitlab_mode="read-only",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
     # API read: allowed
     d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_ro)
@@ -469,6 +490,7 @@ def test_read_only_denies_writes_allows_reads():
             operation="receive-pack",
             _method="push",
             _writes=True,
+            _host=HOST,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),

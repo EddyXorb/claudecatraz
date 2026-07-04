@@ -11,7 +11,7 @@ import httpx
 from warden.app import create_app
 from warden.context import build_context
 from warden.core.audit import AuditLog
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.guards.git.pktline import FLUSH, pkt_line
 
@@ -133,7 +133,7 @@ def _client_with(cfg: Config) -> httpx.AsyncClient:
     state.mark_reconciled("api")
     ctx = build_context(cfg, state, AuditLog("-"))
     transport = httpx.ASGITransport(app=create_app(ctx))
-    return httpx.AsyncClient(transport=transport, base_url="http://warden")
+    return httpx.AsyncClient(transport=transport, base_url="http://gitlab.example")
 
 
 async def test_push_over_max_push_bytes_rejected_r5(cfg, respx_router):
@@ -173,11 +173,14 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
     cfg = Config(
         branch_prefixes=("claude/",),
         allowed_projects=("group/proj",),
-        api_url=f"{UPSTREAM}/api/v4",
         read_token="READ-TOKEN",
         write_token="WRITE-TOKEN",
         state_db_path=":memory:",
         gitlab_mode=mode,
+        git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),),
+        git_credentials={
+            "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
+        },
     )
     state = State(":memory:")
     state.mark_reconciled("git")
@@ -186,7 +189,7 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
     ctx = build_context(cfg, state, audit)
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)
-    return httpx.AsyncClient(transport=transport, base_url="http://warden")
+    return httpx.AsyncClient(transport=transport, base_url="http://gitlab.example")
 
 
 async def test_off_advertise_clone_denied_no_upstream():

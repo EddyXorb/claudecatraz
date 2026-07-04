@@ -45,9 +45,9 @@ async def reconcile_mrs(
     project, on every configured host (§07 Punkt 8 follow-up, design spike
     section 4).
 
-    ``cfg.effective_hosts`` is single-element (the implicit host) when
-    multi-target is inactive — identical iteration count/behaviour to before
-    the host dimension existed. The numeric-id alias set is a plain union
+    ``cfg.effective_hosts`` is every configured ``[[git.endpoint]]``'s host
+    (step 03) — a single-endpoint deployment iterates one host, identical
+    behaviour to before the host dimension existed. The numeric-id alias set is a plain union
     across hosts (M6's project-id widening does not need to know which host
     an id came from — ``ApiGuard.project_allowed`` only asks "is this id
     known", never "on which host"). Returns ``(ok, resolved_ids)``. The

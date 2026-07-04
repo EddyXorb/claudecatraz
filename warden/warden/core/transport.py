@@ -11,7 +11,6 @@ anything under ``guards.gitlab_api``.
 from __future__ import annotations
 
 import base64
-import dataclasses
 import logging
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 from urllib.parse import quote
@@ -19,7 +18,7 @@ from urllib.parse import quote
 import httpx
 from starlette.responses import StreamingResponse
 
-from .config import Config, normalize_project
+from .config import Config, GitEndpoint, HostCredentials, normalize_project
 from .model import TokenKind
 
 log = logging.getLogger("warden")
@@ -45,9 +44,45 @@ def project_id(project: str) -> str:
     return quote(normalize_project(project), safe="")
 
 
+def base_urls(endpoint: GitEndpoint) -> tuple[str, Optional[str]]:
+    """Base URLs derived from ``endpoint.host`` + ``endpoint.type`` (step 03,
+    point 1) — the replacement for the old free-form ``Config.api_url``: every
+    host is explicit, and its URL form follows straight from its declared
+    ``type``, never from an env var.
+
+    Returns ``(git_base, api_base)``; ``api_base`` is ``None`` for a type with
+    no REST surface (``plain``). ``github`` is reserved (rejected at parse
+    time, step 01) until its guard exists, so it never reaches here.
+    """
+    if endpoint.type == "gitlab":
+        return f"https://{endpoint.host}", f"https://{endpoint.host}/api/v4"
+    if endpoint.type == "plain":
+        return f"https://{endpoint.host}", None
+    raise ValueError(f"base_urls: unsupported endpoint type {endpoint.type!r}")
+
+
 class Upstream:
-    def __init__(self, cfg: Config, client: Optional[httpx.AsyncClient] = None) -> None:
-        self._cfg = cfg
+    """One endpoint's transport: base URLs + read/write tokens, forge-neutral.
+
+    Built exclusively by :class:`UpstreamRouter` from a :class:`GitEndpoint`
+    (never from a whole :class:`Config` clone) — the endpoint's own
+    ``host``/``type`` and its resolved :class:`~.config.HostCredentials` are
+    the only inputs a request needs once the router has resolved it.
+    """
+
+    def __init__(
+        self,
+        *,
+        git_base: str,
+        api_base: Optional[str],
+        read_token: str,
+        write_token: str,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> None:
+        self._git_base = git_base
+        self._api_base = api_base
+        self._read_token = read_token
+        self._write_token = write_token
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
 
     async def aclose(self) -> None:
@@ -55,7 +90,7 @@ class Upstream:
 
     # --- token headers ---------------------------------------------------------
     def _rest_token(self, token: TokenKind) -> str:
-        return self._cfg.read_token if token == TokenKind.READ else self._cfg.write_token
+        return self._read_token if token == TokenKind.READ else self._write_token
 
     def _git_auth_header(self, token: TokenKind) -> str:
         secret = self._rest_token(token)
@@ -68,7 +103,8 @@ class Upstream:
 
     # --- REST ------------------------------------------------------------------
     def rest_url(self, path: str) -> str:
-        return f"{self._cfg.api_url}/{path.lstrip('/')}"
+        assert self._api_base is not None, "endpoint has no REST base (type has no API surface)"
+        return f"{self._api_base}/{path.lstrip('/')}"
 
     async def get_json(self, path: str, token: TokenKind) -> httpx.Response:
         resp = await self._client.get(
@@ -97,7 +133,7 @@ class Upstream:
     # --- git Smart-HTTP --------------------------------------------------------
     def git_url(self, project: str, suffix: str) -> str:
         project = normalize_project(project)
-        return f"{self._cfg.git_base}/{project}.git/{suffix.lstrip('/')}"
+        return f"{self._git_base}/{project}.git/{suffix.lstrip('/')}"
 
     async def git_get(
         self, project: str, suffix: str, *, params: dict[str, str], token: TokenKind
@@ -134,80 +170,53 @@ class Upstream:
         return {k: v for k, v in resp.headers.items() if k.lower() not in _DROP_RESPONSE_HEADERS}
 
 
-def _host_config(cfg: Config, host: str) -> Config:
-    """Build a host-scoped :class:`Config` clone for :class:`Upstream` construction.
-
-    ``Upstream`` only ever reads ``api_url``/``git_base``/``read_token``/
-    ``write_token`` off the ``Config`` it is given, so cloning via
-    :func:`dataclasses.replace` needs no changes to ``Upstream.__init__`` or
-    any existing ``Upstream(cfg)`` call site — only the values the clone
-    carries differ. Base URL is derived purely from the host: a host in the
-    allowlist implies its own URL form, independent of ``GITLAB_URL`` (which
-    only matters for the legacy single-target path — see
-    :class:`UpstreamRouter`'s single-``Upstream`` branch, built straight from
-    ``cfg`` with no cloning).
-    """
-    creds = cfg.credentials_for(host)
-    return dataclasses.replace(
-        cfg,
-        api_url=f"https://{host}/api/v4",
-        read_token=creds.read_token,
-        write_token=creds.write_token,
-    )
-
-
 class UpstreamRouter:
-    """Host → Upstream resolution (§07 Punkt 8 design spike, section 2),
-    shared by the git guard and the REST-API guard so neither re-derives its
-    own routing. One shared ``httpx.AsyncClient`` (connection pooling)
-    regardless of how many hosts are configured.
+    """Host → Upstream resolution (§2), shared by the git guard and the
+    REST-API guard so neither re-derives its own routing. One shared
+    ``httpx.AsyncClient`` (connection pooling) regardless of how many hosts
+    are configured.
 
-    **Single-target default** (``cfg.host_order`` empty — no ``[git.urls]
-    hosts`` configured): :meth:`resolve` ignores the ``Host`` header entirely
-    and always returns the one ``Upstream`` built straight from ``cfg`` —
-    byte-for-byte the pre-multi-target behaviour, so an existing single-host
-    deployment sees no change no matter what a client's ``Host`` header says.
-
-    **Multi-target** (``cfg.host_order`` non-empty): :meth:`resolve` uses
-    ``Config.resolve_target_host`` (case/port/trailing-dot-insensitive,
-    default-deny) to map the request's ``Host`` header to one of the
-    pre-built per-host ``Upstream`` instances, or ``None`` on an unknown host.
+    Built straight from ``cfg.git_endpoints`` (step 03): one ``Upstream`` per
+    endpoint whose :meth:`Config.access_mode` is not ``"closed"`` — an
+    endpoint with no usable read credential never gets a routable ``Upstream``
+    at all. Every host is explicit; there is no single-target special case.
+    :meth:`resolve` normalises the raw ``Host`` header
+    (:meth:`Config.normalize_host`) and looks it up in that map, returning
+    ``None`` for an unknown *or* closed host (default-deny, R6).
     """
 
     def __init__(self, cfg: Config, *, client: Optional[httpx.AsyncClient] = None) -> None:
         self._cfg = cfg
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
-        if not cfg.host_order:
-            self._single: Optional[Upstream] = Upstream(cfg, client=self._client)
-            self._by_host: dict[str, Upstream] = {}
-        else:
-            self._single = None
-            self._by_host = {
-                host: Upstream(_host_config(cfg, host), client=self._client)
-                for host in cfg.host_order
-            }
+        self._by_host: dict[str, Upstream] = {}
+        for endpoint in cfg.git_endpoints:
+            if cfg.access_mode(endpoint.host) == "closed":
+                continue
+            git_base, api_base = base_urls(endpoint)
+            normalized = cfg.normalize_host(endpoint.host)
+            creds = cfg.git_credentials.get(normalized, HostCredentials())
+            self._by_host[normalized] = Upstream(
+                git_base=git_base,
+                api_base=api_base,
+                read_token=creds.read_token,
+                write_token=creds.write_token,
+                client=self._client,
+            )
 
     def resolve(self, host_header: str) -> Optional[Upstream]:
         """Resolve the raw ``Host`` header to this request's ``Upstream``.
 
-        ``None`` means an unknown/unlisted host (default-deny) — the caller
-        must turn that into a denial, never fall back to some default
-        upstream. Never ``None`` in single-target mode (see class docstring).
+        ``None`` means an unknown or ``closed`` host (default-deny) — the
+        caller must turn that into a denial, never fall back to some default
+        upstream.
         """
-        target = self._cfg.resolve_target_host(host_header)
-        if target is None:
-            return None
-        if self._single is not None:
-            return self._single
-        return self._by_host.get(target)
+        return self._by_host.get(self._cfg.normalize_host(host_header))
 
     def for_host(self, host: str) -> Upstream:
-        """Direct, non-header lookup for reconcile (§07 Punkt 8 follow-up):
-        ``host`` must come from ``cfg.effective_hosts`` — exactly the set
-        this router was built from, so the lookup never misses."""
-        if self._single is not None:
-            return self._single
-        return self._by_host[host]
+        """Direct, non-header lookup for reconcile: ``host`` must be one this
+        router actually built an ``Upstream`` for (an open endpoint's host
+        from ``cfg.effective_hosts``), so the lookup never misses."""
+        return self._by_host[self._cfg.normalize_host(host)]
 
     async def aclose(self) -> None:
         await self._client.aclose()

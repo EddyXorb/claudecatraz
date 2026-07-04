@@ -9,20 +9,54 @@ from __future__ import annotations
 
 import shutil
 import socket
+import ssl
 import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import httpx
 import pytest
 
 from warden.app import create_app
 from warden.context import build_context
 from warden.core.audit import AuditLog
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 
-pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+pytestmark = pytest.mark.skipif(
+    shutil.which("git") is None or shutil.which("openssl") is None,
+    reason="git/openssl not installed",
+)
+
+
+def _make_self_signed_cert(tmp_path) -> tuple[str, str]:
+    """Ephemeral self-signed cert+key (openssl CLI, no extra test dependency):
+    the fake upstream below must terminate real TLS (step 03: `base_urls`
+    always derives ``https://`` — the Warden never speaks a raw, unencrypted
+    scheme to an upstream, even a test double standing in for one)."""
+    cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=127.0.0.1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return str(cert), str(key)
 
 
 # --- a minimal git Smart-HTTP upstream backed by `git http-backend` ------------
@@ -136,21 +170,42 @@ def e2e(tmp_path):
 
     backend_port = _free_port()
     backend = ThreadingHTTPServer(("127.0.0.1", backend_port), _make_backend_handler(str(root)))
+    # The backend must terminate real TLS (step 03: `base_urls` always derives
+    # `https://` for an endpoint, plain or gitlab) — wrap its listening socket
+    # with a throwaway self-signed cert before it starts accepting.
+    cert, key = _make_self_signed_cert(tmp_path)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(certfile=cert, keyfile=key)
+    backend.socket = tls.wrap_socket(backend.socket, server_side=True)
     threading.Thread(target=backend.serve_forever, daemon=True).start()
 
-    # 2. warden in front, pointing at the upstream
+    # 2. warden in front, pointing at the upstream: a `[[git.endpoint]]` whose
+    # host is the backend's own address (`127.0.0.1:<port>`, port and all —
+    # base_urls builds the outbound URL straight from this host string, while
+    # Config.normalize_host strips the port only for *matching* an incoming
+    # Host header, so the warden's own `127.0.0.1:<warden_port>` header still
+    # resolves to this endpoint even though the ports differ). `type="plain"`
+    # since `git http-backend` has no GitLab REST surface at all.
+    backend_host = f"127.0.0.1:{backend_port}"
     cfg = Config(
         branch_prefixes=("claude/",),
         allowed_projects=("repo",),
-        api_url=f"http://127.0.0.1:{backend_port}/api/v4",
         read_token="r",
         write_token="w",
         state_db_path=str(tmp_path / "state.db"),
+        git_endpoints=(GitEndpoint(host=backend_host, type="plain"),),
+        git_credentials={
+            Config.normalize_host(backend_host): HostCredentials(read_token="r", write_token="w")
+        },
     )
     state = State(cfg.state_db_path)
     state.mark_reconciled("git")
     state.mark_reconciled("api")
-    ctx = build_context(cfg, state, AuditLog("-"))
+    # The backend's cert is self-signed (a throwaway test double, not a real
+    # forge) — verify=False here only, never a default on the production
+    # Upstream/UpstreamRouter path.
+    upstream_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0), verify=False)
+    ctx = build_context(cfg, state, AuditLog("-"), client=upstream_client)
     warden_port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(create_app(ctx), host="127.0.0.1", port=warden_port, log_level="error")

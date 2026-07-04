@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from warden.core.config import Config
+from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.guards.gitlab_api.intent import ApiIntent
 from warden.guards.gitlab_api.policy import full_decide as decide
+
+HOST = "gitlab.example"
+_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
+_OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
 
 
 class FakeClock:
@@ -25,12 +29,18 @@ def _mr(cfg) -> ApiIntent:
         _method="POST",
         path="/projects/group%2Fproj/merge_requests",
         fields={"source_branch": "claude/x"},
+        _host=HOST,
     )
 
 
 def test_n_writes_ok_then_block():
     cfg = Config(
-        allowed_projects=("group/proj",), read_token="r", write_token="w", max_writes_per_hour=3
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+        max_writes_per_hour=3,
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
     clock = FakeClock()
     st = State(":memory:", clock=clock)
@@ -46,7 +56,12 @@ def test_n_writes_ok_then_block():
 
 def test_sliding_window_frees_budget_after_an_hour():
     cfg = Config(
-        allowed_projects=("group/proj",), read_token="r", write_token="w", max_writes_per_hour=2
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+        max_writes_per_hour=2,
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
     )
     clock = FakeClock()
     st = State(":memory:", clock=clock)
@@ -61,7 +76,13 @@ def test_sliding_window_frees_budget_after_an_hour():
 
 
 def test_locked_until_reconciled():
-    cfg = Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
+    cfg = Config(
+        allowed_projects=("group/proj",),
+        read_token="r",
+        write_token="w",
+        git_endpoints=_OPEN_ENDPOINT,
+        git_credentials=_OPEN_CREDENTIALS,
+    )
     st = State(":memory:")  # never reconciled
     assert st.view("api").locked
     assert not decide(_mr(cfg), st.view("api"), cfg).allow
