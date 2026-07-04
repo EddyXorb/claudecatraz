@@ -56,8 +56,7 @@ def resolve_agent_profile(root: Path) -> str:
     `AGENT_PROFILE`, defaulting to `claude`. Fails closed on an unregistered
     name — a typo must never silently fall back to a different agent."""
     name = (
-        load_env(root / ".catraz" / ".env").get("AGENT_PROFILE")
-        or DEFAULT_AGENT_PROFILE
+        load_env(root / ".catraz" / ".env").get("AGENT_PROFILE") or DEFAULT_AGENT_PROFILE
     ).strip()
     if name not in AGENT_REGISTRY:
         raise CliError(

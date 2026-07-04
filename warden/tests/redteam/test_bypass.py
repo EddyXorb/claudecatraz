@@ -24,13 +24,26 @@ async def test_merge_alias_when_pipeline_succeeds_blocked(client, respx_router):
 
 
 async def test_merge_via_state_event_blocked(client, respx_router):
+    # Foreign author but namespace source_branch — §07 Punkt 4 allows touching the MR,
+    # but R4's merge block is independent and must still apply.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 42}})
+        return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
     resp = await client.put(
         f"/api/v4/projects/{PROJ}/merge_requests/7", json={"state_event": "merge"}
     )
     assert resp.status_code == 403 and resp.json()["rule"] == "R4"
+
+
+async def test_mr_note_on_non_namespace_branch_still_denied(client, respx_router):
+    # The security boundary that matters (§07 Punkt 4): dropping the author check
+    # must NOT also drop the namespace check. A MR whose source_branch is outside
+    # the allowed prefixes stays blocked no matter who authored it.
+    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
+        return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
+    )
+    resp = await client.post(f"/api/v4/projects/{PROJ}/merge_requests/7/notes", json={"body": "hi"})
+    assert resp.status_code == 403 and resp.json()["rule"] == "R3"
 
 
 async def test_cross_project_read_blocked(client, respx_router):

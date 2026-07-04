@@ -70,9 +70,7 @@ def load_inherited(src_root: Path) -> dict[str, Any]:
                 # not real secrets.  Inheriting them would make the wizard show
                 # "inherited (hidden)" for a token that was never set.
                 try:
-                    content = child.read_text(
-                        encoding="utf-8", errors="replace"
-                    ).strip()
+                    content = child.read_text(encoding="utf-8", errors="replace").strip()
                 except OSError:
                     continue
                 if content:
@@ -127,8 +125,7 @@ def stage_inherited(
             out.info(f"  • inherited secrets/{name}/ (contents not shown)")
         else:
             dst_empty = (
-                dst.is_file()
-                and not dst.read_text(encoding="utf-8", errors="replace").strip()
+                dst.is_file() and not dst.read_text(encoding="utf-8", errors="replace").strip()
             )
             if not dst.exists() or yes or dst_empty:
                 shutil.copy2(src_path, dst)

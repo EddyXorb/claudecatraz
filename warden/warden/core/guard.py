@@ -11,9 +11,12 @@ Sequence ``Guard.handle`` guarantees, in this order:
 1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
 2. :func:`kernel_gates` — guard-agnostic deny gates:
    a. Mode-gate ``off`` — GitLab-disabled denies everything.
-   b. Mode-gate ``read-only`` — set by parser, never by :class:`~warden.core.model.Decision`.
+   b. Host allowlist (§07 Punkt 8 follow-up) — default-deny for a ``Host``
+      header outside ``[git.urls] hosts``, inert (always allow) while that
+      section is unconfigured.
+   c. Mode-gate ``read-only`` — set by parser, never by :class:`~warden.core.model.Decision`.
       Runs *before* ``enrich`` so credential-using lookups are unreachable in read-only/off mode.
-   c. Resource allowlist — enforced once, not per-guard, before ``enrich``.
+   d. Resource allowlist — enforced once, not per-guard, before ``enrich``.
 3. ``guard.enrich`` — unpure lookups a check declared it needs.
 4. Capability invariants (``core.capabilities.FORBIDDEN``) via :meth:`Guard.capability_gate`.
 5. ``guard.decide`` — pure, guard-specific, default-deny.
@@ -54,6 +57,21 @@ def mode_gate_writes(cfg: Config) -> Optional[Decision]:
     return None
 
 
+def host_gate(host: str, cfg: Config) -> Optional[Decision]:
+    """M6: default-deny for a ``Host`` header outside the multi-target
+    allowlist (§07 Punkt 8 follow-up, design spike section 2).
+
+    ``Config.host_allowed`` always returns ``True`` while ``allowed_hosts`` is
+    empty (single-target, the default and every deployment before
+    multi-target) — this gate only ever denies once an operator opts in via
+    ``[git.urls] hosts``. Guard-agnostic and kernel-owned like every other
+    gate in :func:`kernel_gates`, since every guard's request carries a host.
+    """
+    if not cfg.host_allowed(host):
+        return Decision(False, R6, f"host {host!r} not in the multi-target allowlist")
+    return None
+
+
 def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Optional[Decision]:
     """Resource allowlist — the single source of truth, shared by every guard.
 
@@ -80,6 +98,8 @@ def kernel_gates(
     re-derived copy of it.
     """
     denied = mode_gate_off(cfg)
+    if denied is None:
+        denied = host_gate(intent.host, cfg)
     if denied is None and intent.writes:
         denied = mode_gate_writes(cfg)
     if denied is None:
@@ -149,14 +169,15 @@ class Guard(ABC, Generic[IntentT]):
         return self.cfg.project_allowed(project)
 
     def state_view(self) -> StateView:
-        """Quota snapshot hook. Default: the core-only view (no domain state).
-        A guard backed by a domain (e.g. the forge's branch/MR counters)
-        overrides this to return the combined snapshot instead.
+        """Quota snapshot hook. Default: this guard's own core-only view (no
+        domain state), locked until this guard reconciled. A guard backed by a
+        domain (e.g. the git/REST-API branch/MR counters) overrides this to
+        return the combined snapshot instead.
         """
-        return self.state.view()
+        return self.state.view(self.name)
 
     async def startup(self) -> None:
-        """One-time, pre-serve setup (e.g. resolving service-account id).
+        """One-time, pre-serve setup.
 
         Default no-op; a guard overrides only if needed.
         """

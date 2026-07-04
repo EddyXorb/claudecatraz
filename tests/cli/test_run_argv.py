@@ -60,9 +60,7 @@ def test_main_hands_opaque_tail_to_run(
 
 
 @pytest.mark.parametrize("argv", [["run", "--help"], ["run", "-h"]])
-def test_run_help_shows_catraz_help(
-    capsys: pytest.CaptureFixture[str], argv: list[str]
-) -> None:
+def test_run_help_shows_catraz_help(capsys: pytest.CaptureFixture[str], argv: list[str]) -> None:
     with pytest.raises(SystemExit) as e:
         cli.main(argv)
     assert e.value.code == 0

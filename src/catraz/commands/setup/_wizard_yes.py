@@ -53,8 +53,7 @@ def _yes_apply_warden_policy(
     out: Out,
 ) -> None:
     raw_projects = (
-        os.environ.get("WARDEN_ALLOWED_PROJECTS")
-        or env.get("WARDEN_ALLOWED_PROJECTS", "")
+        os.environ.get("WARDEN_ALLOWED_PROJECTS") or env.get("WARDEN_ALLOWED_PROJECTS", "")
     ).strip()
     if raw_projects and warden_toml.exists():
         projects = [p.strip() for p in raw_projects.split(",") if p.strip()]

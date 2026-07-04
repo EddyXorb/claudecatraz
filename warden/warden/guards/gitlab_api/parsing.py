@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, unquote
 
 from starlette.requests import Request
 
-from .catalog import CatalogEntry, Location
+from .catalog import Location, Recognizer
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
 _API_PREFIX = "/api/v4"
@@ -77,13 +77,13 @@ def parse_body_fields(body: bytes, content_type: str) -> dict[str, Any]:
     return {}
 
 
-def extract_fields(request: Request, body: bytes, ep: Optional[CatalogEntry]) -> dict[str, Any]:
+def extract_fields(request: Request, body: bytes, ep: Optional[Recognizer]) -> dict[str, Any]:
     """Pull the decision fields for this request.
 
     For an unmatched write or any read (``ep is None``) this stays query-only.
 
-    For a matched catalog entry: only the fields the entry *declares*
-    (:attr:`CatalogEntry.decision_fields`) are read, each strictly from its
+    For a matched recognizer: only the fields the entry *declares*
+    (:attr:`Recognizer.decision_fields`) are read, each strictly from its
     declared location (body or query) — never a blind merge of both.
     A body-declared field that only appears in the query string (or vice versa)
     is simply absent from the decision, exactly as if the caller never sent it.

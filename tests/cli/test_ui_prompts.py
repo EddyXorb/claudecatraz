@@ -16,9 +16,7 @@ def out() -> Out:
 
 
 class TestAsk:
-    def test_returns_typed_value(
-        self, out: Out, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_typed_value(self, out: Out, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("builtins.input", lambda prompt: "typed")
         assert out.ask("Enter value", default="fallback") == "typed"
 
@@ -28,9 +26,7 @@ class TestAsk:
         monkeypatch.setattr("builtins.input", lambda prompt: "")
         assert out.ask("Enter value", default="fallback") == "fallback"
 
-    def test_returns_default_on_eof(
-        self, out: Out, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_default_on_eof(self, out: Out, monkeypatch: pytest.MonkeyPatch) -> None:
         def raise_eof(prompt: str) -> None:
             raise EOFError
 
@@ -96,9 +92,7 @@ class TestChoice:
         # 3 tries inside choice, each calls ask once which calls input once
         assert call_count == 3
 
-    def test_returns_default_on_eof(
-        self, out: Out, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_default_on_eof(self, out: Out, monkeypatch: pytest.MonkeyPatch) -> None:
         def raise_eof(prompt: str) -> None:
             raise EOFError
 
@@ -113,9 +107,7 @@ class TestChoice:
 
 
 class TestSecret:
-    def test_returns_typed_secret(
-        self, out: Out, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_typed_secret(self, out: Out, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("getpass.getpass", lambda prompt: "s3cr3t")
         assert out.secret("Token") == "s3cr3t"
 
@@ -125,9 +117,7 @@ class TestSecret:
         monkeypatch.setattr("getpass.getpass", lambda prompt: "")
         assert out.secret("Token", current="existing") == "existing"
 
-    def test_returns_current_on_eof(
-        self, out: Out, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_current_on_eof(self, out: Out, monkeypatch: pytest.MonkeyPatch) -> None:
         def raise_eof(prompt: str) -> None:
             raise EOFError
 

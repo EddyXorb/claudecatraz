@@ -62,8 +62,7 @@ def test_doctor_auth_warns_about_refresh_persistence(tmp_path: Path) -> None:
     f = doctor.Findings()
     doctor.check_auth(tmp_path, {"AUTH_MODE": "subscription"}, f)
     assert any(
-        i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower()
-        for i in f.items
+        i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower() for i in f.items
     )
 
 
@@ -107,7 +106,5 @@ def test_doctor_auth_api_key_with_key(tmp_path: Path) -> None:
     (tmp_path / ".catraz" / "secrets").mkdir(parents=True, mode=0o700)
     (tmp_path / ".catraz" / "secrets" / "claude").mkdir(mode=0o700)
     f = doctor.Findings()
-    doctor.check_auth(
-        tmp_path, {"AUTH_MODE": "api_key", "ANTHROPIC_API_KEY": "sk-x"}, f
-    )
+    doctor.check_auth(tmp_path, {"AUTH_MODE": "api_key", "ANTHROPIC_API_KEY": "sk-x"}, f)
     assert not any(i[0] == doctor.BAD for i in f.items)

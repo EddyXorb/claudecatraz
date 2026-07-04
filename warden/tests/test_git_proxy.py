@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import replace
 
 import httpx
 
@@ -13,7 +14,6 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
 from warden.guards.git.pktline import FLUSH, pkt_line
-from warden.guards.gitlab.upstream import Upstream
 
 ZERO = "0" * 40
 SHA1 = "1" * 40
@@ -76,8 +76,10 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     # Write-token injected, and the body forwarded byte-for-byte (SHA-preserving).
     assert sent.headers["authorization"] == _basic("WRITE-TOKEN")
     assert sent.content == body
-    # The create was recorded for the branch quota.
-    assert ctx.forge.forge_state.open_branches() == 1
+    # The create was recorded for the branch quota (the git guard's own
+    # BranchState, §07 Punkt 6 step 4 — no more shared forge_state).
+    git_guard = next(g for g in ctx.guards if g.name == "git")
+    assert git_guard.branch_state.open_branches() == 1
     assert ctx.state.writes_last_hour() == 1
     # Regression: the project key is normalised (no ``.git`` suffix) so it matches
     # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
@@ -121,6 +123,45 @@ async def test_push_forwards_content_encoding(client, respx_router):
     assert route.calls.last.request.headers.get("content-encoding") == "gzip"
 
 
+# --- push-size limit (§07 Punkt 6.3): cheap Content-Length gate, no packfile parsing ---
+
+
+def _client_with(cfg: Config) -> httpx.AsyncClient:
+    """Build an ASGI test client for a warden with a specific ``cfg`` (max_push_bytes here)."""
+    state = State(":memory:")
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
+    ctx = build_context(cfg, state, AuditLog("-"))
+    transport = httpx.ASGITransport(app=create_app(ctx))
+    return httpx.AsyncClient(transport=transport, base_url="http://warden")
+
+
+async def test_push_over_max_push_bytes_rejected_r5(cfg, respx_router):
+    small_cfg = replace(cfg, max_push_bytes=200)
+    async with _client_with(small_cfg) as c:
+        body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")], pack=b"PACK" + b"\x00" * 500)
+        assert len(body) > 200
+        resp = await c.post(RECV, content=body)
+    assert resp.status_code == 200  # in-band rejection
+    assert b"warden: R5" in resp.content
+    assert b"exceeds max_push_bytes" in resp.content
+
+
+async def test_push_under_max_push_bytes_is_forwarded(cfg, respx_router):
+    small_cfg = replace(cfg, max_push_bytes=10_000)
+    route = respx_router.route(method="POST", url__regex=r".*/git-receive-pack$").mock(
+        return_value=httpx.Response(
+            200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH)
+        )
+    )
+    async with _client_with(small_cfg) as c:
+        body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
+        assert len(body) < 10_000
+        resp = await c.post(RECV, content=body)
+    assert resp.status_code == 200
+    assert route.called
+
+
 # --- GITLAB_MODE gate tests (mode-enforcement, step 9) -------------------------
 # Build a fresh test client per mode; no upstream mock needed (a hit would fail).
 
@@ -139,11 +180,10 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
         gitlab_mode=mode,
     )
     state = State(":memory:")
-    state.mark_reconciled()
-    upstream = Upstream(cfg)
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
     audit = AuditLog("-")
-    ctx = build_context(cfg, upstream, state, audit)
-    ctx.forge.service_account_id = 42
+    ctx = build_context(cfg, state, audit)
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://warden")

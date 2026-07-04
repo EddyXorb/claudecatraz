@@ -27,9 +27,7 @@ def _mock_cmd_run(
     # Host gitconfig is environment-dependent; pin it off so extra_env is deterministic.
     monkeypatch.setattr(run_cmd, "_host_gitconfig_env", lambda: {})
 
-    def fake_prepare(
-        root: object, *, render: object, extra_env: object = None
-    ) -> list[str]:
+    def fake_prepare(root: object, *, render: object, extra_env: object = None) -> list[str]:
         prepare_calls.append({"render": render, "extra_env": extra_env})
         return ["docker", "compose", "--project-name", "test"]
 
@@ -64,9 +62,7 @@ def test_cmd_run_passes_base_image_to_prepare(
     assert prepare_calls[0]["render"] is True
 
 
-def test_host_gitconfig_env_present(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_host_gitconfig_env_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """_host_gitconfig_env exports HOST_GITCONFIG when ~/.gitconfig exists, else nothing."""
     home = tmp_path / "home"
     home.mkdir()

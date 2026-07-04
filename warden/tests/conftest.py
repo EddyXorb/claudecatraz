@@ -11,8 +11,8 @@ from warden.context import AppContext, build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config
 from warden.core.state import State
-from warden.guards.gitlab.forge import GitForge
-from warden.guards.gitlab.upstream import Upstream
+from warden.core.transport import UpstreamRouter
+from warden.guards.gitlab_api.guard import ApiGuard
 
 UPSTREAM = "https://gitlab.example"
 
@@ -35,26 +35,21 @@ def cfg() -> Config:
 @pytest.fixture
 def state() -> State:
     st = State(":memory:")
-    st.mark_reconciled()  # unlock the quota view for tests
+    # Unlock the quota view for tests — locks are per guard now, so unlock both.
+    st.mark_reconciled("git")
+    st.mark_reconciled("api")
     return st
 
 
 @pytest.fixture
-def forge(cfg, state) -> GitForge:
-    upstream = Upstream(cfg)
-    audit = AuditLog("-")
-    forge = GitForge(cfg, upstream, state, audit)
-    forge.service_account_id = 42
-    return forge
+def api_guard(cfg, state) -> ApiGuard:
+    return ApiGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg))
 
 
 @pytest.fixture
 def ctx(cfg, state) -> AppContext:
-    upstream = Upstream(cfg)
     audit = AuditLog("-")
-    ctx = build_context(cfg, upstream, state, audit)
-    ctx.forge.service_account_id = 42
-    return ctx
+    return build_context(cfg, state, audit)
 
 
 @pytest.fixture
@@ -69,4 +64,4 @@ async def client(ctx) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://warden") as c:
         yield c
-    await ctx.forge.upstream.aclose()
+    await ctx.router.aclose()

@@ -34,9 +34,7 @@ def test_prepare_home_subscription_sync(
     adapter.prepare_home(home, secrets)
     assert (home / ".credentials.json").exists()
     cj = json.loads((tmp_path / ".claude.json").read_text())
-    assert (
-        cj["organizationUuid"] == "org" and cj["bypassPermissionsModeAccepted"] is True
-    )
+    assert cj["organizationUuid"] == "org" and cj["bypassPermissionsModeAccepted"] is True
     assert (home / "settings.json").exists()
 
 
@@ -70,9 +68,7 @@ def test_prepare_home_persistent_wires_selective_symlinks(
     secrets = _secrets(ep, persistent_state_dir=state_dir)
     adapter.prepare_home(home, secrets)
     assert (home / ".credentials.json").is_symlink()
-    assert (home / ".credentials.json").resolve() == (
-        state_dir / ".credentials.json"
-    ).resolve()
+    assert (home / ".credentials.json").resolve() == (state_dir / ".credentials.json").resolve()
     assert (home / "projects").is_symlink()
     assert (home / "projects").resolve() == (state_dir / "projects").resolve()
     assert state_dir.stat().st_mode & 0o777 == 0o700

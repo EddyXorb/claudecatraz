@@ -45,6 +45,10 @@ class Intent(Protocol):
       Allows read-only mode-gate to run *before* ``enrich``, keeping credentials unreachable.
     * ``project`` — what the resource-allowlist gate needs.
     * ``method`` — the audit envelope's verb (HTTP method for REST, ``"push"`` for git).
+    * ``host`` — the raw ``Host`` header the guard's parser read off the request
+      (§07 Punkt 8 follow-up). What ``core.guard.host_gate`` checks against
+      ``Config.host_allowed``; a guard resolves the *canonical* host (for
+      ``UpstreamRouter``/state keys) via ``Config.resolve_target_host(host)``.
 
     Guard-specific fields live on the concrete Intent dataclass in that guard's package.
     """
@@ -57,3 +61,6 @@ class Intent(Protocol):
 
     @property
     def method(self) -> str: ...
+
+    @property
+    def host(self) -> str: ...

@@ -136,6 +136,12 @@ Verifikation: `cd warden && uv run pytest -q` grün, `ruff check`, `mypy` grün.
 **Fertig-Kriterium.** `core/state_migrations.py` ist weg, `State` stampt und prüft
 die Version selbst, kein Migrationslauf mehr, Tests grün.
 
+> **✅ ERLEDIGT** (Commit `refactor(state): Punkt 2`). `state_migrations.py`
+> gelöscht; `StateStore._check_and_stamp_schema_version()` liest/stampt
+> `PRAGMA user_version` gegen `CURRENT_SCHEMA_VERSION=1`, fail-closed via
+> `SchemaError` (jetzt in `state.py`). Migrationstests entfernt, Version-Stamp-/
+> Fail-closed-/Zieltabellen-Tests behalten. pytest/ruff/format/mypy grün.
+
 ---
 
 ## 3. Betriebs-Logging: `print(…, file=sys.stderr)` → `logging.Logger` in Datei
@@ -184,6 +190,14 @@ stderr-Strings von vorher prüfen — solche Assertions ggf. auf den Logger
 
 **Fertig-Kriterium.** Keine betrieblichen `print(stderr)` mehr im Warden;
 `.catraz/logs/warden/warden.log` füllt sich beim Lauf; Audit-Log unverändert.
+
+> **✅ ERLEDIGT** (Commit `feat(logging): Punkt 3`). Neues
+> `core/logging_setup.py::configure_logging()` (stderr + FileHandler auf
+> `cfg.log_path`, festes Format, Root INFO, idempotent). `cfg.log_path`-Feld
+> ergänzt; betriebliche prints in `__main__.py` + `guards/gitlab/forge.py` auf
+> Modul-Logger umgestellt. Bewusst *nicht* angefasst: `core/audit.py`-prints
+> (Audit-Subsystem) und der Startup-Abort-`print` (läuft vor `configure_logging`).
+> pytest/ruff/format/mypy grün.
 
 ---
 
@@ -258,6 +272,15 @@ Grenznutzen und kostete ein ganzes Konzept (Service-Account-Identität).
 Autor bearbeiten; Service-Account-Identität existiert nicht mehr als Konzept;
 Merge bleibt blockiert; Tests grün.
 
+> **✅ ERLEDIGT** (Commit `feat(forge): Punkt 4`). `mr_owned_by_agent` →
+> `mr_source_in_namespace` (nur noch `in_branch_namespace(source)`, Tristate
+> bleibt). Service-Account-Maschinerie komplett entfernt: `resolve_service_account`,
+> `service_account_id`, `GET /user`, `author_id`-Filter in `_list_agent_mrs`,
+> `ApiGuard.startup`. `intent.mr_owner_ok` → `mr_source_ok`; Check
+> `OWNED_BY_AGENT` → `MR_SOURCE_IN_NAMESPACE`. `field_not_equals("merge")`
+> bewusst belassen (Schritt 7). Redteam: Nicht-Namespace-MR bleibt R3-Deny,
+> Merge bleibt R4-Deny. 341 passed, ruff/format/mypy grün.
+
 ---
 
 ## 5. `__main__._serve` entflechten: generische Runtime vs. Composition Root
@@ -314,6 +337,14 @@ Ein Test, der den Lifecycle bis „Port offen" simuliert, muss grün bleiben.
 **Fertig-Kriterium.** `__main__` importiert/konstruiert kein `Upstream` mehr;
 `_run_servers` gekapselt; die vier Code-TODOs sind entweder umgesetzt (Upstream),
 an H2 delegiert (Startgate) oder bewusst als won't-do vermerkt (reconcile-in-Guard).
+
+> **✅ ERLEDIGT** (Commit `refactor(main): Punkt 5`). `build_context(cfg, state,
+> audit)` konstruiert `Upstream` selbst; `AppContext` hält `upstream` + neue
+> `aclose()` (bündelt upstream/audit/state-Teardown). `__main__` importiert
+> `Upstream` nicht mehr; Uvicorn-Block in `_run_servers(ctx)` extrahiert, `_serve`
+> linear. TODO „tidy up" + „leaks from gitlab_api" weg; reconcile-in-Guard-TODO
+> durch Won't-do-Kommentar ersetzt. Startgate (5.3) war durch H2 bereits weg —
+> No-op. 341 passed, ruff/format/mypy grün.
 
 ---
 
@@ -426,6 +457,30 @@ nicht mehr; der git-Guard importiert keine Forge-/Guard-Fremdlogik und hat eigen
 State + Push-Größenlimit; die GitLab-Domänenlogik liegt im `gitlab_api`-Paket; die
 git-nativen Regeln (R2/R4/R5 + Größe) stehen ohne Forge; Tests grün.
 
+> **✅ ERLEDIGT** (Commit-Serie `§07 Punkt 6`). Strikt in der vorgegebenen
+> Reihenfolge: (1) `guards/gitlab/upstream.py` → `core/transport.py`
+> (`Upstream`, `stream_upstream`, `project_id`, neu `get_paginated`), von
+> `context.py`, git- und `gitlab_api`-Guard importiert — git-Guard hängt seither
+> nie mehr an `guards.gitlab`. (6.2 `git_reject_response` war schon in
+> `guards/git/errors.py` — kein Rest-Import mehr, nichts zu tun.) (3)
+> `max_push_bytes` (Default 50 MiB) in `Config`/`config_load.py`; `GitIntent.
+> push_bytes` aus `Content-Length`; `policy.decide` lehnt Überschreitung vor dem
+> Ref-Loop mit R5 ab, ohne Packfile-Parsing. (4) Branch-Tabelle/-Methoden →
+> `guards/git/state.py::BranchState`; eigener Reconcile in
+> `guards/git/reconcile.py::reconcile_branches` (nutzt nur `core.transport`);
+> `GitGuard.state_view()`/`reconcile()` eigenständig, Core-Lock bleibt geteilt
+> (wie im Dokument gefordert). (5) `GitForge` aufgelöst: MR-Ownership →
+> `guards/gitlab_api/ownership.py::MrOwnership`, MR-Reconcile +
+> Projekt-Id-Alias → `guards/gitlab_api/reconcile.py::reconcile_mrs`, MR-Tabelle
+> → `guards/gitlab_api/state.py::MrState`; `ApiGuard` hält sie direkt (kein
+> Gott-Objekt). `guards/gitlab/` komplett gelöscht (`forge.py`, `state.py`,
+> `__init__.py`). `context.py`/`AppContext` kennen `GitForge`/`forge` nicht mehr,
+> nur noch den geteilten `Upstream`. Nordstern-Grep leer, `ls guards/gitlab/`
+> → nicht gefunden. Tests thematisch umgezogen (`test_git_state.py`,
+> `test_git_reconcile.py`, `test_api_ownership.py`, `test_api_reconcile.py`,
+> `test_api_state.py`); `test_forge.py` gelöscht. 347 passed (Warden) + 386
+> passed (CLI/Container), ruff/format/mypy grün (Root + Warden).
+
 ---
 
 ## 7. Katalog auf `Recognizer → ⟨Capability, Scope⟩` vereinheitlichen (ehem. Schritt I, Ownership bereits ausgebaut)
@@ -536,82 +591,38 @@ Matcher umbenannt):
 scope⟩→`decide`-Modell; die drei Invarianten stehen; kein Autor-Ownership;
 `field_not_equals("merge")` entfernt; identisches Entscheidungsverhalten; Tests grün.
 
+> **✅ ERLEDIGT** (Warden `catalog/model.py`, `entries.py`, `read_endpoints.py`,
+> `policy.py`, `guard.py`, `parsing.py`, `intent.py`, `catalog/__init__.py`,
+> `catalog/activation.py`, `catalog/report.py`). `CatalogEntry`/`RegisteredCheck`/
+> `CheckFn`/`checks.py` (field_has_prefix, MR_SOURCE_IN_NAMESPACE, field_not_equals)
+> weg; **eine** `Recognizer`-Dataclass (`id`, `method`, `template`, `scope_kind`,
+> `kind`, `rule`, `capabilities`, `decision_fields`, `namespace_field`, `classify`)
+> für Read (`READ_RECOGNIZERS`, vormals `READ_ENDPOINTS`) **und** Write (`CATALOG`).
+> `ScopeKind` = `branch-namespace` (`namespace_field` literal oder `None` ⇒
+> iid-Lookup via `intent.mr_source_ok`) / `quota-by-kind` / `content-exposure`
+> (`classify: ApiIntent -> (ReadClass, str)`, schmal — nie eine beliebige Decision).
+> Eine generische `policy.decide_scope(intent, match, state, cfg)` dispatcht rein
+> über `scope_kind` — keine Pro-Eintrag-Logik mehr. `mr.update`s
+> `field_not_equals("state_event","merge")` entfernt; Merge bleibt R4-verboten
+> allein über die `MERGES`-Capability (`api_capabilities`, unverändert). Alle drei
+> Invarianten stehen (Capability-Vokabular, geschlossener Scope-Satz, Read-Default-
+> Deny). `/policy`-JSON-Struktur unverändert (`endpoint_table_report`, per
+> Golden-Test in `tests/catalog/test_report.py` abgesichert). Neue Struktur-Tests
+> in `tests/catalog/test_recognizer.py` + `test_report.py`; bestehende Verhaltens-
+> Tests (`test_policy.py`, `test_capabilities.py`, `test_api_proxy.py`,
+> `tests/catalog/*`, `redteam/test_bypass.py`) unverändert grün. 359 passed
+> (Warden, 347 vorher + 12 neue), 386 passed (CLI/Container, unverändert),
+> ruff/format/mypy grün (Root + Warden).
+
 ---
 
-## 8. Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz` via Host-Routing
+## 8. Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz`
 
-**Ziel.** Ein `.catraz`-Ordner soll mehr als eine Upstream-Instanz bedienen können
-(z.B. `gitlab.com` **und** `my-gitlab.de` **und** ein privater git-Server). Heute
-nimmt das Design genau einen Upstream an. Der saubere Mechanismus ist
-**Host-basiertes Routing** — der Agent behält kanonische Remotes, der Warden
-erkennt das echte Ziel am HTTP-`Host`-Header. Das erfüllt zugleich das Ziel „im
-Container die Interfaces so nutzen wie außerhalb" und konvergiert mit **P5** im
-CLI-`TODO` (transparente Warden-Interception, `insteadOf` ablösen).
-
-> **Größter, sicherheitssensitivster Schritt. Zuletzt.** Voraussetzung:
-> Schritt 6 (unabhängige, host-parametrische Guards). Er berührt die
-> Trust-Boundary (welche Upstreams sind erreichbar), daher als **erster
-> Teil-Deliverable ein kurzer Design-Spike** (eigene Datei
-> `docs/design/architecture-generalization/08-multi-target.md`), der die zwei
-> unten genannten offenen Detailfragen für die API-Seite entscheidet, **bevor**
-> Code entsteht.
-
-**Empfohlener Ansatz (entschieden, nicht mehr offen).**
-
-1. **Konfiguration in `warden.toml`** (nicht `.env` — alles an einem Ort): eine
-   Sektion, die die erlaubten Upstream-Hosts als **explizite, enumerierte
-   Allowlist** listet (R5/§6.10 — offer, never auto-add), z.B.:
-
-   ```toml
-   [git.urls]
-   hosts = ["gitlab.com", "my-gitlab.de", "personal-gitserver.it"]
-   ```
-
-   `core/config.py` liest das in ein `frozenset` erlaubter Hosts. Ein Request an
-   einen nicht gelisteten Host wird abgelehnt (default-deny, konsistent mit R6).
-2. **Routing per `Host`-Header.** Der Docker-DNS zeigt die gelisteten Hosts auf den
-   Warden (Compose-`extra_hosts`/Netzwerk-Aliase; im Entrypoint gesetzt). Der
-   Warden liest `request.headers["host"]`, prüft ihn gegen die Allowlist und wählt
-   den passenden Upstream (Transport aus Schritt 6, pro Host parametrisiert:
-   Basis-URL + Credentials). Damit behält der Agent kanonische Remotes
-   (`git clone https://my-gitlab.de/x.git`) — kein `insteadOf`-Pfad-Trick, keine
-   geleakte Warden-Adresse in den Remotes.
-3. **Guards pro Host parametrisieren.** Der git-Guard ist nach Schritt 6 bereits
-   transport-neutral; er bekommt den ziel-spezifischen Transport anhand des Hosts.
-   Der GitLab-API-Guard analog, wo ein GitLab-Host adressiert ist.
-
-**Zwei offene Detailfragen — im Spike (`08-…md`) zu entscheiden, dann umsetzen:**
-
-- **API-Multi-Endpoint:** Wie werden mehrere GitLab-**API**-Instanzen adressiert
-  (Host-Routing wie bei git, oder separate Guard-Instanzen)? Empfehlung:
-  identisches Host-Routing; im Spike bestätigen.
-- **Credentials pro Host:** Woher kommen Token je Host (getrennte Env-Variablen
-  pro Host? Sektion in `warden.toml`)? Im Spike festlegen; Grundsatz: keine
-  Geheimnisse in `warden.toml` — Token bleiben in der Umgebung, die Host-Liste in
-  `warden.toml`.
-
-**Nicht tun.**
-- **Kein** `insteadOf`-Pfad-Präfix-Trick (`warden:8080/personal-gitserver.it/repo.git`):
-  er macht die Remotes im Container un-kanonisch und widerspricht dem Kernziel.
-  Host-Routing statt Pfad-Encoding.
-- **Kein** separater Warden-Container pro Guard/Host „auf Vorrat" — ein Warden, der
-  nach Host routet, ist einfacher und reicht. Container-Vervielfachung erst bei
-  konkretem Isolationsbedarf.
-- Die Host-Liste **nicht** implizit/automatisch füllen — explizite Allowlist.
-
-**Tests.**
-- Config-Test (`test_config.py`): `[git.urls].hosts` wird in die Host-Allowlist
-  geparst; leere/fehlende Sektion → Verhalten wie heute (ein Default-Host oder
-  leer→deny, im Spike festgelegt).
-- Routing-Test: Request mit erlaubtem `Host` wählt den richtigen Upstream; Request
-  mit nicht gelistetem `Host` wird abgelehnt (default-deny).
-- Container-Test (`tests/container/`): zwei Hosts konfiguriert, beide erreichbar,
-  ein dritter abgelehnt.
-- Verifikation: warden pytest/ruff/mypy **und** CLI-Tests grün.
-
-**Fertig-Kriterium.** Ein `.catraz` kann mehrere gelistete Upstream-Hosts bedienen;
-der Agent nutzt kanonische Remotes; nicht gelistete Hosts werden verweigert; Spike
-`08-multi-target.md` dokumentiert die zwei Detailentscheidungen.
+Als eigenständiger, selbstgenügsamer Plan nach
+[`08-multi-target.md`](08-multi-target.md) ausgelagert — Design, `warden.toml`-Schema,
+Credentials, Access-Mode, State-Keying, CLI und Umsetzungsstand stehen vollständig
+dort. Anders als Punkt 1–7 ist dieser Schritt **noch nicht abgeschlossen**; der
+aktuelle Stand steht in Doc 8 §8.
 
 ---
 

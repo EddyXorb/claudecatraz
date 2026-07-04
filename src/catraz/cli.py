@@ -104,15 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-V", "--version", action="store_true", help="show version and exit")
     sub = p.add_subparsers(dest="command")
 
-    pi = sub.add_parser(
-        "init", parents=[_g()], help="interactive setup session (the wizard)"
-    )
-    pi.add_argument(
-        "--force", action="store_true", help="re-prompt even for set values"
-    )
-    pi.add_argument(
-        "--skip-sync", action="store_true", help="skip the Claude credential import"
-    )
+    pi = sub.add_parser("init", parents=[_g()], help="interactive setup session (the wizard)")
+    pi.add_argument("--force", action="store_true", help="re-prompt even for set values")
+    pi.add_argument("--skip-sync", action="store_true", help="skip the Claude credential import")
     pi.add_argument(
         "-y",
         "--yes",
@@ -126,20 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="inherit curated .env keys, config/, and secrets/ from an existing sandbox",
     )
 
-    pd = sub.add_parser(
-        "doctor", parents=[_g()], help="preflight: turn silent setup failures loud"
-    )
-    pd.add_argument(
-        "--fix", action="store_true", help="repair safe findings (dirs, chown)"
-    )
-    pd.add_argument(
-        "--strict", action="store_true", help="warnings count as failures (exit 3)"
-    )
+    pd = sub.add_parser("doctor", parents=[_g()], help="preflight: turn silent setup failures loud")
+    pd.add_argument("--fix", action="store_true", help="repair safe findings (dirs, chown)")
+    pd.add_argument("--strict", action="store_true", help="warnings count as failures (exit 3)")
     pd.add_argument("--section", choices=DOCTOR_SECTIONS, help="run only one section")
 
-    pst = sub.add_parser(
-        "stop", aliases=["down"], parents=[_g()], help="stop the stack"
-    )
+    pst = sub.add_parser("stop", aliases=["down"], parents=[_g()], help="stop the stack")
     pst.add_argument("-v", "--volumes", action="store_true", help="also remove volumes")
     pst.add_argument(
         "--print",
@@ -176,13 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional mode (claude|claude-remote|shell), then its args",
     )
 
-    sub.add_parser(
-        "status", parents=[_g()], help="health per service, URLs, quota snapshot"
-    )
+    sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
-    sub.add_parser(
-        "ps", parents=[_g()], help="list active agent containers for this repo"
-    )
+    sub.add_parser("ps", parents=[_g()], help="list active agent containers for this repo")
 
     pr = sub.add_parser(
         "reload", parents=[_g()], help="restart services whose .catraz config changed"
@@ -200,9 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="show the compose command without running it",
     )
 
-    pl = sub.add_parser(
-        "logs", parents=[_g()], help="tail logs (agent|warden|proxy, or --audit)"
-    )
+    pl = sub.add_parser("logs", parents=[_g()], help="tail logs (agent|warden|proxy, or --audit)")
     pl.add_argument(
         "service",
         nargs="?",
@@ -211,9 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pl.add_argument("-f", "--follow", action="store_true", help="follow")
     pl.add_argument("--tail", type=int, default=100, help="last N lines (default 100)")
-    pl.add_argument(
-        "--audit", action="store_true", help="warden decision log instead of stdout"
-    )
+    pl.add_argument("--audit", action="store_true", help="warden decision log instead of stdout")
 
     ps = sub.add_parser(
         "sync",
@@ -221,16 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="re-import Claude sandbox credentials from the host",
     )
     ps.add_argument("--from", dest="source", help="source ~/.claude path")
-    ps.add_argument(
-        "--force", action="store_true", help="overwrite existing credential"
-    )
+    ps.add_argument("--force", action="store_true", help="overwrite existing credential")
 
     pal = sub.add_parser(
         "allow", parents=[_g()], help="add GitLab project(s) to the warden allowlist"
     )
-    pal.add_argument(
-        "projects", nargs="+", help="full project path(s), e.g. group/sub/project"
-    )
+    pal.add_argument("projects", nargs="+", help="full project path(s), e.g. group/sub/project")
 
     pae = sub.add_parser(
         "allow-endpoint",
@@ -247,9 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     pa = sub.add_parser(
         "audit", parents=[_g()], help="warden decision log (JSONL tail or --web viewer)"
     )
-    pa.add_argument(
-        "--web", action="store_true", help="open the live viewer over the admin socket"
-    )
+    pa.add_argument("--web", action="store_true", help="open the live viewer over the admin socket")
     pa.add_argument("-f", "--follow", action="store_true", help="follow")
     pa.add_argument("--tail", type=int, default=100, help="last N lines (default 100)")
 

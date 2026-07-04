@@ -53,7 +53,7 @@ R5: Final = "R5"
 R6: Final = "R6"
 
 _DEFS: tuple[RuleDef, ...] = (
-    RuleDef(R0, MetaRule.M0, "Mode gate — GitLab disabled or writes disabled"),
+    RuleDef(R0, MetaRule.M0, "Mode gate — git forge disabled or writes disabled"),
     RuleDef(R1, MetaRule.M1, "Read pass-through with the least-privilege read token"),
     RuleDef(R2, MetaRule.M2, "Write limited to the agent's own branch namespace"),
     RuleDef(R3, MetaRule.M3, "Write limited to objects the agent itself authored"),

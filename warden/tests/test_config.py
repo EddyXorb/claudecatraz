@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from warden.core.config import Config, ConfigError
-from warden.core.config_load import from_env
+from warden.core.config import Config, ConfigError, HostCredentials
+from warden.core.config_load import _host_slug, from_env
 
 _MIN = {
     "ALLOWED_PROJECTS": "group/proj",
@@ -348,6 +348,172 @@ def test_secret_file_missing_raises(tmp_path):
             {**_MIN, "GITLAB_READ_TOKEN_FILE": str(tmp_path / "nonexistent")},
             strict=True,
         )
+
+
+# --- allowed_hosts / host_allowed (§07 Punkt 8 design spike) -------------------
+# NOT yet wired into any request path — see
+# docs/design/architecture-generalization/08-multi-target.md. These tests cover
+# only the Config-level primitive: parsing + the pure allow/deny predicate.
+
+
+def test_host_allowed_empty_allowlist_allows_anything():
+    """Default (no [git.urls] configured) ⇒ feature off, no behaviour change."""
+    cfg = Config()
+    assert cfg.allowed_hosts == frozenset()
+    assert cfg.host_allowed("gitlab.com")
+    assert cfg.host_allowed("anything.example")
+    assert cfg.host_allowed("")
+
+
+def test_host_allowed_nonempty_allowlist_is_default_deny():
+    cfg = Config(host_order=("gitlab.com", "my-gitlab.de"))
+    assert cfg.host_allowed("gitlab.com")
+    assert cfg.host_allowed("my-gitlab.de")
+    assert not cfg.host_allowed("evil.example")
+    assert not cfg.host_allowed("")
+
+
+def test_host_allowed_normalizes_case_port_and_trailing_dot():
+    cfg = Config(host_order=("gitlab.com",))
+    assert cfg.host_allowed("GitLab.com")
+    assert cfg.host_allowed("gitlab.com:443")
+    assert cfg.host_allowed("gitlab.com.")
+
+
+def test_git_urls_hosts_absent_section_yields_empty_allowlist(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('allowed_projects = ["group/proj"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.allowed_hosts == frozenset()
+    assert cfg.host_allowed("anything.example")
+
+
+def test_git_urls_hosts_parsed_from_toml(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "My-Gitlab.DE"]\n')
+    env = {
+        **_MIN,
+        "GITLAB_READ_TOKEN__MY_GITLAB_DE": "r2",
+        "GITLAB_WRITE_TOKEN__MY_GITLAB_DE": "w2",
+    }
+    cfg = from_env(env, strict=True, toml_path=str(toml))
+    assert cfg.allowed_hosts == frozenset({"gitlab.com", "my-gitlab.de"})  # normalised
+    assert cfg.host_order == ("gitlab.com", "my-gitlab.de")  # order preserved
+
+
+def test_git_urls_hosts_with_port_normalizes_like_an_incoming_host_header(tmp_path):
+    """Regression: an allowlist entry with a port (or trailing dot) must be
+    normalised the same way ``host_allowed``/``resolve_target_host`` normalise
+    an incoming ``Host`` header — otherwise it can never match and the host
+    is silently denied forever (two divergent normalisations bug)."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.internal:8443"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.host_order == ("gitlab.internal",)
+    assert cfg.allowed_hosts == frozenset({"gitlab.internal"})
+    assert cfg.host_allowed("gitlab.internal:8443")
+    assert cfg.host_allowed("GITLAB.INTERNAL")
+
+
+def test_git_urls_hosts_wrong_shape_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = "gitlab.com"\n')
+    with pytest.raises(ConfigError, match="git.urls.hosts"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_section_wrong_shape_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text("git = 1\n")
+    with pytest.raises(ConfigError, match=r"\[git\]"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_git_urls_section_wrong_shape_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text("[git]\nurls = 1\n")
+    with pytest.raises(ConfigError, match=r"\[git\.urls\]"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+# --- per-host credentials (§07 Punkt 8 follow-up, design spike section 3) ------
+
+
+def test_host_slug_is_lowercase_nonalnum_to_underscore_then_uppercase():
+    assert _host_slug("my-gitlab.de") == "MY_GITLAB_DE"
+    assert _host_slug("gitlab.com") == "GITLAB_COM"
+    assert _host_slug("GitLab.COM") == "GITLAB_COM"  # case-insensitive input
+
+
+def test_single_listed_host_aliases_the_legacy_env_vars(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com"]\n')
+    cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.host_credentials == {"gitlab.com": HostCredentials(read_token="r", write_token="w")}
+
+
+def test_additional_host_reads_slugged_env_vars(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "my-gitlab.de"]\n')
+    env = {
+        **_MIN,
+        "GITLAB_READ_TOKEN__MY_GITLAB_DE": "r2",
+        "GITLAB_WRITE_TOKEN__MY_GITLAB_DE": "w2",
+    }
+    cfg = from_env(env, strict=True, toml_path=str(toml))
+    assert cfg.host_credentials["gitlab.com"] == HostCredentials(read_token="r", write_token="w")
+    assert cfg.host_credentials["my-gitlab.de"] == HostCredentials(
+        read_token="r2", write_token="w2"
+    )
+
+
+def test_additional_host_file_variant_env_vars(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "my-gitlab.de"]\n')
+    f_read = tmp_path / "r2"
+    f_read.write_text("r2-from-file\n")
+    env = {
+        **_MIN,
+        "GITLAB_READ_TOKEN__MY_GITLAB_DE_FILE": str(f_read),
+        "GITLAB_WRITE_TOKEN__MY_GITLAB_DE": "w2",
+    }
+    cfg = from_env(env, strict=True, toml_path=str(toml))
+    assert cfg.host_credentials["my-gitlab.de"] == HostCredentials(
+        read_token="r2-from-file", write_token="w2"
+    )
+
+
+def test_additional_host_missing_read_token_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "my-gitlab.de"]\n')
+    with pytest.raises(ConfigError, match="GITLAB_READ_TOKEN__MY_GITLAB_DE"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+def test_additional_host_missing_write_token_aborts_in_read_write_mode(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "my-gitlab.de"]\n')
+    env = {**_MIN, "GITLAB_READ_TOKEN__MY_GITLAB_DE": "r2"}
+    with pytest.raises(ConfigError, match="GITLAB_WRITE_TOKEN__MY_GITLAB_DE"):
+        from_env(env, strict=True, toml_path=str(toml))
+
+
+def test_additional_host_write_token_not_required_in_read_only_mode(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["gitlab.com", "my-gitlab.de"]\n')
+    env = {**_MIN, "GITLAB_MODE": "read-only", "GITLAB_READ_TOKEN__MY_GITLAB_DE": "r2"}
+    cfg = from_env(env, strict=True, toml_path=str(toml))
+    assert cfg.host_credentials["my-gitlab.de"] == HostCredentials(read_token="r2", write_token="")
+
+
+def test_host_slug_collision_aborts_startup(tmp_path):
+    # "a.b.com" and "a-b.com" both slug to "A_B_COM" — the design spike's own
+    # example of a collision that must be rejected fail-closed, not silently
+    # mixed up.
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[git.urls]\nhosts = ["a.b.com", "a-b.com", "gitlab.com"]\n')
+    with pytest.raises(ConfigError, match="A_B_COM"):
+        from_env(_MIN, strict=True, toml_path=str(toml))
 
 
 def test_secret_file_empty_fails_validate(tmp_path):

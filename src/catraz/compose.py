@@ -94,9 +94,7 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     Runs `docker compose ... --profile remote config` (interpolated, agent stays gated).
     Returns True on success, False on failure (caller falls back to _source_cmd).
     """
-    env = dict(
-        os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets")
-    )
+    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
     if extra_env:
         env.update(extra_env)
     cmd = [*_source_cmd(root), "--profile", "remote", "config"]
@@ -122,9 +120,7 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     return True
 
 
-def prepare(
-    root: Path, *, render: bool, extra_env: dict[str, str] | None = None
-) -> list[str]:
+def prepare(root: Path, *, render: bool, extra_env: dict[str, str] | None = None) -> list[str]:
     """Return the compose cmd prefix for this handler to use consistently.
 
     render=True  (up/run/shell/down): write auth fragment + (re)generate resolved.yml.
@@ -134,9 +130,7 @@ def prepare(
     if render:
         if generate_resolved(root, extra_env):
             return _resolved_cmd(root)
-        _warn_fallback(
-            "config render failed — running layered; resolved.yml may be stale"
-        )
+        _warn_fallback("config render failed — running layered; resolved.yml may be stale")
         return _source_cmd(root)
     if (root / ".catraz/compose.resolved.yml").exists():
         return _resolved_cmd(root)
@@ -164,9 +158,7 @@ def run(
     # CATRAZ_ASSETS anchors the compose build contexts at the extracted asset cache.
     # Compose resolves relative `context:` paths against --project-directory (the user's
     # repo), so the contexts are absolute via this var instead — see docker-compose.yml.
-    env = dict(
-        os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets")
-    )
+    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
     if extra_env:
         env.update(extra_env)
     if tee is not None:
@@ -177,9 +169,7 @@ def run(
         tee.parent.mkdir(parents=True, exist_ok=True)
         try:
             with open(tee, "wb") as f:
-                p = subprocess.Popen(
-                    cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-                )
+                p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 # read1 (not read) returns as soon as data is available, preserving live
                 # output — read(n) would block until n bytes or EOF.
                 assert p.stdout is not None
@@ -193,9 +183,7 @@ def run(
             raise CliError("`docker` not found on PATH", EXIT_DOCKER)
         return subprocess.CompletedProcess(cmd, p.returncode)
     try:
-        return subprocess.run(
-            cmd, env=env, check=check, capture_output=capture, text=True
-        )
+        return subprocess.run(cmd, env=env, check=check, capture_output=capture, text=True)
     except FileNotFoundError:
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
 
@@ -263,9 +251,7 @@ def resolve_service(name: str) -> str:
         return SERVICES[name]
     if name in SERVICES.values():
         return name
-    raise CliError(
-        f"unknown service '{name}' — use one of: {', '.join(SERVICES)}", EXIT_CONFIG
-    )
+    raise CliError(f"unknown service '{name}' — use one of: {', '.join(SERVICES)}", EXIT_CONFIG)
 
 
 def _rc(r: subprocess.CompletedProcess[str] | None) -> int:
@@ -281,9 +267,7 @@ def _rc(r: subprocess.CompletedProcess[str] | None) -> int:
 def assert_real_dirs(root: Path) -> None:
     for p in (root, root / ".catraz"):
         if p.is_symlink():
-            raise CliError(
-                f"{p} is a symlink — bind source must be a real dir", EXIT_CONFIG
-            )
+            raise CliError(f"{p} is a symlink — bind source must be a real dir", EXIT_CONFIG)
 
 
 def _env_keys(agent: dict[str, Any]) -> set[str]:
@@ -315,9 +299,7 @@ def assert_invariants(root: Path, *, prefix: list[str] | None = None) -> None:
         check=False,
     )
     if r is None or r.returncode != 0:
-        raise CliError(
-            "docker compose config failed (cannot verify trust boundary)", EXIT_CONFIG
-        )
+        raise CliError("docker compose config failed (cannot verify trust boundary)", EXIT_CONFIG)
     cfg = json.loads(r.stdout)
     if not cfg.get("networks", {}).get("agent-net", {}).get("internal"):
         raise CliError("invariant: agent-net is not internal", EXIT_CONFIG)

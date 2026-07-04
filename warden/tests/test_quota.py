@@ -34,13 +34,13 @@ def test_n_writes_ok_then_block():
     )
     clock = FakeClock()
     st = State(":memory:", clock=clock)
-    st.mark_reconciled()
+    st.mark_reconciled("api")
 
     for _ in range(3):
-        assert decide(_mr(cfg), st.view(), cfg).allow
+        assert decide(_mr(cfg), st.view("api"), cfg).allow
         st.record_write("api", "mr")
     # (N+1)-th is blocked by the rate limit
-    d = decide(_mr(cfg), st.view(), cfg)
+    d = decide(_mr(cfg), st.view("api"), cfg)
     assert not d.allow and d.rule == "R5"
 
 
@@ -50,22 +50,22 @@ def test_sliding_window_frees_budget_after_an_hour():
     )
     clock = FakeClock()
     st = State(":memory:", clock=clock)
-    st.mark_reconciled()
+    st.mark_reconciled("api")
 
     st.record_write("api", "mr")
     st.record_write("api", "mr")
-    assert not decide(_mr(cfg), st.view(), cfg).allow
+    assert not decide(_mr(cfg), st.view("api"), cfg).allow
 
     clock.advance(3601)  # both records fall out of the 1h window
-    assert decide(_mr(cfg), st.view(), cfg).allow
+    assert decide(_mr(cfg), st.view("api"), cfg).allow
 
 
 def test_locked_until_reconciled():
     cfg = Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
     st = State(":memory:")  # never reconciled
-    assert st.view().locked
-    assert not decide(_mr(cfg), st.view(), cfg).allow
+    assert st.view("api").locked
+    assert not decide(_mr(cfg), st.view("api"), cfg).allow
 
-    st.mark_reconciled()
-    assert not st.view().locked
-    assert decide(_mr(cfg), st.view(), cfg).allow
+    st.mark_reconciled("api")
+    assert not st.view("api").locked
+    assert decide(_mr(cfg), st.view("api"), cfg).allow

@@ -30,9 +30,7 @@ def _make_source(
     cat.mkdir()
     (cat / "config").mkdir()
     (cat / "config" / "image").mkdir(parents=True)
-    (cat / "config" / "image" / "Dockerfile").write_text(
-        "FROM ubuntu:24.04\nRUN echo src\n"
-    )
+    (cat / "config" / "image" / "Dockerfile").write_text("FROM ubuntu:24.04\nRUN echo src\n")
     (cat / "config" / "warden.toml").write_text('allowed_projects = ["group/proj"]\n')
     (cat / "config" / "squid.conf").write_text("# squid src\n")
     (cat / "config" / "allowlist.txt").write_text("example.com\n")
@@ -184,9 +182,7 @@ def test_stage_inherited_overwrites_empty_destination(tmp_path: Path) -> None:
 # ── -y (non-interactive) clone ────────────────────────────────────────────────
 
 
-def test_yes_clone_inherits_env_keys(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_yes_clone_inherits_env_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """-y --from clones curated .env keys to the destination."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
@@ -229,9 +225,7 @@ def test_yes_clone_copies_secrets_without_env_override(
     assert (secrets_dir / "gitlab_read_token").read_text() == "glpat-env-override"
 
 
-def test_yes_clone_copies_claude_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_yes_clone_copies_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """-y --from copies secrets/claude/ without printing its contents."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
@@ -243,9 +237,7 @@ def test_yes_clone_copies_claude_dir(
     assert "src-cred" in cred.read_text()
 
 
-def test_yes_clone_config_file_copied(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_yes_clone_config_file_copied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """-y --from copies config/image/Dockerfile from source."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
@@ -289,15 +281,9 @@ def test_interactive_clone_inherits_config_files(
     setup.cmd_init(dst, _interactive_args(str(src)), Out(color=False))
 
     cfg = dst / ".catraz" / "config"
-    assert "echo src" in (cfg / "image" / "Dockerfile").read_text(), (
-        "Dockerfile not inherited"
-    )
-    assert (cfg / "allowlist.txt").read_text() == "example.com\n", (
-        "allowlist not inherited"
-    )
-    assert (cfg / "squid.conf").read_text() == "# squid src\n", (
-        "squid.conf not inherited"
-    )
+    assert "echo src" in (cfg / "image" / "Dockerfile").read_text(), "Dockerfile not inherited"
+    assert (cfg / "allowlist.txt").read_text() == "example.com\n", "allowlist not inherited"
+    assert (cfg / "squid.conf").read_text() == "# squid src\n", "squid.conf not inherited"
 
 
 # ── secret never printed ──────────────────────────────────────────────────────
@@ -323,15 +309,11 @@ def test_secret_never_echoed_to_stdout(
 # ── error on invalid path ─────────────────────────────────────────────────────
 
 
-def test_invalid_from_path_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_invalid_from_path_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--from pointing to a non-initialised dir raises CliError."""
     from catraz.errors import CliError
 
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
     with pytest.raises(CliError):
-        setup.cmd_init(
-            dst, _yes_args(str(tmp_path / "does_not_exist")), Out(color=False)
-        )
+        setup.cmd_init(dst, _yes_args(str(tmp_path / "does_not_exist")), Out(color=False))

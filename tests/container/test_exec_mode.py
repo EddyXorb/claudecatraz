@@ -42,9 +42,7 @@ def test_exec_configures_home_and_warden(
     seen: list[str] = []
     monkeypatch.setattr(ep, "drop_to_dev", lambda: None)
     monkeypatch.setattr(ep, "install_host_gitconfig", lambda home: None)
-    monkeypatch.setattr(
-        ep, "configure_git_warden", lambda: seen.append("configure_git_warden")
-    )
+    monkeypatch.setattr(ep, "configure_git_warden", lambda: seen.append("configure_git_warden"))
     monkeypatch.setattr(ep.os, "execvp", lambda prog, argv: seen.append("execvp"))
     monkeypatch.delenv("AUTH_MODE", raising=False)
     monkeypatch.delenv("REQUIRE_AGENT_INSTRUCTIONS", raising=False)

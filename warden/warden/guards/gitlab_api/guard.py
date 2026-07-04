@@ -1,8 +1,14 @@
 """REST guard I/O hooks: parse → enrich → forward/deny-response —
 the guard half of the write pipeline. Reads stream through with the read-token (R1);
-writes are matched against the data-driven allowlist, ownership-checked,
-quota-checked, then forwarded with the write-token — or denied with a 403
-that never leaks a GitLab response.
+writes are matched against the data-driven allowlist, source-branch-namespace
+checked, quota-checked, then forwarded with the write-token — or denied with a
+403 that never leaks a GitLab response.
+
+Self-contained GitLab domain logic (§07 Punkt 6, step 5 — the former shared
+``GitForge`` class is dissolved): the MR source-branch-namespace lookup
+(:mod:`.mr_namespace`), MR/project-id reconcile (:mod:`.reconcile`) and the
+MR-quota table (:mod:`.state`) are this guard's own implementation details
+now, reachable by no other guard.
 """
 
 from __future__ import annotations
@@ -15,23 +21,28 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from ...core.audit import AuditLog
-from ...core.config import Config
+from ...core.config import Config, normalize_project
 from ...core.guard import Guard
 from ...core.model import Decision, StateView, TokenKind
 from ...core.rules import R6
 from ...core.state import State
+from ...core.transport import UpstreamRouter, stream_upstream
 from ...errors import deny_json
-from ..gitlab.forge import GitForge
-from ..gitlab.upstream import stream_upstream
-from .catalog import CatalogEntry, EffectiveTable, build_effective_table, match_endpoint
+from .catalog import EffectiveTable, Recognizer, ScopeKind, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
+from .mr_namespace import MrNamespace
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
 from .policy import capability_gate, decide
+from .reconcile import reconcile_mrs
+from .state import MrState
 
 
-def _needs_mr_owner(ep: CatalogEntry) -> bool:
-    """Check if the matched entry requires MR ownership verification by declared need."""
-    return any("mr_owner" in check.needs for check in ep.checks)
+def _needs_source_lookup(ep: Recognizer) -> bool:
+    """Check if the matched recognizer requires a source-branch-namespace
+    lookup: a ``BRANCH_NAMESPACE`` scope whose branch is *not* literally in
+    the request (``namespace_field is None``) — the request carries only an
+    iid, so the branch must be resolved via the iid → MR upstream lookup."""
+    return ep.scope_kind is ScopeKind.BRANCH_NAMESPACE and ep.namespace_field is None
 
 
 class ApiGuard(Guard[ApiIntent]):
@@ -43,9 +54,15 @@ class ApiGuard(Guard[ApiIntent]):
     def name(self) -> str:
         return "api"
 
-    def __init__(self, cfg: Config, state: State, audit: AuditLog, forge: GitForge) -> None:
+    def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
         super().__init__(cfg, state, audit)
-        self.forge = forge
+        self.router = router
+        self.mr_state = MrState(state.store)
+        self.mr_namespace = MrNamespace(router, cfg)
+        # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
+        # Guard state, not Config — Config stays immutable; only this guard's
+        # view of "which ids currently alias an allowlisted project" is refreshed.
+        self.project_id_aliases: set[str] = set()
         # Built once at construction, never rebuilt — no runtime rebuild, no drift.
         self._effective: EffectiveTable = build_effective_table(cfg, cfg.endpoint_enable)
 
@@ -59,17 +76,45 @@ class ApiGuard(Guard[ApiIntent]):
         ]
 
     def project_allowed(self, project: str) -> bool:
-        """Check if project is allowed by path or numeric id."""
-        return self.cfg.project_allowed(project) or self.forge.project_allowed_by_id(project)
+        """Check if project is allowed by path or numeric id (M6)."""
+        return (
+            self.cfg.project_allowed(project)
+            or normalize_project(project) in self.project_id_aliases
+        )
 
     def state_view(self) -> StateView:
-        return self.forge.state_view()
-
-    async def startup(self) -> None:
-        await self.forge.resolve_service_account()
+        """This guard's own snapshot: its per-guard fail-safe lock + writes
+        counter plus this domain's MR count — never branches (the git guard
+        tracks those). Locked until *this* guard reconciled; a broken git
+        upstream never locks the REST-API guard, and vice versa."""
+        if not self.state.is_reconciled(self.name):
+            return StateView(locked=True)
+        return StateView(
+            open_mrs=self.mr_state.open_mrs(),
+            writes_last_hour=self.state.writes_last_hour(),
+            locked=False,
+        )
 
     async def reconcile(self) -> bool:
-        return await self.forge.reconcile()
+        """Rebuild the MR counter + numeric-id aliases from GitLab truth.
+
+        Rebuilds only this guard's own MR counter/aliases and, on success,
+        unlocks only its own per-guard lock
+        (:meth:`~warden.core.state.State.mark_reconciled`). A failure leaves
+        *this* guard fail-safe-locked but never touches the git guard's lock —
+        one guard's permanently unreachable upstream can never block the other.
+
+        In ``off`` mode no upstream call is made — the guard unlocks itself so the
+        warden serves (then denies) requests without ever contacting GitLab.
+        """
+        if not self.cfg.gitlab_enabled:
+            self.state.mark_reconciled(self.name)
+            return True
+        ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
+        self.project_id_aliases = resolved_ids
+        if ok:
+            self.state.mark_reconciled(self.name)
+        return ok
 
     async def parse(self, request: Request) -> ApiIntent:
         """Parse method/path/project/fields/body into the decision intent.
@@ -93,6 +138,7 @@ class ApiGuard(Guard[ApiIntent]):
         return ApiIntent(
             _project=project,
             _method=method,
+            _host=request.headers.get("host", ""),
             path=rest_path,
             endpoint=ep,
             fields=fields,
@@ -102,16 +148,17 @@ class ApiGuard(Guard[ApiIntent]):
         )
 
     async def enrich(self, intent: ApiIntent) -> ApiIntent:
-        """MR ownership lookup, only when the matched endpoint needs it.
+        """MR source-branch-namespace lookup, only when the matched endpoint needs it.
 
-        Reachable only once the kernel's read-only gate has already passed
-        — the write credential this transitively depends on (via
-        :meth:`~warden.guards.gitlab.forge.GitForge.resolve_service_account`)
-        is therefore never touched in off/read-only mode.
+        Reachable only once the kernel's read-only gate has already passed, so
+        this read-token lookup is never made in off mode.
         """
         ep = intent.endpoint
-        if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
-            intent.mr_owner_ok = await self.forge.mr_owned_by_agent(intent.project, intent.iid)
+        needs_lookup = ep is not None and _needs_source_lookup(ep)
+        if needs_lookup and intent.iid is not None and intent.project:
+            intent.mr_source_ok = await self.mr_namespace.source_in_namespace(
+                intent.host, intent.project, intent.iid
+            )
         return intent
 
     def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:
@@ -123,13 +170,18 @@ class ApiGuard(Guard[ApiIntent]):
     def record(self, intent: ApiIntent, decision: Decision) -> None:
         """Record the write *before* the upstream call — fail-safe against crashes."""
         if decision.token == TokenKind.WRITE and intent.endpoint is not None:
+            assert intent.endpoint.kind is not None, (
+                f"write recognizer {intent.endpoint.id!r} has no kind"
+            )
             self.state.record_write("api", intent.endpoint.kind, str(intent.iid or intent.project))
 
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:
         # Raw query is reattached here at transport boundary only, never in intent.path
         # — matching/decision stay query-less.
+        transport = self.router.resolve(intent.host)
+        assert transport is not None, "kernel_gates already denied an unresolved host"
         path = f"{intent.path}?{intent.raw_query}" if intent.raw_query else intent.path
-        resp: httpx.Response = await self.forge.upstream.open_rest(
+        resp: httpx.Response = await transport.open_rest(
             intent.method,
             path,
             headers=dict(request.headers),
@@ -163,6 +215,7 @@ class ApiGuard(Guard[ApiIntent]):
         return via if via and via != "default" else None
 
 
+# TODO: this belongs to the Gitlab API guard and should not be treated separately.
 class GraphqlGuard(Guard[GraphqlIntent]):
     """`/api/graphql` — always 403, never contacts upstream.
 
@@ -190,7 +243,11 @@ class GraphqlGuard(Guard[GraphqlIntent]):
         ]
 
     async def parse(self, request: Request) -> GraphqlIntent:
-        return GraphqlIntent(path=request.url.path, _method=request.method)
+        return GraphqlIntent(
+            path=request.url.path,
+            _method=request.method,
+            _host=request.headers.get("host", ""),
+        )
 
     async def enrich(self, intent: GraphqlIntent) -> GraphqlIntent:
         return intent

@@ -6,7 +6,8 @@ Mode gate (R0), resource allowlist (R6), and capability invariants (R4) are the 
 Rules enforced:
   R2  git write limits   push only to branches under allowed <branch_prefix>.
   R4  Irreversible verbs tag pushes and branch deletes never permitted.
-  R5  Quota & rate       max open branches, max writes/hour; locked state denies (fail-safe).
+  R5  Quota & rate       max open branches, max writes/hour, max push size (§07 Punkt 6.3);
+                         locked state denies (fail-safe).
 """
 
 from __future__ import annotations
@@ -87,6 +88,12 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     """
     if not intent.ref_commands:
         return Decision(False, R2, "no ref commands in push")
+    if intent.push_bytes is not None and intent.push_bytes > cfg.max_push_bytes:
+        return Decision(
+            False,
+            R5,
+            f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({cfg.max_push_bytes})",
+        )
     pending_branches = 0
     pending_writes = 0
     for cmd in intent.ref_commands:

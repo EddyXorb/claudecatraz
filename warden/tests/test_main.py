@@ -8,10 +8,13 @@ schema version aborts cleanly with code 2 (A9).
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 import warden.__main__ as main_mod
 from warden.core.config import Config, ConfigError
+from warden.core.logging_setup import configure_logging
 from warden.core.state import SchemaError
 
 
@@ -35,14 +38,14 @@ def test_main_exits_2_on_schema_error(monkeypatch):
     assert exc.value.code == 2
 
 
-def test_main_exits_2_on_catalog_config_error(monkeypatch):
+def test_main_exits_2_on_catalog_config_error(monkeypatch, tmp_path):
     # build_context() (called at the __main__ composition root) constructs
     # ApiGuard, whose __init__ calls build_effective_table and raises
     # CatalogConfigError fail-closed on an unknown [api.endpoints].enable id —
     # this must abort exactly like any other fail-closed startup error, not
     # surface as a raw traceback. state_db_path/audit_log_path are set to
-    # in-memory/stdout so this exercises the real construction path without
-    # touching disk.
+    # in-memory/stdout, log_path to a tmp file, so this exercises the real
+    # construction path without touching disk outside the test's tmp dir.
     monkeypatch.setattr(
         main_mod,
         "from_env",
@@ -50,8 +53,34 @@ def test_main_exits_2_on_catalog_config_error(monkeypatch):
             endpoint_enable=("no.such.entry",),
             state_db_path=":memory:",
             audit_log_path="-",
+            log_path=str(tmp_path / "warden.log"),
         ),
     )
     with pytest.raises(SystemExit) as exc:
         main_mod.main()
     assert exc.value.code == 2
+
+
+def test_configure_logging_writes_to_file(tmp_path):
+    log_path = tmp_path / "warden.log"
+    configure_logging(str(log_path))
+    logging.getLogger("warden").warning("hello from test")
+
+    assert log_path.exists()
+    assert "hello from test" in log_path.read_text()
+
+
+def test_configure_logging_is_idempotent(tmp_path):
+    log_path = tmp_path / "warden.log"
+    configure_logging(str(log_path))
+    configure_logging(str(log_path))
+
+    root = logging.getLogger()
+    file_handlers = [h for h in root.handlers if isinstance(h, logging.FileHandler)]
+    stream_handlers = [
+        h
+        for h in root.handlers
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    ]
+    assert len(file_handlers) == 1
+    assert len(stream_handlers) == 1

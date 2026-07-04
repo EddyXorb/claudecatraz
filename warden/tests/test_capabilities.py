@@ -25,10 +25,11 @@ from warden.guards.git.intent import GitIntent
 from warden.guards.git.pktline import RefCommand
 from warden.guards.git.policy import git_ref_capabilities
 from warden.guards.gitlab_api.catalog import (
-    CATALOG,
     DEFAULT_ENABLED,
-    CatalogEntry,
+    WRITE_ENDPOINTS,
     EndpointKind,
+    Recognizer,
+    ScopeKind,
     api_capabilities,
 )
 from warden.guards.gitlab_api.catalog.builtin import is_builtin_merge_endpoint
@@ -159,8 +160,8 @@ def test_git_ref_capabilities_golden_table(cfg, old, new, ref, expected):
 # --- REST: every CATALOG row, plus the field-dependent merge alias --------
 
 
-def _endpoint(template: str, method: str) -> CatalogEntry:
-    for ep in CATALOG:
+def _endpoint(template: str, method: str) -> Recognizer:
+    for ep in WRITE_ENDPOINTS:
         if ep.template == template and ep.method == method:
             return ep
     raise AssertionError(f"no such catalog entry: {method} {template}")
@@ -228,7 +229,7 @@ def test_every_catalog_row_is_covered_by_the_golden_table():
         ("POST", "/projects/{id}/repository/branches"),
         ("POST", "/projects/{id}/issues"),
     }
-    actual = {(ep.method, ep.template) for ep in CATALOG}
+    actual = {(ep.method, ep.template) for ep in WRITE_ENDPOINTS}
     assert actual == covered
 
 
@@ -251,7 +252,7 @@ def test_default_enabled_is_exactly_the_pre_schritt4_active_set():
 def test_every_catalog_entry_has_an_id():
     # §04.2: the id is the stable name activation config and CLI match
     # against — every row in CATALOG must carry one.
-    for ep in CATALOG:
+    for ep in WRITE_ENDPOINTS:
         assert ep.id, f"catalog entry with empty id: {ep.method} {ep.template}"
 
 
@@ -261,7 +262,7 @@ def test_no_catalog_entry_declares_a_forbidden_capability():
     # from *authoring* such a row today (no taming mechanism exists yet). Pin
     # down that none of the entries actually shipped do this, so that
     # invariant is never silently relied upon by a real default-enabled row.
-    for ep in CATALOG:
+    for ep in WRITE_ENDPOINTS:
         assert not (ep.capabilities & FORBIDDEN), f"{ep.id!r} declares a FORBIDDEN capability"
 
 
@@ -269,7 +270,7 @@ def test_no_catalog_entry_declares_a_forbidden_capability():
 
 
 def test_merge_endpoint_is_not_a_catalog_row():
-    assert not any(ep.template.endswith("/merge") for ep in CATALOG)
+    assert not any(ep.template.endswith("/merge") for ep in WRITE_ENDPOINTS)
 
 
 @pytest.mark.parametrize(
@@ -319,7 +320,7 @@ def test_e2e_api_merge_endpoint_denied_r4(cfg):
 
 def test_e2e_api_state_event_merge_alias_denied_r4(cfg):
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", state_event="merge")
-    req.mr_owner_ok = True
+    req.mr_source_ok = True
     d = api_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
 
@@ -333,11 +334,11 @@ def test_e2e_capability_layer_denies_even_without_endpoint_checks(cfg):
     denied, because the capability gate runs before the guard's own
     ``decide``/``ep.checks`` (kernel sequence, §03.2).
     """
-    hypothetical_row = CatalogEntry(
+    hypothetical_row = Recognizer(
         id="hypothetical.merge_via_release",
         method="POST",
         template="/projects/{id}/releases",
-        checks=(),  # no checks whatsoever — the old-style defense is gone
+        scope_kind=ScopeKind.QUOTA_BY_KIND,  # no scope check whatsoever — the old-style defense is gone
         rule="R4",
         kind=EndpointKind.MERGE,
         capabilities=frozenset({Capability.MERGES}),

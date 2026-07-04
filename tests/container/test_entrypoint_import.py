@@ -4,10 +4,7 @@ from pathlib import Path
 
 
 def test_entrypoint_imports() -> None:
-    p = (
-        Path(__file__).resolve().parents[2]
-        / "src/catraz/assets/container/entrypoint.py"
-    )
+    p = Path(__file__).resolve().parents[2] / "src/catraz/assets/container/entrypoint.py"
     loader = SourceFileLoader("entrypoint", str(p))
     spec = importlib.util.spec_from_loader("entrypoint", loader)
     assert spec is not None

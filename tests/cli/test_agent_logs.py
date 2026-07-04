@@ -31,9 +31,7 @@ def test_prune_keeps_newest_50(tmp_path: Path) -> None:
 # ── cmd_run tee wiring ────────────────────────────────────────────────────────
 
 
-def _mock_cmd_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> list[dict[str, Any]]:
+def _mock_cmd_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[str, Any]]:
     """Stub every side-effecting collaborator cmd_run touches; record compose_run kwargs."""
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
@@ -65,9 +63,7 @@ def _mock_cmd_run(
     return compose_calls
 
 
-def test_cmd_run_non_tty_tees_transcript(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cmd_run_non_tty_tees_transcript(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     compose_calls = _mock_cmd_run(monkeypatch, tmp_path)
     monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
     monkeypatch.chdir(tmp_path)
@@ -99,9 +95,7 @@ def test_cmd_run_tty_no_tee(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 def test_compose_run_tee_writes_file(tmp_path: Path) -> None:
     # prefix=[] is mandatory: an omitted prefix defaults to the docker-compose source cmd.
     log = tmp_path / "out.log"
-    r = compose_mod.run(
-        tmp_path, ["bash", "-c", "printf hello"], prefix=[], check=False, tee=log
-    )
+    r = compose_mod.run(tmp_path, ["bash", "-c", "printf hello"], prefix=[], check=False, tee=log)
     assert r is not None
     assert r.returncode == 0
     assert log.read_text() == "hello"

@@ -18,9 +18,9 @@ from typing import Mapping, Optional
 
 from ....core.capabilities import FORBIDDEN
 from ....core.config import Config
-from .entries import CATALOG, DEFAULT_ENABLED
 from .errors import CatalogConfigError
-from .model import CatalogEntry
+from .model import Recognizer
+from .write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class EffectiveTable:
     this to flag non-default activations.
     """
 
-    entries: tuple[CatalogEntry, ...]
+    entries: tuple[Recognizer, ...]
     enabled_via: Mapping[str, str]
 
 
@@ -48,7 +48,7 @@ def build_effective_table(cfg: Config, enable: Optional[tuple[str, ...]]) -> Eff
     section (or the whole ``warden.toml``) was absent, falling back to the
     catalog's default set; an explicit empty tuple activates nothing.
     """
-    catalog_by_id = {e.id: e for e in CATALOG}
+    catalog_by_id = {e.id: e for e in WRITE_ENDPOINTS}
     enable = enable if enable is not None else tuple(DEFAULT_ENABLED)
 
     unknown_enabled = sorted(set(enable) - set(catalog_by_id))
@@ -58,7 +58,7 @@ def build_effective_table(cfg: Config, enable: Optional[tuple[str, ...]]) -> Eff
             f"{', '.join(unknown_enabled)}"
         )
 
-    entries: list[CatalogEntry] = []
+    entries: list[Recognizer] = []
     enabled_via: dict[str, str] = {}
     seen: set[str] = set()
     for entry_id in enable:

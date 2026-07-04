@@ -80,11 +80,7 @@ def test_set_env_values_uncomments_and_updates(tmp_path: Path) -> None:
     assert env["ANTHROPIC_API_KEY"] == "sk-new"
     assert env["WARDEN_ALLOWED_PROJECTS"] == "group/sub/a,group/sub/b"
     # Exactly one active line each — no duplicate from the commented seed.
-    active = [
-        ln
-        for ln in p.read_text().splitlines()
-        if ln.startswith("WARDEN_ALLOWED_PROJECTS=")
-    ]
+    active = [ln for ln in p.read_text().splitlines() if ln.startswith("WARDEN_ALLOWED_PROJECTS=")]
     assert len(active) == 1
 
 
@@ -117,9 +113,7 @@ def _project(
     return envfile.load_env(env)
 
 
-def test_env_override_beats_toml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_override_beats_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
     env = _project(
         tmp_path,
@@ -131,13 +125,9 @@ def test_env_override_beats_toml(
     assert "override" in source
 
 
-def test_toml_used_when_no_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_toml_used_when_no_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WARDEN_ALLOWED_PROJECTS", raising=False)
-    env = _project(
-        tmp_path, env_override=None, toml_projects=["group/sub/a", "group/sub/b"]
-    )
+    env = _project(tmp_path, env_override=None, toml_projects=["group/sub/a", "group/sub/b"])
     resolved, source = policy._resolve_allowed_projects(tmp_path, env)
     assert resolved == ["group/sub/a", "group/sub/b"]
     assert source == "warden.toml"

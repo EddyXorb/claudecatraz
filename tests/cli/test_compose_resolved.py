@@ -21,9 +21,7 @@ def _make_root(tmp_path: Path) -> Path:
     cat = root / ".catraz"
     cat.mkdir()
     (cat / "config").mkdir()
-    (cat / "config" / "warden.toml").write_text(
-        'allowed_projects = ["group/sub/proj"]\n'
-    )
+    (cat / "config" / "warden.toml").write_text('allowed_projects = ["group/sub/proj"]\n')
     (cat / ".env").write_text("AUTH_MODE=subscription\n")
     return root
 
@@ -114,9 +112,7 @@ def test_prepare_render_fail_returns_source_cmd(
     # Warning should have been printed to stderr
     captured = capsys.readouterr()
     assert (
-        "WARNING" in captured.err
-        or "fallback" in captured.err.lower()
-        or "stale" in captured.err
+        "WARNING" in captured.err or "fallback" in captured.err.lower() or "stale" in captured.err
     )
 
 
@@ -137,9 +133,7 @@ def test_prepare_render_false_existing_resolved(
 # ── (d) render=False, no resolved.yml: returns layered source, no side effects ──
 
 
-def test_prepare_render_false_no_resolved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prepare_render_false_no_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _make_root(tmp_path)
     # No resolved.yml
     prefix = compose.prepare(root, render=False)
@@ -174,9 +168,7 @@ def test_resolved_written_at_0600_even_with_sensitive_output(
     """Even if the config stdout contains sensitive-looking strings, resolved.yml stays 0600."""
     sensitive_output = "ANTHROPIC_API_KEY: sk-ant-secretvalue\nGITLAB: glpat-xxx\n"
     root = _make_root(tmp_path)
-    monkeypatch.setattr(
-        compose, "subprocess", _fake_subprocess_success(sensitive_output)
-    )
+    monkeypatch.setattr(compose, "subprocess", _fake_subprocess_success(sensitive_output))
     compose.generate_resolved(root)
     resolved = root / ".catraz/compose.resolved.yml"
     assert resolved.exists()

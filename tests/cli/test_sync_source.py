@@ -24,9 +24,7 @@ class _RecordingAdapter:
         self.calls.append((source, home))
 
 
-def test_shell_env_credential_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_shell_env_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLAUDE_CREDENTIAL_SOURCE in os.environ → passed as `source` to sync_from_host."""
     import catraz.commands.setup as setup
     from catraz.commands.setup import _sync as setup_sync
@@ -45,9 +43,7 @@ def test_shell_env_credential_source(
     assert str(source) == "/custom/claude"
 
 
-def test_from_flag_overrides_shell_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_from_flag_overrides_shell_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--from flag takes precedence over shell env CLAUDE_CREDENTIAL_SOURCE."""
     import catraz.commands.setup as setup
     from catraz.commands.setup import _sync as setup_sync

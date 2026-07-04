@@ -65,18 +65,14 @@ def test_self_hosted_host_and_ssh_user(
     }
 
 
-def test_idempotent_on_rerun(
-    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_idempotent_on_rerun(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _run(ep, tmp_path, monkeypatch)
     values = _run(ep, tmp_path, monkeypatch)  # second pass on the same ~/.gitconfig
     assert len(values) == 3
     assert ep.os.environ["GIT_TERMINAL_PROMPT"] == "0"
 
 
-def test_off_mode_writes_nothing(
-    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_off_mode_writes_nothing(ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     values = _run(ep, tmp_path, monkeypatch, GITLAB_MODE="off")
     assert values == []
     assert ep.os.environ["GIT_TERMINAL_PROMPT"] == "0"

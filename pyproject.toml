@@ -6,7 +6,7 @@ description = "Sandbox front door for an autonomous Claude Code agent."
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest", "mypy>=2.1.0,<3"]
+dev = ["pytest", "mypy>=2.1.0,<3", "ruff>=0.9,<0.12"]
 
 [project.scripts]
 catraz = "catraz.cli:main"
@@ -21,6 +21,9 @@ packages = ["src/catraz"]
 [tool.hatch.build.targets.wheel.force-include]
 "warden" = "catraz/assets/warden"
 "forward-proxy" = "catraz/assets/forward-proxy"
+
+[tool.ruff]
+line-length = 100
 
 [tool.pytest.ini_options]
 # importlib mode lets same-basename test files coexist across dirs

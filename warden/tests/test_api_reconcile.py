@@ -1,0 +1,135 @@
+"""reconcile.py (W6.2, W8.2, §6.11, §07 Punkt 6 step 5): the REST-API guard's
+MR reconcile pagination, fail-safe locking, and numeric-id project-alias
+resolution (M6). Folded here from the now-dissolved
+``guards.gitlab.forge.GitForge`` — see ``test_api_mr_namespace.py`` for the MR
+source-branch-namespace-lookup side and ``test_git_reconcile.py`` for the git
+guard's own (branch) reconcile.
+
+The pagination test is the regression guard for the quota-undercount bug:
+listing stopped at the first 100 results, so a busy project counted too low
+and the policy could wrongly ``allow`` further writes.
+"""
+
+from __future__ import annotations
+
+import httpx
+
+from warden.core.audit import AuditLog
+from warden.core.config import Config
+from warden.core.state import State
+from warden.core.transport import UpstreamRouter
+from warden.guards.gitlab_api.guard import ApiGuard
+from warden.guards.gitlab_api.reconcile import reconcile_mrs
+
+
+def _api_guard(cfg) -> ApiGuard:
+    """A guard on its own fresh (never-reconciled) state — unlike the shared
+    ``api_guard`` fixture (built on the pre-reconciled ``state`` fixture), so
+    the lock/reconcile tests below see the real starting condition."""
+    return ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
+
+
+# --- project_allowed (M6) -------------------------------------------------------
+def test_project_allowed_matches_reconciled_numeric_id_alias_only(api_guard):
+    api_guard.project_id_aliases = {"81882161"}
+    assert api_guard.project_allowed("81882161")
+    assert not api_guard.project_allowed("99999999")  # unknown id: default-deny
+
+
+# --- pagination (the bugfix) ---------------------------------------------------
+async def test_reconcile_mrs_paginates_and_filters_by_namespace_author_independent(
+    cfg, respx_router
+):
+    guard = _api_guard(cfg)
+    page1 = httpx.Response(
+        200,
+        json=[{"iid": 1, "state": "opened", "source_branch": "claude/x"}],
+        headers={"X-Next-Page": "2"},
+    )
+    page2 = httpx.Response(
+        200,
+        json=[
+            {"iid": 2, "state": "opened", "source_branch": "feature/y"},  # no prefix
+            # foreign author, but namespace source_branch — still counted (§07 Punkt 4)
+            {
+                "iid": 3,
+                "state": "opened",
+                "source_branch": "claude/z",
+                "author": {"id": 999},
+            },
+        ],
+    )
+    respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
+        side_effect=[page1, page2]
+    )
+    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
+        return_value=httpx.Response(200, json={"id": 12345})
+    )
+
+    ok, resolved_ids = await reconcile_mrs(cfg, guard.router, guard.mr_state)
+
+    assert ok is True
+    assert resolved_ids == {"12345"}
+    assert guard.mr_state.open_mrs() == 2  # both pages, namespace-filtered only
+
+
+# --- reconcile (W8.2 / §6.11) --------------------------------------------------
+async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_router):
+    # A guard's own reconcile rebuilds its MR counter/aliases and unlocks its OWN
+    # per-guard view — independent of the git guard (see test_reconcile_all.py for
+    # the cross-guard isolation the per-guard lock guarantees).
+    guard = _api_guard(cfg)
+    assert guard.state_view().locked is True  # locked until this guard's first success
+
+    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
+        return_value=httpx.Response(200, json={"id": 12345})
+    )
+    respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
+        return_value=httpx.Response(
+            200, json=[{"iid": 5, "state": "opened", "source_branch": "claude/x"}]
+        )
+    )
+
+    ok = await guard.reconcile()
+
+    assert ok is True
+    view = guard.state_view()
+    assert view.locked is False
+    assert view.open_mrs == 1
+    # The numeric-id alias was resolved and added to the guard's alias set
+    # (R6 by id form) — Config itself is never mutated (D2).
+    assert guard.project_id_aliases == {"12345"}
+    assert guard.project_allowed("12345")
+
+
+async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
+    # Fail-safe (§6.11): a failed reconcile must NOT unlock this guard's quota —
+    # "empty = all free" is exactly the failure we refuse.
+    guard = _api_guard(cfg)
+    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
+        return_value=httpx.Response(200, json={"id": 12345})
+    )
+    respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
+        return_value=httpx.Response(500)
+    )
+
+    ok = await guard.reconcile()
+
+    assert ok is False
+    assert guard.state_view().locked is True
+
+
+# --- GITLAB_MODE gates (mode-enforcement, step 6/7) ----------------------------
+
+
+async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
+    """reconcile() must make NO upstream call when GITLAB_MODE=off, and unlock its own view."""
+    cfg_off = Config(gitlab_mode="off")
+    guard = _api_guard(cfg_off)
+    assert guard.state_view().locked is True  # starts locked
+
+    # No mock registered — any upstream call raises respx.MockTransportError.
+    ok = await guard.reconcile()
+
+    assert ok is True
+    assert guard.state_view().locked is False  # unlocked so the warden can serve (and deny)

@@ -17,9 +17,7 @@ from catraz import compose
 from catraz.ui import Out
 
 
-def _tail_files(
-    d: Path, glob: str, label: str, args: argparse.Namespace, out: Out
-) -> int:
+def _tail_files(d: Path, glob: str, label: str, args: argparse.Namespace, out: Out) -> int:
     files = sorted(d.glob(glob)) if d.exists() else []
     if not files:
         out.warn(f"no {label} in {d}")
@@ -66,9 +64,7 @@ def cmd_logs(root: Path, args: argparse.Namespace, out: Out) -> int:
     # `docker compose logs` never captures it — tail its file transcripts in
     # .catraz/logs/agent instead (written by non-interactive runs, see run.py).
     if args.service and resolve_service(args.service) == compose.SERVICES["agent"]:
-        return _tail_files(
-            root / ".catraz/logs/agent", "*.log", "agent logs", args, out
-        )
+        return _tail_files(root / ".catraz/logs/agent", "*.log", "agent logs", args, out)
     log_args = ["logs"]
     if args.follow:
         log_args.append("-f")

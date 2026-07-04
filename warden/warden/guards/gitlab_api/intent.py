@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from warden.core.model import Intent
 
 if TYPE_CHECKING:  # only for the annotation; avoids a load cycle (catalog imports this module)
-    from .catalog.model import CatalogEntry
+    from .catalog.model import Recognizer
 
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 
@@ -21,12 +21,17 @@ class ApiIntent(Intent):
 
     _project: str
     _method: str
+    # Raw `Host` header, read by the guard's parse() (§07 Punkt 8 follow-up).
+    # `core.guard.host_gate` checks this against `Config.host_allowed`; the
+    # guard itself resolves the canonical host (for `UpstreamRouter`/state
+    # keys) via `Config.resolve_target_host(_host)`.
+    _host: str = ""
 
     path: str = ""  # REST path after /api/v4, e.g. /projects/123/merge_requests
-    endpoint: Optional["CatalogEntry"] = None  # matched catalog entry (writes only)
+    endpoint: Optional["Recognizer"] = None  # matched catalog entry (writes only)
     fields: dict[str, Any] = field(default_factory=dict)  # extracted body/query fields
     # Resolved by the guard's enrich() via an upstream lookup; None ⇒ unverifiable.
-    mr_owner_ok: Optional[bool] = None
+    mr_source_ok: Optional[bool] = None
     iid: Optional[int] = None  # merge_requests/{iid} from the path, if present
     body: bytes = b""  # raw request body, carried for forward()
     raw_query: str = ""  # exact wire query string, reattached only at forward()
@@ -43,6 +48,10 @@ class ApiIntent(Intent):
     def method(self) -> str:
         return self._method
 
+    @property
+    def host(self) -> str:
+        return self._host
+
 
 @dataclass
 class GraphqlIntent(Intent):
@@ -50,6 +59,7 @@ class GraphqlIntent(Intent):
 
     path: str
     _method: str
+    _host: str = ""
 
     @property
     def writes(self) -> bool:
@@ -62,3 +72,7 @@ class GraphqlIntent(Intent):
     @property
     def method(self) -> str:
         return self._method
+
+    @property
+    def host(self) -> str:
+        return self._host

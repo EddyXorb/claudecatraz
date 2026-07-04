@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import sys
 
@@ -14,9 +15,11 @@ from .context import AppContext, build_context
 from .core.audit import AuditLog
 from .core.config import ConfigError
 from .core.config_load import from_env
+from .core.logging_setup import configure_logging
 from .core.state import SchemaError, State
-from .guards.gitlab.upstream import Upstream
 from .guards.gitlab_api.catalog import CatalogConfigError
+
+log = logging.getLogger("warden")
 
 
 async def _periodic_reconcile(ctx: AppContext) -> None:
@@ -24,47 +27,16 @@ async def _periodic_reconcile(ctx: AppContext) -> None:
         await asyncio.sleep(ctx.cfg.reconcile_interval_s)
         try:
             ctx.state.prune()
-            for g in ctx.guards:
-                await g.reconcile()
+            await ctx.reconcile_all()
         except Exception as exc:  # never crash the loop
-            print(f"warden: periodic reconcile error: {exc}", file=sys.stderr)
+            log.error("periodic reconcile error: %s", exc)
 
 
-# TODO: tidy up this function and split it into smaller functions.
-async def _serve() -> None:
-    cfg = from_env()
-
-    if cfg.gitlab_enabled and not cfg.allowed_projects:
-        print(
-            "warden: WARNING: allowed_projects is empty — ALL GitLab operations "
-            "will be denied (R-rules) until a project is added to warden.toml. "
-            "The dev-env still starts for offline work.",
-            file=sys.stderr,
-        )
-    # TODO: this leaks from gitlab_api, should not be here. If is is really needed it
-    # can persist in the Guards that the build-context creates, but as part of the
-    # their initialization (make it a member of the guard class) without the context
-    # builder needing to know about it.
-    upstream = Upstream(cfg)
-    state = State(cfg.state_db_path)
-    audit = AuditLog(cfg.audit_log_path)
-    audit.start()
-    ctx = build_context(cfg, upstream, state, audit)
-
-    # Reconcile BEFORE opening the agent port: GitLab truth dominates.
-    # TODO: consider moving this into the Gitlab-Guard directly.
-    # The fact the the context holds all guards alive (and they are no one-shot
-    # objects anymore) makes this possible
-    for g in ctx.guards:
-        await g.startup()
-    ok = True
-    for g in ctx.guards:
-        ok = (await g.reconcile()) and ok
-    if not ok:
-        print("warden: initial reconcile incomplete — state stays locked", file=sys.stderr)
-
+async def _run_servers(ctx: AppContext) -> None:
+    """Own the uvicorn lifecycle: agent + admin servers, periodic reconcile,
+    and teardown once either server stops."""
     agent = uvicorn.Server(
-        uvicorn.Config(create_app(ctx), host="0.0.0.0", port=cfg.agent_port, log_level="info")
+        uvicorn.Config(create_app(ctx), host="0.0.0.0", port=ctx.cfg.agent_port, log_level="info")
     )
     admin_uds = os.environ.get("ADMIN_UDS")
     if admin_uds:
@@ -73,7 +45,10 @@ async def _serve() -> None:
         admin_config = uvicorn.Config(create_admin_app(ctx), uds=admin_uds, log_level="warning")
     else:
         admin_config = uvicorn.Config(
-            create_admin_app(ctx), host=cfg.admin_host, port=cfg.admin_port, log_level="warning"
+            create_admin_app(ctx),
+            host=ctx.cfg.admin_host,
+            port=ctx.cfg.admin_port,
+            log_level="warning",
         )
     admin = uvicorn.Server(admin_config)
     reconcile_task = asyncio.create_task(_periodic_reconcile(ctx))
@@ -81,9 +56,33 @@ async def _serve() -> None:
         await asyncio.gather(agent.serve(), admin.serve())
     finally:
         reconcile_task.cancel()
-        await audit.stop()
-        await upstream.aclose()
-        state.close()
+        await ctx.aclose()
+
+
+async def _serve() -> None:
+    cfg = from_env()
+    configure_logging(cfg.log_path)
+
+    if cfg.gitlab_enabled and not cfg.allowed_projects:
+        log.warning(
+            "allowed_projects is empty — ALL GitLab operations will be denied "
+            "(R-rules) until a project is added to warden.toml. The dev-env "
+            "still starts for offline work."
+        )
+    state = State(cfg.state_db_path)
+    audit = AuditLog(cfg.audit_log_path)
+    audit.start()
+    ctx = build_context(cfg, state, audit)
+
+    # Reconcile BEFORE opening the agent port: GitLab truth dominates. This is a
+    # global lifecycle guarantee (port-open timing), so it lives in the runtime
+    # and stays out of any individual guard (won't-do: see §07 Punkt 5).
+    for g in ctx.guards:
+        await g.startup()
+    if not await ctx.reconcile_all():
+        log.error("initial reconcile incomplete — state stays locked")
+
+    await _run_servers(ctx)
 
 
 def main() -> None:

@@ -29,9 +29,7 @@ class _FakeAdapter:
         self.calls.append((source, home))
 
 
-def test_run_sync_calls_adapter_in_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_sync_calls_adapter_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed(tmp_path)
     fake = _FakeAdapter()
     monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: fake)
@@ -66,9 +64,7 @@ def test_run_sync_propagates_adapter_failure_as_clierror(
 
             sys.exit("error: no host credential found")
 
-    monkeypatch.setattr(
-        setup_sync, "load_adapter_module", lambda profile: _FailingAdapter()
-    )
+    monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: _FailingAdapter())
     with pytest.raises(CliError) as ei:
         cli._run_sync(tmp_path, cli.Out(color=False))
     assert "no host credential found" in str(ei.value)

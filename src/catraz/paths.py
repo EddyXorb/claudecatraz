@@ -34,9 +34,7 @@ def _source_signature(*roots: Path) -> str:
         if not r.exists():
             continue
         for dirpath, dirnames, filenames in os.walk(r):
-            dirnames[:] = [
-                d for d in dirnames if d not in (".venv", "__pycache__", ".git")
-            ]
+            dirnames[:] = [d for d in dirnames if d not in (".venv", "__pycache__", ".git")]
             for name in filenames:
                 if name.endswith(".pyc"):
                     continue
@@ -65,9 +63,7 @@ def asset_root() -> Path:
     marker = dst / ".extracted"
     repo = _repo_root()
     sig = (
-        _source_signature(
-            repo / "src/catraz/assets", repo / "warden", repo / "forward-proxy"
-        )
+        _source_signature(repo / "src/catraz/assets", repo / "warden", repo / "forward-proxy")
         if repo
         else _installed_sig()
     )
@@ -89,9 +85,7 @@ def asset_root() -> Path:
             ignore=_IGNORE,
         )
         for ctx in ("warden", "forward-proxy"):
-            shutil.copytree(
-                repo / ctx, dst / "assets" / ctx, dirs_exist_ok=True, ignore=_IGNORE
-            )
+            shutil.copytree(repo / ctx, dst / "assets" / ctx, dirs_exist_ok=True, ignore=_IGNORE)
     marker.write_text(sig)  # store the signature we just extracted
     return dst
 
@@ -116,12 +110,8 @@ def _assert_no_nested(root: Path) -> None:
     top = root / ".catraz"
     for dirpath, dirnames, _ in os.walk(root):
         if ".catraz" in dirnames and Path(dirpath) / ".catraz" != top:
-            raise CliError(
-                f"nested .catraz at {Path(dirpath) / '.catraz'} — refuse", EXIT_CONFIG
-            )
-        dirnames[:] = [
-            d for d in dirnames if Path(dirpath) / d not in (top, root / ".git")
-        ]
+            raise CliError(f"nested .catraz at {Path(dirpath) / '.catraz'} — refuse", EXIT_CONFIG)
+        dirnames[:] = [d for d in dirnames if Path(dirpath) / d not in (top, root / ".git")]
 
 
 def claude_home(root: Path) -> Path:

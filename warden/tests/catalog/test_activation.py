@@ -7,11 +7,11 @@ from __future__ import annotations
 import pytest
 
 from warden.core.config import Config
-from warden.guards.gitlab_api.catalog import entries as entries_mod
+from warden.guards.gitlab_api.catalog import write_endpoints as entries_mod
 from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
-from warden.guards.gitlab_api.catalog.entries import CATALOG, DEFAULT_ENABLED
 from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
-from warden.guards.gitlab_api.catalog.model import CatalogEntry, EndpointKind
+from warden.guards.gitlab_api.catalog.model import EndpointKind, Recognizer, ScopeKind
+from warden.guards.gitlab_api.catalog.write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS
 
 
 @pytest.fixture
@@ -68,21 +68,21 @@ def test_enabling_a_forbidden_capability_entry_raises(cfg, monkeypatch):
     # substituting a fake catalog.
     from warden.core.capabilities import Capability
 
-    forbidden_entry = CatalogEntry(
+    forbidden_entry = Recognizer(
         id="hypothetical.forbidden",
         method="POST",
         template="/projects/{id}/whatever",
-        checks=(),
+        scope_kind=ScopeKind.QUOTA_BY_KIND,
         rule="R4",
         kind=EndpointKind.ISSUE,
         capabilities=frozenset({Capability.MERGES}),
     )
-    monkeypatch.setattr(entries_mod, "CATALOG", CATALOG + (forbidden_entry,))
+    monkeypatch.setattr(entries_mod, "WRITE_ENDPOINTS", WRITE_ENDPOINTS + (forbidden_entry,))
     # activation.py imported CATALOG by name at module load time — patch its
     # own binding too, exactly as a monkeypatch of a "from x import y" name.
     import warden.guards.gitlab_api.catalog.activation as activation_mod
 
-    monkeypatch.setattr(activation_mod, "CATALOG", entries_mod.CATALOG)
+    monkeypatch.setattr(activation_mod, "WRITE_ENDPOINTS", entries_mod.WRITE_ENDPOINTS)
 
     with pytest.raises(CatalogConfigError, match="forbidden capabilities"):
         build_effective_table(cfg, ("hypothetical.forbidden",))

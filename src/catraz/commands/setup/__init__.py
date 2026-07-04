@@ -81,9 +81,7 @@ def _init_seed_env(
     return env, updates
 
 
-def _init_sync_credentials(
-    root: Path, env_path: Path, args: argparse.Namespace, out: Out
-) -> None:
+def _init_sync_credentials(root: Path, env_path: Path, args: argparse.Namespace, out: Out) -> None:
     from catraz.paths import claude_home
     from ._sync import _credentials_mode
 
@@ -122,9 +120,7 @@ def _init_preflight(root: Path, out: Out) -> int:
     bad, _ = print_findings(f, out)
     print()
     if bad:
-        out.info(
-            out.yellow("Some checks failed above. Fix them, then:") + "  catraz doctor"
-        )
+        out.info(out.yellow("Some checks failed above. Fix them, then:") + "  catraz doctor")
         return EXIT_DOCTOR
     out.info(out.green("Ready.") + " Next:  " + out.bold("catraz run"))
     return EXIT_OK
@@ -241,10 +237,7 @@ def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
     set_toml_list(warden_toml, "allowed_projects", merged)
     out.info(out.green(f"• allowed_projects now: {', '.join(merged)}"))
 
-    if (
-        _resolve_allowed_projects(root, load_env(root / ".catraz" / ".env"))[1]
-        == ".env override"
-    ):
+    if _resolve_allowed_projects(root, load_env(root / ".catraz" / ".env"))[1] == ".env override":
         out.warn(
             "the WARDEN_ALLOWED_PROJECTS override (env or .env) currently shadows "
             "warden.toml — this change won't take effect until that var is cleared"
