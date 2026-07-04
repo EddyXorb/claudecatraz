@@ -18,6 +18,7 @@ GITLAB_MODE selects one of three operating modes:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tomllib
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 from .config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
+
+log = logging.getLogger("warden")
 
 _VALID_MODES = frozenset({"off", "read-only", "read-write"})
 _KNOWN_RULE_KEYS = frozenset(
@@ -275,6 +278,67 @@ def _resolve_host_credentials(
     return creds
 
 
+def _parse_token_file(env: Mapping[str, str], name: str) -> dict[str, str]:
+    """Parse a grouped ``<host> <token>`` secrets file (``<name>_FILE`` or the
+    bare ``<name>`` env var, via :func:`_secret`) into a host -> token map.
+
+    Split on the first run of whitespace; blank lines and ``#`` comments are
+    skipped; a duplicate host (after normalisation) aborts startup.
+    """
+    content = _secret(env, name)
+    if not content:
+        return {}
+    tokens: dict[str, str] = {}
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split(None, 1)
+        if len(parts) != 2:
+            raise ConfigError(f"{name}_FILE: malformed line {line!r}, expected '<host> <token>'")
+        host = Config.normalize_host(parts[0])
+        if host in tokens:
+            raise ConfigError(f"{name}_FILE: duplicate host {host!r}")
+        tokens[host] = parts[1]
+    return tokens
+
+
+def _resolve_git_endpoint_credentials(
+    env: Mapping[str, str], git_endpoints: tuple[GitEndpoint, ...]
+) -> dict[str, HostCredentials]:
+    """Resolve each endpoint's read/write tokens from the grouped
+    ``read_tokens``/``write_tokens`` files, keyed by normalised host."""
+    read_tokens = _parse_token_file(env, "READ_TOKENS")
+    write_tokens = _parse_token_file(env, "WRITE_TOKENS")
+    creds: dict[str, HostCredentials] = {}
+    for endpoint in git_endpoints:
+        host = Config.normalize_host(endpoint.host)
+        creds[host] = HostCredentials(
+            read_token=read_tokens.get(host, ""), write_token=write_tokens.get(host, "")
+        )
+    return creds
+
+
+def _warn_closed_endpoints(cfg: Config) -> None:
+    """Log why each endpoint that resolves to ``closed`` is closed.
+
+    Fail-closed-degrade, not fail-stop: a missing or write-without-read
+    credential never aborts startup, it only disables that one endpoint.
+    """
+    for endpoint in cfg.git_endpoints:
+        if cfg.access_mode(endpoint.host) != "closed":
+            continue
+        creds = cfg.git_credentials.get(Config.normalize_host(endpoint.host), HostCredentials())
+        if creds.write_token:
+            log.warning(
+                "host %s closed: write token without a read token — add a "
+                "read-scoped token to read_tokens",
+                endpoint.host,
+            )
+        else:
+            log.warning("host %s closed: no read token", endpoint.host)
+
+
 DEFAULT_TOML_PATH = "/etc/warden/warden.toml"
 
 
@@ -387,6 +451,7 @@ def from_env(
     write_token = _secret(env, "GITLAB_WRITE_TOKEN")
     host_order = _parse_git_url_hosts(file)
     git_rules, git_endpoints = _parse_git(file)
+    git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
         branch_prefixes=_tunable_branch_prefixes(
@@ -412,7 +477,9 @@ def from_env(
         host_credentials=_resolve_host_credentials(env, host_order, read_token, write_token),
         git_rules=git_rules,
         git_endpoints=git_endpoints,
+        git_credentials=git_credentials,
     )
+    _warn_closed_endpoints(cfg)
 
     if strict:
         _validate(cfg)

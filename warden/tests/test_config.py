@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from warden.core.config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
-from warden.core.config_load import _host_slug, from_env
+from warden.core.config_load import _host_slug, _parse_token_file, from_env
 
 _MIN = {
     "ALLOWED_PROJECTS": "group/proj",
@@ -674,3 +674,110 @@ def test_git_endpoint_missing_host_aborts_startup(tmp_path):
     toml.write_text('[[git.endpoint]]\ntype = "gitlab"\n')
     with pytest.raises(ConfigError, match="host"):
         from_env(_MIN, strict=True, toml_path=str(toml))
+
+
+# --- grouped read_tokens/write_tokens files + per-endpoint access mode --------
+# Credential *source* for git_endpoints: the access mode is derived from token
+# presence, never a declared mode. Not yet wired into any guard.
+
+
+def test_parse_token_file_splits_host_and_token(tmp_path):
+    f = tmp_path / "read_tokens"
+    f.write_text("gitlab.com   glpat-abc\nmy-gitlab.de\tglpat-def\n")
+    tokens = _parse_token_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
+    assert tokens == {"gitlab.com": "glpat-abc", "my-gitlab.de": "glpat-def"}
+
+
+def test_parse_token_file_skips_comments_and_blank_lines(tmp_path):
+    f = tmp_path / "read_tokens"
+    f.write_text("# comment\n\ngitlab.com glpat-abc\n   \n# another\n")
+    tokens = _parse_token_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
+    assert tokens == {"gitlab.com": "glpat-abc"}
+
+
+def test_parse_token_file_normalizes_host():
+    tokens = _parse_token_file({"READ_TOKENS": "GitLab.COM:443 glpat-abc\n"}, "READ_TOKENS")
+    assert tokens == {"gitlab.com": "glpat-abc"}
+
+
+def test_parse_token_file_duplicate_host_aborts(tmp_path):
+    f = tmp_path / "read_tokens"
+    f.write_text("gitlab.com glpat-abc\nGitLab.com glpat-def\n")
+    with pytest.raises(ConfigError, match="duplicate host"):
+        _parse_token_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
+
+
+def test_parse_token_file_absent_yields_empty():
+    assert _parse_token_file({}, "READ_TOKENS") == {}
+
+
+def test_access_mode_no_tokens_is_closed():
+    cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),))
+    assert cfg.access_mode("gitlab.com") == "closed"
+
+
+def test_access_mode_read_only_is_read_only():
+    cfg = Config(
+        git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),),
+        git_credentials={"gitlab.com": HostCredentials(read_token="r")},
+    )
+    assert cfg.access_mode("gitlab.com") == "read-only"
+
+
+def test_access_mode_read_and_write_is_read_write():
+    cfg = Config(
+        git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),),
+        git_credentials={"gitlab.com": HostCredentials(read_token="r", write_token="w")},
+    )
+    assert cfg.access_mode("gitlab.com") == "read-write"
+
+
+def test_access_mode_write_without_read_is_closed():
+    """Least privilege: a write token never substitutes for a missing read token."""
+    cfg = Config(
+        git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),),
+        git_credentials={"gitlab.com": HostCredentials(write_token="w")},
+    )
+    assert cfg.access_mode("gitlab.com") == "closed"
+
+
+def test_access_mode_unconfigured_host_is_closed():
+    assert Config().access_mode("gitlab.com") == "closed"
+
+
+def test_endpoint_credentials_resolved_from_grouped_files(tmp_path):
+    read_f = tmp_path / "read_tokens"
+    read_f.write_text("gitlab.com r1\nmy-gitlab.de r2\n")
+    write_f = tmp_path / "write_tokens"
+    write_f.write_text("gitlab.com w1\n")
+    toml = tmp_path / "warden.toml"
+    toml.write_text(
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
+        '[[git.endpoint]]\nhost = "my-gitlab.de"\ntype = "gitlab"\n'
+    )
+    env = {**_MIN, "READ_TOKENS_FILE": str(read_f), "WRITE_TOKENS_FILE": str(write_f)}
+    cfg = from_env(env, strict=True, toml_path=str(toml))
+    assert cfg.access_mode("gitlab.com") == "read-write"
+    assert cfg.access_mode("my-gitlab.de") == "read-only"
+
+
+def test_missing_read_token_closes_endpoint_with_warning_no_abort(tmp_path, caplog):
+    """A configured endpoint with no read token is closed, not a startup abort."""
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n')
+    with caplog.at_level("WARNING", logger="warden"):
+        cfg = from_env(_MIN, strict=True, toml_path=str(toml))
+    assert cfg.access_mode("gitlab.com") == "closed"
+    assert "gitlab.com" in caplog.text and "no read token" in caplog.text
+
+
+def test_write_without_read_closes_endpoint_with_warning_no_abort(tmp_path, caplog):
+    write_f = tmp_path / "write_tokens"
+    write_f.write_text("gitlab.com w1\n")
+    toml = tmp_path / "warden.toml"
+    toml.write_text('[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n')
+    env = {**_MIN, "WRITE_TOKENS_FILE": str(write_f)}
+    with caplog.at_level("WARNING", logger="warden"):
+        cfg = from_env(env, strict=True, toml_path=str(toml))
+    assert cfg.access_mode("gitlab.com") == "closed"
+    assert "gitlab.com" in caplog.text and "read-scoped token" in caplog.text

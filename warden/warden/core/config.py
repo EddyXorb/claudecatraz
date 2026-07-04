@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass, field
-from typing import Mapping, Optional, TypeVar
+from typing import Literal, Mapping, Optional, TypeVar
 from urllib.parse import urlparse
 
 _T = TypeVar("_T")
@@ -32,6 +32,9 @@ class HostCredentials:
 
     read_token: str = ""
     write_token: str = ""
+
+
+AccessMode = Literal["closed", "read-only", "read-write"]
 
 
 def normalize_project(project: str) -> str:
@@ -136,6 +139,10 @@ class Config:
     # wired into any guard. Empty git_endpoints ⇒ no endpoints configured.
     git_rules: GitRules = field(default_factory=GitRules)
     git_endpoints: tuple[GitEndpoint, ...] = ()
+    # Per-endpoint tokens resolved from the grouped read_tokens/write_tokens
+    # files, keyed by normalised host. Backs access_mode(); not yet wired into
+    # any guard.
+    git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
 
     @property
     def gitlab_enabled(self) -> bool:
@@ -300,3 +307,16 @@ class Config:
         """
         endpoint = self.endpoint_for(host)
         return endpoint is not None and endpoint.project_allowed(project)
+
+    def access_mode(self, host: str) -> AccessMode:
+        """Mode derived from which of this host's tokens are present.
+
+        No read token means closed even if a write token exists — a write
+        token is never used as a read fallback (least privilege).
+        """
+        creds = self.git_credentials.get(self.normalize_host(host), HostCredentials())
+        if not creds.read_token:
+            return "closed"
+        if not creds.write_token:
+            return "read-only"
+        return "read-write"
