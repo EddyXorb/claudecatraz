@@ -2,10 +2,15 @@
 
 Only the *model* half of the config layer lives here — building a
 :class:`Config` from env + ``warden.toml`` (secret files, precedence, hard
-fail-closed validation, the three GITLAB_MODEs) is :mod:`warden.core.config_load`'s
-job. Split kept so neither half outgrows a readable file and the many
-``Config`` importers (guards, catalog, tests) depend on the small value type,
-not on the loading machinery.
+fail-closed validation) is :mod:`warden.core.config_load`'s job. Split kept so
+neither half outgrows a readable file and the many ``Config`` importers
+(guards, catalog, tests) depend on the small value type, not on the loading
+machinery.
+
+There is no global "mode" anymore (step 05): access is derived per host from
+which of that host's tokens are present (:meth:`Config.access_mode`) — a
+deployment with no configured/open endpoints denies everything by simple
+absence, not by a declared ``off``.
 """
 
 from __future__ import annotations
@@ -102,8 +107,6 @@ class Config:
     # upstream. Generous default so a normal push is never affected.
     max_push_bytes: int = 50 * 1024 * 1024
     allowed_projects: tuple[str, ...] = ()
-    read_token: str = ""
-    write_token: str = ""
     reconcile_interval_s: int = 300
     state_db_path: str = "/var/lib/warden/state.db"
     audit_log_path: str = "/var/log/warden/audit.jsonl"
@@ -111,7 +114,6 @@ class Config:
     agent_port: int = 8080
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"
-    gitlab_mode: str = "read-write"
     # The parsed [api.endpoints].enable list — plain data, catalog-agnostic.
     # None ⇒ section absent, meaning "use the catalog's default set"; an
     # explicit empty tuple disables every default entry. The gitlab_api guard
@@ -131,16 +133,6 @@ class Config:
     # files, keyed by normalised host. Backs access_mode() and
     # UpstreamRouter's per-endpoint credentials.
     git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
-
-    @property
-    def gitlab_enabled(self) -> bool:
-        """True unless GitLab is intentionally disabled (GITLAB_MODE=off)."""
-        return self.gitlab_mode != "off"
-
-    @property
-    def writes_enabled(self) -> bool:
-        """True only in read-write mode — never in off or read-only."""
-        return self.gitlab_mode == "read-write"
 
     def project_allowed(self, project: str) -> bool:
         """Default-deny match against ``ALLOWED_PROJECTS``, path form only.

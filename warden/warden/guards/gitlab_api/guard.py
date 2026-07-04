@@ -111,12 +111,12 @@ class ApiGuard(Guard[ApiIntent]):
         *this* guard fail-safe-locked but never touches the git guard's lock —
         one guard's permanently unreachable upstream can never block the other.
 
-        In ``off`` mode no upstream call is made — the guard unlocks itself so the
-        warden serves (then denies) requests without ever contacting GitLab.
+        No endpoints configured (the former ``GITLAB_MODE=off``) makes no
+        upstream call either: :func:`~warden.core.transport.for_each_host_project`
+        simply iterates zero hosts and returns ``True``, so the guard still
+        unlocks itself and the warden serves (then denies) requests without
+        ever contacting GitLab.
         """
-        if not self.cfg.gitlab_enabled:
-            self.state.mark_reconciled(self.name)
-            return True
         ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
         self.project_id_aliases = resolved_ids
         if ok:

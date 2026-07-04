@@ -17,7 +17,6 @@ from .config_load import from_env
 from .guard import (
     Guard,
     kernel_gates,
-    mode_gate_off,
     mode_gate_writes,
     project_gate,
 )
@@ -74,7 +73,6 @@ __all__ = [
     "forbidden_check",
     "from_env",
     "kernel_gates",
-    "mode_gate_off",
     "mode_gate_writes",
     "normalize_project",
     "project_gate",

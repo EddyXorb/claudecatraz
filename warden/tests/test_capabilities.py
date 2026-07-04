@@ -48,8 +48,6 @@ HOST = "gitlab.example"
 def cfg() -> Config:
     return Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_endpoints=(GitEndpoint(host=HOST, type="gitlab"),),
         git_credentials={HOST: HostCredentials(read_token="r", write_token="w")},
     )

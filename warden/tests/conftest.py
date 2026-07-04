@@ -26,8 +26,6 @@ def cfg() -> Config:
         max_open_branches=10,
         max_writes_per_hour=60,
         allowed_projects=("group/proj",),
-        read_token="READ-TOKEN",
-        write_token="WRITE-TOKEN",
         state_db_path=":memory:",
         git_endpoints=(GitEndpoint(host=HOST, type="gitlab"),),
         git_credentials={HOST: HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")},

@@ -190,8 +190,6 @@ def e2e(tmp_path):
     cfg = Config(
         branch_prefixes=("claude/",),
         allowed_projects=("repo",),
-        read_token="r",
-        write_token="w",
         state_db_path=str(tmp_path / "state.db"),
         git_endpoints=(GitEndpoint(host=backend_host, type="plain"),),
         git_credentials={

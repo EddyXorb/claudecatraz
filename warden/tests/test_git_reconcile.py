@@ -89,9 +89,11 @@ async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
     await guard.router.aclose()
 
 
-async def test_reconcile_no_upstream_call_in_off_mode(respx_router):
-    """reconcile() must make NO upstream call when GITLAB_MODE=off, and unlock its own view."""
-    cfg_off = Config(gitlab_mode="off")
+async def test_reconcile_no_upstream_call_with_no_endpoints_configured(respx_router):
+    """reconcile() must make NO upstream call when no [[git.endpoint]] is configured
+    (the former GITLAB_MODE=off) — the shared host×project loop is simply a no-op
+    over an empty ``effective_hosts`` — and it must still unlock its own view."""
+    cfg_off = Config()
     state = State(":memory:")
     guard = _git_guard(cfg_off, state)
     assert guard.state_view(HOST).locked is True  # starts locked

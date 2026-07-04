@@ -108,12 +108,13 @@ class GitGuard(Guard[GitIntent]):
         failure here leaves *this* guard fail-safe-locked but never touches the
         REST-API guard's lock — one guard's permanently unreachable upstream can
         never block the other.
+
+        No endpoints configured (the former ``GITLAB_MODE=off``) makes no
+        upstream call either: :func:`~warden.core.transport.for_each_host_project`
+        simply iterates zero hosts and returns ``True``, so this guard still
+        unlocks and the warden serves (and then denies) instead of staying
+        fail-safe-locked.
         """
-        if not self.cfg.gitlab_enabled:
-            # off mode: no upstream call; unlock this guard so the warden serves
-            # (and then denies) instead of staying fail-safe locked.
-            self.state.mark_reconciled(self.name)
-            return True
         ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
         if ok:
             self.state.mark_reconciled(self.name)

@@ -16,15 +16,15 @@ from warden.guards.gitlab_api.catalog.activation import build_effective_table
 from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
 from warden.guards.gitlab_api.catalog.write_endpoints import DEFAULT_ENABLED
 
-_MIN_ENV = {
-    "ALLOWED_PROJECTS": "group/proj",
-    "GITLAB_READ_TOKEN": "r",
-    "GITLAB_WRITE_TOKEN": "w",
-}
+# Not a "minimal valid config" anymore (step 05: from_env has no fail-stop
+# token/allowlist requirement left) — an empty env is just as strict-valid.
+# Kept as a named constant since these tests are about [api.endpoints], not
+# about what env from_env accepts.
+_MIN_ENV: dict[str, str] = {}
 
 
 def test_bare_config_defaults_to_the_default_endpoint_set():
-    cfg = Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
+    cfg = Config(allowed_projects=("group/proj",))
     table = build_effective_table(cfg, cfg.endpoint_enable)
     assert {e.id for e in table.entries} == DEFAULT_ENABLED
 

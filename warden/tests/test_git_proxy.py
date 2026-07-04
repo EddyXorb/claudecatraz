@@ -162,25 +162,31 @@ async def test_push_under_max_push_bytes_is_forwarded(cfg, respx_router):
     assert route.called
 
 
-# --- GITLAB_MODE gate tests (mode-enforcement, step 9) -------------------------
-# Build a fresh test client per mode; no upstream mock needed (a hit would fail).
+# --- per-host access-mode gate tests (the former GITLAB_MODE, step 05) --------
+# Build a fresh test client per access mode; no upstream mock needed (a hit would fail).
 
 UPSTREAM = "https://gitlab.example"
 
 
-def _mode_client(mode: str) -> httpx.AsyncClient:
-    """Build an ASGI test client for a warden with the given GITLAB_MODE."""
+def _access_client(access: str) -> httpx.AsyncClient:
+    """Build an ASGI test client for a warden whose one `[[git.endpoint]]`
+    resolves to the given access mode (``closed``/``read-only``/``read-write``,
+    :meth:`~warden.core.config.Config.access_mode`) — derived from which of
+    its tokens are present, there is no more declared mode."""
+    if access == "closed":
+        creds: dict[str, HostCredentials] = {}
+    elif access == "read-only":
+        creds = {"gitlab.example": HostCredentials(read_token="READ-TOKEN")}
+    else:
+        creds = {
+            "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
+        }
     cfg = Config(
         branch_prefixes=("claude/",),
         allowed_projects=("group/proj",),
-        read_token="READ-TOKEN",
-        write_token="WRITE-TOKEN",
         state_db_path=":memory:",
-        gitlab_mode=mode,
         git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),),
-        git_credentials={
-            "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
-        },
+        git_credentials=creds,
     )
     state = State(":memory:")
     state.mark_reconciled("git")
@@ -192,26 +198,27 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, base_url="http://gitlab.example")
 
 
-async def test_off_advertise_clone_denied_no_upstream():
-    """GITLAB_MODE=off: git clone discovery (git-upload-pack) is denied R0; no upstream call."""
-    async with _mode_client("off") as c:
+async def test_closed_advertise_clone_denied_no_upstream():
+    """A closed host (former GITLAB_MODE=off): git clone discovery (git-upload-pack)
+    is denied by `host_gate` (R6), before any mode/write check; no upstream call."""
+    async with _access_client("closed") as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R0"
-    assert "off" in resp.json()["reason"]
+    assert resp.json()["rule"] == "R6"
 
 
-async def test_off_upload_pack_denied_no_upstream():
-    """GITLAB_MODE=off: git fetch body (upload-pack) is denied R0; no upstream call."""
-    async with _mode_client("off") as c:
+async def test_closed_upload_pack_denied_no_upstream():
+    """A closed host: git fetch body (upload-pack) is denied R6; no upstream call."""
+    async with _access_client("closed") as c:
         resp = await c.post("/git/group/proj.git/git-upload-pack", content=b"0032want ...")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R0"
+    assert resp.json()["rule"] == "R6"
 
 
 async def test_read_only_advertise_receive_pack_denied_no_upstream():
-    """GITLAB_MODE=read-only: push discovery (git-receive-pack) is denied R0 before git_get."""
-    async with _mode_client("read-only") as c:
+    """A read-only host (former GITLAB_MODE=read-only): push discovery
+    (git-receive-pack) is denied R0 before git_get."""
+    async with _access_client("read-only") as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R0"
@@ -219,11 +226,11 @@ async def test_read_only_advertise_receive_pack_denied_no_upstream():
 
 
 async def test_read_only_push_discovery_denied_r0_not_r6_for_unallowed_project():
-    # Behaviour change (Schritt C): the kernel checks off -> writes -> project,
+    # Behaviour change (Schritt C): the kernel checks host -> writes -> project,
     # so a write-mode denial now preempts the allowlist check. Before, advertise
     # hand-rolled off -> project -> writes and this case reported R6. Both are
     # a 403; only the reported rule id changed.
-    async with _mode_client("read-only") as c:
+    async with _access_client("read-only") as c:
         resp = await c.get("/git/other/secret.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R0"
@@ -274,14 +281,14 @@ async def test_upload_pack_read_is_audited(client, respx_router, ctx, tmp_path):
 
 
 async def test_read_only_advertise_upload_pack_passes_through(respx_router):
-    """GITLAB_MODE=read-only: clone discovery (git-upload-pack) still passes through with READ."""
+    """A read-only host: clone discovery (git-upload-pack) still passes through with READ."""
     import respx as respx_module
 
     with respx_module.mock(base_url=UPSTREAM, assert_all_called=False) as router:
         route = router.route(method="GET", url__regex=r".*/info/refs.*").mock(
             return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
         )
-        async with _mode_client("read-only") as c:
+        async with _access_client("read-only") as c:
             resp = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
 
     assert resp.status_code == 200

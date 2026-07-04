@@ -36,8 +36,6 @@ def _mr(cfg) -> ApiIntent:
 def test_n_writes_ok_then_block():
     cfg = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         # step 04: the stateful ceiling is per-endpoint (Config.effective_rules),
         # never this legacy global field — set it via git_rules to actually bite.
         git_rules=GitRules(max_writes_per_hour=3),
@@ -59,8 +57,6 @@ def test_n_writes_ok_then_block():
 def test_sliding_window_frees_budget_after_an_hour():
     cfg = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_rules=GitRules(max_writes_per_hour=2),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
@@ -80,8 +76,6 @@ def test_sliding_window_frees_budget_after_an_hour():
 def test_locked_until_reconciled():
     cfg = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -102,8 +96,6 @@ def test_endpoint_override_raises_the_ceiling_above_the_default():
     host_a, host_b = "gitlab.example", "strict.example"
     cfg = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_endpoints=(
             GitEndpoint(host=host_a, type="gitlab", rules=GitRules(max_writes_per_hour=100)),
             GitEndpoint(host=host_b, type="gitlab"),  # falls back to the built-in default (60)
@@ -121,8 +113,6 @@ def test_endpoint_override_lowers_the_ceiling_below_the_default_and_gates_writes
     host_a, host_b = "gitlab.example", "strict.example"
     cfg = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_endpoints=(
             GitEndpoint(host=host_a, type="gitlab"),  # built-in default (60) — plenty of budget
             GitEndpoint(host=host_b, type="gitlab", rules=GitRules(max_writes_per_hour=1)),

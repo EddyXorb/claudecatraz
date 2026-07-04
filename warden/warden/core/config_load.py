@@ -3,17 +3,18 @@
 The loading half of the config layer: :mod:`warden.core.config` holds the pure,
 frozen :class:`~warden.core.config.Config` value (what the policy consumes);
 this module holds everything that *produces* one — secret files, TOML parsing,
-env-over-file precedence, and the hard fail-closed validation. Missing token
-⇒ abort, never "open". ``ALLOWED_PROJECTS`` empty ⇒ nothing is allowed
-(fail-closed *by denying*, not by crashing): the warden still boots so the
-dev-env can run offline, and every GitLab op is denied until a project is
-allowed. Fail-closed means *deny*, not *refuse to start*.
+env-over-file precedence, and the hard fail-closed validation.
 
-GITLAB_MODE selects one of three operating modes:
-  off         — GitLab is intentionally disabled; no token or allowlist required;
-                all GitLab operations are denied (R0).
-  read-only   — only the read token is required; writes are denied (R0).
-  read-write  — both tokens are required; full current behaviour (default).
+One source of truth per setting (step 05): policy tunables (branch namespace,
+quotas, allowlists) live only in ``warden.toml``'s ``[git.rules]``/
+``[[git.endpoint]]``; forge identity/credentials live only in the grouped
+``read_tokens``/``write_tokens`` secret files. There is no global operating
+mode and no startup-fatal token requirement anymore — a per-host access mode
+(:meth:`~warden.core.config.Config.access_mode`) is derived purely from which
+of that host's tokens are present. A host with no usable read token is simply
+``closed`` (a logged warning, see :func:`_warn_closed_endpoints`), never a
+startup abort: the warden still boots (fail-closed *degrade*, not fail-stop)
+and every operation against that host is denied by ``core.guard.host_gate``.
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ from .config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
 
 log = logging.getLogger("warden")
 
-_VALID_MODES = frozenset({"off", "read-only", "read-write"})
 _KNOWN_RULE_KEYS = frozenset(
     {
         "branch_prefixes",
@@ -53,10 +53,6 @@ def _secret(env: Mapping[str, str], name: str) -> str:
         except OSError as e:
             raise ConfigError(f"{name}_FILE={path!r} unreadable: {e}") from e
     return env.get(name, "")
-
-
-def _split_csv(value: str) -> tuple[str, ...]:
-    return tuple(p.strip() for p in value.split(",") if p.strip())
 
 
 def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ...]]:
@@ -271,14 +267,19 @@ def from_env(
 ) -> Config:
     """Build a :class:`Config`.
 
-    **One source of truth per setting.** Non-secret policy tunables
-    (``branch_prefixes``, the ``max_*`` limits, ``allowed_projects``) live in
-    ``warden.toml``; a matching env var **overrides** the file value when set
-    (non-empty), else the file value applies, else a built-in default. Secrets
-    (tokens) and infra (URL, host, ports, paths) come from env only.
+    **One source of truth per setting** (step 05). Policy tunables
+    (``branch_prefixes``, the ``max_*`` limits, ``allowed_projects``) come from
+    ``warden.toml`` only — no env override left. Secrets (the grouped
+    ``read_tokens``/``write_tokens`` files) and infra (host, ports, paths)
+    come from env only.
 
-    With ``strict`` (the production path) missing secrets or an empty project
-    allowlist abort startup. Tests pass ``strict=False`` to build partial configs.
+    With ``strict`` (the production path) a malformed ``warden.toml`` still
+    aborts startup — a non-positive quota or an empty/blank branch-prefix
+    namespace is nonsensical regardless of deployment. There is no
+    startup-fatal *credential* requirement anymore: a host with no usable read
+    token simply resolves ``closed`` (fail-closed *degrade*, logged by
+    :func:`_warn_closed_endpoints`), and a deployment with no endpoints at all
+    boots and denies everything via ``core.guard.host_gate``.
     """
     env = env if env is not None else os.environ
     file = _load_toml(toml_path or env.get("WARDEN_CONFIG_PATH", DEFAULT_TOML_PATH))
@@ -292,35 +293,25 @@ def from_env(
         except ValueError as exc:
             raise ConfigError(f"{key} must be an integer, got {raw!r}") from exc
 
-    # --- tunables: env (if set, non-empty) overrides warden.toml, else default ---
-    def _tunable_int(env_key: str, toml_key: str, default: int) -> int:
-        raw = env.get(env_key)
-        if raw:
-            try:
-                return int(raw)
-            except ValueError as exc:
-                raise ConfigError(f"{env_key} must be an integer, got {raw!r}") from exc
+    # --- tunables: warden.toml only, no env override (step 05) ---
+    def _tunable_int(toml_key: str, default: int) -> int:
         val = file.get(toml_key, default)
         if not isinstance(val, int) or isinstance(val, bool):
             raise ConfigError(f"{toml_key} in warden.toml must be an integer, got {val!r}")
         return val
 
     def _tunable_branch_prefixes(
-        env_key: str, list_key: str, legacy_scalar_key: str, default: tuple[str, ...]
+        list_key: str, legacy_scalar_key: str, default: tuple[str, ...]
     ) -> tuple[str, ...]:
         """Resolve ``branch_prefixes`` — one namespace-list setting, one source.
 
-        CSV env var (if non-empty) wins outright. Else ``warden.toml`` may set
-        the list form (``branch_prefixes = [...]``) or the legacy scalar form
-        (``branch_prefix = "..."``, kept as a one-element list) — never both,
-        that would be two sources of truth for the same namespace. Emptiness
-        (empty list, empty element) is *not* rejected here — :func:`_validate`
-        does that so the error message is consistent whichever source produced
-        the value.
+        ``warden.toml`` may set the list form (``branch_prefixes = [...]``) or
+        the legacy scalar form (``branch_prefix = "..."``, kept as a
+        one-element list) — never both, that would be two sources of truth
+        for the same namespace. Emptiness (empty list, empty element) is *not*
+        rejected here — :func:`_validate` does that so the error message is
+        consistent whichever source produced the value.
         """
-        raw = env.get(env_key)
-        if raw:
-            return _split_csv(raw)
         has_list = list_key in file
         has_scalar = legacy_scalar_key in file
         if has_list and has_scalar:
@@ -344,38 +335,28 @@ def from_env(
             return (val,)
         return default
 
-    def _tunable_projects(env_key: str, toml_key: str) -> tuple[str, ...]:
-        raw = env.get(env_key)
-        if raw:
-            return _split_csv(raw)
+    def _tunable_projects(toml_key: str) -> tuple[str, ...]:
         val = file.get(toml_key, [])
         if not isinstance(val, list) or not all(isinstance(p, str) for p in val):
             raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
         return tuple(p.strip() for p in val if p.strip())
 
-    read_token = _secret(env, "GITLAB_READ_TOKEN")
-    write_token = _secret(env, "GITLAB_WRITE_TOKEN")
     git_rules, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
-        branch_prefixes=_tunable_branch_prefixes(
-            "BRANCH_PREFIX", "branch_prefixes", "branch_prefix", ("claude/",)
-        ),
-        max_open_mrs=_tunable_int("MAX_OPEN_MRS", "max_open_mrs", 5),
-        max_open_branches=_tunable_int("MAX_OPEN_BRANCHES", "max_open_branches", 10),
-        max_writes_per_hour=_tunable_int("MAX_WRITES_PER_HOUR", "max_writes_per_hour", 60),
-        max_push_bytes=_tunable_int("MAX_PUSH_BYTES", "max_push_bytes", 50 * 1024 * 1024),
-        allowed_projects=_tunable_projects("ALLOWED_PROJECTS", "allowed_projects"),
-        read_token=read_token,
-        write_token=write_token,
+        branch_prefixes=_tunable_branch_prefixes("branch_prefixes", "branch_prefix", ("claude/",)),
+        max_open_mrs=_tunable_int("max_open_mrs", 5),
+        max_open_branches=_tunable_int("max_open_branches", 10),
+        max_writes_per_hour=_tunable_int("max_writes_per_hour", 60),
+        max_push_bytes=_tunable_int("max_push_bytes", 50 * 1024 * 1024),
+        allowed_projects=_tunable_projects("allowed_projects"),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
         agent_port=_int("AGENT_PORT", 8080),
         admin_port=_int("ADMIN_PORT", 9090),
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
-        gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
         endpoint_enable=_parse_endpoint_enable(file),
         git_rules=git_rules,
         git_endpoints=git_endpoints,
@@ -389,54 +370,36 @@ def from_env(
 
 
 def _validate(cfg: Config) -> None:
+    """Fail-closed validation with no mode-branching left (step 05): every
+    check here is unconditional, since there is no longer a declared
+    off/read-only/read-write mode to gate them on.
+
+    No credential (or allowlist) requirement aborts startup — a git_endpoint
+    with a missing/inconsistent token is fail-closed-*degrade* (§4.2, step 02):
+    the endpoint simply resolves ``closed`` (a logged warning, see
+    ``_warn_closed_endpoints``), never an abort; and an empty ``allowed_projects``
+    just means ``project_allowed()`` denies everything, so the warden boots
+    (dev-env runs offline) and every op stays denied until a project is
+    allowed.
+    """
     problems: list[str] = []
 
-    if cfg.gitlab_mode not in _VALID_MODES:
-        problems.append(
-            f"GITLAB_MODE must be one of {sorted(_VALID_MODES)!r}, got {cfg.gitlab_mode!r}"
-        )
-        # Mode is unknown — skip mode-specific checks to avoid confusing secondary errors.
-        raise ConfigError("invalid configuration: " + "; ".join(problems))
-
-    # Quota limits apply in all modes.
     for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour", "max_push_bytes"):
         if getattr(cfg, name) <= 0:
             problems.append(f"{name.upper()} must be > 0")
 
-    if cfg.gitlab_mode == "off":
-        # Intentionally disabled — no token or allowlist requirement.
-        pass
-
-    elif cfg.gitlab_mode == "read-only":
-        if not cfg.read_token:
-            problems.append("GITLAB_READ_TOKEN is required")
-        problems.extend(_branch_prefixes_problems(cfg))
-        # An empty allowlist is NOT a startup error: project_allowed() already
-        # denies everything, so the warden boots (dev-env runs offline) and
-        # simply refuses every GitLab op until a project is allowed. Likewise
-        # a git_endpoint with a missing/inconsistent token is not a startup
-        # error either — it is fail-closed-*degrade* (§4.2, step 02): the
-        # endpoint is simply `closed` (a logged warning, see
-        # `_warn_closed_endpoints`), never an abort.
-
-    else:  # read-write (default)
-        if not cfg.read_token:
-            problems.append("GITLAB_READ_TOKEN is required")
-        if not cfg.write_token:
-            problems.append("GITLAB_WRITE_TOKEN is required")
-        problems.extend(_branch_prefixes_problems(cfg))
-        # Empty allowlist ⇒ deny-all (see read-only note above), not an abort.
+    problems.extend(_branch_prefixes_problems(cfg))
 
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))
 
 
 def _branch_prefixes_problems(cfg: Config) -> list[str]:
-    """Fail-closed validation of the branch namespace (shared by both live modes).
+    """Fail-closed validation of the branch namespace.
 
     An empty list or an empty element would make :meth:`Config.in_branch_namespace`
     accept *any* branch name (``"".startswith("")`` is always true) — checked once
-    here instead of duplicated per mode.
+    here, unconditionally (:func:`_validate`).
     """
     if not cfg.branch_prefixes:
         return ["BRANCH_PREFIX must be non-empty"]

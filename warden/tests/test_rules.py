@@ -87,7 +87,7 @@ def test_qualify_rejects_empty_namespace():
 
 @pytest.fixture
 def cfg() -> Config:
-    return Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
+    return Config(allowed_projects=("group/proj",))
 
 
 def _api(method, path, **fields) -> ApiIntent:

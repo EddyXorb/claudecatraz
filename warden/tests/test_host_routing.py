@@ -191,8 +191,6 @@ async def test_reconcile_branches_runs_per_host_with_same_project_path():
     # (or overwriting) their branch counts.
     base = Config(
         allowed_projects=("acme/infra",),
-        read_token="r",
-        write_token="w",
         state_db_path=":memory:",
     )
     multi = replace(

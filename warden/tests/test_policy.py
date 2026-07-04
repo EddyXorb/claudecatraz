@@ -43,8 +43,6 @@ def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Deci
 def cfg() -> Config:
     return Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -56,8 +54,6 @@ def multi_prefix_cfg() -> Config:
     return Config(
         branch_prefixes=("claude/", "bot/"),
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -428,30 +424,29 @@ def test_mr_update_without_merge_intent_allowed(cfg):
 # own Intent type, and an unrouted path never reaches any decide at all.
 
 
-# --- R0: GITLAB_MODE gates -------------------------------------------------------
+# --- R6/R0: per-host access mode (the former GITLAB_MODE gates, step 05) -------
 
 
-def test_off_denies_reads_and_writes():
-    """GITLAB_MODE=off: both reads and writes are denied (R0) — no GitLab traffic at all."""
-    cfg_off = Config(
+def test_closed_host_denies_reads_and_writes():
+    """A host with no usable read token is `closed` (the former GITLAB_MODE=off):
+    both reads and writes are denied — by `host_gate`'s R6, before
+    `mode_gate_writes` (or any guard-specific decide) ever runs."""
+    cfg_closed = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="w",
-        gitlab_mode="off",
         git_endpoints=_OPEN_ENDPOINT,
-        git_credentials=_OPEN_CREDENTIALS,
+        git_credentials={},  # no tokens at all for this host -> closed
     )
     # API read
-    d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_off)
-    assert not d.allow and d.rule == "R0" and "off" in d.reason
+    d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_closed)
+    assert not d.allow and d.rule == "R6"
 
     # API write
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
         StateView(),
-        cfg_off,
+        cfg_closed,
     )
-    assert not d.allow and d.rule == "R0"
+    assert not d.allow and d.rule == "R6"
 
     # git push
     d = decide(
@@ -464,20 +459,19 @@ def test_off_denies_reads_and_writes():
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
         StateView(),
-        cfg_off,
+        cfg_closed,
     )
-    assert not d.allow and d.rule == "R0"
+    assert not d.allow and d.rule == "R6"
 
 
-def test_read_only_denies_writes_allows_reads():
-    """GITLAB_MODE=read-only: reads pass (R1), writes are denied (R0)."""
+def test_read_only_host_denies_writes_allows_reads():
+    """A host with a read token but no write token is `read-only` (the former
+    GITLAB_MODE=read-only): reads pass (R1), writes are denied (R0) by the
+    per-host `mode_gate_writes`."""
     cfg_ro = Config(
         allowed_projects=("group/proj",),
-        read_token="r",
-        write_token="",
-        gitlab_mode="read-only",
         git_endpoints=_OPEN_ENDPOINT,
-        git_credentials=_OPEN_CREDENTIALS,
+        git_credentials={HOST: HostCredentials(read_token="r")},
     )
     # API read: allowed
     d = decide(_api("GET", "/projects/group%2Fproj/repository/tree"), StateView(), cfg_ro)

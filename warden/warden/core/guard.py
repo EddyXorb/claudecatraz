@@ -10,12 +10,18 @@ Sequence ``Guard.handle`` guarantees, in this order:
 
 1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
 2. :func:`kernel_gates` — guard-agnostic deny gates:
-   a. Mode-gate ``off`` — GitLab-disabled denies everything.
-   b. Host allowlist (§2) — default-deny for a ``Host`` header outside the
-      configured ``[[git.endpoint]]`` list; an empty list denies every host.
-   c. Mode-gate ``read-only`` — set by parser, never by :class:`~warden.core.model.Decision`.
-      Runs *before* ``enrich`` so credential-using lookups are unreachable in read-only/off mode.
-   d. Resource allowlist — enforced once, not per-guard, before ``enrich``.
+   a. Host allowlist (§2, §4.2) — default-deny for a ``Host`` header outside
+      the configured ``[[git.endpoint]]`` list, or whose endpoint currently
+      has no usable read credential (``access_mode`` is ``closed``); an empty
+      list denies every host. This is what denies a wholly unconfigured
+      deployment (the former ``GITLAB_MODE=off``) — there is no separate
+      global mode-gate anymore.
+   b. Mode-gate writes — a write is denied unless the target host's
+      ``access_mode`` (:meth:`~warden.core.config.Config.access_mode`) is
+      ``read-write``; a ``closed`` host never reaches this, host allowlist
+      already denied it. Runs *before* ``enrich`` so credential-using lookups
+      are unreachable on a read-only host.
+   c. Resource allowlist — enforced once, not per-guard, before ``enrich``.
 3. ``guard.enrich`` — unpure lookups a check declared it needs.
 4. Capability invariants (``core.capabilities.FORBIDDEN``) via :meth:`Guard.capability_gate`.
 5. ``guard.decide`` — pure, guard-specific, default-deny.
@@ -42,17 +48,17 @@ from .rules import R0, R6
 from .state import State
 
 
-def mode_gate_off(cfg: Config) -> Optional[Decision]:
-    """M0: deny every operation while GitLab is intentionally disabled."""
-    if not cfg.gitlab_enabled:
-        return Decision(False, R0, "GitLab disabled (GITLAB_MODE=off)")
-    return None
+def mode_gate_writes(host: str, cfg: Config) -> Optional[Decision]:
+    """M0: deny a write to a host whose access mode is not ``read-write``.
 
-
-def mode_gate_writes(cfg: Config) -> Optional[Decision]:
-    """M0: deny a write while the deployment is read-only (or off)."""
-    if not cfg.writes_enabled:
-        return Decision(False, R0, f"writes disabled (GITLAB_MODE={cfg.gitlab_mode})")
+    Per-host (step 05) — there is no more global mode. A ``closed`` host is
+    already denied earlier by :func:`host_gate` (R6), so by the time this
+    runs the only two possibilities left are ``read-only`` (deny) and
+    ``read-write`` (allow).
+    """
+    access = cfg.access_mode(host)
+    if access != "read-write":
+        return Decision(False, R0, f"writes disabled for host {host!r} (access_mode={access!r})")
     return None
 
 
@@ -99,11 +105,9 @@ def kernel_gates(
     ``decide`` so unit tests exercise exactly the effective order — never a
     re-derived copy of it.
     """
-    denied = mode_gate_off(cfg)
-    if denied is None:
-        denied = host_gate(intent.host, cfg)
+    denied = host_gate(intent.host, cfg)
     if denied is None and intent.writes:
-        denied = mode_gate_writes(cfg)
+        denied = mode_gate_writes(intent.host, cfg)
     if denied is None:
         denied = project_gate(intent.project, project_allowed)
     return denied

@@ -26,7 +26,7 @@ _EXPECTED_ROW_KEYS = {
 
 
 def _cfg() -> Config:
-    return Config(allowed_projects=("group/proj",), read_token="r", write_token="w")
+    return Config(allowed_projects=("group/proj",))
 
 
 def test_report_top_level_shape():

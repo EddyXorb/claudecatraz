@@ -63,7 +63,7 @@ async def _serve() -> None:
     cfg = from_env()
     configure_logging(cfg.log_path)
 
-    if cfg.gitlab_enabled and not cfg.allowed_projects:
+    if cfg.git_endpoints and not cfg.allowed_projects:
         log.warning(
             "allowed_projects is empty — ALL GitLab operations will be denied "
             "(R-rules) until a project is added to warden.toml. The dev-env "

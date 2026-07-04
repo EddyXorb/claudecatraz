@@ -86,10 +86,12 @@ async def test_one_guards_permanent_failure_does_not_block_the_others(cfg, respx
     await ctx.router.aclose()
 
 
-async def test_reconcile_all_unlocks_in_off_mode(respx_router):
-    # off mode makes no upstream call; every guard unlocks itself, so the warden
-    # opens the port and then denies ops.
-    ctx = _fresh_ctx(Config(gitlab_mode="off"))
+async def test_reconcile_all_unlocks_with_no_endpoints_configured(respx_router):
+    # No [[git.endpoint]] configured (the former "off" mode) makes no upstream
+    # call — the shared host×project loop is a no-op over an empty
+    # `effective_hosts` — so every guard unlocks itself, and the warden opens
+    # the port and then denies ops.
+    ctx = _fresh_ctx(Config())
 
     # No mock registered — any upstream call would raise respx.MockTransportError.
     ok = await ctx.reconcile_all()
