@@ -16,7 +16,7 @@ from ...core.model import TokenKind
 from ...core.transport import UpstreamRouter, project_id
 
 
-class MrOwnership:
+class MrNamespace:
     """Credential-backed ``source_branch`` lookup, with a short-TTL cache
     (performance only, never security — a cache hit still reflects a lookup
     made within the last :attr:`_ttl` seconds).

@@ -1,9 +1,9 @@
 """reconcile.py (W6.2, W8.2, §6.11, §07 Punkt 6 step 5): the REST-API guard's
 MR reconcile pagination, fail-safe locking, and numeric-id project-alias
 resolution (M6). Folded here from the now-dissolved
-``guards.gitlab.forge.GitForge`` — see ``test_api_ownership.py`` for the MR
-ownership-lookup side and ``test_git_reconcile.py`` for the git guard's own
-(branch) reconcile.
+``guards.gitlab.forge.GitForge`` — see ``test_api_mr_namespace.py`` for the MR
+source-branch-namespace-lookup side and ``test_git_reconcile.py`` for the git
+guard's own (branch) reconcile.
 
 The pagination test is the regression guard for the quota-undercount bug:
 listing stopped at the first 100 results, so a busy project counted too low

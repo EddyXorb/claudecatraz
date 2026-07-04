@@ -1,13 +1,14 @@
 """REST guard I/O hooks: parse → enrich → forward/deny-response —
 the guard half of the write pipeline. Reads stream through with the read-token (R1);
-writes are matched against the data-driven allowlist, ownership-checked,
-quota-checked, then forwarded with the write-token — or denied with a 403
-that never leaks a GitLab response.
+writes are matched against the data-driven allowlist, source-branch-namespace
+checked, quota-checked, then forwarded with the write-token — or denied with a
+403 that never leaks a GitLab response.
 
 Self-contained GitLab domain logic (§07 Punkt 6, step 5 — the former shared
-``GitForge`` class is dissolved): MR ownership (:mod:`.ownership`), MR/project-id
-reconcile (:mod:`.reconcile`) and the MR-quota table (:mod:`.state`) are this
-guard's own implementation details now, reachable by no other guard.
+``GitForge`` class is dissolved): the MR source-branch-namespace lookup
+(:mod:`.mr_namespace`), MR/project-id reconcile (:mod:`.reconcile`) and the
+MR-quota table (:mod:`.state`) are this guard's own implementation details
+now, reachable by no other guard.
 """
 
 from __future__ import annotations
@@ -29,18 +30,18 @@ from ...core.transport import UpstreamRouter, stream_upstream
 from ...errors import deny_json
 from .catalog import EffectiveTable, Recognizer, ScopeKind, build_effective_table, match_endpoint
 from .intent import ApiIntent, GraphqlIntent
-from .ownership import MrOwnership
+from .mr_namespace import MrNamespace
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
 from .policy import capability_gate, decide
 from .reconcile import reconcile_mrs
 from .state import MrState
 
 
-def _needs_mr_owner(ep: Recognizer) -> bool:
-    """Check if the matched recognizer requires MR ownership verification:
-    a ``BRANCH_NAMESPACE`` scope whose branch is *not* literally in the
-    request (``namespace_field is None``) — the request carries only an iid,
-    so the branch must be resolved via the iid → MR upstream lookup."""
+def _needs_source_lookup(ep: Recognizer) -> bool:
+    """Check if the matched recognizer requires a source-branch-namespace
+    lookup: a ``BRANCH_NAMESPACE`` scope whose branch is *not* literally in
+    the request (``namespace_field is None``) — the request carries only an
+    iid, so the branch must be resolved via the iid → MR upstream lookup."""
     return ep.scope_kind is ScopeKind.BRANCH_NAMESPACE and ep.namespace_field is None
 
 
@@ -57,7 +58,7 @@ class ApiGuard(Guard[ApiIntent]):
         super().__init__(cfg, state, audit)
         self.router = router
         self.mr_state = MrState(state.store)
-        self.ownership = MrOwnership(router, cfg)
+        self.mr_namespace = MrNamespace(router, cfg)
         # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
         # Guard state, not Config — Config stays immutable; only this guard's
         # view of "which ids currently alias an allowlisted project" is refreshed.
@@ -146,8 +147,9 @@ class ApiGuard(Guard[ApiIntent]):
         this read-token lookup is never made in off mode.
         """
         ep = intent.endpoint
-        if ep is not None and _needs_mr_owner(ep) and intent.iid is not None and intent.project:
-            intent.mr_source_ok = await self.ownership.source_in_namespace(
+        needs_lookup = ep is not None and _needs_source_lookup(ep)
+        if needs_lookup and intent.iid is not None and intent.project:
+            intent.mr_source_ok = await self.mr_namespace.source_in_namespace(
                 intent.host, intent.project, intent.iid
             )
         return intent

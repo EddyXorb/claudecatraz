@@ -159,7 +159,7 @@ def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
     assert not d.allow and d.rule == "R6"
 
 
-# --- R3 create / ownership -----------------------------------------------------
+# --- R3 create / source-branch-namespace ----------------------------------------
 def test_r3_create_mr_with_prefix_allowed(cfg):
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),

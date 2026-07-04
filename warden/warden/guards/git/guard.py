@@ -149,8 +149,8 @@ class GitGuard(Guard[GitIntent]):
         )
 
     async def enrich(self, intent: GitIntent) -> GitIntent:
-        # git needs no unpure lookups; unlike REST guard's MR-ownership check,
-        # no credential-backed lookup happens here.
+        # git needs no unpure lookups; unlike REST guard's MR
+        # source-branch-namespace check, no credential-backed lookup happens here.
         return intent
 
     def capability_gate(self, intent: GitIntent, cfg: Config) -> Optional[Decision]:
