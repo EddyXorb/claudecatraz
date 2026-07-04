@@ -214,9 +214,6 @@ def test_cmd_init_yes_reads_tokens_from_env(
 def test_cmd_init_yes_clears_stale_warden_projects_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """WARDEN_ALLOWED_PROJECTS is no longer read as input (policy has one
-    source, warden.toml, §3.5) — a leftover key from an older catraz version
-    is cleared from .env on init so it doesn't linger looking like live config."""
     root = _make_root(tmp_path)
     (root / ".catraz" / ".env").write_text(
         "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"

@@ -256,14 +256,13 @@ class TestYesModeReadWrite:
 
 
 class TestYesMigration:
-    """Stale WARDEN_* keys in .env must be removed after init — they are no
-    longer read as input (policy has one source, warden.toml, §3.5)."""
+    """Stale WARDEN_* keys in .env are removed on init; policy comes from
+    warden.toml only."""
 
     def test_stale_env_key_removed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"
-        # Simulate an older catraz version's cmd_init writing this into .env.
         env_path.write_text(
             "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
         )
@@ -274,9 +273,6 @@ class TestYesMigration:
     def test_stale_branch_prefix_removed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A leftover WARDEN_BRANCH_PREFIX from an older catraz version is cleared
-        from .env on init — it is no longer read as input (policy has one source,
-        warden.toml, §3.5), so it must not linger looking like live config."""
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"

@@ -120,9 +120,9 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
 def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:
     """Best-effort ``branch_prefixes`` (or the legacy scalar ``branch_prefix``)
     read from the mounted warden.toml, for the rendered instructions' example
-    only (§3.5: policy has one source, warden.toml — no env override). A
-    missing/unreadable/malformed file degrades to the ``claude/`` default
-    rather than crashing the entrypoint before the agent even starts."""
+    only. A missing/unreadable/malformed file degrades to the ``claude/``
+    default rather than crashing the entrypoint before the agent even
+    starts."""
     try:
         data: dict[str, Any] = tomllib.loads(warden_toml_path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):

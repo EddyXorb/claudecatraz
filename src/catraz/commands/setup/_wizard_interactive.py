@@ -199,9 +199,6 @@ def _prompt_branch_prefix(warden_toml: Path, env_path: Path, out: Out) -> None:
         # Retire the legacy scalar key so it can't coexist with the list we just
         # wrote (Config aborts on both being set — one source of truth).
         remove_toml_key(warden_toml, "branch_prefix")
-    # No longer read as input (policy has one source, warden.toml, §3.5) —
-    # only cleared so a leftover key from an older catraz version doesn't
-    # linger in .env looking like live config.
     unset_env_keys(env_path, ["WARDEN_BRANCH_PREFIX"])
 
 

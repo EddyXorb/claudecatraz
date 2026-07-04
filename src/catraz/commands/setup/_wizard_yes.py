@@ -46,11 +46,6 @@ def _yes_apply_tokens(secrets_dir: Path, auth_mode: str, out: Out) -> None:
 
 
 def _yes_clear_stale_policy_env(env_path: Path) -> None:
-    """WARDEN_ALLOWED_PROJECTS/WARDEN_BRANCH_PREFIX are no longer read as input —
-    policy has one source, warden.toml (§3.5). Use `catraz allow` to populate
-    allowed_projects non-interactively. Only cleared here so a leftover key
-    from an older catraz version doesn't linger in .env looking like live
-    config."""
     unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS", "WARDEN_BRANCH_PREFIX"])
 
 

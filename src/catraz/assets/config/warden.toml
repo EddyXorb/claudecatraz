@@ -1,12 +1,10 @@
 # Warden — non-secret policy parameters. SOURCE OF TRUTH for these settings.
 # Host-editable, mounted read-only. Details: docs/design/agentic-workflow/02-warden.md (W10)
 #
-# One setting, one source: there is no env-var override for any value below
-# (§3.5 of docs/design/architecture-generalization/08-multi-target.md) — edit
-# this file directly, or use `catraz allow` for allowed_projects. This file
-# holds NO secrets: the GitLab tokens live in .catraz/secrets/ (one file each,
-# mounted as compose secrets); GITLAB_URL / GITLAB_MODE live in .catraz/.env —
-# never put any here.
+# One setting, one source: edit this file directly for every value below, or
+# use `catraz allow` for allowed_projects. This file holds NO secrets: the
+# GitLab tokens live in .catraz/secrets/ (one file each, mounted as compose
+# secrets); GITLAB_URL / GITLAB_MODE live in .catraz/.env — never put any here.
 
 # R2: only branches under one of these prefixes may be pushed (the allowed
 # namespace is the union of the list). Legacy single-prefix form still works:
