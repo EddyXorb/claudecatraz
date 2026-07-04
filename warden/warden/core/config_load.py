@@ -283,7 +283,6 @@ def from_env(
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
         gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
         endpoint_enable=_parse_endpoint_enable(file),
-        allowed_hosts=frozenset(host_order),
         host_order=host_order,
         host_credentials=_resolve_host_credentials(env, host_order, read_token, write_token),
     )

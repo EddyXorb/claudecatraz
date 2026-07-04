@@ -10,6 +10,7 @@ not on the loading machinery.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from typing import Mapping, Optional
 from urllib.parse import urlparse
@@ -70,25 +71,17 @@ class Config:
     # guards.gitlab_api.catalog.activation.build_effective_table) — config.py
     # itself never looks at the catalog.
     endpoint_enable: Optional[tuple[str, ...]] = None
-    # The parsed [git.urls].hosts allowlist (§07 Punkt 8 design spike,
-    # docs/design/architecture-generalization/08-multi-target.md). Empty
-    # (default) means the feature is inactive: single implicit target,
-    # behaviour unchanged from before multi-target. Wired into the
-    # request/kernel path via `host_gate` (core/guard.py) and
-    # `UpstreamRouter` (core/transport.py) — see 08-multi-target.md section 6
-    # for what "wired" now means.
-    allowed_hosts: frozenset[str] = frozenset()
-    # Order-preserving twin of `allowed_hosts` (§07 Punkt 8 follow-up): the
-    # first entry is the host that GITLAB_READ_TOKEN/GITLAB_WRITE_TOKEN alias
-    # (see `host_credentials`) and the one `UpstreamRouter`/reconcile iterate
-    # in. `allowed_hosts` (frozenset, order-less) stays the fast membership
-    # check `host_allowed` uses. Empty ⇒ multi-target inactive, identical to
-    # today. config_load keeps both in sync (`allowed_hosts == frozenset(host_order)`).
+    # [git.urls].hosts allowlist, in configured order (§07 Punkt 8 design
+    # spike, docs/design/architecture-generalization/08-multi-target.md) —
+    # host_order[0] is the host GITLAB_READ_TOKEN/GITLAB_WRITE_TOKEN alias
+    # (see `host_credentials`), and the order `UpstreamRouter`/reconcile
+    # iterate in. Empty (default) ⇒ multi-target inactive, single implicit
+    # target, unchanged behaviour. `allowed_hosts` (below) is derived from
+    # this field, not stored separately.
     host_order: tuple[str, ...] = ()
-    # Per-host resolved tokens, keyed by normalised host (§07 Punkt 8
-    # follow-up, design spike section 3). Empty when `host_order` is empty.
-    # Populated by config_load, including an entry for `host_order[0]` that
-    # mirrors read_token/write_token.
+    # Per-host resolved tokens, keyed by normalised host. Empty when
+    # `host_order` is empty; populated by config_load, including an entry
+    # for `host_order[0]` that mirrors read_token/write_token.
     host_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
 
     @property
@@ -125,6 +118,15 @@ class Config:
         and reconcile filters call this instead of comparing directly.
         """
         return any(name.startswith(prefix) for prefix in self.branch_prefixes)
+
+    @functools.cached_property
+    def allowed_hosts(self) -> frozenset[str]:
+        """Membership set :meth:`host_allowed` checks, derived from
+        ``host_order`` (§07 Punkt 8 follow-up) — one stored field, not two
+        kept in sync by hand. Each entry is run through :meth:`normalize_host`
+        so a differently-cased/ported/dotted ``host_order`` entry still
+        matches the same normalised incoming ``Host`` header."""
+        return frozenset(self.normalize_host(h) for h in self.host_order)
 
     def host_allowed(self, host: str) -> bool:
         """Host-header allowlist gate (§07 Punkt 8 design spike), wired into

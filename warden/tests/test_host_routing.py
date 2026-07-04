@@ -40,7 +40,6 @@ def _multi_cfg(cfg: Config) -> Config:
     return replace(
         cfg,
         host_order=("gitlab.example", "my-gitlab.de"),
-        allowed_hosts=frozenset({"gitlab.example", "my-gitlab.de"}),
         host_credentials={
             "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN"),
             "my-gitlab.de": HostCredentials(read_token="R2", write_token="W2"),
@@ -151,7 +150,6 @@ async def test_reconcile_branches_runs_per_host_with_same_project_path():
     multi = replace(
         base,
         host_order=("gitlab.com", "my-gitlab.de"),
-        allowed_hosts=frozenset({"gitlab.com", "my-gitlab.de"}),
         host_credentials={
             "gitlab.com": HostCredentials(read_token="r", write_token="w"),
             "my-gitlab.de": HostCredentials(read_token="r2", write_token="w2"),

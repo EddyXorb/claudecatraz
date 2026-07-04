@@ -366,7 +366,7 @@ def test_host_allowed_empty_allowlist_allows_anything():
 
 
 def test_host_allowed_nonempty_allowlist_is_default_deny():
-    cfg = Config(allowed_hosts=frozenset({"gitlab.com", "my-gitlab.de"}))
+    cfg = Config(host_order=("gitlab.com", "my-gitlab.de"))
     assert cfg.host_allowed("gitlab.com")
     assert cfg.host_allowed("my-gitlab.de")
     assert not cfg.host_allowed("evil.example")
@@ -374,7 +374,7 @@ def test_host_allowed_nonempty_allowlist_is_default_deny():
 
 
 def test_host_allowed_normalizes_case_port_and_trailing_dot():
-    cfg = Config(allowed_hosts=frozenset({"gitlab.com"}))
+    cfg = Config(host_order=("gitlab.com",))
     assert cfg.host_allowed("GitLab.com")
     assert cfg.host_allowed("gitlab.com:443")
     assert cfg.host_allowed("gitlab.com.")
