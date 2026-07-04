@@ -133,7 +133,12 @@ allowed_projects = ["me/dotfiles"]
 Endpoints (welches Ziel); das optionale `rules` ist Verhalten (wie streng). Nur das
 Verhalten kaskadiert (§3.3); `allowed_projects` ist immer per-Endpoint (ein
 Domänen-Default-Projekt ergäbe keinen Sinn — ein Pfad ist nur relativ zu seinem Host
-eindeutig).
+eindeutig). [09-endpoint-actions.md](09-endpoint-actions.md) §1.3 erweitert diese Linie
+um eine dritte Kategorie, host-unabhängigen Scope (`actions`):
+
+> **Identität** (`host`, `type`) und **host-relativer Scope** (`allowed_projects`)
+> kaskadieren nicht; **host-unabhängiger Scope** (`actions`) und **Verhalten**
+> (`rules`) kaskadieren — per-Key-Merge, Listen ersetzen komplett.
 
 ### 3.2 Endpoint = ein Host
 
