@@ -341,6 +341,4 @@ def _mock_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, projects: l
     """Patch _resolve_allowed_projects to return the given list."""
     import catraz.policy as policy_mod
 
-    monkeypatch.setattr(
-        policy_mod, "_resolve_allowed_projects", lambda root, env: (projects, "mock")
-    )
+    monkeypatch.setattr(policy_mod, "_resolve_allowed_projects", lambda root: (projects, "mock"))

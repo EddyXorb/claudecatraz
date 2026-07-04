@@ -310,12 +310,9 @@ max_writes_per_hour = 60           # R5
 allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 ```
 
-> **Precedence — env overrides the file.** For each policy setting there is an optional
-> `WARDEN_*` env var (`WARDEN_MAX_OPEN_MRS`, `WARDEN_MAX_OPEN_BRANCHES`,
-> `WARDEN_MAX_WRITES_PER_HOUR`, `WARDEN_ALLOWED_PROJECTS`).
-> Set one (non-empty) to **override** `warden.toml` for that single setting; leave it
-> empty/unset to use the file. So a value is read from exactly one place at a time —
-> the env var if present, otherwise the toml.
+> **One setting, one source.** There is no env-var override for any policy setting above —
+> edit `warden.toml` directly (or use `catraz allow` for `allowed_projects`). Secrets
+> (GitLab tokens) and infra plumbing still live in `.env`/`.catraz/secrets/`, never here.
 
 > **Applying changes.** The Warden and Squid read their config once at startup, so an edit
 > to `warden.toml`, `squid.conf`, `allowlist.txt`, or `.env` is inert until the container is

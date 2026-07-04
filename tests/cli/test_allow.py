@@ -124,19 +124,6 @@ def test_cmd_allow_not_set_up(tmp_path: Path) -> None:
         setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
 
 
-def test_cmd_allow_warns_on_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    warden = _seed(tmp_path)
-    monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "other/proj")
-    msgs: list[str] = []
-    out = _out()
-    monkeypatch.setattr(out, "warn", lambda m: msgs.append(m))
-    rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), out)
-    assert rc == EXIT_OK
-    assert any("WARDEN_ALLOWED_PROJECTS" in m for m in msgs)
-    # the toml is still written even though the override shadows it
-    assert policy._read_toml_allowed_projects(warden) == ["grp/proj"]
-
-
 # ── _discover_gitlab_projects ─────────────────────────────────────────────────
 
 

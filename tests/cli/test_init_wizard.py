@@ -231,20 +231,6 @@ class TestYesModeReadOnly:
         # Existing write token must survive
         assert (secrets_dir / "gitlab_write_token").read_text() == "glpat-existing-write"
 
-    def test_warden_projects_from_env_written_to_toml(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        root = _make_root(tmp_path)
-        _patch_common(monkeypatch)
-        monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
-        monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
-        setup.cmd_init(root, _yes_args(), Out(color=False))
-        toml = root / ".catraz" / "config" / "warden.toml"
-        assert _read_toml_allowed_projects(toml) == ["group/proj-a", "group/proj-b"]
-        # Must NOT appear in .env
-        env = load_env(root / ".catraz" / ".env")
-        assert "WARDEN_ALLOWED_PROJECTS" not in env
-
 
 class TestYesModeReadWrite:
     """--yes with both tokens → GITLAB_MODE=read-write."""
@@ -270,17 +256,17 @@ class TestYesModeReadWrite:
 
 
 class TestYesMigration:
-    """Stale WARDEN_* keys in .env must be removed after init writes to toml."""
+    """Stale WARDEN_* keys in .env must be removed after init — they are no
+    longer read as input (policy has one source, warden.toml, §3.5)."""
 
     def test_stale_env_key_removed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         env_path = root / ".catraz" / ".env"
-        # Simulate old cmd_init writing WARDEN_ALLOWED_PROJECTS into .env
+        # Simulate an older catraz version's cmd_init writing this into .env.
         env_path.write_text(
             "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
         )
-        monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/new-proj")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         env = load_env(env_path)
         assert "WARDEN_ALLOWED_PROJECTS" not in env

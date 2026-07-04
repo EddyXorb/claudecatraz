@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-from catraz.envfile import load_env, unset_env_keys
+from catraz.envfile import unset_env_keys
 from catraz.policy import (
     _discover_gitlab_projects,
     _resolve_allowed_projects,
@@ -151,14 +151,13 @@ def _prompt_secret_keep_or_replace(secrets_dir: Path, filename: str, label: str,
 
 def _prompt_allowed_projects(
     root: Path,
-    env: dict[str, str],
     warden_toml: Path,
     env_path: Path,
     gitlab_url: str,
     args: argparse.Namespace,
     out: Out,
 ) -> None:
-    cur_proj, _ = _resolve_allowed_projects(root, env)
+    cur_proj, _ = _resolve_allowed_projects(root)
     if cur_proj and not args.force:
         out.info(f"\n  allowed projects already set: {', '.join(cur_proj)} — keeping.")
         return
@@ -270,7 +269,7 @@ def _wizard_interactive(
         )
         updates["GITLAB_URL"] = url
         _prompt_gitlab_tokens(secrets_dir, mode, args, out, inherited)
-        _prompt_allowed_projects(root, env, warden_toml, env_path, url, args, out)
+        _prompt_allowed_projects(root, warden_toml, env_path, url, args, out)
         _prompt_branch_prefix(warden_toml, env_path, out)
     else:
         _ensure_secret(secrets_dir, "gitlab_read_token")
@@ -279,7 +278,7 @@ def _wizard_interactive(
     if auth_mode == "api_key":
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
-    proj_count, _ = _resolve_allowed_projects(root, load_env(env_path))
+    proj_count, _ = _resolve_allowed_projects(root)
     url_part = (
         f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}" if mode != "off" else ""
     )

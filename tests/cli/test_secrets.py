@@ -10,7 +10,6 @@ import pytest
 from catraz.commands import setup
 from catraz.doctor import run_doctor, _doctor_fix, SECRETS
 from catraz.envfile import load_env
-from catraz.policy import _read_toml_allowed_projects
 from catraz.ui import Out
 
 
@@ -212,16 +211,16 @@ def test_cmd_init_yes_reads_tokens_from_env(
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_persists_warden_projects_from_env(
+def test_cmd_init_yes_clears_stale_warden_projects_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """--yes writes WARDEN_ALLOWED_PROJECTS from env to warden.toml (not .env).
-
-    Old cmd_init wrote to .env; new cmd_init uses warden.toml as the SSOT and
-    unsets any stale WARDEN_ALLOWED_PROJECTS from .env.
-    """
+    """WARDEN_ALLOWED_PROJECTS is no longer read as input (policy has one
+    source, warden.toml, §3.5) — a leftover key from an older catraz version
+    is cleared from .env on init so it doesn't linger looking like live config."""
     root = _make_root(tmp_path)
-    monkeypatch.setenv("WARDEN_ALLOWED_PROJECTS", "group/proj-a,group/proj-b")
+    (root / ".catraz" / ".env").write_text(
+        "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
+    )
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
     monkeypatch.setattr(
         "catraz.commands.setup.run_doctor",
@@ -231,12 +230,6 @@ def test_cmd_init_yes_persists_warden_projects_from_env(
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
-    # Projects must now be in warden.toml
-    toml_path = root / ".catraz" / "config" / "warden.toml"
-    projects = _read_toml_allowed_projects(toml_path)
-    assert projects == ["group/proj-a", "group/proj-b"]
-
-    # WARDEN_ALLOWED_PROJECTS must NOT be written to .env
     env = load_env(root / ".catraz" / ".env")
     assert "WARDEN_ALLOWED_PROJECTS" not in env
 

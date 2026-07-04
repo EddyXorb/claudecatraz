@@ -482,7 +482,7 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         return
     from catraz.policy import _resolve_allowed_projects, validate_project
 
-    resolved, source = _resolve_allowed_projects(root, env)
+    resolved, source = _resolve_allowed_projects(root)
     if not resolved:
         f.warn(
             "policy",
