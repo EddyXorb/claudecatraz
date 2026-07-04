@@ -203,3 +203,92 @@ abgesichert:
 sind; §07 Punkt 8 wird deshalb **nicht** als erledigt markiert. Dieser Spike
 plus der Config-Grundbaustein sind der erste, sicher verifizierbare
 Teil-Deliverable davon.
+
+> **✅ Folgearbeit 1–3 ERLEDIGT** (Commits `feat(config): Punkt 8 Folgearbeit
+> — Per-Host-Credentials`, `feat(guards): Punkt 8 Folgearbeit —
+> Host→Upstream-Auflösung + State-Keying`). Ausdrücklich **innerhalb** des
+> Warden-Python-Pakets, ohne CLI-/Compose-Änderungen (4) und ohne den
+> Container-Test (5) — diese beiden bleiben als **„8b"** benannte, separate
+> Folgearbeit offen (siehe unten).
+>
+> **1. Host→Upstream-Auflösung.** `core/transport.py::UpstreamRouter` löst
+> jetzt den `Host`-Header pro Request auf. Single-Target (`[git.urls] hosts`
+> leer/fehlend): der Router ignoriert den Header komplett und liefert immer
+> denselben, aus `Config.api_url`/den bisherigen Tokens gebauten `Upstream` —
+> bit-identisch zum Vorzustand, unabhängig davon, was ein Client als Host
+> sendet. Multi-Target: pro gelistetem Host wird ein eigener `Upstream` gebaut
+> (Basis-URL regelbasiert `https://<host>[/api/v4]`, Tokens aus
+> `Config.host_credentials`), `resolve(header)` normalisiert
+> (case/port/trailing-dot) und liefert `None` bei unbekanntem Host.
+> `GitGuard`/`ApiGuard` halten seither `router: UpstreamRouter` statt
+> `transport: Upstream`; `core/guard.py::host_gate` (neues, kernel-eigenes
+> M6-Gate, Teil von `kernel_gates`, läuft vor `enrich`/`capability_gate`/
+> `decide`) prüft `intent.host` gegen `Config.host_allowed` und deny't R6 bei
+> unbekanntem Host — damit ist `Config.host_allowed` jetzt genau dort
+> verdrahtet, wo Abschnitt 6 es zuvor bewusst ausgespart hatte. Jede
+> `Intent`-Implementierung (`GitIntent`/`ApiIntent`/`GraphqlIntent`) trägt den
+> rohen `Host`-Header (`parse()` setzt ihn); `MrOwnership` löst pro Aufruf
+> über den Router auf statt einen fest injizierten `Upstream` zu halten.
+>
+> **2. Per-Host-Credentials.** `core/config_load.py`: Slug-Ableitung
+> (lowercase, `[^a-z0-9]`→`_`, uppercase) für jeden zusätzlichen Host,
+> `GITLAB_READ_TOKEN__<SLUG>`/`GITLAB_WRITE_TOKEN__<SLUG>` (+ `_FILE`-Varianten
+> über den bestehenden `_secret()`-Helfer). Der erste gelistete Host bleibt
+> Alias der bestehenden `GITLAB_READ_TOKEN`/`GITLAB_WRITE_TOKEN`. Zwei Hosts,
+> die auf denselben Slug abbilden, werfen beim Config-Laden fail-closed einen
+> `ConfigError` (`_resolve_host_credentials`), bevor überhaupt ein Token
+> nachgeschlagen wird. Fehlende Tokens für einen zusätzlichen Host brechen den
+> Start ab, exakt wie beim Primärhost (abhängig vom `GITLAB_MODE`:
+> `read-only` verlangt nur den Read-Token, `read-write` beide).
+>
+> **3. State-Keying `(host, project)`.** `agent_branches`
+> (`guards/git/state.py::BranchState`) und `agent_mrs`
+> (`guards/gitlab_api/state.py::MrState`) tragen jetzt eine `host`-Spalte als
+> Teil des Primärschlüssels; `replace_branches`/`replace_mrs`/`add_branch`/
+> `upsert_mr` nehmen `host` als ersten Parameter. `reconcile_branches`/
+> `reconcile_mrs` iterieren über `Config.effective_hosts` (Multi-Target:
+> `host_order`; Single-Target: ein synthetischer `implicit_host`, aus
+> `GITLAB_URL` abgeleitet) statt einmalig zu laufen. `open_branches()`/
+> `open_mrs()` bleiben bewusst **global/ungefiltert** — die Quote
+> (`max_open_branches`/`max_open_mrs`) war schon vor Multi-Target ein
+> einziger projektübergreifender Deckel, kein Per-Projekt-Limit; Multi-Target
+> erweitert diesen Deckel konsistent über alle Hosts, statt eine neue
+> Semantik einzuführen. Für Single-Host ist das **keine sichtbare
+> Verhaltensänderung** (ein einziger, konstanter Host-Schlüsselwert für alle
+> Zeilen).
+>
+> **Schema-Version-Bump 1 → 2** (`core/state.py::CURRENT_SCHEMA_VERSION`):
+> notwendig, weil `CREATE TABLE IF NOT EXISTS` eine neue Spalte nicht in eine
+> bereits bestehende Tabelle nachzieht. Die Fail-closed-Prüfung
+> (`_check_and_stamp_schema_version`) wurde deshalb von „nur *neuer* als
+> `CURRENT_SCHEMA_VERSION` bricht ab" auf „*jede* Version außer `0`
+> (frischer Datei) und `CURRENT_SCHEMA_VERSION` bricht ab" verschärft — eine
+> ältere, bereits existierende v1-DB wird beim Hochfahren mit einem
+> `SchemaError` abgelehnt statt still mit der alten (spaltenlosen)
+> Tabellenform weiterzulaufen. Konsistent mit „State ist pre-1.0 wegwerfbar":
+> der Operator löscht die Datei, kein Migrationslauf nötig.
+>
+> Tests: `tests/test_host_routing.py` (Host-Auflösung inkl. End-to-End-Request
+> über zwei Hosts + Deny für unbekannten Host, `reconcile_branches` pro Host),
+> `tests/test_config.py` (Slug-Mechanik, Alias des ersten Hosts, `_FILE`-
+> Variante, fehlende Tokens, Kollision), `tests/test_git_state.py`/
+> `tests/test_api_state.py` (zwei Hosts mit gleichem Projektpfad → getrennte
+> Zähler), `tests/test_state.py` (Schema-Fail-closed jetzt auch für ältere
+> Version). 390 passed (367 Baseline + 23 neue), ruff/format/mypy grün.
+>
+> **„8b" — weiterhin NICHT Teil dieser Folgearbeit, separat zu planen:**
+>
+> 4. CLI-/Compose-seitige DNS-Aliase, `git_routing.py`-Anpassung für mehrere
+>    kanonische Hosts (heute rewrited `git_routing.py` genau *einen*
+>    konfigurierten `GITLAB_URL` auf `gitlab-warden`), Rendering der
+>    Agent-Instruktionen für mehrere Remotes.
+> 5. Der im Plandokument geforderte Container-Test (zwei erreichbare Hosts,
+>    ein dritter abgelehnt) — setzt 4 voraus (braucht echte, per Compose
+>    verdrahtete DNS-Aliase, nicht nur Unit-Mocks).
+>
+> **Fertig-Kriterium für Punkt 8 insgesamt bleibt weiterhin offen**, bis 8b
+> (4–5) nachgezogen ist; §07 Punkt 8 wird deshalb **weiterhin nicht** als
+> erledigt markiert — der Warden-interne Mechanismus (Host-Routing,
+> Credentials, State-Keying) ist jetzt vollständig und getestet, aber ohne
+> CLI/Compose-Verdrahtung kann kein Deployment tatsächlich mehrere Hosts
+> nutzen.
