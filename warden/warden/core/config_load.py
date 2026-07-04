@@ -67,6 +67,33 @@ def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ..
     return parse_api_endpoints(file).enable
 
 
+def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
+    """Parse an ``actions`` list-key (``[git].actions`` or a per-endpoint
+    ``actions``).
+
+    Absent (``raw is None``, the key isn't in the table) stays ``None`` — "no
+    opinion here, the cascade falls through" (§09 §1.4). Present — including
+    ``[]`` — becomes a tuple, deliberately kept distinguishable from absent
+    (§09 §5: an explicit empty list means "may do nothing", not "inherit").
+
+    Fail-closed (§09 §3.1): not a list of strings, or an id outside the closed
+    vocabulary (typo protection), aborts startup. Deferred import for the same
+    reason as ``_parse_endpoint_enable``: the vocabulary is guard-owned, core
+    stays guard-agnostic at module-import time.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(a, str) for a in raw):
+        raise ConfigError(f"{context} must be a list of strings, got {raw!r}")
+
+    from ..guards.gitlab_api.actions import ALL_ACTIONS
+
+    unknown = sorted(set(raw) - ALL_ACTIONS)
+    if unknown:
+        raise ConfigError(f"{context}: unknown action id(s) {unknown!r}")
+    return tuple(raw)
+
+
 def _parse_rules(table: Mapping[str, object], context: str) -> GitRules:
     """Parse a ``rules``-shaped table (``[git.rules]`` or an endpoint's inline
     ``rules = {...}``) into a :class:`GitRules` override.
@@ -136,20 +163,42 @@ def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
     if not isinstance(rules_table, Mapping):
         raise ConfigError(f"warden.toml [[git.endpoint]] host={host!r}: rules must be a table")
 
+    actions = _parse_actions(
+        raw.get("actions"), f"warden.toml [[git.endpoint]] host={host!r} actions"
+    )
+    if actions is not None:
+        # Explicit endpoint override with a type-impossible id is always a
+        # mistake (§09 §3.2) — unlike the inherited default (cut quietly in
+        # Config.effective_actions), this aborts startup here.
+        from ..guards.gitlab_api.actions import actions_valid_for_type
+
+        valid_for_type = actions_valid_for_type(endpoint_type)
+        invalid = sorted(set(actions) - valid_for_type)
+        if invalid:
+            raise ConfigError(
+                f"warden.toml [[git.endpoint]] host={host!r}: action id(s) {invalid!r} "
+                f"not valid for type {endpoint_type!r}"
+            )
+
     return GitEndpoint(
         host=host,
         type=endpoint_type,
         allowed_projects=tuple(p.strip() for p in raw_projects if p.strip()),
         rules=_parse_rules(rules_table, f"warden.toml [[git.endpoint]] host={host!r} rules"),
+        actions=actions,
     )
 
 
-def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint, ...]]:
-    """Parse ``[git.rules]`` (domain defaults) and ``[[git.endpoint]]`` (one entry
-    per host) into the endpoint-taxonomy config surface.
+def _parse_git(
+    file: Mapping[str, object],
+) -> tuple[GitRules, Optional[tuple[str, ...]], tuple[GitEndpoint, ...]]:
+    """Parse ``[git.rules]``/``[git].actions`` (domain defaults) and
+    ``[[git.endpoint]]`` (one entry per host) into the endpoint-taxonomy config
+    surface.
 
-    Fail-closed: an unknown ``type``, a duplicate ``host``, or an unknown key in
-    any ``rules`` table aborts startup rather than silently misconfiguring policy.
+    Fail-closed: an unknown ``type``, a duplicate ``host``, an unknown key in
+    any ``rules`` table, or an unknown/type-invalid ``actions`` id aborts
+    startup rather than silently misconfiguring policy.
     """
     git = file.get("git", {})
     if not isinstance(git, Mapping):
@@ -159,6 +208,8 @@ def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint,
     if not isinstance(rules_table, Mapping):
         raise ConfigError("warden.toml: [git.rules] must be a table")
     git_rules = _parse_rules(rules_table, "warden.toml [git.rules]")
+
+    git_actions = _parse_actions(git.get("actions"), "warden.toml [git].actions")
 
     raw_endpoints = git.get("endpoint", [])
     if not isinstance(raw_endpoints, list):
@@ -177,7 +228,7 @@ def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint,
         seen_hosts[normalized] = endpoint.host
         endpoints.append(endpoint)
 
-    return git_rules, tuple(endpoints)
+    return git_rules, git_actions, tuple(endpoints)
 
 
 def _parse_token_file(env: Mapping[str, str], name: str) -> dict[str, str]:
@@ -341,7 +392,7 @@ def from_env(
             raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
         return tuple(p.strip() for p in val if p.strip())
 
-    git_rules, git_endpoints = _parse_git(file)
+    git_rules, git_actions, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
@@ -359,6 +410,7 @@ def from_env(
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
         endpoint_enable=_parse_endpoint_enable(file),
         git_rules=git_rules,
+        git_actions=git_actions,
         git_endpoints=git_endpoints,
         git_credentials=git_credentials,
     )

@@ -82,13 +82,21 @@ class GitRules:
 @dataclass(frozen=True)
 class GitEndpoint:
     """One git host: its identity/scope (``host``, ``type``, ``allowed_projects``)
-    plus optional rule overrides. ``allowed_projects`` is always per-endpoint —
-    a project path is only unambiguous relative to the host it lives on."""
+    plus optional rule/action overrides. ``allowed_projects`` is always
+    per-endpoint — a project path is only unambiguous relative to the host it
+    lives on.
+
+    ``actions`` follows the same cascade contract as ``rules`` (§09 §1.4):
+    ``None`` means "no override, the domain default (``Config.git_actions``)
+    or built-in default applies"; an explicit ``()`` means "this endpoint may
+    do nothing" — a deliberately narrow value, never to be normalised into
+    ``None`` (the two must stay distinguishable, §09 §5)."""
 
     host: str
     type: str
     allowed_projects: tuple[str, ...] = ()
     rules: GitRules = field(default_factory=GitRules)
+    actions: Optional[tuple[str, ...]] = None
 
     def project_allowed(self, project: str) -> bool:
         """Default-deny match against this endpoint's own ``allowed_projects``."""
@@ -128,6 +136,12 @@ class Config:
     # core.guard). Empty git_endpoints ⇒ no endpoints configured ⇒ every host
     # is denied (real default-deny, not "feature off").
     git_rules: GitRules = field(default_factory=GitRules)
+    # [git].actions domain default (§09 §1.4). None ⇒ the key is absent from
+    # warden.toml, meaning the built-in default (guards.gitlab_api.actions.
+    # DEFAULT_ACTIONS) applies — same "absent != empty" contract as git_rules'
+    # individual fields, kept at the whole-list granularity since actions
+    # replace completely rather than merging per-key.
+    git_actions: Optional[tuple[str, ...]] = None
     git_endpoints: tuple[GitEndpoint, ...] = ()
     # Per-endpoint tokens resolved from the grouped read_tokens/write_tokens
     # files, keyed by normalised host. Backs access_mode() and
@@ -260,6 +274,41 @@ class Config:
                 override.max_push_bytes, domain.max_push_bytes, _DEFAULT_MAX_PUSH_BYTES
             ),
         )
+
+    def effective_actions(self, host: str) -> tuple[str, ...]:
+        """Per-host action cascade (§09 §1.4), same ``_cascade`` mechanic as
+        :meth:`effective_rules`: the endpoint's own ``actions`` if set, else
+        ``git_actions`` (the domain default), else the built-in default
+        (:data:`~warden.guards.gitlab_api.actions.DEFAULT_ACTIONS`, step 01).
+        The list **replaces** completely — never merged, just like
+        ``branch_prefixes``.
+
+        The ``type``-cut (§3.2) applies only to an *inherited* value: a
+        ``plain`` endpoint that falls through to ``git_actions``/the built-in
+        default is silently intersected with
+        :func:`~warden.guards.gitlab_api.actions.actions_valid_for_type` for
+        its ``type`` — no error, since every mixed deployment would otherwise
+        be forced to override every ``plain`` endpoint explicitly. An
+        *explicit* endpoint override is returned as-is, unfiltered here: a
+        type-impossible id in it is a ``ConfigError`` raised by the loader at
+        config-build time (``core.config_load``), never silently dropped.
+
+        Deferred import (matching ``config_load._parse_endpoint_enable``):
+        the catalog is guard-owned, ``Config`` only threads the plain
+        ``tuple[str, ...]`` values through.
+        """
+        from ..guards.gitlab_api.actions import DEFAULT_ACTIONS, actions_valid_for_type
+
+        endpoint = self.endpoint_for(host)
+        override = endpoint.actions if endpoint is not None else None
+        if override is not None:
+            return override
+
+        inherited = _cascade(None, self.git_actions, DEFAULT_ACTIONS)
+        if endpoint is None:
+            return inherited
+        valid_for_type = actions_valid_for_type(endpoint.type)
+        return tuple(action for action in inherited if action in valid_for_type)
 
     def git_project_allowed(self, host: str, project: str) -> bool:
         """Per-endpoint ``allowed_projects`` check, keyed by host.
