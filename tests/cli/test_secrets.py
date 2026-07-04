@@ -129,40 +129,47 @@ def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
     assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700
 
 
-def test_doctor_bad_on_empty_file(tmp_path: Path) -> None:
-    """doctor reports bad for each token file that exists but is empty."""
+def test_doctor_warns_endpoint_closed_on_empty_grouped_files(tmp_path: Path) -> None:
+    """§08-multi-target Step 06: an [[git.endpoint]] with no token in the grouped
+    read_tokens/write_tokens files warns "closed" — never a failing (bad) exit;
+    the Warden, not doctor, is the side that enforces fail-closed."""
     root = _make_root(tmp_path)
+    (root / ".catraz" / "config" / "warden.toml").write_text(
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
+    )
     secrets_dir = root / ".catraz" / "secrets"
     secrets_dir.mkdir(mode=0o700)
-    for filename, _, _ in SECRETS:
+    for filename in ("read_tokens", "write_tokens"):
         p = secrets_dir / filename
         p.write_text("")
         p.chmod(0o600)
 
     f = run_doctor(root, only=["tokens"])
-    bad_msgs = [i[2] for i in f.items if i[0] == "bad"]
-    for filename, _, _ in SECRETS:
-        assert any(filename in m for m in bad_msgs), f"expected bad for {filename!r}"
+    assert not any(i[0] == "bad" for i in f.items)
+    assert any(i[0] == "warn" and "gitlab.com" in i[2] and "closed" in i[2] for i in f.items)
 
 
-def test_doctor_ok_on_non_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """doctor reports ok when both secret files are non-empty (probe skipped in unit tests)."""
+def test_doctor_ok_on_non_empty_grouped_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """doctor reports ok when a configured endpoint has both tokens set (probe
+    skipped in unit tests)."""
     import catraz.doctor as doc
 
     monkeypatch.setattr(doc, "_probe_gitlab_tokens", lambda *a, **kw: None)
-    monkeypatch.setattr(doc, "_probe_write_user_read", lambda *a, **kw: None)
 
     root = _make_root(tmp_path)
+    (root / ".catraz" / "config" / "warden.toml").write_text(
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
+    )
     secrets_dir = root / ".catraz" / "secrets"
     secrets_dir.mkdir(mode=0o700)
-    for filename, _, _ in SECRETS:
-        p = secrets_dir / filename
-        p.write_text("glpat-xxxxxxxtoken")
-        p.chmod(0o600)
+    (secrets_dir / "read_tokens").write_text("gitlab.com glpat-xxxxxxxtoken\n")
+    (secrets_dir / "read_tokens").chmod(0o600)
+    (secrets_dir / "write_tokens").write_text("gitlab.com glpat-yyyyyyytoken\n")
+    (secrets_dir / "write_tokens").chmod(0o600)
 
     f = run_doctor(root, only=["tokens"])
     assert not any(i[0] == "bad" for i in f.items)
-    assert any(i[0] == "ok" and "both GitLab tokens" in i[2] for i in f.items)
+    assert any(i[0] == "ok" and "gitlab.com" in i[2] and "read-write" in i[2] for i in f.items)
 
 
 def test_doctor_fix_creates_secrets_dir_and_files(tmp_path: Path) -> None:

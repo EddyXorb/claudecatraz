@@ -23,3 +23,26 @@ max_writes_per_hour = 60                  # R5: max write actions per hour
 # Full paths of concrete projects only — NO wildcards/globs, NO partial/leaf names,
 # NO group prefixes. Empty = fail-closed (nothing allowed).
 allowed_projects    = []
+
+# --- Multi-target endpoint taxonomy (docs/design/architecture-generalization/
+# 08-multi-target.md) — additive preview, not yet enforced by any guard; the
+# settings above are still what's live. [git.rules] holds the same
+# domain-default knobs as above (branch_prefixes, max_open_branches,
+# max_open_mrs, max_writes_per_hour, max_push_bytes), scoped to the endpoint
+# model; each [[git.endpoint]] table configures exactly one git host, with an
+# optional per-endpoint `rules = { ... }` overriding a [git.rules] default for
+# that host only. Tokens are NEVER set here — they live in the grouped
+# .catraz/secrets/read_tokens / write_tokens files (<host> <token> per line).
+#
+# Implemented `type` values:
+#   "gitlab" — git + REST API (gitlab.com or self-hosted GitLab)
+#   "plain"  — git smart-HTTP only, no REST API assumed
+# "github" is reserved for a future guard — the Warden refuses to start if used.
+[git.rules]
+# branch_prefixes = ["claude/"]
+
+# Example — add one [[git.endpoint]] table per host.
+# [[git.endpoint]]
+# host             = "gitlab.com"
+# type             = "gitlab"
+# allowed_projects = []

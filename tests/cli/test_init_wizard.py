@@ -153,6 +153,50 @@ class TestYesModeOff:
         assert original == after
 
 
+class TestMultiEndpointScaffold:
+    """06-cli-doctor-init.md "Tests": `init` scaffolds the grouped read_tokens/
+    write_tokens files (empty, 0600) and a parsable warden.toml carrying the
+    [git.rules]/[[git.endpoint]] taxonomy — alongside (not instead of) the
+    legacy per-token files the current single-target compose still mounts."""
+
+    def test_read_write_tokens_files_scaffolded_empty_0600(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        secrets_dir = root / ".catraz" / "secrets"
+        for fname in ("read_tokens", "write_tokens"):
+            p = secrets_dir / fname
+            assert p.exists(), f"missing: {fname}"
+            assert p.read_text() == ""
+            assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+    def test_existing_read_write_tokens_not_clobbered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        secrets_dir = root / ".catraz" / "secrets"
+        secrets_dir.mkdir(mode=0o700, exist_ok=True)
+        (secrets_dir / "read_tokens").write_text("gitlab.com glpat-existing\n")
+        (secrets_dir / "read_tokens").chmod(0o600)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        assert (secrets_dir / "read_tokens").read_text() == "gitlab.com glpat-existing\n"
+
+    def test_warden_toml_is_parsable_with_git_endpoint_taxonomy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tomllib
+
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        toml_path = root / ".catraz" / "config" / "warden.toml"
+        data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        assert "rules" in data.get("git", {})
+
+
 class TestYesModeReadOnly:
     """--yes with read token only → GITLAB_MODE=read-only."""
 
