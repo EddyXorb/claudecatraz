@@ -105,7 +105,8 @@ def test_host_gate_allows_a_listed_host(cfg):
 async def test_end_to_end_request_routes_by_host_header_and_denies_unknown_host(cfg):
     multi = _multi_cfg(cfg)
     state = State(":memory:")
-    state.mark_reconciled()
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
     ctx = build_context(multi, state, AuditLog("-"))
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)

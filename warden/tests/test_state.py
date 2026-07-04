@@ -33,15 +33,15 @@ def _clocked(start=1000.0):
 # --- fail-safe lock ------------------------------------------------------------
 def test_view_is_locked_until_reconciled():
     st = State(":memory:")
-    assert st.view().locked is True  # never "empty = all free"
-    st.mark_reconciled()
-    assert st.view().locked is False
+    assert st.view("git").locked is True  # never "empty = all free"
+    st.mark_reconciled("git")
+    assert st.view("git").locked is False
 
 
 # --- rolling write window ------------------------------------------------------
 def test_writes_last_hour_drops_records_past_the_window():
     st, now = _clocked()
-    st.mark_reconciled()
+    st.mark_reconciled("git")
     st.record_write("api", "mr", "1")
     assert st.writes_last_hour() == 1
     now["t"] += WINDOW_SECONDS + 1  # roll past the hour
@@ -69,9 +69,9 @@ def test_close_releases_the_connection():
 
 def test_view_reflects_writes_counter_once_reconciled():
     st, _ = _clocked()
-    st.mark_reconciled()
+    st.mark_reconciled("git")
     st.record_write("git", "push", "claude/a")
-    v = st.view()
+    v = st.view("git")
     # open_branches/open_mrs default to 0 on the core-only view — each guard
     # fills its own via its own state_view (test_git_reconcile.py/test_api_reconcile.py).
     assert (v.open_branches, v.open_mrs, v.writes_last_hour, v.locked) == (0, 0, 1, False)
@@ -134,10 +134,10 @@ def test_older_schema_version_also_fails_closed(tmp_path):
 def test_reopening_a_current_db_is_idempotent(tmp_path):
     path = tmp_path / "state.db"
     st1 = State(str(path))
-    st1.mark_reconciled()
+    st1.mark_reconciled("git")
     st1.close()
 
     st2 = State(str(path))
     assert st2.schema_version() == CURRENT_SCHEMA_VERSION
-    assert st2.is_reconciled() is True  # data from the first open survived reopening
+    assert st2.is_reconciled("git") is True  # data from the first open survived reopening
     st2.close()

@@ -129,7 +129,8 @@ async def test_push_forwards_content_encoding(client, respx_router):
 def _client_with(cfg: Config) -> httpx.AsyncClient:
     """Build an ASGI test client for a warden with a specific ``cfg`` (max_push_bytes here)."""
     state = State(":memory:")
-    state.mark_reconciled()
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
     ctx = build_context(cfg, state, AuditLog("-"))
     transport = httpx.ASGITransport(app=create_app(ctx))
     return httpx.AsyncClient(transport=transport, base_url="http://warden")
@@ -179,7 +180,8 @@ def _mode_client(mode: str) -> httpx.AsyncClient:
         gitlab_mode=mode,
     )
     state = State(":memory:")
-    state.mark_reconciled()
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
     audit = AuditLog("-")
     ctx = build_context(cfg, state, audit)
     app = create_app(ctx)

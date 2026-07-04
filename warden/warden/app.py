@@ -58,10 +58,15 @@ def create_admin_app(ctx: AppContext) -> Starlette:
 
 async def _healthz(request: Request) -> JSONResponse:
     ctx: AppContext = request.app.state.ctx
+    # Per-guard reconcile status: each guard locks independently, so report each
+    # one — a single broken upstream shows as that guard alone not reconciled.
+    reconciled = {
+        name: ctx.state.is_reconciled(name) for name in sorted({g.name for g in ctx.guards})
+    }
     return JSONResponse(
         {
             "status": "ok",
-            "reconciled": ctx.state.is_reconciled(),
+            "reconciled": reconciled,
         }
     )
 

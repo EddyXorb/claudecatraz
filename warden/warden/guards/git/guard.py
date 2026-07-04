@@ -79,8 +79,10 @@ class GitGuard(Guard[GitIntent]):
         ]
 
     def state_view(self) -> StateView:
-        """Core-lock (shared, §07 Punkt 6 step 4) + this guard's own branch counter."""
-        if not self.state.is_reconciled():
+        """This guard's own per-guard lock + its own branch counter (§07 Punkt 6
+        step 4). Locked until *this* guard reconciled — a broken REST-API
+        upstream never locks git, and vice versa."""
+        if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
         return StateView(
             open_branches=self.branch_state.open_branches(),
@@ -91,18 +93,22 @@ class GitGuard(Guard[GitIntent]):
     async def reconcile(self) -> bool:
         """Rebuild the branch-quota counter from upstream truth (§07 Punkt 6, step 4).
 
-        Own reconcile, independent of the REST-API guard's MR reconcile — rebuilds
-        only this guard's own branch counter and reports success. The shared core
-        lock is **not** touched here: it is a global fail-safe that only the
-        orchestrator (:meth:`~warden.context.AppContext.reconcile_all`) may set,
-        and only once every guard has reconciled — otherwise this guard's success
-        alone would unlock a view whose MR counters another guard left stale.
+        Own reconcile, independent of the REST-API guard's MR reconcile: rebuilds
+        only this guard's own branch counter and, on success, unlocks only its own
+        per-guard lock (:meth:`~warden.core.state.State.mark_reconciled`). A
+        failure here leaves *this* guard fail-safe-locked but never touches the
+        REST-API guard's lock — one guard's permanently unreachable upstream can
+        never block the other.
         """
         if not self.cfg.gitlab_enabled:
-            # off mode: skip all upstream calls; report success so the orchestrator
-            # can open the agent port and deny ops (instead of staying fail-safe locked).
+            # off mode: no upstream call; unlock this guard so the warden serves
+            # (and then denies) instead of staying fail-safe locked.
+            self.state.mark_reconciled(self.name)
             return True
-        return await reconcile_branches(self.cfg, self.router, self.branch_state)
+        ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
+        if ok:
+            self.state.mark_reconciled(self.name)
+        return ok
 
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for receive-pack;

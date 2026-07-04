@@ -148,7 +148,8 @@ def e2e(tmp_path):
         state_db_path=str(tmp_path / "state.db"),
     )
     state = State(cfg.state_db_path)
-    state.mark_reconciled()
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
     ctx = build_context(cfg, state, AuditLog("-"))
     warden_port = _free_port()
     server = uvicorn.Server(

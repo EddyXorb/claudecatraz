@@ -83,9 +83,11 @@ class ApiGuard(Guard[ApiIntent]):
         )
 
     def state_view(self) -> StateView:
-        """This guard's own snapshot: core's fail-safe lock/writes counter plus
-        this domain's MR count — never branches (the git guard tracks those)."""
-        if not self.state.is_reconciled():
+        """This guard's own snapshot: its per-guard fail-safe lock + writes
+        counter plus this domain's MR count — never branches (the git guard
+        tracks those). Locked until *this* guard reconciled; a broken git
+        upstream never locks the REST-API guard, and vice versa."""
+        if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
         return StateView(
             open_mrs=self.mr_state.open_mrs(),
@@ -96,20 +98,22 @@ class ApiGuard(Guard[ApiIntent]):
     async def reconcile(self) -> bool:
         """Rebuild the MR counter + numeric-id aliases from GitLab truth.
 
-        Rebuilds only this guard's own MR counter/aliases and reports success.
-        The shared core lock is **not** touched here — only the orchestrator
-        (:meth:`~warden.context.AppContext.reconcile_all`) sets it, and only once
-        every guard has reconciled, so a git-only success can never unlock a view
-        whose MR counter this reconcile left stale.
+        Rebuilds only this guard's own MR counter/aliases and, on success,
+        unlocks only its own per-guard lock
+        (:meth:`~warden.core.state.State.mark_reconciled`). A failure leaves
+        *this* guard fail-safe-locked but never touches the git guard's lock —
+        one guard's permanently unreachable upstream can never block the other.
 
-        In ``off`` mode no upstream call is made — the guard reports success so the
-        orchestrator can unlock and serve (then deny) requests without ever
-        contacting GitLab.
+        In ``off`` mode no upstream call is made — the guard unlocks itself so the
+        warden serves (then denies) requests without ever contacting GitLab.
         """
         if not self.cfg.gitlab_enabled:
+            self.state.mark_reconciled(self.name)
             return True
         ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
         self.project_id_aliases = resolved_ids
+        if ok:
+            self.state.mark_reconciled(self.name)
         return ok
 
     async def parse(self, request: Request) -> ApiIntent:

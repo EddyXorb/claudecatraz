@@ -1,12 +1,12 @@
-"""AppContext.reconcile_all (§07 Punkt 6 follow-up): the shared core lock is an
-aggregate property — it unlocks only when EVERY guard reconciled successfully,
-never on a single guard's success.
+"""Per-guard reconcile isolation (§07 Punkt 6 follow-up): each guard's fail-safe
+lock is its OWN — a guard whose upstream is permanently unreachable stays
+locked and denies, while every other guard keeps serving off its own fresh
+counts. AppContext.reconcile_all runs them all; a guard only ever unlocks its
+own view.
 
-Regression guard for the fail-safe hole this closed: the git branch reconcile
-and the REST-API MR reconcile mark the *same* shared lock, so if each guard
-unlocked on its own, a git-only success would open the view while the API
-guard's MR counter was left stale by a failed reconcile — letting it serve and
-quota against an empty view.
+Regression guard for the fail-safe design: git-branch and REST-API-MR counts
+live behind separate per-guard locks, so a failed MR reconcile can neither serve
+a stale MR count (safety) nor block the working git guard (availability).
 """
 
 from __future__ import annotations
@@ -20,86 +20,100 @@ from warden.core.state import State
 
 
 def _fresh_ctx(cfg):
-    """A context on a brand-new (never-reconciled → locked) state."""
+    """A context on a brand-new (never-reconciled → both guards locked) state."""
     return build_context(cfg, State(":memory:"), AuditLog("-"))
 
 
-async def test_reconcile_all_unlocks_only_when_all_guards_succeed(cfg, respx_router):
-    ctx = _fresh_ctx(cfg)
-    assert ctx.state.view().locked is True  # locked until the first full success
+def _git(ctx):
+    return next(g for g in ctx.guards if g.name == "git")
 
-    respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
+
+def _api(ctx):
+    # ApiGuard and GraphqlGuard both name themselves "api"; the reconciling one
+    # is the ApiGuard, distinguished by its own MR state.
+    return next(g for g in ctx.guards if g.name == "api" and hasattr(g, "mr_state"))
+
+
+def _mock_branches_ok(router):
+    router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
         return_value=httpx.Response(200, json=[{"name": "claude/a"}])
     )
-    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
+
+
+def _mock_projects_ok(router):
+    router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
         return_value=httpx.Response(200, json={"id": 1})
     )
+
+
+async def test_reconcile_all_unlocks_every_guard_on_full_success(cfg, respx_router):
+    ctx = _fresh_ctx(cfg)
+    assert _git(ctx).state_view().locked is True
+    assert _api(ctx).state_view().locked is True
+
+    _mock_branches_ok(respx_router)
+    _mock_projects_ok(respx_router)
     respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
-        return_value=httpx.Response(
-            200, json=[{"iid": 5, "state": "opened", "source_branch": "claude/x"}]
-        )
+        return_value=httpx.Response(200, json=[])
     )
 
     ok = await ctx.reconcile_all()
 
     assert ok is True
-    assert ctx.state.view().locked is False
+    assert _git(ctx).state_view().locked is False
+    assert _api(ctx).state_view().locked is False
     await ctx.router.aclose()
 
 
-async def test_reconcile_all_stays_locked_when_one_guard_fails(cfg, respx_router):
-    # THE fix: the git branch reconcile succeeds but the REST-API MR reconcile
-    # fails — the shared lock must stay engaged. Before, git's success unlocked
-    # the view, letting the API guard serve/quota against a stale (empty) MR
-    # counter.
+async def test_one_guards_permanent_failure_does_not_block_the_others(cfg, respx_router):
+    # THE isolation guarantee: the REST-API MR reconcile fails (its upstream is
+    # down), but the git branch reconcile succeeds — the git guard must serve off
+    # its own fresh counts, while ONLY the API guard stays fail-safe-locked and
+    # denies. A single unreachable upstream never blocks the whole warden.
     ctx = _fresh_ctx(cfg)
 
-    respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
-        return_value=httpx.Response(200, json=[{"name": "claude/a"}])
-    )
-    respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
-        return_value=httpx.Response(200, json={"id": 1})
-    )
+    _mock_branches_ok(respx_router)
+    _mock_projects_ok(respx_router)
     respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*").mock(
-        return_value=httpx.Response(500)  # API reconcile fails
+        return_value=httpx.Response(500)  # API upstream unreachable
     )
 
     ok = await ctx.reconcile_all()
 
-    assert ok is False
-    assert ctx.state.view().locked is True  # still locked despite the git guard's success
+    assert ok is False  # aggregate: not everything reconciled
+    assert _git(ctx).state_view().locked is False  # git serves — unaffected
+    assert _api(ctx).state_view().locked is True  # only the broken guard denies
     await ctx.router.aclose()
 
 
 async def test_reconcile_all_unlocks_in_off_mode(respx_router):
-    # off mode makes no upstream call; every guard reports success, so the
-    # orchestrator unlocks (the warden opens the port and then denies ops).
+    # off mode makes no upstream call; every guard unlocks itself, so the warden
+    # opens the port and then denies ops.
     ctx = _fresh_ctx(Config(gitlab_mode="off"))
 
     # No mock registered — any upstream call would raise respx.MockTransportError.
     ok = await ctx.reconcile_all()
 
     assert ok is True
-    assert ctx.state.view().locked is False
+    assert _git(ctx).state_view().locked is False
+    assert _api(ctx).state_view().locked is False
     await ctx.router.aclose()
 
 
-async def test_reconcile_all_stays_unlocked_after_a_later_transient_failure(cfg, respx_router):
-    # Once the latch is set by a full success, a later per-guard failure does NOT
-    # re-lock — the lock means "has fully reconciled at least once", so the last
-    # known-good counters keep serving instead of flapping locked on a blip.
+async def test_a_later_transient_failure_does_not_re_lock_a_reconciled_guard(cfg, respx_router):
+    # Each per-guard lock is a one-way latch: once the API guard reconciled, a
+    # later transient failure on a periodic cycle does NOT re-lock it — it keeps
+    # serving its last known-good MR count instead of flapping locked on a blip.
     ctx = _fresh_ctx(cfg)
-    branches = respx_router.route(method="GET", url__regex=r".*/repository/branches.*")
-    projects = respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$")
+    _mock_branches_ok(respx_router)
+    _mock_projects_ok(respx_router)
     mrs = respx_router.route(method="GET", url__regex=r".*/merge_requests\?.*")
 
-    branches.mock(return_value=httpx.Response(200, json=[{"name": "claude/a"}]))
-    projects.mock(return_value=httpx.Response(200, json={"id": 1}))
     mrs.mock(return_value=httpx.Response(200, json=[]))
     assert await ctx.reconcile_all() is True
-    assert ctx.state.view().locked is False
+    assert _api(ctx).state_view().locked is False
 
     mrs.mock(return_value=httpx.Response(500))  # transient blip on a later cycle
     assert await ctx.reconcile_all() is False
-    assert ctx.state.view().locked is False  # stays unlocked — latch is not un-set
+    assert _api(ctx).state_view().locked is False  # stays unlocked — latch not un-set
     await ctx.router.aclose()

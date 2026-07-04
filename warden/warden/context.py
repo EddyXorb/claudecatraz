@@ -38,24 +38,21 @@ class AppContext:
         self.state.close()
 
     async def reconcile_all(self) -> bool:
-        """Reconcile every guard, then mark the shared core lock reconciled
-        **iff all guards succeeded**.
+        """Reconcile every guard, each unlocking only its own per-guard lock on
+        success (see :meth:`~warden.core.state.State.is_reconciled`). Returns
+        True iff *all* guards succeeded — used only for the startup/periodic log
+        line, not to gate anything: the locks are per guard, so a guard whose
+        upstream is permanently unreachable stays fail-safe-locked and denies,
+        while every other guard keeps serving off its own fresh counts.
 
-        The lock is a single, shared, global fail-safe: ``state.view().locked``
-        stays true until the *whole* system has a fresh view. A guard may only
-        rebuild its own domain counters here — it must not touch the shared lock
-        alone, or one guard's success (say the git branch reconcile) would unlock
-        the fail-safe while another guard's counters (the REST-API guard's MR
-        count) were left stale by a failed reconcile, letting it serve and quota
-        against an empty view. Only this orchestrator sees every guard, so only it
-        may set the lock. Once set (persisted), a later transient per-guard failure
-        does not re-lock — the latch means "has fully reconciled at least once".
+        Each guard's lock is a one-way latch: once a guard has reconciled once,
+        a later transient failure on a periodic cycle does not re-lock it — it
+        keeps serving its last known-good counts instead of flapping locked on a
+        blip; the next successful cycle refreshes them.
         """
         ok = True
         for g in self.guards:
             ok = (await g.reconcile()) and ok
-        if ok:
-            self.state.mark_reconciled()
         return ok
 
 

@@ -35,7 +35,9 @@ def cfg() -> Config:
 @pytest.fixture
 def state() -> State:
     st = State(":memory:")
-    st.mark_reconciled()  # unlock the quota view for tests
+    # Unlock the quota view for tests — locks are per guard now, so unlock both.
+    st.mark_reconciled("git")
+    st.mark_reconciled("api")
     return st
 
 

@@ -176,18 +176,28 @@ class State:
         ).fetchone()
         return int(row["c"])
 
-    def is_reconciled(self) -> bool:
-        row = self._store.execute("SELECT value FROM meta WHERE key='last_reconcile'").fetchone()
+    def is_reconciled(self, guard: str) -> bool:
+        """Has ``guard`` reconciled its own domain at least once?
+
+        The reconcile lock is **per guard**, not global: each guard talks to
+        its own upstream, so one guard whose remote is permanently unreachable
+        must fail-safe-lock only *its own* view — never the whole warden. A
+        working guard keeps serving off its own fresh counts while a broken one
+        denies. Keyed in ``meta`` as ``reconciled:<guard>``.
+        """
+        row = self._store.execute(
+            "SELECT value FROM meta WHERE key = ?", (f"reconciled:{guard}",)
+        ).fetchone()
         return row is not None
 
-    def view(self) -> StateView:
-        """Core-only snapshot for the policy. Locked until the first
-        successful reconcile; open_mrs/open_branches default to 0 — each guard
-        fills its own domain count via its own ``state_view`` override (the
+    def view(self, guard: str) -> StateView:
+        """Core-only snapshot for the policy. Locked until ``guard`` first
+        reconciles successfully; open_mrs/open_branches default to 0 — each
+        guard fills its own domain count via its own ``state_view`` override (the
         git guard's :meth:`~warden.guards.git.guard.GitGuard.state_view`, the
         REST-API guard's :meth:`~warden.guards.gitlab_api.guard.ApiGuard.state_view`).
         """
-        if not self.is_reconciled():
+        if not self.is_reconciled(guard):
             return StateView(locked=True)
         return StateView(writes_last_hour=self.writes_last_hour(), locked=False)
 
@@ -197,9 +207,11 @@ class State:
         self._store.execute("DELETE FROM writes WHERE ts < ?", (cutoff,))
         self._store.commit()
 
-    def mark_reconciled(self) -> None:
+    def mark_reconciled(self, guard: str) -> None:
+        """Record that ``guard`` reconciled its own domain (unlocks only that
+        guard's view — see :meth:`is_reconciled`)."""
         self._store.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('last_reconcile', ?)",
-            (str(self._clock()),),
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (f"reconciled:{guard}", str(self._clock())),
         )
         self._store.commit()

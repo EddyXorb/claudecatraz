@@ -402,7 +402,8 @@ def _activated_client_ctx(cfg, respx_router):
         endpoint_enable=tuple(DEFAULT_ENABLED) + ("branch.create",),
     )
     state = State(":memory:")
-    state.mark_reconciled()
+    state.mark_reconciled("git")
+    state.mark_reconciled("api")
     ctx = build_context(activated_cfg, state, AuditLog("-"))
     return ctx, create_app(ctx)
 

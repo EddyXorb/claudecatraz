@@ -18,7 +18,8 @@ async def test_healthz_reports_reconcile_status(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["reconciled"] is True
+    # Per-guard reconcile status; the fixture unlocked both guards.
+    assert body["reconciled"] == {"api": True, "git": True}
 
 
 async def _admin_client(ctx):
