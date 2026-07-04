@@ -369,9 +369,7 @@ def _probe_gitlab_tokens(
         write_t = write_tokens.get(host, "")
 
         if read_t and write_t and read_t == write_t:
-            f.warn(
-                "tokens", f"{host}: READ and WRITE token are identical — likely a paste mistake"
-            )
+            f.warn("tokens", f"{host}: READ and WRITE token are identical — likely a paste mistake")
 
         for label, token in (("read", read_t), ("write", write_t)):
             if not token:

@@ -149,7 +149,9 @@ def test_doctor_warns_endpoint_closed_on_empty_grouped_files(tmp_path: Path) -> 
     assert any(i[0] == "warn" and "gitlab.com" in i[2] and "closed" in i[2] for i in f.items)
 
 
-def test_doctor_ok_on_non_empty_grouped_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_ok_on_non_empty_grouped_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """doctor reports ok when a configured endpoint has both tokens set (probe
     skipped in unit tests)."""
     import catraz.doctor as doc
