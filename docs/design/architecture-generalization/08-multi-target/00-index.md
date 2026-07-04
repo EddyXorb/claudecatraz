@@ -8,17 +8,17 @@ raten.
 
 ## Reihenfolge (Abhängigkeiten)
 
-| # | Datei | Leitet ab aus | Hängt ab von |
-| --- | --- | --- | --- |
-| 0b | [`00b-dns-poc.md`](00b-dns-poc.md) — **optional**, vorgezogen | §1.1/§1.2 | — |
-| 1 | [`01-config-schema.md`](01-config-schema.md) | §3.1–§3.4 | — |
-| 2 | [`02-credentials-and-access-mode.md`](02-credentials-and-access-mode.md) | §4 | 1 |
-| 3 | [`03-routing-and-guards.md`](03-routing-and-guards.md) | §1.1 (intern), §2 | 1, 2 |
-| 4 | [`04-state-keying.md`](04-state-keying.md) | §5 | 1, 3 |
-| 5 | [`05-env-cleanup.md`](05-env-cleanup.md) | §3.5 | 1, 2, 3 |
-| 6 | [`06-cli-doctor-init.md`](06-cli-doctor-init.md) | §6 | 1, 2 |
-| 7 | [`07-compose-and-agent-routing.md`](07-compose-and-agent-routing.md) | §1.1, §1.2, §4.1 | 1–6 |
-| 8 | [`08-container-test.md`](08-container-test.md) | §8 | 1–7 |
+| # | Datei | Leitet ab aus | Hängt ab von | Status |
+| --- | --- | --- | --- | --- |
+| 0b | [`00b-dns-poc.md`](00b-dns-poc.md) — **optional**, vorgezogen | §1.1/§1.2 | — | übersprungen (optional, Wegwerf-PoC) |
+| 1 | [`01-config-schema.md`](01-config-schema.md) | §3.1–§3.4 | — | ✅ erledigt (60abceb) |
+| 2 | [`02-credentials-and-access-mode.md`](02-credentials-and-access-mode.md) | §4 | 1 | offen |
+| 3 | [`03-routing-and-guards.md`](03-routing-and-guards.md) | §1.1 (intern), §2 | 1, 2 | offen |
+| 4 | [`04-state-keying.md`](04-state-keying.md) | §5 | 1, 3 | offen |
+| 5 | [`05-env-cleanup.md`](05-env-cleanup.md) | §3.5 | 1, 2, 3 | offen |
+| 6 | [`06-cli-doctor-init.md`](06-cli-doctor-init.md) | §6 | 1, 2 | offen |
+| 7 | [`07-compose-and-agent-routing.md`](07-compose-and-agent-routing.md) | §1.1, §1.2, §4.1 | 1–6 | offen |
+| 8 | [`08-container-test.md`](08-container-test.md) | §8 | 1–7 | offen |
 
 Schritte 1–5 sind das Warden-Python-Paket (`warden/`), 6–8 die CLI-/Asset-Schicht
 (`src/catraz/`). Jeder Schritt ist ein eigener Commit; **nicht** mehrere Schritte in
