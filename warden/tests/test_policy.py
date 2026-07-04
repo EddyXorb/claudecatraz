@@ -382,7 +382,15 @@ def test_git_multiref_quota_accounts_within_batch(cfg):
 
 def test_git_tag_push_rejected_with_tag_message(cfg):
     # B3 fix: a tag push is an irreversible verb (M4) — R4, not R2.
-    d = check_ref(RefCommand(ZERO, SHA, "refs/tags/claude/v1"), StateView(), cfg)
+    rules = cfg.effective_rules(HOST)
+    assert rules.max_open_branches is not None and rules.max_writes_per_hour is not None
+    d = check_ref(
+        RefCommand(ZERO, SHA, "refs/tags/claude/v1"),
+        StateView(),
+        cfg,
+        rules.max_open_branches,
+        rules.max_writes_per_hour,
+    )
     assert not d.allow and d.rule == "R4" and "tag" in d.reason
 
 

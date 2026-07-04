@@ -79,8 +79,8 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     # The create was recorded for the branch quota (the git guard's own
     # BranchState, §07 Punkt 6 step 4 — no more shared forge_state).
     git_guard = next(g for g in ctx.guards if g.name == "git")
-    assert git_guard.branch_state.open_branches() == 1
-    assert ctx.state.writes_last_hour() == 1
+    assert git_guard.branch_state.open_branches("gitlab.example") == 1
+    assert ctx.state.writes_last_hour("gitlab.example") == 1
     # Regression: the project key is normalised (no ``.git`` suffix) so it matches
     # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
     # reconcile row (``proj``) coexist → the branch is counted twice and the push

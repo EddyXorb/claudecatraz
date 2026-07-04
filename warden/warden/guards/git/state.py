@@ -9,14 +9,14 @@ Keyed by ``(host, project, ref)`` (§07 Punkt 8 follow-up, design spike
 section 4): two different hosts can coincidentally share a project path
 (``gitlab.com/acme/infra`` vs. ``my-gitlab.de/acme/infra``); without the host
 in the key a push on one would silently share/overwrite the other's row.
-:meth:`open_branches` stays a **global**, unfiltered count on purpose — the
-quota it feeds (``max_open_branches``) was already a single cross-project cap
-before hosts existed, so a multi-host deployment simply extends that same cap
-across every configured host, consistent with "one Warden process, one trust
-boundary" (§07 Punkt 8, section 1). A deployment with a single
-``[[git.endpoint]]`` simply has every row's ``host`` equal to that one
-endpoint's host, so this table is behaviourally identical to the
-pre-host-column schema.
+:meth:`open_branches` is **per-endpoint** (step 04, §3.3/§5 of the
+multi-target design): ``max_open_branches`` is overridable per
+``[[git.endpoint]]`` (``Config.effective_rules``), so the counter it is
+checked against must be scoped to that same endpoint — a global count would
+let one endpoint's pushes exhaust every other endpoint's quota. A deployment
+with a single ``[[git.endpoint]]`` simply always queries the one host every
+row carries, so this table is behaviourally identical to a global count for
+that case.
 """
 
 from __future__ import annotations
@@ -44,8 +44,10 @@ class BranchState:
         )
         self._store.commit()
 
-    def open_branches(self) -> int:
-        row = self._store.execute("SELECT count(*) AS c FROM agent_branches").fetchone()
+    def open_branches(self, host: str) -> int:
+        row = self._store.execute(
+            "SELECT count(*) AS c FROM agent_branches WHERE host=?", (host,)
+        ).fetchone()
         return int(row["c"])
 
     def replace_branches(self, host: str, project: str, refs: list[str]) -> None:

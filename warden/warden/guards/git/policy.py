@@ -58,7 +58,17 @@ def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
     return None
 
 
-def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
+def check_ref(
+    cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
+) -> Decision:
+    """``max_open_branches``/``max_writes_per_hour`` are the endpoint's own
+    resolved ceilings (``Config.effective_rules(intent.host)``, step 04) —
+    stateful quotas are per-endpoint, never a global ``Config`` field, so the
+    caller resolves the cascade once per request and passes the concrete
+    ints through (``GitRules``' fields are ``Optional`` — sentinels for the
+    cascade merge itself — so the caller, not this function, is where the
+    ``None``-after-cascade invariant is asserted).
+    """
     if cmd.ref.startswith("refs/tags/"):  # tags are never namespace branches
         # Irreversible verb ("never" capability) — R4, not R2.
         return Decision(False, R4, "tag pushes are not permitted")
@@ -73,10 +83,10 @@ def check_ref(cmd: RefCommand, state: StateView, cfg: Config) -> Decision:
         return Decision(False, R4, f"deleting branch {ref!r} is forbidden")
     if state.locked:  # Fail-safe
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
-    if cmd.is_create and state.open_branches >= cfg.max_open_branches:  # R5
-        return Decision(False, R5, f"max open branches reached ({cfg.max_open_branches})")
-    if state.writes_last_hour >= cfg.max_writes_per_hour:  # R5
-        return Decision(False, R5, f"rate limit reached ({cfg.max_writes_per_hour}/h)")
+    if cmd.is_create and state.open_branches >= max_open_branches:  # R5
+        return Decision(False, R5, f"max open branches reached ({max_open_branches})")
+    if state.writes_last_hour >= max_writes_per_hour:  # R5
+        return Decision(False, R5, f"rate limit reached ({max_writes_per_hour}/h)")
     return Decision(True, R2, "ok", TokenKind.WRITE)
 
 
@@ -94,6 +104,11 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
             R5,
             f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({cfg.max_push_bytes})",
         )
+    rules = cfg.effective_rules(intent.host)  # step 04: per-endpoint quota ceiling
+    max_open_branches, max_writes_per_hour = rules.max_open_branches, rules.max_writes_per_hour
+    assert max_open_branches is not None and max_writes_per_hour is not None, (
+        "effective_rules always resolves every field to a concrete built-in default"
+    )
     pending_branches = 0
     pending_writes = 0
     for cmd in intent.ref_commands:
@@ -102,7 +117,7 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
             open_branches=state.open_branches + pending_branches,
             writes_last_hour=state.writes_last_hour + pending_writes,
         )
-        d = check_ref(cmd, view, cfg)
+        d = check_ref(cmd, view, cfg, max_open_branches, max_writes_per_hour)
         if not d.allow:
             return d
         pending_writes += 1

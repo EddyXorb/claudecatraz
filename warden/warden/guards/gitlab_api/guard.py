@@ -82,16 +82,23 @@ class ApiGuard(Guard[ApiIntent]):
             or normalize_project(project) in self.project_id_aliases
         )
 
-    def state_view(self) -> StateView:
+    def state_view(self, host: str) -> StateView:
         """This guard's own snapshot: its per-guard fail-safe lock + writes
         counter plus this domain's MR count — never branches (the git guard
-        tracks those). Locked until *this* guard reconciled; a broken git
-        upstream never locks the REST-API guard, and vice versa."""
+        tracks those) — all scoped to ``host`` (per-endpoint since step 04).
+        Locked until *this* guard reconciled; a broken git upstream never
+        locks the REST-API guard, and vice versa.
+
+        See :meth:`~warden.guards.git.guard.GitGuard.state_view` for why
+        ``host`` is normalised but not resolved/validated here (this runs
+        before ``host_gate``).
+        """
         if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
+        key = self.cfg.normalize_host(host)
         return StateView(
-            open_mrs=self.mr_state.open_mrs(),
-            writes_last_hour=self.state.writes_last_hour(),
+            open_mrs=self.mr_state.open_mrs(key),
+            writes_last_hour=self.state.writes_last_hour(key),
             locked=False,
         )
 
@@ -173,7 +180,11 @@ class ApiGuard(Guard[ApiIntent]):
             assert intent.endpoint.kind is not None, (
                 f"write recognizer {intent.endpoint.id!r} has no kind"
             )
-            self.state.record_write("api", intent.endpoint.kind, str(intent.iid or intent.project))
+            host = self.cfg.resolve_target_host(intent.host)
+            assert host is not None, "kernel_gates already denied an unresolved host"
+            self.state.record_write(
+                "api", host, intent.endpoint.kind, str(intent.iid or intent.project)
+            )
 
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:
         # Raw query is reattached here at transport boundary only, never in intent.path

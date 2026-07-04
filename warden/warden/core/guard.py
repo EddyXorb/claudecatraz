@@ -170,13 +170,17 @@ class Guard(ABC, Generic[IntentT]):
         """
         return self.cfg.project_allowed(project)
 
-    def state_view(self) -> StateView:
+    def state_view(self, host: str) -> StateView:
         """Quota snapshot hook. Default: this guard's own core-only view (no
         domain state), locked until this guard reconciled. A guard backed by a
         domain (e.g. the git/REST-API branch/MR counters) overrides this to
         return the combined snapshot instead.
+
+        ``host`` is the request's raw ``Host`` header (step 04, state-keying):
+        the stateful quotas are per-endpoint now, so the snapshot must be
+        scoped to the endpoint the request is actually addressed to.
         """
-        return self.state.view(self.name)
+        return self.state.view(self.name, host)
 
     async def startup(self) -> None:
         """One-time, pre-serve setup.
@@ -202,7 +206,7 @@ class Guard(ABC, Generic[IntentT]):
         started = time.monotonic()
 
         intent = await self.parse(request)
-        view = self.state_view()
+        view = self.state_view(intent.host)
 
         decision = kernel_gates(intent, self.cfg, self.project_allowed)
         if decision is None:

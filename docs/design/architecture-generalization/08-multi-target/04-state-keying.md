@@ -67,3 +67,30 @@ refactor(state): per-endpoint quota keyed by (host, project)
 Reconcile läuft pro Endpoint; Branch-/MR-Zähler und Quotas sind per-Endpoint
 (`host`-gefiltert) und nutzen `effective_rules`; kein `implicit_host` mehr im State-Pfad;
 Tests grün.
+
+## Status
+
+✅ Erledigt. Umsetzung folgt der 4-Punkte-Liste, plus zwei Zusatzentscheidungen:
+
+- **`writes`-Tabelle bekam ebenfalls eine `host`-Spalte** (Schema v2 → v3):
+  `max_writes_per_hour` ist über `effective_rules` genauso per-Endpoint überschreibbar wie
+  `max_open_branches`/`max_open_mrs`, also muss auch der Zähler, gegen den geprüft wird
+  (`writes_last_hour`), per-Endpoint sein — ein globaler Zähler hätte einem einzelnen
+  vielbeschäftigten Endpoint erlaubt, das Rate-Limit aller anderen Endpoints
+  mit-aufzubrauchen. Kein Migrationslauf, wie in Punkt 4 beschrieben.
+- **`for_each_host_project`'s closed-Host-Toleranz (Commit `32bc43b`) wurde durch einen
+  Caller-seitigen Vorfilter ersetzt.** Reconcile ruft die Schleife jetzt mit
+  `cfg.open_hosts` auf (neue `Config`-Property, gemeinsam von `reconcile_branches` und
+  `reconcile_mrs` genutzt) statt mit `cfg.effective_hosts`; die Schleife selbst vertraut
+  darauf, dass jeder übergebene Host offen ist, und lässt `router.for_host` bei einem
+  `closed`-Host jetzt ungefangen `KeyError` werfen (Caller-Bug, kein erwarteter Laufzeitfall
+  mehr). Verhalten nach außen unverändert — der Regressionstest aus Schritt 03
+  (`test_reconcile_completes_and_unlocks_when_one_of_two_endpoints_is_closed`) bleibt grün —,
+  aber der Vertrag liegt jetzt beim Aufrufer, nicht mehr in der geteilten Schleife.
+
+Bewusst nicht angefasst: `Config.max_push_bytes` (der Push-Größen-Deckel) wird weiterhin
+als globales Feld geprüft (`guards/git/policy.py::decide`), nicht über
+`effective_rules(intent.host).max_push_bytes`, obwohl `GitRules` das Feld für die Kaskade
+mitführt — ein Endpoint-Override für `max_push_bytes` wird also derzeit still ignoriert.
+Das ist kein stateful-Quota-Zähler (Fokus dieses Schritts) und war außerhalb der
+4-Punkte-Liste; potenzieller Folge-Fix für einen späteren Schritt.

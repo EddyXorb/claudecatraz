@@ -219,12 +219,28 @@ class Config:
 
     @property
     def effective_hosts(self) -> tuple[str, ...]:
-        """Host list reconcile iterates over: every configured endpoint's
-        normalised host, in ``git_endpoints`` order — always "from the
-        endpoints" (step 03), no single-target fallback. Empty when no
-        endpoint is configured. Reconcile does not yet skip ``closed``
-        endpoints here (that per-endpoint iteration is step 04)."""
+        """Host list: every configured endpoint's normalised host, in
+        ``git_endpoints`` order — always "from the endpoints" (step 03), no
+        single-target fallback. Empty when no endpoint is configured. Includes
+        ``closed`` endpoints; see :attr:`open_hosts` for the per-endpoint
+        reconcile's trimmed variant (step 04)."""
         return tuple(self.normalize_host(e.host) for e in self.git_endpoints)
+
+    @property
+    def open_hosts(self) -> tuple[str, ...]:
+        """:attr:`effective_hosts`, trimmed to endpoints that currently have a
+        usable read credential (step 04: per-endpoint reconcile). The single
+        definition shared by :func:`~warden.guards.git.reconcile.reconcile_branches`
+        and :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs` — a
+        ``closed`` endpoint is unreachable via ``host_gate`` anyway (R6) and
+        never needs reconciling (see :func:`~warden.core.transport.for_each_host_project`'s
+        docstring for why passing a closed host through would be a bug, not a
+        tolerated case)."""
+        return tuple(
+            self.normalize_host(e.host)
+            for e in self.git_endpoints
+            if self.access_mode(e.host) != "closed"
+        )
 
     def effective_rules(self, host: str) -> GitRules:
         """Per-key cascade for ``host``: endpoint override, else ``git_rules``

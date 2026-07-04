@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Sequence
 from urllib.parse import quote
 
 import httpx
@@ -272,12 +272,13 @@ async def get_paginated(upstream: Upstream, path: str) -> list[Any]:
 async def for_each_host_project(
     cfg: Config,
     router: UpstreamRouter,
+    hosts: Sequence[str],
     label: str,
     fn: Callable[[Upstream, str, str], Awaitable[None]],
 ) -> bool:
     """Shared fail-safe reconcile loop (§6.11, §07 Punkt 8 follow-up): iterate
-    every configured host (``cfg.effective_hosts``) times every allowed
-    project, calling ``fn(upstream, host, project)`` for each combination.
+    ``hosts`` times every allowed project, calling ``fn(upstream, host,
+    project)`` for each combination.
 
     Forge-neutral on purpose — both the git guard's branch reconcile and the
     REST-API guard's MR reconcile had their own copy of this exact double
@@ -286,30 +287,24 @@ async def for_each_host_project(
     domain-specific work (listing + replacing that guard's own state table);
     a combination whose ``fn`` raises is logged (using ``label`` — e.g.
     ``"git"``/``"api"`` — to tell the guards' log lines apart) and skipped,
-    never aborting the rest of the loop. Returns True only if every *open*
+    never aborting the rest of the loop. Returns True only if every
     combination completed without raising; False tells the caller to keep its
     state fail-closed-locked rather than trust an undercounted/stale view.
 
-    ``cfg.effective_hosts`` still lists every configured endpoint's host,
-    ``closed`` or not (step 04 is the one that trims it to open endpoints
-    only) — a ``closed`` host has no entry in ``router``'s map
-    (:class:`UpstreamRouter` skips it, §4.2/step 03), so :meth:`UpstreamRouter.for_host`
-    would raise ``KeyError`` for it. That is an *expected*, non-fatal state
-    (an operator can add an endpoint before its token is ready) — not the
-    same as ``fn`` raising — so it is skipped quietly and does **not** flip
-    ``ok`` to False: a closed host is unreachable via ``host_gate`` anyway
-    (R6), so it never needed reconciling, and treating it as a failure would
-    permanently fail-safe-lock the *whole* guard (every host) for as long as
-    any single endpoint stays closed — exactly the cross-endpoint blast
-    radius §4.2/step 02 was built to prevent.
+    ``hosts`` is the caller's job to narrow to currently-open endpoints
+    (step 04: :func:`~warden.guards.git.reconcile.reconcile_branches` /
+    :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs` filter
+    ``cfg.git_endpoints`` via ``cfg.access_mode(...) != "closed"`` *before*
+    calling here) — this loop trusts that contract and calls
+    :meth:`UpstreamRouter.for_host` unconditionally. A ``closed`` host slipping
+    through would be a caller bug, not an expected runtime state, so it is
+    allowed to raise ``KeyError`` rather than being silently swallowed (this
+    function used to catch it here itself, before both callers pre-filtered —
+    see the git history around the ``closed``-endpoint reconcile crash fix).
     """
     ok = True
-    for host in cfg.effective_hosts:
-        try:
-            upstream = router.for_host(host)
-        except KeyError:
-            log.debug("%s reconcile: host %s has no open endpoint, skipping", label, host)
-            continue
+    for host in hosts:
+        upstream = router.for_host(host)
         for project in cfg.allowed_projects:
             try:
                 await fn(upstream, host, project)

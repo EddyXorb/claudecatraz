@@ -78,15 +78,24 @@ class GitGuard(Guard[GitIntent]):
             Route("/git/{project:path}/git-receive-pack", self.handle, methods=["POST"]),
         ]
 
-    def state_view(self) -> StateView:
-        """This guard's own per-guard lock + its own branch counter (§07 Punkt 6
-        step 4). Locked until *this* guard reconciled — a broken REST-API
-        upstream never locks git, and vice versa."""
+    def state_view(self, host: str) -> StateView:
+        """This guard's own per-guard lock + its own branch counter, scoped to
+        ``host`` (§07 Punkt 6 step 4; per-endpoint since step 04). Locked
+        until *this* guard reconciled — a broken REST-API upstream never
+        locks git, and vice versa.
+
+        ``host`` is normalised but not resolved/validated here: this runs
+        *before* the kernel's ``host_gate`` (§2), so an unrecognised host must
+        not raise — it simply queries a key nothing was ever recorded under,
+        yielding harmless zero counts; ``host_gate`` denies the request right
+        after regardless of what this view reports.
+        """
         if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
+        key = self.cfg.normalize_host(host)
         return StateView(
-            open_branches=self.branch_state.open_branches(),
-            writes_last_hour=self.state.writes_last_hour(),
+            open_branches=self.branch_state.open_branches(key),
+            writes_last_hour=self.state.writes_last_hour(key),
             locked=False,
         )
 
@@ -181,7 +190,7 @@ class GitGuard(Guard[GitIntent]):
         assert host is not None, "kernel_gates already denied an unresolved host"
         for cmd in intent.ref_commands:
             ref = cmd.ref.removeprefix("refs/heads/")
-            self.state.record_write("git", "push", ref)
+            self.state.record_write("git", host, "push", ref)
             if cmd.is_create:
                 self.branch_state.add_branch(host, intent.project, ref)
 
@@ -240,9 +249,14 @@ class GitGuard(Guard[GitIntent]):
         if intent.operation != "receive-pack":
             return deny_json(decision)
         refs = [c.ref for c in intent.ref_commands]
+        rules = self.cfg.effective_rules(intent.host)
+        max_open_branches, max_writes_per_hour = rules.max_open_branches, rules.max_writes_per_hour
+        assert max_open_branches is not None and max_writes_per_hour is not None, (
+            "effective_rules always resolves every field to a concrete built-in default"
+        )
         per_ref = []
         for cmd in intent.ref_commands:
-            d = policy.check_ref(cmd, state, self.cfg)
+            d = policy.check_ref(cmd, state, self.cfg, max_open_branches, max_writes_per_hour)
             per_ref.append(d if not d.allow else decision)
         per_ref = per_ref or [decision]
         return git_reject_response(per_ref, refs or [""], sideband=intent.sideband)

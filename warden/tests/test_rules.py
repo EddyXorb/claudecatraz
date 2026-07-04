@@ -134,7 +134,21 @@ def test_decide_rule_is_always_registered(cfg, make_decision):
 
 
 def test_git_tag_push_and_branch_delete_are_registered_as_r4(cfg):
-    tag = check_ref(RefCommand(ZERO, SHA, "refs/tags/claude/v1"), StateView(), cfg)
-    delete = check_ref(RefCommand(SHA, ZERO, "refs/heads/claude/feature"), StateView(), cfg)
+    rules = cfg.effective_rules("h")
+    assert rules.max_open_branches is not None and rules.max_writes_per_hour is not None
+    tag = check_ref(
+        RefCommand(ZERO, SHA, "refs/tags/claude/v1"),
+        StateView(),
+        cfg,
+        rules.max_open_branches,
+        rules.max_writes_per_hour,
+    )
+    delete = check_ref(
+        RefCommand(SHA, ZERO, "refs/heads/claude/feature"),
+        StateView(),
+        cfg,
+        rules.max_open_branches,
+        rules.max_writes_per_hour,
+    )
     assert tag.rule == "R4" and rule(tag.rule).meta == MetaRule.M4
     assert delete.rule == "R4" and rule(delete.rule).meta == MetaRule.M4

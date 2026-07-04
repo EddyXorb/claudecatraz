@@ -7,9 +7,9 @@ Folded here from the now-dissolved ``guards.gitlab.state.ForgeState``
 :mod:`warden.guards.git.state`; this table is the REST-API guard's MR-quota
 domain only.
 
-Keyed by ``(host, project, iid)`` and kept a **global**, unfiltered
-:meth:`open_mrs` count for the same reasons :mod:`warden.guards.git.state`
-is — see that module's docstring, this table's shape mirrors it exactly.
+Keyed by ``(host, project, iid)`` with a **per-endpoint** :meth:`open_mrs`
+count for the same reasons :mod:`warden.guards.git.state` is — see that
+module's docstring, this table's shape mirrors it exactly.
 """
 
 from __future__ import annotations
@@ -38,9 +38,9 @@ class MrState:
         )
         self._store.commit()
 
-    def open_mrs(self) -> int:
+    def open_mrs(self, host: str) -> int:
         row = self._store.execute(
-            "SELECT count(*) AS c FROM agent_mrs WHERE state='opened'"
+            "SELECT count(*) AS c FROM agent_mrs WHERE host=? AND state='opened'", (host,)
         ).fetchone()
         return int(row["c"])
 
