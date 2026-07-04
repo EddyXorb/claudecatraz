@@ -19,11 +19,12 @@ GITLAB_MODE selects one of three operating modes:
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Mapping, Optional
 
-from .config import Config, ConfigError
+from .config import Config, ConfigError, HostCredentials
 
 _VALID_MODES = frozenset({"off", "read-only", "read-write"})
 
@@ -57,10 +58,16 @@ def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ..
     return parse_api_endpoints(file).enable
 
 
-def _parse_git_url_hosts(file: Mapping[str, object]) -> frozenset[str]:
+def _parse_git_url_hosts(file: Mapping[str, object]) -> tuple[str, ...]:
     """Parse ``[git.urls].hosts`` (§07 Punkt 8 design spike: the host allowlist).
 
-    Absent ``[git]`` or ``[git.urls]`` ⇒ empty frozenset — multi-target is
+    Returns an **order-preserving, de-duplicated tuple** rather than a
+    frozenset — ``Config.host_order`` needs the order (the first entry is the
+    host the legacy ``GITLAB_READ_TOKEN``/``GITLAB_WRITE_TOKEN`` alias, design
+    spike section 3); ``Config.allowed_hosts`` (the plain membership set used
+    by ``host_allowed``) is built from this tuple at the call site.
+
+    Absent ``[git]`` or ``[git.urls]`` ⇒ empty tuple — multi-target is
     inactive, ``Config.host_allowed`` then always allows (unchanged single-
     target behaviour). Present but malformed shape aborts startup (fail-closed,
     consistent with every other ``warden.toml`` section). Entries are
@@ -74,11 +81,70 @@ def _parse_git_url_hosts(file: Mapping[str, object]) -> frozenset[str]:
     if not isinstance(urls, Mapping):
         raise ConfigError("warden.toml: [git.urls] must be a table")
     if "hosts" not in urls:
-        return frozenset()
+        return ()
     hosts = urls["hosts"]
     if not isinstance(hosts, list) or not all(isinstance(h, str) for h in hosts):
         raise ConfigError(f"git.urls.hosts in warden.toml must be a list of strings, got {hosts!r}")
-    return frozenset(h.strip().lower() for h in hosts if h.strip())
+    seen: dict[str, None] = {}
+    for h in hosts:
+        cleaned = h.strip().lower()
+        if cleaned:
+            seen[cleaned] = None  # dict preserves insertion order and de-dupes
+    return tuple(seen)
+
+
+_SLUG_INVALID = re.compile(r"[^a-z0-9]")
+
+
+def _host_slug(host: str) -> str:
+    """Deterministic env-var slug for a host (§07 Punkt 8 follow-up, design
+    spike section 3): lowercase, every character outside ``[a-z0-9]`` becomes
+    ``_``, then the result is upper-cased (``my-gitlab.de`` → ``MY_GITLAB_DE``).
+    Purely mechanical — callers must check for collisions themselves, this
+    function does not (and cannot) know the rest of the host list.
+    """
+    return _SLUG_INVALID.sub("_", host.lower()).upper()
+
+
+def _resolve_host_credentials(
+    env: Mapping[str, str], host_order: tuple[str, ...], primary_read: str, primary_write: str
+) -> dict[str, HostCredentials]:
+    """Per-host token resolution (§07 Punkt 8 follow-up, design spike section 3).
+
+    ``host_order[0]`` (if any) aliases the legacy ``GITLAB_READ_TOKEN``/
+    ``GITLAB_WRITE_TOKEN`` (already resolved by the caller as
+    ``primary_read``/``primary_write``) — no separate env var needed for it.
+    Every other host reads ``GITLAB_READ_TOKEN__<SLUG>``/
+    ``GITLAB_WRITE_TOKEN__<SLUG>`` (``_FILE`` variants included, via
+    :func:`_secret`). Slug collisions across the host list abort startup
+    (``ConfigError``, fail-closed) before any additional-host token is even
+    looked up — a silent credential mix-up between two hosts is worse than
+    refusing to boot.
+    """
+    if not host_order:
+        return {}
+
+    slug_owner: dict[str, str] = {}
+    for host in host_order:
+        slug = _host_slug(host)
+        if slug in slug_owner:
+            raise ConfigError(
+                f"warden.toml [git.urls] hosts: {host!r} and {slug_owner[slug]!r} both map "
+                f"to the env-var slug {slug!r} — rename one host so their credentials "
+                "cannot be mixed up"
+            )
+        slug_owner[slug] = host
+
+    creds: dict[str, HostCredentials] = {
+        host_order[0]: HostCredentials(read_token=primary_read, write_token=primary_write)
+    }
+    for host in host_order[1:]:
+        slug = _host_slug(host)
+        creds[host] = HostCredentials(
+            read_token=_secret(env, f"GITLAB_READ_TOKEN__{slug}"),
+            write_token=_secret(env, f"GITLAB_WRITE_TOKEN__{slug}"),
+        )
+    return creds
 
 
 DEFAULT_TOML_PATH = "/etc/warden/warden.toml"
@@ -189,6 +255,10 @@ def from_env(
             raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
         return tuple(p.strip() for p in val if p.strip())
 
+    read_token = _secret(env, "GITLAB_READ_TOKEN")
+    write_token = _secret(env, "GITLAB_WRITE_TOKEN")
+    host_order = _parse_git_url_hosts(file)
+
     cfg = Config(
         branch_prefixes=_tunable_branch_prefixes(
             "BRANCH_PREFIX", "branch_prefixes", "branch_prefix", ("claude/",)
@@ -199,8 +269,8 @@ def from_env(
         max_push_bytes=_tunable_int("MAX_PUSH_BYTES", "max_push_bytes", 50 * 1024 * 1024),
         allowed_projects=_tunable_projects("ALLOWED_PROJECTS", "allowed_projects"),
         api_url=env.get("GITLAB_URL", "https://gitlab.com").rstrip("/") + "/api/v4",
-        read_token=_secret(env, "GITLAB_READ_TOKEN"),
-        write_token=_secret(env, "GITLAB_WRITE_TOKEN"),
+        read_token=read_token,
+        write_token=write_token,
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
@@ -209,7 +279,9 @@ def from_env(
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
         gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip(),
         endpoint_enable=_parse_endpoint_enable(file),
-        allowed_hosts=_parse_git_url_hosts(file),
+        allowed_hosts=frozenset(host_order),
+        host_order=host_order,
+        host_credentials=_resolve_host_credentials(env, host_order, read_token, write_token),
     )
 
     if strict:
@@ -240,6 +312,7 @@ def _validate(cfg: Config) -> None:
         if not cfg.read_token:
             problems.append("GITLAB_READ_TOKEN is required")
         problems.extend(_branch_prefixes_problems(cfg))
+        problems.extend(_additional_host_credential_problems(cfg, require_write=False))
         # An empty allowlist is NOT a startup error: project_allowed() already
         # denies everything, so the warden boots (dev-env runs offline) and
         # simply refuses every GitLab op until a project is allowed.
@@ -250,10 +323,31 @@ def _validate(cfg: Config) -> None:
         if not cfg.write_token:
             problems.append("GITLAB_WRITE_TOKEN is required")
         problems.extend(_branch_prefixes_problems(cfg))
+        problems.extend(_additional_host_credential_problems(cfg, require_write=True))
         # Empty allowlist ⇒ deny-all (see read-only note above), not an abort.
 
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))
+
+
+def _additional_host_credential_problems(cfg: Config, *, require_write: bool) -> list[str]:
+    """Fail-closed validation of every host beyond the first (§07 Punkt 8
+    follow-up): each one needs its own ``GITLAB_READ_TOKEN__<SLUG>`` (and, in
+    read-write mode, ``GITLAB_WRITE_TOKEN__<SLUG>``) exactly like the primary
+    host needs the bare env vars — a host listed in ``[git.urls] hosts``
+    without its token is a silent, always-failing target, not a valid one.
+    ``host_order[0]`` is excluded: its credentials are the already-validated
+    primary read_token/write_token (aliased, see ``_resolve_host_credentials``).
+    """
+    problems: list[str] = []
+    for host in cfg.host_order[1:]:
+        slug = _host_slug(host)
+        cred = cfg.host_credentials.get(host, HostCredentials())
+        if not cred.read_token:
+            problems.append(f"GITLAB_READ_TOKEN__{slug} is required (host {host!r})")
+        if require_write and not cred.write_token:
+            problems.append(f"GITLAB_WRITE_TOKEN__{slug} is required (host {host!r})")
+    return problems
 
 
 def _branch_prefixes_problems(cfg: Config) -> list[str]:
