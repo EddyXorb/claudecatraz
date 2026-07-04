@@ -12,7 +12,7 @@ raten.
 | --- | --- | --- | --- | --- |
 | 0b | [`00b-dns-poc.md`](00b-dns-poc.md) — **optional**, vorgezogen | §1.1/§1.2 | — | übersprungen (optional, Wegwerf-PoC) |
 | 1 | [`01-config-schema.md`](01-config-schema.md) | §3.1–§3.4 | — | ✅ erledigt (60abceb) |
-| 2 | [`02-credentials-and-access-mode.md`](02-credentials-and-access-mode.md) | §4 | 1 | offen |
+| 2 | [`02-credentials-and-access-mode.md`](02-credentials-and-access-mode.md) | §4 | 1 | ✅ erledigt (fac1806) |
 | 3 | [`03-routing-and-guards.md`](03-routing-and-guards.md) | §1.1 (intern), §2 | 1, 2 | offen |
 | 4 | [`04-state-keying.md`](04-state-keying.md) | §5 | 1, 3 | offen |
 | 5 | [`05-env-cleanup.md`](05-env-cleanup.md) | §3.5 | 1, 2, 3 | offen |

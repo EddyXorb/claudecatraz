@@ -73,3 +73,17 @@ Tokens werden aus `read_tokens`/`write_tokens` aufgelöst; `access_mode(host)` l
 `closed`/`read-only`/`read-write` aus der Präsenz; `GITLAB_MODE`/`gitlab_mode`/`_host_slug`
 sind weg; ein tokenloser oder write-ohne-read Endpoint startet `closed` mit Warnung,
 ohne den Warden zu stoppen; Tests grün.
+
+## Status
+
+✅ Erledigt (Commit `fac1806`). Additiv umgesetzt: `Config.gitlab_mode`/`_VALID_MODES`,
+`core/config_load.py::_resolve_host_credentials`/`_host_slug` und die
+`GITLAB_READ_TOKEN__<SLUG>`-Env-Logik wurden **nicht** entfernt (das macht Schritt 03,
+sobald `guard.py`/`__main__.py`/die Guards von `gitlab_enabled`/`writes_enabled` auf
+`access_mode(intent.host)` umgehängt sind). Die neue Auflösung lebt unter eigenen,
+nicht kollidierenden Namen: `Config.git_credentials` (statt `host_credentials`),
+`_resolve_git_endpoint_credentials` (statt `_resolve_host_credentials`), `access_mode`
+(statt `gitlab_mode`). Grund: kein `[[git.endpoint]]` ist heute in einem Deployment
+scharf geschaltet — ein sofortiger Cutover ließe `access_mode()` für jeden Host
+`closed` liefern und würde jeden bestehenden Single-Target-Warden leerlaufen lassen,
+bevor Schritt 03 das Routing dafür bereitstellt. Gleiches Muster wie Schritt 01.
