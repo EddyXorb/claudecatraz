@@ -5,11 +5,11 @@ frozen :class:`~warden.core.config.Config` value (what the policy consumes);
 this module holds everything that *produces* one — secret files, TOML parsing,
 env-over-file precedence, and the hard fail-closed validation.
 
-One source of truth per setting (step 05): policy tunables (branch namespace,
+One source of truth per setting: policy tunables (branch namespace,
 quotas, allowlists) live only in ``warden.toml``'s ``[git.rules]``/
 ``[[git.endpoint]]``; forge identity/credentials live only in the grouped
 ``read_tokens``/``write_tokens`` secret files. There is no global operating
-mode and no startup-fatal token requirement anymore — a per-host access mode
+mode and no startup-fatal token requirement — a per-host access mode
 (:meth:`~warden.core.config.Config.access_mode`) is derived purely from which
 of that host's tokens are present. A host with no usable read token is simply
 ``closed`` (a logged warning, see :func:`_warn_closed_endpoints`), never a
@@ -60,11 +60,11 @@ def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
     ``actions``).
 
     Absent (``raw is None``, the key isn't in the table) stays ``None`` — "no
-    opinion here, the cascade falls through" (§09 §1.4). Present — including
+    opinion here, the cascade falls through". Present — including
     ``[]`` — becomes a tuple, deliberately kept distinguishable from absent
-    (§09 §5: an explicit empty list means "may do nothing", not "inherit").
+    (an explicit empty list means "may do nothing", not "inherit").
 
-    Fail-closed (§09 §3.1): not a list of strings, or an id outside the closed
+    Fail-closed: not a list of strings, or an id outside the closed
     vocabulary (typo protection), aborts startup. Deferred import: the
     vocabulary is guard-owned, core stays guard-agnostic at module-import time.
     """
@@ -155,7 +155,7 @@ def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
     )
     if actions is not None:
         # Explicit endpoint override with a type-impossible id is always a
-        # mistake (§09 §3.2) — unlike the inherited default (cut quietly in
+        # mistake — unlike the inherited default (cut quietly in
         # Config.effective_actions), this aborts startup here.
         from ..guards.gitlab_api.actions import actions_valid_for_type
 
@@ -305,7 +305,7 @@ def from_env(
 ) -> Config:
     """Build a :class:`Config`.
 
-    **One source of truth per setting** (step 05). Policy tunables
+    **One source of truth per setting.** Policy tunables
     (``branch_prefixes``, the ``max_*`` limits, ``allowed_projects``) come from
     ``warden.toml`` only — no env override left. Secrets (the grouped
     ``read_tokens``/``write_tokens`` files) and infra (host, ports, paths)
@@ -314,7 +314,7 @@ def from_env(
     With ``strict`` (the production path) a malformed ``warden.toml`` still
     aborts startup — a non-positive quota or an empty/blank branch-prefix
     namespace is nonsensical regardless of deployment. There is no
-    startup-fatal *credential* requirement anymore: a host with no usable read
+    startup-fatal *credential* requirement: a host with no usable read
     token simply resolves ``closed`` (fail-closed *degrade*, logged by
     :func:`_warn_closed_endpoints`), and a deployment with no endpoints at all
     boots and denies everything via ``core.guard.host_gate``.
@@ -331,7 +331,7 @@ def from_env(
         except ValueError as exc:
             raise ConfigError(f"{key} must be an integer, got {raw!r}") from exc
 
-    # --- tunables: warden.toml only, no env override (step 05) ---
+    # --- tunables: warden.toml only, no env override ---
     def _tunable_int(toml_key: str, default: int) -> int:
         val = file.get(toml_key, default)
         if not isinstance(val, int) or isinstance(val, bool):
@@ -408,13 +408,13 @@ def from_env(
 
 
 def _validate(cfg: Config) -> None:
-    """Fail-closed validation with no mode-branching left (step 05): every
-    check here is unconditional, since there is no longer a declared
-    off/read-only/read-write mode to gate them on.
+    """Fail-closed validation with no mode-branching: every check here is
+    unconditional, since there is no declared off/read-only/read-write mode
+    to gate them on.
 
     No credential (or allowlist) requirement aborts startup — a git_endpoint
-    with a missing/inconsistent token is fail-closed-*degrade* (§4.2, step 02):
-    the endpoint simply resolves ``closed`` (a logged warning, see
+    with a missing/inconsistent token is fail-closed-*degrade*: the endpoint
+    simply resolves ``closed`` (a logged warning, see
     ``_warn_closed_endpoints``), never an abort; and an empty ``allowed_projects``
     just means ``project_allowed()`` denies everything, so the warden boots
     (dev-env runs offline) and every op stays denied until a project is

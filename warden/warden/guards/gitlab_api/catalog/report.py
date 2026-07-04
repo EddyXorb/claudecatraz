@@ -2,9 +2,9 @@
 
 Served by the admin ``/policy`` route (``app.py``) so the CLI can learn the
 catalog's ids and each configured host's activation state without a runtime
-Python import. Per-host since §09 step 03: two hosts with different
-``actions`` now genuinely differ, so one flat table is no longer the whole
-story — the report has one section per configured host instead.
+Python import. Per-host, since two hosts with different ``actions`` can
+genuinely differ: the report has one section per configured host rather
+than a single flat table.
 """
 
 from __future__ import annotations

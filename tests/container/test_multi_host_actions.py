@@ -1,11 +1,10 @@
-"""Container-level integration test for Doc 09 (endpoint actions) §8 / step 05
-(docs/design/architecture-generalization/09-endpoint-actions/05-container-test.md):
-a multi-endpoint deployment with three hosts — full default `actions`,
-review-only override, and a `plain`-type host inheriting the default's
-type-cut — is actually treated differently by a *real* Warden container, on
-both the git axis and the REST axis.
+"""Container-level integration test for endpoint actions: a multi-endpoint
+deployment with three hosts — full default `actions`, review-only override,
+and a `plain`-type host inheriting the default's type-cut — is actually
+treated differently by a *real* Warden container, on both the git axis and
+the REST axis.
 
-Same blueprint as ``tests/container/test_multi_host.py`` (step 08): a real
+Same blueprint as ``tests/container/test_multi_host.py``: a real
 ``gitlab-warden`` service (via `catraz.compose`), driven with `docker compose
 exec` + a stdlib `http.client` call carrying an explicit `Host` header — no
 unit-level mock, no real forge behind these hostnames (see that module's
@@ -41,7 +40,7 @@ def _docker_available() -> bool:
 pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
 
 
-# ── fixed multi-endpoint fixture data (§6 cascade example) ────────────────────
+# ── fixed multi-endpoint fixture data (cascade example) ───────────────────────
 
 HOST_FULL = "full-forge.test"  # gitlab, no `actions` override -> domain default
 HOST_REVIEW = "review-forge.test"  # gitlab, actions = [git.fetch, mr.comment]
@@ -52,15 +51,15 @@ _WARDEN_TOML = f"""\
 # Top-level (global) project allowlist: the request-path project gate for BOTH
 # guards is `cfg.project_allowed` (guards/git/policy.py, core/guard.py) which
 # reads this global list — the per-[[git.endpoint]] `allowed_projects` below is
-# the §3 config surface but is not (yet) what the git/REST project gate checks.
+# a config surface but is not (yet) what the git/REST project gate checks.
 # Both must name the project for a request to clear the project gate and reach
 # the upstream.
 allowed_projects = ["{PROJECT}"]
 
 [git]
-# Domain default (§1.4/§6): the full built-in action set, spelled out
-# explicitly so the FULL and PLAIN hosts' cascade below is visible in this
-# file rather than relying on the code-side built-in default.
+# Domain default: the full built-in action set, spelled out explicitly so the
+# FULL and PLAIN hosts' cascade below is visible in this file rather than
+# relying on the code-side built-in default.
 actions = ["git.fetch", "git.push", "mr.create", "mr.comment", "mr.update",
            "pipeline.trigger"]
 
@@ -120,7 +119,7 @@ def _wait_healthy(root: Path, prefix: list[str], *, timeout: float = 60) -> None
 @pytest.fixture(scope="module")
 def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     """Scaffold a project via `catraz init`, overwrite it with a 3-endpoint
-    `warden.toml` (§6 cascade: full / review-only / plain) + grouped
+    `warden.toml` (cascade: full / review-only / plain) + grouped
     `read_tokens`/`write_tokens`, then bring up *only* `gitlab-warden` via
     `catraz.compose` — see module docstring for why."""
     root = tmp_path_factory.mktemp("catraz-multihost-actions")
@@ -163,7 +162,7 @@ def _probe(
     production (see `test_multi_host.py`'s module docstring for why this
     replaces a DNS-alias hop through a live agent container here).
 
-    ``method``/``body`` extend the step-08 blueprint's GET-only probe: a JSON
+    ``method``/``body`` extend `test_multi_host.py`'s GET-only probe: a JSON
     body is needed to drive `mr.create`/`mr.comment` REST writes.
     """
     body_json = json.dumps(body) if body is not None else None
@@ -262,9 +261,9 @@ def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: s
 
 @pytest.mark.slow
 def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
-    """§6 case 1 (full default): a `gitlab` endpoint with no `actions`
-    override inherits the domain default, which includes both `git.push` and
-    `mr.create` — both clear the action gate.
+    """Full default: a `gitlab` endpoint with no `actions` override inherits
+    the domain default, which includes both `git.push` and `mr.create` —
+    both clear the action gate.
 
     `git.push` (advertise-receive) never touches quota state, so it reaches
     `forward()` and gets this test's usual "routed" 500 (absent upstream).
@@ -291,13 +290,12 @@ def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
-    """§6 case 2 (review-only override): `actions = ["git.fetch", "mr.comment"]`
-    narrows this host relative to the full default — but selectively, not
-    blanket:
+    """Review-only override: `actions = ["git.fetch", "mr.comment"]` narrows
+    this host relative to the full default — but selectively, not blanket:
 
     - `git.fetch` stays allowed (routed).
     - `git.push` is denied cleanly at the advertise phase (git guard's
-      `action_gate`, §09 step 03) — before the client ever sends a pack.
+      `action_gate`) — before the client ever sends a pack.
     - `mr.create` is denied (not in this host's per-host effective REST
       table) — same status/rule as
       ``test_two_hosts_with_different_actions_behave_differently_on_the_same_guard``
@@ -347,13 +345,13 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_plain_endpoint_fetch_and_push_routed(live_stack: Stack) -> None:
-    """§6 case 3 (plain, inherited type-cut): a `plain`-type endpoint with no
-    `actions` override inherits the domain default intersected with its
-    type's vocabulary ({git.fetch, git.push} — no forge/REST actions at all,
-    §3.2). Spot-check only, per the step-05 plan: both git transport verbs
-    still clear the action gate and are routed; there is no meaningful REST
-    `mr.*` path on a `plain` host to probe (`type = "plain"` has no REST base
-    at all, `core.transport.base_urls`)."""
+    """Plain, inherited type-cut: a `plain`-type endpoint with no `actions`
+    override inherits the domain default intersected with its type's
+    vocabulary ({git.fetch, git.push} — no forge/REST actions at all).
+    Spot-check only: both git transport verbs still clear the action gate
+    and are routed; there is no meaningful REST `mr.*` path on a `plain` host
+    to probe (`type = "plain"` has no REST base at all,
+    `core.transport.base_urls`)."""
     status, body = _probe(
         live_stack, host=HOST_PLAIN, path=_git_advertise_path(PROJECT, push=False)
     )

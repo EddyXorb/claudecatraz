@@ -28,7 +28,7 @@ class EffectiveTable:
     """The built, request-matchable endpoint table.
 
     ``enabled_via`` marks every active entry with how it came to be active:
-    ``"default"`` for the shipped Built-in-Default action set (§09 §1.2),
+    ``"default"`` for the shipped Built-in-Default action set,
     ``"config:<action id>"`` for anything a deployment's ``actions`` list
     additionally activated. The audit layer uses this to flag non-default
     activations.
@@ -38,7 +38,7 @@ class EffectiveTable:
     enabled_via: Mapping[str, str]
 
 
-#: The table for a host with no configured endpoint (§09 §3, step 03): matches
+#: The table for a host with no configured endpoint: matches
 #: nothing, so every write default-denies. Only reachable before the kernel's
 #: ``host_gate`` has fired — see ``ApiGuard._table_for``'s docstring.
 EMPTY_TABLE = EffectiveTable(entries=(), enabled_via={})
@@ -46,15 +46,15 @@ EMPTY_TABLE = EffectiveTable(entries=(), enabled_via={})
 
 def build_effective_table(actions: tuple[str, ...]) -> EffectiveTable:
     """Build one host's effective table from its effective actions
-    (``Config.effective_actions(host)``, §09 §1.4). Raises
+    (``Config.effective_actions(host)``). Raises
     :class:`CatalogConfigError` on validation failures:
 
-    * an action id outside the closed vocabulary (§09 §3.1) — a defence-in-depth
+    * an action id outside the closed vocabulary — a defence-in-depth
       backstop: the config loader already rejects this at startup, but this
       function never trusts a caller that bypassed it (e.g. a hand-built
       ``Config`` in a test);
     * activating a recognizer whose static capabilities intersect ``FORBIDDEN``
-      (no scoping-check taming mechanism exists yet, §2 Punkt 1).
+      (no scoping-check taming mechanism exists yet).
 
     Only the **REST** (forge) actions in ``actions`` are relevant here —
     ``git.fetch``/``git.push`` are transport-only verbs the git guard's own

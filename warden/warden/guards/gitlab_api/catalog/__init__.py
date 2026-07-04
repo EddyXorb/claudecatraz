@@ -9,8 +9,7 @@ and ``app.py`` import ``warden.guards.gitlab_api.catalog`` rather than submodule
 * ``builtin``     — the merge endpoint's built-in deny invariant
 * ``activation``  — a host's effective actions × Catalog → effective, request-matchable table
 
-§07 Punkt 7 unified the former write-only ``CatalogEntry``/check-tuple shape
-and the read-table's always-terminal ``ReadCheck`` shape into one type,
+Both write and read endpoints share one row type,
 :class:`~.model.Recognizer` — see its docstring for the closed scope
 vocabulary (``ScopeKind``) the one generic ``policy.decide_scope`` consumes.
 """

@@ -4,11 +4,10 @@ writes are matched against the data-driven allowlist, source-branch-namespace
 checked, quota-checked, then forwarded with the write-token — or denied with a
 403 that never leaks a GitLab response.
 
-Self-contained GitLab domain logic (§07 Punkt 6, step 5 — the former shared
-``GitForge`` class is dissolved): the MR source-branch-namespace lookup
+Self-contained GitLab domain logic: the MR source-branch-namespace lookup
 (:mod:`.mr_namespace`), MR/project-id reconcile (:mod:`.reconcile`) and the
-MR-quota table (:mod:`.state`) are this guard's own implementation details
-now, reachable by no other guard.
+MR-quota table (:mod:`.state`) are this guard's own implementation details,
+reachable by no other guard.
 """
 
 from __future__ import annotations
@@ -70,10 +69,9 @@ class ApiGuard(Guard[ApiIntent]):
         # Guard state, not Config — Config stays immutable; only this guard's
         # view of "which ids currently alias an allowlisted project" is refreshed.
         self.project_id_aliases: set[str] = set()
-        # Built once at construction, never rebuilt — no runtime rebuild, no drift
-        # (§09 §4). One table per configured host — a REST write allowed on one
-        # host can be denied on another, per that host's own effective actions
-        # (§09 §1.4).
+        # Built once at construction, never rebuilt — no runtime rebuild, no drift.
+        # One table per configured host — a REST write allowed on one
+        # host can be denied on another, per that host's own effective actions.
         self._effective_by_host: Mapping[str, EffectiveTable] = {
             cfg.normalize_host(ep.host): build_effective_table(cfg.effective_actions(ep.host))
             for ep in cfg.git_endpoints
@@ -107,7 +105,7 @@ class ApiGuard(Guard[ApiIntent]):
     def state_view(self, host: str) -> StateView:
         """This guard's own snapshot: its per-guard fail-safe lock + writes
         counter plus this domain's MR count — never branches (the git guard
-        tracks those) — all scoped to ``host`` (per-endpoint since step 04).
+        tracks those) — all scoped to ``host`` (per-endpoint).
         Locked until *this* guard reconciled; a broken git upstream never
         locks the REST-API guard, and vice versa.
 
@@ -133,8 +131,8 @@ class ApiGuard(Guard[ApiIntent]):
         *this* guard fail-safe-locked but never touches the git guard's lock —
         one guard's permanently unreachable upstream can never block the other.
 
-        No endpoints configured (the former ``GITLAB_MODE=off``) makes no
-        upstream call either: :func:`~warden.core.transport.for_each_host_project`
+        No endpoints configured makes no upstream call either:
+        :func:`~warden.core.transport.for_each_host_project`
         simply iterates zero hosts and returns ``True``, so the guard still
         unlocks itself and the warden serves (then denies) requests without
         ever contacting GitLab.

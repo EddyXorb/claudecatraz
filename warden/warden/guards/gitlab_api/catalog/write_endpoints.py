@@ -1,6 +1,6 @@
 """The endpoint catalog: every GitLab REST write endpoint the warden knows how to guard.
 
-Code defines the catalog; a host's effective ``actions`` (§09) activate entries.
+Code defines the catalog; a host's effective ``actions`` activate entries.
 ``DEFAULT_ENABLED`` is the default set — a host with no ``actions`` override
 anywhere in its cascade gets precisely this (the REST half of
 ``guards.gitlab_api.actions.DEFAULT_ACTIONS``). Extra entries (``branch.create``,
@@ -10,12 +10,11 @@ deployment's ``actions`` explicitly includes their action id.
 The merge endpoint is deliberately **not** here — it is a built-in deny invariant
 (``builtin.py``), not an activatable row.
 
-Every row is a :class:`~.model.Recognizer` (§07 Punkt 7): its ``scope_kind`` is
+Every row is a :class:`~.model.Recognizer`: its ``scope_kind`` is
 either ``BRANCH_NAMESPACE`` (a branch name — literal or resolved via an iid → MR
 lookup — must lie in the namespace) or ``QUOTA_BY_KIND`` (project boundary +
-quota only, e.g. ``issue.create``). The former author-based ``mr-ownership``
-scope no longer exists (§07 Punkt 4): MR access is namespace-only, regardless
-of who opened the MR.
+quota only, e.g. ``issue.create``). MR access is namespace-only, regardless
+of who opened the MR — there is no author-based ownership check.
 """
 
 from __future__ import annotations
@@ -77,8 +76,8 @@ WRITE_ENDPOINTS: tuple[Recognizer, ...] = (
         kind=EndpointKind.MR_UPDATE,
         # capabilities=∅ *statically* — the state_event=merge alias is
         # field-dependent, added by api_capabilities(), not declared here. The
-        # capability layer alone forbids it (§07 Punkt 7: the former separate
-        # "state_event != merge" check is redundant and has been removed).
+        # capability layer alone forbids it; no separate state_event check
+        # is needed.
         decision_fields=(FieldSpec("state_event", Location.BODY),),
     ),
     Recognizer(

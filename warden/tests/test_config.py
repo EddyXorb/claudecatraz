@@ -1,17 +1,17 @@
-"""config.py (W10): fail-closed env validation + allowlist matching.
+"""config.py: fail-closed env validation + allowlist matching.
 
 The point of the module is to refuse to start when misconfigured rather than
-run "open". These tests assert that refusal, plus the prefix-confusion guard in
-``project_allowed`` (Q9).
+run "open". These tests assert that refusal, plus the prefix-confusion guard
+in ``project_allowed``.
 
-Step 05: there is no more ``GITLAB_MODE``/declared operating mode and no more
-startup-fatal token requirement. Policy tunables (``allowed_projects``,
-``branch_prefixes``, the ``max_*`` quotas) come from ``warden.toml`` only — a
-matching env var has no effect anymore. Access is derived per host from which
-of that host's tokens are present (``Config.access_mode``); a host with no
-usable read token is simply ``closed`` (a logged warning, never a startup
-abort), and a deployment with no ``[[git.endpoint]]`` at all boots and denies
-every git operation (real default-deny, not "feature off").
+There is no ``GITLAB_MODE``/declared operating mode and no startup-fatal
+token requirement. Policy tunables (``allowed_projects``, ``branch_prefixes``,
+the ``max_*`` quotas) come from ``warden.toml`` only — a matching env var has
+no effect. Access is derived per host from which of that host's tokens are
+present (``Config.access_mode``); a host with no usable read token is simply
+``closed`` (a logged warning, never a startup abort), and a deployment with no
+``[[git.endpoint]]`` at all boots and denies every git operation (real
+default-deny, not "feature off").
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ def test_from_env_non_strict_allows_partial_config():
 
 
 # --- from_env: fail-closed validation ------------------------------------------
-# No token/allowlist requirement is left (step 05) — only the always-applicable
-# quota/branch-namespace sanity checks can still abort startup.
+# There is no token/allowlist requirement — only the always-applicable
+# quota/branch-namespace sanity checks can abort startup.
 
 
 def test_empty_config_boots_without_aborting():
@@ -150,15 +150,15 @@ def test_legacy_branch_prefix_scalar_becomes_single_element_tuple(tmp_path):
 
 
 def test_branch_prefix_env_has_no_effect(tmp_path):
-    """BRANCH_PREFIX is pure vestige now (step 05) — only warden.toml sets the
-    branch namespace; a set env var is silently ignored, not applied."""
+    """BRANCH_PREFIX has no effect — only warden.toml sets the branch
+    namespace; a set env var is silently ignored, not applied."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/"]\n')
     cfg = from_env({"BRANCH_PREFIX": "test/,bot/"}, strict=True, toml_path=str(toml))
     assert cfg.branch_prefixes == ("claude/",)
 
 
-# --- toml is the only source for policy tunables (step 05) ---------------------
+# --- toml is the only source for policy tunables --------------------------------
 _TOML = (
     'branch_prefix = "claude/"\n'
     "max_open_mrs = 7\n"
@@ -178,9 +178,9 @@ def test_tunables_read_from_toml(tmp_path):
 
 
 def test_policy_env_vars_have_no_effect(tmp_path):
-    """BRANCH_PREFIX/MAX_OPEN_MRS/ALLOWED_PROJECTS env vars are pure vestige
-    now — warden.toml is the only source of truth for policy tunables (step 05,
-    ``GITLAB_URL``/``GITLAB_MODE``/``ALLOWED_PROJECTS`` env all lost their effect)."""
+    """BRANCH_PREFIX/MAX_OPEN_MRS/ALLOWED_PROJECTS env vars have no effect —
+    warden.toml is the only source of truth for policy tunables (``GITLAB_URL``/
+    ``GITLAB_MODE``/``ALLOWED_PROJECTS`` env vars are likewise ignored)."""
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env(
@@ -212,10 +212,9 @@ def test_invalid_toml_type_aborts(tmp_path):
 
 
 # --- grouped read_tokens/write_tokens files + per-endpoint access mode --------
-# Credential *source* for git_endpoints (step 02): the access mode is derived
-# from token presence, never a declared mode. This is the only credential
-# mechanism left — the legacy single-pair GITLAB_READ_TOKEN/GITLAB_WRITE_TOKEN
-# (and their *_FILE indirection) is gone with step 05, not just superseded.
+# Credential source for git_endpoints: the access mode is derived from token
+# presence, never a declared mode. The grouped read_tokens/write_tokens files
+# (and their *_FILE indirection) are the only credential mechanism.
 
 
 def test_parse_token_file_splits_host_and_token(tmp_path):
@@ -249,9 +248,7 @@ def test_parse_token_file_absent_yields_empty():
 
 
 def test_read_tokens_file_missing_raises(tmp_path):
-    """The *_FILE indirection still raises on an unreadable path (11.1) — this
-    mechanism is unchanged by step 05, only the legacy single-pair variant of
-    it (GITLAB_READ_TOKEN_FILE) is gone."""
+    """The *_FILE indirection raises on an unreadable path."""
     with pytest.raises(ConfigError, match="READ_TOKENS_FILE"):
         from_env({"READ_TOKENS_FILE": str(tmp_path / "nonexistent")}, strict=True)
 
@@ -328,11 +325,9 @@ def test_write_without_read_closes_endpoint_with_warning_no_abort(tmp_path, capl
     assert "gitlab.com" in caplog.text and "read-scoped token" in caplog.text
 
 
-# --- host_allowed: real default-deny from [[git.endpoint]] (step 03) -----------
-# The old `[git.urls] hosts`/`host_order` allowlist (and its per-host
-# `GITLAB_READ_TOKEN__<SLUG>` credential resolution) is gone without a
-# migration path (00-index.md) — every routable host is now an explicit
-# `[[git.endpoint]]`, and an empty endpoint list denies every host.
+# --- host_allowed: real default-deny from [[git.endpoint]] --------------------
+# Every routable host is an explicit `[[git.endpoint]]`; an empty endpoint
+# list denies every host.
 
 
 def test_host_allowed_empty_endpoint_list_denies_everything():
@@ -362,9 +357,9 @@ def test_host_allowed_allows_a_configured_open_endpoint():
 
 def test_host_allowed_denies_a_configured_but_closed_endpoint():
     """A host with a `[[git.endpoint]]` entry but no usable read token is
-    denied by the same R6 gate as an entirely unlisted host (step 03) — never
-    reaches `UpstreamRouter.resolve` returning ``None`` past an "already
-    denied" assertion."""
+    denied by the same R6 gate as an entirely unlisted host — never reaches
+    `UpstreamRouter.resolve` returning ``None`` past an "already denied"
+    assertion."""
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),))
     assert cfg.access_mode("gitlab.com") == "closed"
     assert not cfg.host_allowed("gitlab.com")
@@ -543,8 +538,8 @@ def test_git_endpoint_missing_host_aborts_startup(tmp_path):
 
 
 # --- [git].actions + per-endpoint actions: parsing, cascade, type-cut --------
-# §09 step 02: a separate cascade next to `rules` (never inside it), same
-# `_cascade` mechanic as `effective_rules`, then cut with the endpoint `type`.
+# A separate cascade next to `rules` (never inside it), same `_cascade`
+# mechanic as `effective_rules`, then cut with the endpoint `type`.
 
 
 def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
@@ -604,7 +599,7 @@ def test_effective_actions_missing_domain_falls_back_to_builtin_default():
 
 def test_effective_actions_plain_endpoint_inherits_domain_cut_to_transport():
     """A `plain` endpoint that inherits `[git].actions` gets the forge ids
-    silently filtered out (§3.2) — no error, unlike an explicit override."""
+    silently filtered out — no error, unlike an explicit override."""
     cfg = Config(
         git_actions=("git.fetch", "git.push", "mr.create", "mr.comment"),
         git_endpoints=(GitEndpoint(host="personal-gitserver.it", type="plain"),),

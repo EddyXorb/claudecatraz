@@ -1,8 +1,5 @@
-"""Tests for the action catalog (§09 step 01): Action-ID -> recognizer/
-transport mapping, the Built-in-Default, and the `type`-dependent vocabulary.
-
-See docs/design/architecture-generalization/09-endpoint-actions/01-action-catalog.md
-for the step this belongs to and 09-endpoint-actions.md §1.2/§5 for the Was/Warum.
+"""Tests for the action catalog: maps action IDs to recognizer/transport
+mapping, the built-in default, and the `type`-dependent vocabulary.
 """
 
 from __future__ import annotations
