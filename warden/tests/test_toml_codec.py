@@ -9,7 +9,6 @@ import pytest
 
 from warden.core import toml_codec
 from warden.core.config import ConfigError
-from warden.guards.gitlab_api.catalog.config_parse import ApiEndpointsConfig
 
 
 @dataclass(frozen=True)
@@ -156,9 +155,7 @@ def _minimal_mapping(instance: object) -> dict[str, object]:
     return mapping
 
 
-@pytest.mark.parametrize(
-    "instance", [ApiEndpointsConfig(), ApiEndpointsConfig(enable=("mr.create", "mr.note"))]
-)
+@pytest.mark.parametrize("instance", [_Inner("n"), _Inner("n", 7)])
 def test_dataclass_instance_round_trips_through_the_decoder(instance):
     mapping = _minimal_mapping(instance)
     decoded = toml_codec.decode(type(instance), mapping)

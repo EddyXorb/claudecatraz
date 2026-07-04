@@ -1,8 +1,10 @@
-"""JSON-serialisable summary of the effective endpoint table.
+"""JSON-serialisable summary of the effective endpoint tables, per host.
 
 Served by the admin ``/policy`` route (``app.py``) so the CLI can learn the
-catalog's ids and the running stack's activation state without a runtime
-Python import.
+catalog's ids and each configured host's activation state without a runtime
+Python import. Per-host, since two hosts with different ``actions`` can
+genuinely differ: the report has one section per configured host rather
+than a single flat table.
 """
 
 from __future__ import annotations
@@ -15,11 +17,23 @@ from .write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS
 
 
 def endpoint_table_report(cfg: Config) -> dict[str, Any]:
-    """Build the ``/policy`` response body: every catalog entry, whether it
-    is part of the shipped default set, and whether this deployment's config
-    actually activated it.
+    """Build the ``/policy`` response body: one section per configured host,
+    each listing that host's effective actions and every catalog entry with
+    whether it is part of the shipped default set and whether this host's
+    config actually activated it.
     """
-    table = build_effective_table(cfg, cfg.endpoint_enable)
+    return {
+        "hosts": {host: _host_report(cfg, host) for host in cfg.effective_hosts},
+        # The merge endpoint is never a catalog row (builtin.py) — surfaced
+        # separately so a consumer (catraz doctor) can state it explicitly
+        # rather than it just being absent from "catalog".
+        "builtin_deny": ["mr.merge"],
+    }
+
+
+def _host_report(cfg: Config, host: str) -> dict[str, Any]:
+    actions = cfg.effective_actions(host)
+    table = build_effective_table(actions)
     active_by_id = {e.id: e for e in table.entries}
     rows = []
     for entry in WRITE_ENDPOINTS:
@@ -41,10 +55,4 @@ def endpoint_table_report(cfg: Config) -> dict[str, Any]:
                 ],
             }
         )
-    return {
-        "catalog": rows,
-        # The merge endpoint is never a catalog row (builtin.py) — surfaced
-        # separately so a consumer (catraz doctor) can state it explicitly
-        # rather than it just being absent from "catalog".
-        "builtin_deny": ["mr.merge"],
-    }
+    return {"actions": list(actions), "catalog": rows}

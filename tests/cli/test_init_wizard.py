@@ -1,4 +1,4 @@
-"""Wave-02 — GITLAB_MODE-aware init wizard tests.
+"""GITLAB_MODE-aware init wizard tests.
 
 Covers:
 - --yes mode: GITLAB_MODE inference + policy written to warden.toml
@@ -153,10 +153,10 @@ class TestYesModeOff:
 
 
 class TestMultiEndpointScaffold:
-    """06-cli-doctor-init.md "Tests": `init` scaffolds the grouped read_tokens/
-    write_tokens files (empty, 0600) and a parsable warden.toml carrying the
-    [git.rules]/[[git.endpoint]] taxonomy — alongside (not instead of) the
-    legacy per-token files the current single-target compose still mounts."""
+    """`init` scaffolds the grouped read_tokens/write_tokens files (empty,
+    0600) and a parsable warden.toml carrying the [git.rules]/[[git.endpoint]]
+    taxonomy — alongside (not instead of) the legacy per-token files the
+    current single-target compose still mounts."""
 
     def test_read_write_tokens_files_scaffolded_empty_0600(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -194,6 +194,42 @@ class TestMultiEndpointScaffold:
         toml_path = root / ".catraz" / "config" / "warden.toml"
         data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
         assert "rules" in data.get("git", {})
+
+    def test_warden_toml_scaffolds_explicit_git_actions_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`init` sets `[git] actions = [...]` explicitly with the full
+        built-in default, plus a vocabulary comment — and no
+        `[api.endpoints]` remnant."""
+        import tomllib
+
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        toml_path = root / ".catraz" / "config" / "warden.toml"
+        text = toml_path.read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+        assert data["git"]["actions"] == [
+            "git.fetch",
+            "git.push",
+            "mr.create",
+            "mr.comment",
+            "mr.update",
+            "pipeline.trigger",
+        ]
+        # Vocabulary comment documents both default and non-default actions.
+        for action in (
+            "git.fetch",
+            "git.push",
+            "mr.create",
+            "mr.comment",
+            "mr.update",
+            "pipeline.trigger",
+            "branch.create",
+            "issue.create",
+        ):
+            assert action in text
+        assert "[api.endpoints]" not in text
 
 
 class TestYesModeReadOnly:
@@ -610,8 +646,8 @@ class TestUnsetEnvKeys:
 class TestBaseImageWizard:
     """Tests for base image configuration in both interactive and --yes modes.
 
-    Interactive base-image prompt removed (Workstream A): the base Dockerfile is
-    now seeded to .catraz/config/image/Dockerfile by cmd_init. BASE_* remain as
+    The base Dockerfile is seeded to .catraz/config/image/Dockerfile by
+    cmd_init; there is no interactive base-image prompt. BASE_* remain as
     .env power-user overrides handled by _wizard_yes.
     """
 
@@ -644,9 +680,10 @@ class TestBaseImageWizard:
     def test_no_base_image_prompt_in_interactive(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Interactive wizard no longer prompts for base image choice."""
+        """The interactive wizard never prompts for a base image choice; the
+        Dockerfile is seeded directly by `cmd_init`."""
         root = _make_root(tmp_path)
-        # "3" → gitlab off; no further inputs needed (prompt removed)
+        # "3" → gitlab off; no further inputs needed (no base-image prompt)
         env = self._run_interactive(root, monkeypatch, ["3"])
         assert "BASE_IMAGE" not in env
         assert "BASE_DOCKERFILE" not in env

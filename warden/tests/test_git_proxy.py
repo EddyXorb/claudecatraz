@@ -1,4 +1,4 @@
-"""git Smart-HTTP proxy integration (W14): advertise/upload passthrough, push accept/reject."""
+"""git Smart-HTTP proxy integration: advertise/upload passthrough, push accept/reject."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from warden.context import build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
+from warden.guards.git.actions import GIT_FETCH, GIT_PUSH
 from warden.guards.git.pktline import FLUSH, pkt_line
 
 ZERO = "0" * 40
@@ -77,7 +78,7 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     assert sent.headers["authorization"] == _basic("WRITE-TOKEN")
     assert sent.content == body
     # The create was recorded for the branch quota (the git guard's own
-    # BranchState, §07 Punkt 6 step 4 — no more shared forge_state).
+    # BranchState, not a shared forge_state).
     git_guard = next(g for g in ctx.guards if g.name == "git")
     assert git_guard.branch_state.open_branches("gitlab.example") == 1
     assert ctx.state.writes_last_hour("gitlab.example") == 1
@@ -90,7 +91,7 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
 
 
 async def test_push_delete_rejected(client, respx_router):
-    # B3 fix: branch delete is an irreversible verb (M4) — reported as R4, not R2.
+    # Branch delete is an irreversible verb (M4) — reported as R4, not R2.
     body = make_push([(SHA1, ZERO, "refs/heads/claude/feature")])
     resp = await client.post(RECV, content=body)
     assert b"ng refs/heads/claude/feature" in resp.content
@@ -111,7 +112,7 @@ async def test_upload_pack_denied_for_project_outside_allowlist(client, respx_ro
 
 
 async def test_push_forwards_content_encoding(client, respx_router):
-    # gzip stays gzip: the Content-Encoding header is passed upstream untouched (W7.4).
+    # gzip stays gzip: the Content-Encoding header is passed upstream untouched.
     body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
     route = respx_router.route(method="POST", url__regex=r".*/git-receive-pack$").mock(
         return_value=httpx.Response(
@@ -123,7 +124,7 @@ async def test_push_forwards_content_encoding(client, respx_router):
     assert route.calls.last.request.headers.get("content-encoding") == "gzip"
 
 
-# --- push-size limit (§07 Punkt 6.3): cheap Content-Length gate, no packfile parsing ---
+# --- push-size limit: cheap Content-Length gate, no packfile parsing ---
 
 
 def _client_with(cfg: Config) -> httpx.AsyncClient:
@@ -162,7 +163,7 @@ async def test_push_under_max_push_bytes_is_forwarded(cfg, respx_router):
     assert route.called
 
 
-# --- per-host access-mode gate tests (the former GITLAB_MODE, step 05) --------
+# --- per-host access-mode gate tests -------------------------------------------
 # Build a fresh test client per access mode; no upstream mock needed (a hit would fail).
 
 UPSTREAM = "https://gitlab.example"
@@ -172,7 +173,7 @@ def _access_client(access: str) -> httpx.AsyncClient:
     """Build an ASGI test client for a warden whose one `[[git.endpoint]]`
     resolves to the given access mode (``closed``/``read-only``/``read-write``,
     :meth:`~warden.core.config.Config.access_mode`) — derived from which of
-    its tokens are present, there is no more declared mode."""
+    its tokens are present; there is no declared mode."""
     if access == "closed":
         creds: dict[str, HostCredentials] = {}
     elif access == "read-only":
@@ -199,8 +200,8 @@ def _access_client(access: str) -> httpx.AsyncClient:
 
 
 async def test_closed_advertise_clone_denied_no_upstream():
-    """A closed host (former GITLAB_MODE=off): git clone discovery (git-upload-pack)
-    is denied by `host_gate` (R6), before any mode/write check; no upstream call."""
+    """A closed host: git clone discovery (git-upload-pack) is denied by
+    `host_gate` (R6), before any mode/write check; no upstream call."""
     async with _access_client("closed") as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
     assert resp.status_code == 403
@@ -216,8 +217,8 @@ async def test_closed_upload_pack_denied_no_upstream():
 
 
 async def test_read_only_advertise_receive_pack_denied_no_upstream():
-    """A read-only host (former GITLAB_MODE=read-only): push discovery
-    (git-receive-pack) is denied R0 before git_get."""
+    """A read-only host: push discovery (git-receive-pack) is denied R0
+    before git_get."""
     async with _access_client("read-only") as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
@@ -226,10 +227,9 @@ async def test_read_only_advertise_receive_pack_denied_no_upstream():
 
 
 async def test_read_only_push_discovery_denied_r0_not_r6_for_unallowed_project():
-    # Behaviour change (Schritt C): the kernel checks host -> writes -> project,
-    # so a write-mode denial now preempts the allowlist check. Before, advertise
-    # hand-rolled off -> project -> writes and this case reported R6. Both are
-    # a 403; only the reported rule id changed.
+    # The kernel checks host -> writes -> project in that order, so a
+    # write-mode denial (R0) preempts the allowlist check here rather than
+    # reporting R6.
     async with _access_client("read-only") as c:
         resp = await c.get("/git/other/secret.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
@@ -240,7 +240,7 @@ async def _read_audit_lines(ctx, tmp_path, make_request):
     # Redirect the *existing* AuditLog in place (rather than replacing
     # ctx.audit with a new instance): the guards were assembled once, at
     # build_context() time, and each holds its own reference to this exact
-    # object (§03.5/03.6) — reassigning ctx.audit itself would not reach them.
+    # object — reassigning ctx.audit itself would not reach them.
     logf = tmp_path / "audit.jsonl"
     ctx.audit._path = str(logf)
     ctx.audit.start()
@@ -250,9 +250,8 @@ async def _read_audit_lines(ctx, tmp_path, make_request):
 
 
 async def test_advertise_read_is_audited(client, respx_router, ctx, tmp_path):
-    # Behaviour change (Schritt C): git reads now run through the same kernel
-    # pipeline as pushes/API reads, so they show up in the audit log too
-    # (previously git reads were never audited at all).
+    # Git reads run through the same kernel pipeline as pushes/API reads, so
+    # they show up in the audit log too.
     respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
         return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
     )
@@ -296,3 +295,74 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
     # read token is used (not write)
     auth = route.calls.last.request.headers["authorization"]
     assert "READ-TOKEN" in base64.b64decode(auth.split(" ", 1)[1]).decode()
+
+
+# --- action gate: git.fetch/git.push per host ----------------------------------
+# `capability_gate` consults `policy.action_gate` for all three operations
+# (advertise/upload-pack/receive-pack), so a `git.push`-disabled host is
+# denied already at push *discovery* — before the client sends the pack.
+
+
+def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
+    cfg = Config(
+        branch_prefixes=("claude/",),
+        allowed_projects=("group/proj",),
+        state_db_path=":memory:",
+        git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab", actions=actions),),
+        git_credentials={
+            "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
+        },
+    )
+    return _client_with(cfg)
+
+
+async def test_action_gate_denies_push_advertise_when_git_push_not_enabled(respx_router):
+    # Push discovery (advertise ?service=git-receive-pack) denied BEFORE any
+    # pack is sent; no upstream route is registered at all here, so an
+    # accidental fall-through to `forward` would fail loudly (respx raises).
+    async with _client_with_actions((GIT_FETCH,)) as c:
+        resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
+    assert resp.status_code == 403
+    body = resp.json()
+    assert body["rule"] == "R6"
+    assert "git.push" in body["reason"]
+
+
+async def test_action_gate_denies_receive_pack_when_git_push_not_enabled(respx_router):
+    async with _client_with_actions((GIT_FETCH,)) as c:
+        body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
+        resp = await c.post(RECV, content=body)
+    assert resp.status_code == 200  # in-band rejection, git convention
+    assert b"warden: R6" in resp.content
+    assert b"git.push" in resp.content
+
+
+async def test_action_gate_allows_fetch_advertise_and_upload_pack_when_only_git_fetch_enabled(
+    respx_router,
+):
+    respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
+        return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
+    )
+    respx_router.route(method="POST", url__regex=r".*/git-upload-pack$").mock(
+        return_value=httpx.Response(200, content=b"fetched-pack")
+    )
+    async with _client_with_actions((GIT_FETCH,)) as c:
+        advertise = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
+        upload = await c.post("/git/group/proj.git/git-upload-pack", content=b"0032want ...")
+    assert advertise.status_code == 200
+    assert upload.status_code == 200
+    assert upload.content == b"fetched-pack"
+
+
+async def test_action_gate_full_default_allows_fetch_and_push(respx_router):
+    # Host with both actions enabled: fetch *and* push discovery both pass
+    # the action gate (they still go through the usual R0/R2/etc. checks
+    # afterwards — this only asserts the action gate itself doesn't deny).
+    respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
+        return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
+    )
+    async with _client_with_actions((GIT_FETCH, GIT_PUSH)) as c:
+        fetch_advertise = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
+        push_advertise = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
+    assert fetch_advertise.status_code == 200
+    assert push_advertise.status_code == 200  # push discovery passes; R1

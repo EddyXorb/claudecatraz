@@ -1,11 +1,11 @@
 """REST guard policy: pure decide for GitLab API requests.
 
 Knows GitLab REST concepts (MR, endpoint catalog) on purpose. Mode gate (R0) and
-resource allowlist (R6) are now the kernel's job; capability invariant (R4) is
+resource allowlist (R6) are the kernel's job; capability invariant (R4) is
 exposed here as :func:`capability_gate` for the kernel, not re-checked in :func:`decide`.
 
-§07 Punkt 7: read and write endpoints are both :class:`~.catalog.model.Recognizer`
-rows now; :func:`decide` matches one (read table or write catalog, depending on
+Read and write endpoints are both :class:`~.catalog.model.Recognizer`
+rows; :func:`decide` matches one (read table or write catalog, depending on
 method) and hands it to :func:`decide_scope` — the **one** generic function that
 consumes a recognizer's ``⟨capabilities, scope⟩`` and produces the terminal
 Decision. No per-entry decision logic lives outside it.
@@ -103,7 +103,7 @@ def decide(intent: ApiIntent, state: StateView, cfg: Config, effective: Effectiv
 
 def decide_scope(intent: ApiIntent, match: Recognizer, state: StateView, cfg: Config) -> Decision:
     """The one generic decision every matched :class:`Recognizer` feeds
-    through (§07 Punkt 7) — dispatches purely on ``match.scope_kind``, never
+    through — dispatches purely on ``match.scope_kind``, never
     on the entry's identity.
 
     * ``CONTENT_EXPOSURE``: terminal — the recognizer's ``classify`` decides
@@ -129,7 +129,7 @@ def decide_scope(intent: ApiIntent, match: Recognizer, state: StateView, cfg: Co
         if denied is not None:
             return denied
 
-    rules = cfg.effective_rules(intent.host)  # step 04: per-endpoint quota ceiling
+    rules = cfg.effective_rules(intent.host)  # per-endpoint quota ceiling
     max_open_mrs, max_writes_per_hour = rules.max_open_mrs, rules.max_writes_per_hour
     assert max_open_mrs is not None and max_writes_per_hour is not None, (
         "effective_rules always resolves every field to a concrete built-in default"
@@ -176,7 +176,7 @@ def _quota_check(
     ep: Recognizer, state: StateView, max_open_mrs: int, max_writes_per_hour: int
 ) -> Optional[Decision]:
     """``max_open_mrs``/``max_writes_per_hour`` are the endpoint's own resolved
-    ceilings (``Config.effective_rules(intent.host)``, step 04) — see
+    ceilings (``Config.effective_rules(intent.host)``) — see
     ``guards.git.policy.check_ref``'s docstring for why these are plain ints,
     never a global ``Config`` field nor a raw (``Optional``-fielded)
     ``GitRules``."""
@@ -203,7 +203,7 @@ def full_decide(
     ``effective`` and ``project_allowed`` default to the real values for free.
     """
     if effective is None:
-        effective = build_effective_table(cfg, cfg.endpoint_enable)
+        effective = build_effective_table(cfg.effective_actions(intent.host))
     d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
     if d is None:
         d = capability_gate(intent, cfg, effective)

@@ -5,11 +5,11 @@ frozen :class:`~warden.core.config.Config` value (what the policy consumes);
 this module holds everything that *produces* one — secret files, TOML parsing,
 env-over-file precedence, and the hard fail-closed validation.
 
-One source of truth per setting (step 05): policy tunables (branch namespace,
+One source of truth per setting: policy tunables (branch namespace,
 quotas, allowlists) live only in ``warden.toml``'s ``[git.rules]``/
 ``[[git.endpoint]]``; forge identity/credentials live only in the grouped
 ``read_tokens``/``write_tokens`` secret files. There is no global operating
-mode and no startup-fatal token requirement anymore — a per-host access mode
+mode and no startup-fatal token requirement — a per-host access mode
 (:meth:`~warden.core.config.Config.access_mode`) is derived purely from which
 of that host's tokens are present. A host with no usable read token is simply
 ``closed`` (a logged warning, see :func:`_warn_closed_endpoints`), never a
@@ -55,16 +55,30 @@ def _secret(env: Mapping[str, str], name: str) -> str:
     return env.get(name, "")
 
 
-def _parse_endpoint_enable(file: Mapping[str, object]) -> Optional[tuple[str, ...]]:
-    """Parse ``[api.endpoints].enable``.
+def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
+    """Parse an ``actions`` list-key (``[git].actions`` or a per-endpoint
+    ``actions``).
 
-    Deferred import: gitlab_api guard owns the schema; core stays guard-agnostic,
-    only threading the parsed value through to ``Config.endpoint_enable``.
-    Malformed shape raises ``ConfigError`` (fail-closed startup abort).
+    Absent (``raw is None``, the key isn't in the table) stays ``None`` — "no
+    opinion here, the cascade falls through". Present — including
+    ``[]`` — becomes a tuple, deliberately kept distinguishable from absent
+    (an explicit empty list means "may do nothing", not "inherit").
+
+    Fail-closed: not a list of strings, or an id outside the closed
+    vocabulary (typo protection), aborts startup. Deferred import: the
+    vocabulary is guard-owned, core stays guard-agnostic at module-import time.
     """
-    from ..guards.gitlab_api.catalog.config_parse import parse_api_endpoints
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(a, str) for a in raw):
+        raise ConfigError(f"{context} must be a list of strings, got {raw!r}")
 
-    return parse_api_endpoints(file).enable
+    from ..guards.gitlab_api.actions import ALL_ACTIONS
+
+    unknown = sorted(set(raw) - ALL_ACTIONS)
+    if unknown:
+        raise ConfigError(f"{context}: unknown action id(s) {unknown!r}")
+    return tuple(raw)
 
 
 def _parse_rules(table: Mapping[str, object], context: str) -> GitRules:
@@ -136,20 +150,42 @@ def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
     if not isinstance(rules_table, Mapping):
         raise ConfigError(f"warden.toml [[git.endpoint]] host={host!r}: rules must be a table")
 
+    actions = _parse_actions(
+        raw.get("actions"), f"warden.toml [[git.endpoint]] host={host!r} actions"
+    )
+    if actions is not None:
+        # Explicit endpoint override with a type-impossible id is always a
+        # mistake — unlike the inherited default (cut quietly in
+        # Config.effective_actions), this aborts startup here.
+        from ..guards.gitlab_api.actions import actions_valid_for_type
+
+        valid_for_type = actions_valid_for_type(endpoint_type)
+        invalid = sorted(set(actions) - valid_for_type)
+        if invalid:
+            raise ConfigError(
+                f"warden.toml [[git.endpoint]] host={host!r}: action id(s) {invalid!r} "
+                f"not valid for type {endpoint_type!r}"
+            )
+
     return GitEndpoint(
         host=host,
         type=endpoint_type,
         allowed_projects=tuple(p.strip() for p in raw_projects if p.strip()),
         rules=_parse_rules(rules_table, f"warden.toml [[git.endpoint]] host={host!r} rules"),
+        actions=actions,
     )
 
 
-def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint, ...]]:
-    """Parse ``[git.rules]`` (domain defaults) and ``[[git.endpoint]]`` (one entry
-    per host) into the endpoint-taxonomy config surface.
+def _parse_git(
+    file: Mapping[str, object],
+) -> tuple[GitRules, Optional[tuple[str, ...]], tuple[GitEndpoint, ...]]:
+    """Parse ``[git.rules]``/``[git].actions`` (domain defaults) and
+    ``[[git.endpoint]]`` (one entry per host) into the endpoint-taxonomy config
+    surface.
 
-    Fail-closed: an unknown ``type``, a duplicate ``host``, or an unknown key in
-    any ``rules`` table aborts startup rather than silently misconfiguring policy.
+    Fail-closed: an unknown ``type``, a duplicate ``host``, an unknown key in
+    any ``rules`` table, or an unknown/type-invalid ``actions`` id aborts
+    startup rather than silently misconfiguring policy.
     """
     git = file.get("git", {})
     if not isinstance(git, Mapping):
@@ -159,6 +195,8 @@ def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint,
     if not isinstance(rules_table, Mapping):
         raise ConfigError("warden.toml: [git.rules] must be a table")
     git_rules = _parse_rules(rules_table, "warden.toml [git.rules]")
+
+    git_actions = _parse_actions(git.get("actions"), "warden.toml [git].actions")
 
     raw_endpoints = git.get("endpoint", [])
     if not isinstance(raw_endpoints, list):
@@ -177,7 +215,7 @@ def _parse_git(file: Mapping[str, object]) -> tuple[GitRules, tuple[GitEndpoint,
         seen_hosts[normalized] = endpoint.host
         endpoints.append(endpoint)
 
-    return git_rules, tuple(endpoints)
+    return git_rules, git_actions, tuple(endpoints)
 
 
 def _parse_token_file(env: Mapping[str, str], name: str) -> dict[str, str]:
@@ -267,7 +305,7 @@ def from_env(
 ) -> Config:
     """Build a :class:`Config`.
 
-    **One source of truth per setting** (step 05). Policy tunables
+    **One source of truth per setting.** Policy tunables
     (``branch_prefixes``, the ``max_*`` limits, ``allowed_projects``) come from
     ``warden.toml`` only — no env override left. Secrets (the grouped
     ``read_tokens``/``write_tokens`` files) and infra (host, ports, paths)
@@ -276,7 +314,7 @@ def from_env(
     With ``strict`` (the production path) a malformed ``warden.toml`` still
     aborts startup — a non-positive quota or an empty/blank branch-prefix
     namespace is nonsensical regardless of deployment. There is no
-    startup-fatal *credential* requirement anymore: a host with no usable read
+    startup-fatal *credential* requirement: a host with no usable read
     token simply resolves ``closed`` (fail-closed *degrade*, logged by
     :func:`_warn_closed_endpoints`), and a deployment with no endpoints at all
     boots and denies everything via ``core.guard.host_gate``.
@@ -293,7 +331,7 @@ def from_env(
         except ValueError as exc:
             raise ConfigError(f"{key} must be an integer, got {raw!r}") from exc
 
-    # --- tunables: warden.toml only, no env override (step 05) ---
+    # --- tunables: warden.toml only, no env override ---
     def _tunable_int(toml_key: str, default: int) -> int:
         val = file.get(toml_key, default)
         if not isinstance(val, int) or isinstance(val, bool):
@@ -341,7 +379,7 @@ def from_env(
             raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
         return tuple(p.strip() for p in val if p.strip())
 
-    git_rules, git_endpoints = _parse_git(file)
+    git_rules, git_actions, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
@@ -357,8 +395,8 @@ def from_env(
         agent_port=_int("AGENT_PORT", 8080),
         admin_port=_int("ADMIN_PORT", 9090),
         admin_host=env.get("ADMIN_HOST", "0.0.0.0"),
-        endpoint_enable=_parse_endpoint_enable(file),
         git_rules=git_rules,
+        git_actions=git_actions,
         git_endpoints=git_endpoints,
         git_credentials=git_credentials,
     )
@@ -370,13 +408,13 @@ def from_env(
 
 
 def _validate(cfg: Config) -> None:
-    """Fail-closed validation with no mode-branching left (step 05): every
-    check here is unconditional, since there is no longer a declared
-    off/read-only/read-write mode to gate them on.
+    """Fail-closed validation with no mode-branching: every check here is
+    unconditional, since there is no declared off/read-only/read-write mode
+    to gate them on.
 
     No credential (or allowlist) requirement aborts startup — a git_endpoint
-    with a missing/inconsistent token is fail-closed-*degrade* (§4.2, step 02):
-    the endpoint simply resolves ``closed`` (a logged warning, see
+    with a missing/inconsistent token is fail-closed-*degrade*: the endpoint
+    simply resolves ``closed`` (a logged warning, see
     ``_warn_closed_endpoints``), never an abort; and an empty ``allowed_projects``
     just means ``project_allowed()`` denies everything, so the warden boots
     (dev-env runs offline) and every op stays denied until a project is

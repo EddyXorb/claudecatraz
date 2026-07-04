@@ -1,10 +1,9 @@
-"""Unit tests for the pure policy cores (W14, §8.1): every rule R0–R6, default-deny.
+"""Unit tests for the pure policy cores: every rule R0-R6, default-deny.
 
-§06-migration.md Schritt 5 split the channel-union ``policy.decide`` into the
-kernel gates (:func:`warden.core.guard.kernel_gates`) plus one pure ``decide``
-per guard. Each guard's ``full_decide`` composes exactly that sequence, so the
-:func:`decide` helper below dispatches on the intent type — the assertions are
-unchanged from the pre-split file.
+The kernel gates (:func:`warden.core.guard.kernel_gates`) run first, then each
+guard's own pure ``decide``; each guard's ``full_decide`` composes exactly
+that sequence. The :func:`decide` helper below dispatches on the intent type
+to call the right guard's ``full_decide``.
 """
 
 from __future__ import annotations
@@ -24,9 +23,9 @@ from warden.guards.gitlab_api.intent import ApiIntent
 ZERO = "0" * 40
 SHA = "a" * 40
 
-# Every intent below carries this Host (§2/step 03: `host_gate` is a real
-# kernel gate now, so a pure-policy test needs an actually-open endpoint, not
-# just an empty/no-op allowlist) — one constant so fixtures and intents agree.
+# Every intent below carries this Host (`host_gate` is a real kernel gate, so
+# a pure-policy test needs an actually-open endpoint, not just an empty/no-op
+# allowlist) — one constant so fixtures and intents agree.
 HOST = "gitlab.example"
 _OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
 _OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
@@ -154,10 +153,10 @@ def test_r6_project_not_in_allowlist_denied(cfg):
 
 
 def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
-    # issue.create ships with checks=() (§04.2) — this pins down that the
-    # project boundary (R6, a kernel gate run before any entry-specific
-    # check) still applies to an entry that checks nothing of its own.
-    effective = build_effective_table(cfg, ("issue.create",))
+    # issue.create ships with checks=() — this pins down that the project
+    # boundary (R6, a kernel gate run before any entry-specific check) still
+    # applies to an entry that checks nothing of its own.
+    effective = build_effective_table(("issue.create",))
     req = ApiIntent(
         _project="other/secret",
         _method="POST",
@@ -207,7 +206,7 @@ def test_r3_pipeline_ref_prefix(cfg):
     assert not decide(bad, StateView(), cfg).allow
 
 
-# --- M2: branch namespace is a list of prefixes (Maintainer-Entscheid) --------
+# --- M2: branch namespace is a list of prefixes -------------------------------
 def test_r3_create_mr_with_second_prefix_allowed(multi_prefix_cfg):
     """A source_branch under the *second* configured prefix (``bot/``) is allowed."""
     d = decide(
@@ -241,10 +240,10 @@ def test_r4_state_event_merge_alias_denied(cfg):
 
 
 def test_r3_mr_update_requires_mr_source_in_namespace(cfg):
-    # mr.update's branch-namespace scope, iid-lookup variant (§07 Punkt 4/7): editing
-    # an MR whose source_branch can't be verified as namespace is denied — same scope
-    # as mr.note/mr.discussion, but exercised on the update endpoint itself, not
-    # just the note endpoint.
+    # mr.update's branch-namespace scope, iid-lookup variant: editing an MR
+    # whose source_branch can't be verified as namespace is denied — same
+    # scope as mr.note/mr.discussion, but exercised on the update endpoint
+    # itself, not just the note endpoint.
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="x")
     req.mr_source_ok = False
     d = decide(req, StateView(), cfg)
@@ -418,19 +417,18 @@ def test_mr_update_without_merge_intent_allowed(cfg):
     assert d.allow and d.rule == "R3" and d.token == TokenKind.WRITE
 
 
-# NOTE (§06 Schritt 5): the pre-split ``test_unknown_channel_default_denied``
-# is gone with the Channel enum itself — an "unknown channel" can no longer be
-# expressed: every request is parsed by exactly one guard into that guard's
-# own Intent type, and an unrouted path never reaches any decide at all.
+# NOTE: there is no Channel enum, so an "unknown channel" cannot be expressed —
+# every request is parsed by exactly one guard into that guard's own Intent
+# type, and an unrouted path never reaches any decide at all.
 
 
-# --- R6/R0: per-host access mode (the former GITLAB_MODE gates, step 05) -------
+# --- R6/R0: per-host access mode -----------------------------------------------
 
 
 def test_closed_host_denies_reads_and_writes():
-    """A host with no usable read token is `closed` (the former GITLAB_MODE=off):
-    both reads and writes are denied — by `host_gate`'s R6, before
-    `mode_gate_writes` (or any guard-specific decide) ever runs."""
+    """A host with no usable read token is `closed`: both reads and writes
+    are denied — by `host_gate`'s R6, before `mode_gate_writes` (or any
+    guard-specific decide) ever runs."""
     cfg_closed = Config(
         allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
@@ -465,9 +463,8 @@ def test_closed_host_denies_reads_and_writes():
 
 
 def test_read_only_host_denies_writes_allows_reads():
-    """A host with a read token but no write token is `read-only` (the former
-    GITLAB_MODE=read-only): reads pass (R1), writes are denied (R0) by the
-    per-host `mode_gate_writes`."""
+    """A host with a read token but no write token is `read-only`: reads
+    pass (R1), writes are denied (R0) by the per-host `mode_gate_writes`."""
     cfg_ro = Config(
         allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,

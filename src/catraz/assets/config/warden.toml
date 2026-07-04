@@ -41,6 +41,33 @@ allowed_projects    = []
 #   "gitlab" — git + REST API (gitlab.com or self-hosted GitLab)
 #   "plain"  — git smart-HTTP only, no REST API assumed
 # "github" is reserved for a future guard — the Warden refuses to start if used.
+#
+# --- actions: what an agent is allowed to DO — layered UNDER the token
+# deck: a write action with no write_token for a host still runs closed,
+# `catraz doctor` warns about that mismatch rather than the Warden failing.
+# Vocabulary (one row = one action, closed set, no wildcards):
+#
+#   action              | covers                                    | default?
+#   --------------------|--------------------------------------------|--------
+#   git.fetch           | git transport read (clone/fetch)            |   yes
+#   git.push            | git transport write (push)                  |   yes
+#   mr.create           | create a merge/pull request                 |   yes
+#   mr.comment          | comment/discuss on an existing MR            |   yes
+#   mr.update           | edit/close an existing MR                   |   yes
+#   pipeline.trigger    | trigger a CI pipeline                       |   yes
+#   branch.create       | create a branch via the REST API            |   no
+#   issue.create        | create an issue                             |   no
+#
+# The built-in default below (the six "yes" rows) ALSO lives in code
+# (warden/warden/guards/gitlab_api/actions.py DEFAULT_ACTIONS) — this key is
+# documentation/a starting point, NOT the sole source of truth: deleting it
+# does not mean "no actions", it falls back to the same code default
+# (missing key != empty list). Each [[git.endpoint]] below can override this
+# domain default per host with its own `actions = [...]` — the list REPLACES
+# completely (no actions_add/actions_remove).
+[git]
+actions = ["git.fetch", "git.push", "mr.create", "mr.comment", "mr.update", "pipeline.trigger"]
+
 [git.rules]
 # branch_prefixes = ["claude/"]
 
@@ -58,3 +85,17 @@ allowed_projects    = []
 # type             = "gitlab"
 # allowed_projects = []
 # rules            = { max_open_mrs = 20 }
+#
+# Review-only endpoint: overrides the domain `actions` default above to just
+# read + comment (no mr.create/mr.update/pipeline.trigger/git.push) — this
+# host can never write. Per-endpoint `rules` overrides are ALWAYS an inline
+# `{ ... }` table like this, NEVER a `[git.endpoint.rules]` header: a header
+# binds to the positionally-last [[git.endpoint]] array element, so
+# reordering endpoint blocks and forgetting to move the header silently
+# attaches the rules to the wrong host.
+# [[git.endpoint]]
+# host             = "review-only.example.com"
+# type             = "gitlab"
+# allowed_projects = []
+# actions          = ["git.fetch", "mr.comment"]
+# rules            = { max_writes_per_hour = 30 }
