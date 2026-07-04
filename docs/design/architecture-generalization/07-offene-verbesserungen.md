@@ -616,80 +616,13 @@ scope⟩→`decide`-Modell; die drei Invarianten stehen; kein Autor-Ownership;
 
 ---
 
-## 8. Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz` via Host-Routing
+## 8. Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz`
 
-**Ziel.** Ein `.catraz`-Ordner soll mehr als eine Upstream-Instanz bedienen können
-(z.B. `gitlab.com` **und** `my-gitlab.de` **und** ein privater git-Server). Heute
-nimmt das Design genau einen Upstream an. Der saubere Mechanismus ist
-**Host-basiertes Routing** — der Agent behält kanonische Remotes, der Warden
-erkennt das echte Ziel am HTTP-`Host`-Header. Das erfüllt zugleich das Ziel „im
-Container die Interfaces so nutzen wie außerhalb" und konvergiert mit **P5** im
-CLI-`TODO` (transparente Warden-Interception, `insteadOf` ablösen).
-
-> **Größter, sicherheitssensitivster Schritt. Zuletzt.** Voraussetzung:
-> Schritt 6 (unabhängige, host-parametrische Guards). Er berührt die
-> Trust-Boundary (welche Upstreams sind erreichbar), daher als **erster
-> Teil-Deliverable ein kurzer Design-Spike** (eigene Datei
-> `docs/design/architecture-generalization/08-multi-target.md`), der die zwei
-> unten genannten offenen Detailfragen für die API-Seite entscheidet, **bevor**
-> Code entsteht.
-
-**Empfohlener Ansatz (entschieden, nicht mehr offen).**
-
-1. **Konfiguration in `warden.toml`** (nicht `.env` — alles an einem Ort): eine
-   Sektion, die die erlaubten Upstream-Hosts als **explizite, enumerierte
-   Allowlist** listet (R5/§6.10 — offer, never auto-add), z.B.:
-
-   ```toml
-   [git.urls]
-   hosts = ["gitlab.com", "my-gitlab.de", "personal-gitserver.it"]
-   ```
-
-   `core/config.py` liest das in ein `frozenset` erlaubter Hosts. Ein Request an
-   einen nicht gelisteten Host wird abgelehnt (default-deny, konsistent mit R6).
-2. **Routing per `Host`-Header.** Der Docker-DNS zeigt die gelisteten Hosts auf den
-   Warden (Compose-`extra_hosts`/Netzwerk-Aliase; im Entrypoint gesetzt). Der
-   Warden liest `request.headers["host"]`, prüft ihn gegen die Allowlist und wählt
-   den passenden Upstream (Transport aus Schritt 6, pro Host parametrisiert:
-   Basis-URL + Credentials). Damit behält der Agent kanonische Remotes
-   (`git clone https://my-gitlab.de/x.git`) — kein `insteadOf`-Pfad-Trick, keine
-   geleakte Warden-Adresse in den Remotes.
-3. **Guards pro Host parametrisieren.** Der git-Guard ist nach Schritt 6 bereits
-   transport-neutral; er bekommt den ziel-spezifischen Transport anhand des Hosts.
-   Der GitLab-API-Guard analog, wo ein GitLab-Host adressiert ist.
-
-**Zwei offene Detailfragen — im Spike (`08-…md`) zu entscheiden, dann umsetzen:**
-
-- **API-Multi-Endpoint:** Wie werden mehrere GitLab-**API**-Instanzen adressiert
-  (Host-Routing wie bei git, oder separate Guard-Instanzen)? Empfehlung:
-  identisches Host-Routing; im Spike bestätigen.
-- **Credentials pro Host:** Woher kommen Token je Host (getrennte Env-Variablen
-  pro Host? Sektion in `warden.toml`)? Im Spike festlegen; Grundsatz: keine
-  Geheimnisse in `warden.toml` — Token bleiben in der Umgebung, die Host-Liste in
-  `warden.toml`.
-
-**Nicht tun.**
-- **Kein** `insteadOf`-Pfad-Präfix-Trick (`warden:8080/personal-gitserver.it/repo.git`):
-  er macht die Remotes im Container un-kanonisch und widerspricht dem Kernziel.
-  Host-Routing statt Pfad-Encoding.
-- **Kein** separater Warden-Container pro Guard/Host „auf Vorrat" — ein Warden, der
-  nach Host routet, ist einfacher und reicht. Container-Vervielfachung erst bei
-  konkretem Isolationsbedarf.
-- Die Host-Liste **nicht** implizit/automatisch füllen — explizite Allowlist.
-
-**Tests.**
-- Config-Test (`test_config.py`): `[git.urls].hosts` wird in die Host-Allowlist
-  geparst; leere/fehlende Sektion → Verhalten wie heute (ein Default-Host oder
-  leer→deny, im Spike festgelegt).
-- Routing-Test: Request mit erlaubtem `Host` wählt den richtigen Upstream; Request
-  mit nicht gelistetem `Host` wird abgelehnt (default-deny).
-- Container-Test (`tests/container/`): zwei Hosts konfiguriert, beide erreichbar,
-  ein dritter abgelehnt.
-- Verifikation: warden pytest/ruff/mypy **und** CLI-Tests grün.
-
-**Fertig-Kriterium.** Ein `.catraz` kann mehrere gelistete Upstream-Hosts bedienen;
-der Agent nutzt kanonische Remotes; nicht gelistete Hosts werden verweigert; Spike
-`08-multi-target.md` dokumentiert die zwei Detailentscheidungen.
+Als eigenständiger, selbstgenügsamer Plan nach
+[`08-multi-target.md`](08-multi-target.md) ausgelagert — Design, `warden.toml`-Schema,
+Credentials, Access-Mode, State-Keying, CLI und Umsetzungsstand stehen vollständig
+dort. Anders als Punkt 1–7 ist dieser Schritt **noch nicht abgeschlossen**; der
+aktuelle Stand steht in Doc 8 §8.
 
 ---
 

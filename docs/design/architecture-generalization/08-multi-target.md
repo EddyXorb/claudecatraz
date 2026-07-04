@@ -1,294 +1,334 @@
-# 08 — Design-Spike: Multi-Target (mehrere git-/Forge-Instanzen pro `.catraz`)
+# 08 — Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz`
 
-Pflicht-Vorlauf für §07 Punkt 8 (`07-offene-verbesserungen.md`, Abschnitt „8.
-Multi-Target"), bevor dort Code entsteht. Der „Empfohlene Ansatz" im Plandokument
-ist bereits vorentschieden (Host-basiertes Routing, Allowlist in `warden.toml`
-unter `[git.urls] hosts = [...]`, Credentials bleiben in Env). Dieser Spike
-bestätigt ihn, entscheidet die zwei offen gelassenen Detailfragen und deckt eine
-dritte, im Plandokument nicht explizit benannte Frage auf (State-Keying bei
-kollidierenden Projektnamen über Hosts hinweg), die für eine korrekte
-Umsetzung ebenfalls entschieden werden muss.
+Ein `.catraz`-Ordner bedient mehrere Upstream-Instanzen (z.B. `gitlab.com`, ein
+self-hosted `my-gitlab.de`, ein privater git-Server) über **einen** Warden-Prozess,
+der das Ziel am HTTP-`Host`-Header erkennt. Der Agent behält kanonische Remotes; die
+erlaubten Endpoints stehen als explizite Liste in `warden.toml`, alles Ungenannte ist
+default-deny. Es gibt keinen `GITLAB_URL`- und keinen `GITLAB_MODE`-Schalter mehr —
+Ziele *und* Zugriffsmodus ergeben sich aus der Config bzw. den vorhandenen Tokens.
 
-Ergebnis vorab: der Spike selbst ist vollständig entschieden (kein „TBD" bleibt
-offen). Die **Code-Umsetzung** in diesem Arbeitsschritt bleibt bewusst auf den
-sicher isolierbaren, additiven Teil beschränkt (Abschnitt „Umsetzungsschnitt
-dieser PR" unten) — der Rest ist als Folgearbeit benannt, nicht implementiert.
+Dieses Dokument ist der vollständige, eigenständige Plan für den Schritt (im Backlog
+`07-offene-verbesserungen.md` als Punkt 8 geführt). Voraussetzung: unabhängige,
+transport-neutrale Guards (§07 Punkt 6) — jeder Guard hält einen austauschbaren
+Transport statt einer forge-eigenen Identität.
+
+> **Für Menschen vs. für Agents.** Dieses Dokument ist die Referenz für Menschen und
+> beschreibt das *Was* und *Warum*. Implementierende Agents finden die schrittweise
+> Umsetzung (das *Wie*) im Unterordner [`08-multi-target/`](08-multi-target/) — ein
+> Dokument je Schritt, exakt aus den §§ hier abgeleitet. Reihenfolge und gemeinsamer
+> Arbeitsablauf: [`08-multi-target/00-index.md`](08-multi-target/00-index.md).
 
 ---
 
-## 1. Bestätigung: Host-basiertes Routing
+## 1. Transport & Routing
 
-Bestätigt wie im Plandokument beschrieben, keine Änderung am Grundmechanismus:
+Docker-DNS/Compose (`extra_hosts` bzw. Netzwerk-Aliase) zeigt jeden gelisteten
+Hostnamen auf den einen Warden-Container. Der Warden liest `request.headers["host"]`,
+prüft ihn gegen die Endpoint-Liste und wählt den passenden Upstream (Basis-URL +
+Credentials). Ein nicht gelisteter Host wird abgelehnt (default-deny, R6). Ein Prozess
+für alle Hosts — kein Container und kein Guard pro Host.
 
-- Der Agent behält **kanonische** Remotes (`git clone https://my-gitlab.de/x.git`,
-  `GITLAB_URL=https://my-gitlab.de`). Kein `insteadOf`-Pfad-Präfix-Trick.
-- Docker-DNS/Compose (`extra_hosts` bzw. Netzwerk-Aliase) zeigt jeden gelisteten
-  Hostnamen auf den einen Warden-Container. Das ist reine CLI-/Compose-Topologie
-  (heute in `src/catraz/assets/compose/docker-compose.yml` + `entrypoint.py` +
-  `git_routing.py`, dort setzt der `insteadOf`-Rewrite den *einen* konfigurierten
-  `GITLAB_URL` auf `gitlab-warden` um) — **nicht** Teil des Warden-Python-Pakets.
-- Der Warden liest `request.headers["host"]`, prüft ihn gegen die Allowlist aus
-  `warden.toml` (`[git.urls] hosts`) und wählt anhand des Hosts den passenden
-  Upstream (Basis-URL + Credentials). Nicht gelistete Hosts: default-deny.
-- Ein Warden-Prozess für alle Hosts (kein Container/Guard pro Host „auf
-  Vorrat"), analog zur bestehenden Ein-Prozess-Architektur.
+### 1.1 Kein TLS zum Warden — Schema-Rewrite (git), gerenderte Basis-URL (REST)
 
-## 2. Offene Detailfrage 1 — API-Multi-Endpoint-Routing
+Der Warden serviert **Klartext-HTTP** (uvicorn auf `:8080`), kein TLS. Ein kanonischer
+`https://`-Remote würde einen TLS-Handshake erwarten (SNI, gültiges Zertifikat), den
+der Warden nicht bedient; und einen HTTP-`Host`-Header kann er nur lesen, wenn die
+Strecke Klartext ist. Der Warden terminiert bewusst **kein** MITM-TLS. Beide Protokolle
+werden daher auf Klartext-HTTP zum Warden gebracht — auf unterschiedlichem Weg, weil
+git und REST unterschiedliche Rewrite-Möglichkeiten haben:
 
-**Frage:** Wie werden mehrere GitLab-**API**-Instanzen adressiert — dasselbe
-Host-Routing wie bei git, oder separate Guard-Instanzen pro Host?
+- **git (transparent).** Der `insteadOf`-Rewrite in `~/.gitconfig` (`git_routing.py`)
+  schreibt pro Host **nur Schema+Port** um und behält den Hostnamen:
 
-**Entscheidung: identisches Host-Routing, keine separaten Guard-Instanzen.**
+  ```text
+  https://my-gitlab.de/  →  http://my-gitlab.de:8080/
+  https://gitlab.com/    →  http://gitlab.com:8080/
+  ```
 
-Begründung:
-- Der API-Guard (`ApiGuard`) ist bereits (§07 Punkt 6) transport-neutral: er
-  hält einen injizierten `Upstream` und kennt keine forge-eigene Identität.
-  Eine zweite `ApiGuard`-Instanz pro Host würde lediglich denselben Code mit
-  einem anderen `Upstream` und eigenem Katalog-Zustand duplizieren — reiner
-  Overhead, keine Isolationsgewinn (derselbe Prozess, dieselbe Trust-Boundary).
-- Ein **einzelner** `ApiGuard` (und `GitGuard`), der pro Request den
-  Ziel-Host aus dem `Host`-Header auflöst und den dazu gehörenden `Upstream`
-  wählt, ist die kleinere Änderung und bleibt konsistent mit dem
-  Guard-Unabhängigkeits-Ziel aus Schritt 6 (ein Guard, mehrere austauschbare
-  Transporte statt mehrerer Guard-Kopien).
-- REST-Pfade (`/api/v4/...`) sind je nach Host identisch strukturiert (GitLab
-  API-Schema) — der Katalog (Recognizer, Capabilities, Scopes) bleibt
-  **host-unabhängig**, nur der physische Transport (Basis-URL + Token)
-  variiert pro Host. Es gibt also keinen fachlichen Grund, den Katalog zu
-  vervielfachen.
-- Folge für den Guard: `ApiGuard`/`GitGuard` werden von „hält **einen**
-  `Upstream`" zu „hält eine **Abbildung** `Host → Upstream`, aufgelöst pro
-  Request über den `Host`-Header, default-deny bei Miss." Das ist eine
-  Erweiterung der bestehenden `__init__`-Signaturen, keine neue Guard-Klasse.
+  `.git/config` bleibt kanonisch (`https://my-gitlab.de`); der Rewrite lebt nur in
+  `~/.gitconfig`. DNS löst `my-gitlab.de` auf den Warden auf, der Request trägt
+  `Host: my-gitlab.de:8080`, und `UpstreamRouter.resolve()` normalisiert
+  Case/Port/trailing-dot weg und wählt den Upstream. Der Agent kann diesen Pfad nicht
+  umgehen.
 
-## 3. Offene Detailfrage 2 — Credentials pro Host
+- **REST (kooperativ).** Für HTTP-API-Clients (curl, glab, python-gitlab, MCP) gibt es
+  keinen `insteadOf`-Hook. Die Basis-URL wird dem Agenten mitgeteilt:
+  `render_instructions` (`assets/agents/claude/adapter.py`) ersetzt
+  `__FORGE_REST_BASE__` in der gerenderten `CLAUDE.md` durch die http-Warden-Basis
+  (`http://<host>:8080/api/v4`). Der Agent benutzt sie.
 
-**Frage:** Woher kommen Token je Host (getrennte Env-Variablen pro Host?
-Sektion in `warden.toml`)?
+**Warum Klartext hier sicher ist.** Der Klartext-Hop Agent→Warden verlässt nie das
+interne Docker-Netz `agent-net` (`internal: true`, kein Egress); warden→upstream ist
+echtes HTTPS. Die Trust-Boundary *ist* der Warden.
 
-**Entscheidung: getrennte Env-Variablen pro Host, benannt nach einem
-deterministischen Host-Slug; die bestehenden `GITLAB_READ_TOKEN`/
-`GITLAB_WRITE_TOKEN` (+ `_FILE`-Varianten) bleiben als Alias für den
-**ersten** in `[git.urls] hosts` gelisteten Host erhalten (Rückwärtskompatibilität
-für bestehende Single-Host-Deployments — kein Migrationszwang).**
+**Warum kooperatives REST-Routing genügt.** Die Enforcement kommt aus Containment,
+nicht aus dem Routing: (1) der Agent-Container hält **keinen** Forge-Token — der Warden
+ist der einzige credentialisierte Pfad, ein Request an ihm vorbei ist
+unauthentifiziert; (2) `agent-net` ist `internal: true`, die einzigen Auswege sind der
+Forward-Proxy (Allowlist, keine Creds) und der Warden. Ein Bypass gewinnt nichts. Das
+Routing macht den vorgesehenen Pfad nur ergonomisch.
 
-Konkret, für einen weiteren Host `my-gitlab.de`:
+### 1.2 Konsequenzen für Rendering und Compose
 
+- **Kanonisch gilt für REST nur eingeschränkt:** git behält `.git/config` kanonisch,
+  REST bekommt `http://<host>:8080/api/v4` (http + Warden-Port). Der DNS-Alias macht
+  nur den Host kanonisch, nicht Schema/Port.
+- **Eine generische Regel pro Host, ohne Warden-Namen zu leaken:** „Für Host X sprich
+  `http://X:8080` (git) bzw. `http://X:8080/api/v4` (REST)." N Hosts, dieselbe Regel.
+- **`no_proxy` muss jeden gerouteten Host enthalten** (`my-gitlab.de`, `gitlab.com`,
+  …), sonst schiebt der HTTP-Client REST-Calls in den Forward-Proxy statt direkt
+  (DNS→Warden) zu gehen.
+
+## 2. Guards: ein Guard je Typ, `Host → Upstream`-Abbildung
+
+`GitGuard` und `ApiGuard` halten eine Abbildung `Host → Upstream` und lösen pro
+Request über den `Host`-Header auf; default-deny bei Miss. Keine Guard-Kopie pro Host:
+
+- Die REST-Pfade (`/api/v4/...`) sind über Hosts identisch strukturiert
+  (Forge-API-Schema). Der Katalog (Recognizer, Capabilities, Scopes) bleibt
+  **host-unabhängig**; nur der physische Transport (Basis-URL + Token) variiert.
+- Eine zweite Guard-Instanz pro Host würde denselben Code mit anderem Upstream und
+  eigenem Katalog-Zustand duplizieren — Overhead ohne Isolationsgewinn (derselbe
+  Prozess, dieselbe Trust-Boundary).
+
+`UpstreamRouter` kapselt die Abbildung: pro gelistetem Host wird ein eigener Upstream
+gebaut, `resolve(header)` normalisiert und liefert `None` bei unbekanntem Host. Ein
+kernel-eigenes Gate (`host_gate`, Teil von `kernel_gates`, läuft vor `enrich`/`decide`)
+prüft `intent.host` gegen die Endpoint-Liste und deny't R6 bei Miss.
+
+## 3. Config-Schema (`warden.toml`)
+
+### 3.1 Domäne, Endpoints, Regeln
+
+Die Config ist nach **Domäne** (`git`, später `db`, …) gegliedert. Eine Domäne hat
+zwei Kinder: `rules` (Domänen-Default-Regeln) und `endpoint` (ein Array konkreter
+Ziele). Jeder Endpoint ist **genau ein Host**:
+
+```toml
+[git.rules]                          # Domänen-Defaults (gelten für alle git-Endpoints)
+branch_prefixes     = ["claude/"]
+max_open_branches   = 10
+max_open_mrs        = 5              # greift nur, wo MRs existieren (Forge-Endpoints)
+max_writes_per_hour = 60
+max_push_bytes      = "50MiB"
+
+[[git.endpoint]]
+host             = "gitlab.com"
+type             = "gitlab"
+allowed_projects = ["acme/infra", "acme/app"]
+
+[[git.endpoint]]
+host             = "my-gitlab.de"
+type             = "gitlab"
+allowed_projects = ["acme/infra"]   # gleicher Pfad, anderes Repo — durch host getrennt
+rules            = { max_open_mrs = 20, branch_prefixes = ["claude/", "bot/"] }
+
+[[git.endpoint]]
+host             = "personal-gitserver.it"
+type             = "plain"
+allowed_projects = ["me/dotfiles"]
 ```
-GITLAB_READ_TOKEN__MY_GITLAB_DE=...
-GITLAB_WRITE_TOKEN__MY_GITLAB_DE=...
-# _FILE-Varianten analog: GITLAB_READ_TOKEN__MY_GITLAB_DE_FILE=/run/secrets/...
+
+**WHAT vs. HOW.** `host`, `type`, `allowed_projects` sind die Identität/der Scope des
+Endpoints (welches Ziel); das optionale `rules` ist Verhalten (wie streng). Nur das
+Verhalten kaskadiert (§3.3); `allowed_projects` ist immer per-Endpoint (ein
+Domänen-Default-Projekt ergäbe keinen Sinn — ein Pfad ist nur relativ zu seinem Host
+eindeutig).
+
+### 3.2 Endpoint = ein Host
+
+Ein Endpoint bindet genau **einen** Host. Das löst die Kollision, die eine
+`hosts = [...]`-Liste mit geteiltem `allowed_projects` erzeugen würde: zwei
+verschiedene Repos mit zufällig gleichem Projektpfad (`acme/infra` auf `gitlab.com`
+und auf `my-gitlab.de`) sind jetzt getrennte Endpoints und werden nie vermischt. Die
+Config spiegelt damit das `(host, project)`-State-Keying (§5) 1:1.
+
+- **`host` ist der Schlüssel** und muss eindeutig sein — zwei Endpoints mit demselben
+  Host → `ConfigError`. Fehlermeldungen/Logs benennen den Endpoint über seinen Host,
+  kein erfundener Name nötig.
+- **`type` ist ein Feld** (nicht im Pfad, da alle Einträge `[[git.endpoint]]` heißen).
+  Es selektiert die Guards und die Basis-URL-Ableitung:
+  - `gitlab` → git-Transport + GitLab-REST, Basis `https://<host>/api/v4`.
+  - `github` → git-Transport + GitHub-REST (künftiger Guard), Basis
+    `https://api.github.com` bzw. Enterprise-Form.
+  - `plain` → nur git-Transport, keine Forge-API, Basis `https://<host>`.
+  - Unbekannter `type` → `ConfigError` mit Liste der implementierten Typen.
+
+Die Basis-URL wird also **regelbasiert aus `host` + `type` abgeleitet**, nicht separat
+konfiguriert — nur das Token (§4) ist zusätzlicher Input.
+
+### 3.3 Regel-Kaskade
+
+`[git.rules]` liefert die Domänen-Defaults; ein `rules = {...}` je Endpoint
+überschreibt sie:
+
+- **Per-Schlüssel-Merge:** Effektivwert für K = `endpoint.rules[K]` falls gesetzt,
+  sonst `git.rules[K]`, sonst Built-in-Default. Ein Endpoint-`rules` mit einem Key
+  überschreibt nur diesen; der Rest fällt weiter auf `[git.rules]` zurück.
+- **Listen ersetzen, nicht anhängen:** ein Endpoint-`branch_prefixes` *ersetzt* die
+  Domänen-Liste komplett — nur so kann ein Override auch verengen.
+- **Stateless vs. stateful:**
+  - `branch_prefixes`, `max_push_bytes` sind reine Pro-Request-Checks — Override ist
+    folgenlos.
+  - `max_open_branches`, `max_open_mrs`, `max_writes_per_hour` zählen. Weil sie
+    überschreibbar sind, ist die **Quote per-Endpoint** (Zählung auf den Endpoint
+    gescoped), kein globaler Deckel. Für Single-Endpoint ist das verhaltensgleich zu
+    heute (ein Endpoint = ein Cap = die bisherige Zählung); bei Multi-Endpoint zählt
+    jeder Endpoint für sich.
+
+### 3.4 Fail-closed-Validierung
+
+- Unbekannter `type` → `ConfigError`.
+- Doppelter `host` über die Endpoints → `ConfigError`.
+- Unbekannter Key in einer `rules`-Tabelle → `ConfigError` (Typo-Schutz).
+- Strukturelle Fehler (kaputtes TOML, obige Fälle) **brechen den Start ab**.
+  Per-Endpoint-*Credential*-Probleme brechen dagegen **nicht** ab, sondern schließen
+  nur den betroffenen Endpoint (§4.2, „fail-closed-degrade").
+
+### 3.5 Keine Policy in `.env`, keine Overrides
+
+Eine Einstellung, eine Quelle. Policy lebt ausschließlich in `warden.toml`, Secrets
+ausschließlich in `.catraz/secrets/` (§4).
+
+- **Entfallen:** `WARDEN_ALLOWED_PROJECTS`, `WARDEN_BRANCH_PREFIX`, `WARDEN_MAX_*`
+  (env-Overrides von toml-Werten), `GITLAB_MODE` (aus Token-Präsenz abgeleitet, §4.2),
+  `GITLAB_URL` (Hosts kommen aus den Endpoints). Mit `GITLAB_URL` entfällt auch der
+  Begriff `implicit_host`: **jeder** Host ist explizit; eine leere Endpoint-Liste ist
+  echtes default-deny (nichts erreichbar), nicht „alles erlaubt".
+- **In `.env` bleiben nur selten geänderte Infra-/Build-Knöpfe** (z.B.
+  `CLAUDE_CODE_VERSION`, `DEV_UID`, `NODE_VERSION`, `CLAUDE_CREDENTIAL_SOURCE`,
+  `AGENT_PROFILE`, `AUTH_MODE`) — keine Policy, keine Secrets.
+- **Davon zu unterscheiden ist die compose-interne Verdrahtung** (`READ_TOKENS_FILE`,
+  `WARDEN_REST_URL`, `ADMIN_UDS`, `no_proxy`): das ist Plumbing zwischen Containern,
+  keine vom User editierte Config, und bleibt env-basiert.
+
+## 4. Credentials & Access-Mode
+
+### 4.1 Secret-Dateien
+
+Zwei gruppierte, forge-agnostische Dateien, je eine pro Capability, mit flachen
+`<host><whitespace><token>`-Zeilen:
+
+```text
+# .catraz/secrets/read_tokens              (mode 0600)
+# <host>  <token>   — ein Token deckt git UND REST
+gitlab.com            glpat-…
+my-gitlab.de          glpat-…
+gitlab.internal:8443  glpat-…
 ```
 
-Slug-Regel: Host in Kleinbuchstaben, jedes Zeichen außer `[a-z0-9]` wird zu
-`_`, das Ergebnis in Großbuchstaben (`my-gitlab.de` → `MY_GITLAB_DE`). Rein
-mechanisch, keine Kollisionsauflösung nötig, solange die Host-Allowlist keine
-zwei Hosts enthält, die auf denselben Slug abbilden (z. B. `a.b` und `a-b`) —
-das ist eine Fail-closed-Prüfung, die die Config-Validierung beim Start
-übernehmen muss (Konflikt ⇒ `ConfigError`, Warden startet nicht).
+parallel `write_tokens`.
 
-Begründung, warum **kein** `warden.toml`-Feld für Credentials:
-- Grundsatz aus dem Plandokument (§8, „keine Geheimnisse in `warden.toml`") —
-  Secrets bleiben strikt in der Umgebung/den Compose-Secrets, Policy strikt in
-  `warden.toml`. Das ist dasselbe Prinzip, das schon `GITLAB_READ_TOKEN`
-  (Env) von `allowed_projects` (`warden.toml`) trennt (CLI-Prinzip **P5**,
-  `docs/design/agentic-workflow/04-cli.md`) — Multi-Host verändert dieses
-  Prinzip nicht, es multipliziert nur die Menge der Env-Variablen.
-- Die Host-**Liste** selbst ist keine Geheimnis, sondern Policy (welche
-  Ziele der Agent überhaupt ansprechen darf) — sie gehört folgerichtig in
-  `warden.toml`, exakt wie im Plandokument vorgegeben.
-- Basis-URL pro Host wird **nicht** separat konfiguriert, sondern
-  regelbasiert aus dem Hostnamen abgeleitet (`https://<host>/api/v4` für
-  REST, `https://<host>` für git — dieselbe Ableitung, die
-  `Config.git_base` heute aus `api_url` macht). Ein Host in der Allowlist
-  bedeutet also implizit auch seine URL-Form; nur das Token ist zusätzlicher
-  Input. Das hält die Konfiguration minimal (eine Liste + N Token-Paare statt
-  einer Liste aus Tabellen mit URL+Tokens).
+- **Separator = Whitespace, nicht `:`** (ein Host darf einen Port tragen,
+  `gitlab.internal:8443`); Split am ersten Whitespace, `#`-Kommentare und Leerzeilen
+  ignoriert.
+- **Ein Host-Token deckt git und REST.** Ein Forge ist ein git-Server mit kanonischer
+  API darüber; ein PAT mit `api`-Scope authentifiziert beides identisch. Getrennte
+  Protokoll-Tokens erzeugten nur zwei zwangsweise scope-identische Tokens.
+- **Compose einmalig.** Zwei `secrets:`-Blöcke (`read_tokens`/`write_tokens`) + zwei
+  Env-Zeilen (`READ_TOKENS_FILE`/`WRITE_TOKENS_FILE`). Einen Host hinzufügen = eine
+  Zeile in der Datei + ein `[[git.endpoint]]` — kein compose-Edit.
+- **Zustellung als docker-secret** (`/run/secrets/…`), nicht als Prozess-Env — die
+  Tokens erscheinen nicht in `/proc/<pid>/environ`.
+- **Auflösung im Warden.** `_resolve_host_credentials` liest die gruppierten Dateien zu
+  `host → token` und füttert `host_credentials`.
 
-## 4. Aufgedeckte dritte Frage — State-Keying bei Multi-Host
+### 4.2 Access-Mode aus Token-Präsenz
 
-Vom Plandokument nicht explizit adressiert, aber notwendig für Korrektheit:
-Die Quota-/Reconcile-Zustände (`agent_branches`, `agent_mrs` — siehe
-`guards/git/state.py::BranchState`, `guards/gitlab_api/state.py::MrState`)
-sind heute **ausschließlich** nach Projektpfad (`group/proj`) geschlüsselt.
-Sobald zwei Hosts erreichbar sind, können zwei *verschiedene* Repos
-zufällig denselben Projektpfad tragen (`gitlab.com/acme/infra` und
-`my-gitlab.de/acme/infra`) — mit reiner Projektpfad-Schlüsselung würden ihre
-Branch-/MR-Zähler sich vermischen: ein Push auf Host A könnte fälschlich die
-Quote von Host B verbrauchen oder ein R6-Deny auf Host B durch Host-A-Aktivität
-auslösen. Das ist ein stiller Korrektheitsfehler, kein Abbruch — würde also
-unbemerkt bleiben.
+Es gibt keinen deklarierten Mode-Schalter; der Zugriffsmodus **je Endpoint** ergibt
+sich aus den vorhandenen Tokens:
 
-**Entscheidung:** Sobald mehr als ein Host konfiguriert ist, wird der
-Zustand nach dem zusammengesetzten Schlüssel `(host, project)` geführt statt
-nur `project`. Konkret:
+| Tokens für Host X | Mode |
+| --- | --- |
+| keiner | **closed** (deny-all) + Warnung |
+| nur read | read-only |
+| read + write | read-write |
+| write ohne read | **closed** + Sicherheits-Warnung |
 
-- `agent_branches`/`agent_mrs` bekommen eine `host`-Spalte (Teil des
-  Primärschlüssels/der Unique-Constraint zusammen mit dem Projektpfad).
-- Reconcile (`reconcile_branches`, `reconcile_mrs`) läuft **pro Host** (eine
-  Iteration über die Host-Allowlist statt eines einzelnen Laufs) und schreibt
-  mit dem jeweiligen Host als Schlüsselteil.
-- Für das bestehende Single-Host-Verhalten (leere/fehlende `[git.urls]`) ist
-  das **kein sichtbarer Unterschied**: der implizite Host (aus `GITLAB_URL`
-  abgeleitet) ist dann der einzige Schlüsselwert, faktisch identisch zum
-  heutigen reinen Projektpfad-Schlüssel — bestehende DBs brauchen keine
-  Migration, weil Punkt 2 des Backlogs (`state_migrations.py` entfernt) fail-
-  closed über `PRAGMA user_version` geht: eine neue Spalte mit Default ist
-  ein additiver Schema-Schnitt, der als neue `CURRENT_SCHEMA_VERSION`
-  eingeführt würde, **wenn** dieser Teil tatsächlich implementiert wird (siehe
-  Abschnitt 6 — in dieser PR nicht der Fall).
+- **Per-Endpoint fail-closed-degrade, nie fail-stop.** Ein Credential-Problem an *einem*
+  Endpoint schließt genau diesen (deny-all), reißt die anderen nicht mit. Bei
+  Multi-Endpoint darf ein schlechter Token nicht den Zugang zu den korrekt
+  konfigurierten Endpoints blockieren.
+- **Mechanik:** kein nutzbares Credential ⇒ der Router hat keinen Upstream ⇒
+  `host_gate` deny't R6. „closed" ist Reuse von default-deny, kein neuer Zustand.
+- **write ohne read → closed + Warnung.** Das ist eine bewusste
+  **Least-Privilege-Policy**, kein technischer Zwang (ein `api`-scoped Token läse auch):
+  der breite Write-Token soll nicht auf jedem Read-Request mitfließen. Die Warnung nennt
+  den Fix („lege für Host X einen read-scoped Token in `read_tokens` an").
+- **Emergente Vorteile:** der Mode ist per-Endpoint (`gitlab.com` read-write,
+  `github.com` read-only — nur über die hinterlegten Tokens); das frühere globale
+  `GITLAB_MODE=off` ist der Fall „keine Endpoints/Tokens".
 
-Das ist bewusst am Ende dieses Spikes vermerkt, weil es die Guard-
-Parametrisierung (Abschnitt 2) direkt betrifft: `state_view()`/`reconcile()`
-je Guard müssen um den Host-Dimension erweitert werden, sobald die
-Host→Upstream-Abbildung (Abschnitt 2/3) real existiert — nicht vorher, sonst
-entsteht eine Halbimplementierung, die bei mehr als einem Host falsche
-Zähler liefert, ohne das sichtbar zu machen.
+## 5. State-Keying `(host, project)`
 
-## 5. Nicht tun (bestätigt aus dem Plandokument, keine Änderung)
+Die Quota-/Reconcile-Zustände (`agent_branches` in `guards/git/state.py::BranchState`,
+`agent_mrs` in `guards/gitlab_api/state.py::MrState`) werden nach dem zusammengesetzten
+Schlüssel `(host, project)` geführt. Ohne den Host-Teil würden zwei verschiedene Repos
+mit gleichem Projektpfad ihre Zähler vermischen — ein stiller Korrektheitsfehler.
 
-- Kein `insteadOf`-Pfad-Präfix-Trick.
-- Kein separater Warden-Container pro Guard/Host auf Vorrat.
-- Keine implizite/automatisch befüllte Host-Liste — explizite Allowlist in
-  `warden.toml`, Default-Deny für alles Ungenannte.
-- Keine Geheimnisse in `warden.toml` (Abschnitt 3).
+- `agent_branches`/`agent_mrs` tragen eine `host`-Spalte als Teil des Primärschlüssels.
+- `reconcile_branches`/`reconcile_mrs` laufen pro Host und schreiben mit dem jeweiligen
+  Host als Schlüsselteil.
+- Die stateful Quotas zählen **per-Endpoint** (§3.3): `open_branches(host)` /
+  `open_mrs(host)` filtern auf den Endpoint. Single-Endpoint verhält sich wie eine
+  reine Projektpfad-Schlüsselung.
+- Es gibt keinen `implicit_host` mehr — jeder Host stammt aus einem `[[git.endpoint]]`.
+- Die `host`-Spalte ist Teil des Schema-Stamps (`PRAGMA user_version` in
+  `core/state.py`). Der State ist pre-1.0 wegwerfbar: kein Migrationslauf, eine ältere
+  DB wird fail-closed abgelehnt, der Operator löscht die Datei.
 
-## 6. Umsetzungsschnitt dieser PR — was jetzt Code wird, was offen bleibt
+## 6. CLI (`catraz doctor` / `catraz init`)
 
-Der volle Umbau (Host→Upstream-Auflösung in beiden Guards, State-Keying nach
-`(host, project)`, Reconcile pro Host, CLI-/Compose-seitige DNS-Aliase +
-`git_routing.py`-Anpassung für mehrere kanonische Hosts, Container-Test mit
-zwei echten Hosts) berührt die Trust-Boundary an mehreren Stellen gleichzeitig
-(welcher Host bekommt welches Token, welcher Request landet bei welchem
-Upstream) und reicht über das Warden-Python-Paket hinaus in die CLI-
-Packaging-/Compose-Schicht (`src/catraz/...`), die in diesem Arbeitsschritt
-nicht angefasst wurde und ohne Laufzeit-Verifikation (echte zweite
-GitLab-Instanz, echtes Compose-Netzwerk) riskant blind zu ändern wäre. Das
-entspricht der Einschätzung im Plandokument selbst („größter,
-sicherheitssensitivster Schritt").
+`doctor` ist die host-seitige Validierung des Multi-Endpoint-Setups; der Warden ist die
+container-seitige Durchsetzung. Beide wenden dieselben Regeln an — `doctor` in der
+**freundlichen, erklärenden** Rolle, der Warden **fail-closed**. Die Regeln stehen
+deshalb in diesem Dokument einmal normativ; beide Seiten werden gegen dieselben Fälle
+getestet (sie liegen in getrennten Packages, `src/catraz/` vs. `warden/warden/`, und
+können keinen Code teilen).
 
-Diese PR liefert deshalb **nur** den sicher isolierten, additiven,
-verhaltensneutralen Grundbaustein, vollständig durch Unit-/Config-Tests
-abgesichert:
+`doctor` muss:
 
-- `core/config.py`: `Config.allowed_hosts: frozenset[str]` (Default
-  `frozenset()`) + `Config.host_allowed(host: str) -> bool`. Leere Allowlist
-  ⇒ Verhalten wie heute (Methode gibt immer `True` zurück — es gibt noch
-  keinen Aufrufer, der sie in den Request-Pfad verdrahtet, siehe unten).
-  Nicht-leere Allowlist ⇒ strikter, Case-insensitiver, Port-strippender
-  Vergleich, default-deny für alles andere.
-- `core/config_load.py`: Parser für `[git.urls] hosts = [...]` aus
-  `warden.toml` (Analog zu `[api.endpoints]`, fail-closed bei Falschform).
-  Keine Env-Variable für die Liste selbst (Policy gehört in `warden.toml`,
-  Abschnitt 3).
+- die gruppierten `read_tokens`/`write_tokens` parsen (`host → token`),
+- gegen die `[[git.endpoint]]`-Liste kreuzprüfen und **warnen** (nie den Start
+  verhindern):
+  - **Token für einen nicht gelisteten Host** → Warnung (wahrscheinlich Tippfehler);
+    der Warden ignoriert ihn.
+  - **Gelisteter Host ohne Token** → Warnung; der Warden startet den Endpoint **closed**
+    (§4.2).
+  - **write ohne read** → Warnung mit der Least-Privilege-Begründung; Endpoint closed.
+- jedes vorhandene Endpoint-Token proben (Erreichbarkeit/Scope), pro Host.
 
-**Ausdrücklich NICHT Teil dieser PR** (Folgearbeit, separat zu planen):
+`init` scaffoldet die gruppierten Secret-Dateien und eine `warden.toml` mit
+`[git.rules]` + `[[git.endpoint]]`-Vorlage; das gelieferte Template dokumentiert die
+implementierten `type`-Werte als Kommentar.
 
-1. Die Host→Upstream-Auflösung selbst (`GitGuard`/`ApiGuard` halten weiterhin
-   genau **einen** `Upstream`, injiziert aus der weiterhin einzigen
-   `Config.api_url`). `Config.host_allowed` wird **nirgends** in den
-   Request-/Kernel-Pfad verdrahtet — ein halb angeschlossenes Gate wäre aktiv
-   irreführend: es würde einen Host als „erlaubt" durchwinken, dessen Traffic
-   dann trotzdem beim einzigen (falschen) Upstream landet.
-2. Die per-Host-Credential-Auflösung (Abschnitt 3) — Slug-Ableitung,
-   `GITLAB_READ_TOKEN__<SLUG>`-Parsing, Kollisionsprüfung.
-3. State-Keying nach `(host, project)` (Abschnitt 4) — Schema-Änderung an
-   `agent_branches`/`agent_mrs`, Reconcile pro Host.
-4. CLI-/Compose-seitige DNS-Aliase, `git_routing.py`-Anpassung für mehrere
-   kanonische Hosts, Rendering der Agent-Instruktionen für mehrere Remotes.
-5. Der im Plandokument geforderte Container-Test (zwei erreichbare Hosts,
-   ein dritter abgelehnt) — setzt 1–4 voraus.
+## 7. Nicht tun
 
-**Fertig-Kriterium für Punkt 8 insgesamt bleibt offen**, bis 1–5 nachgezogen
-sind; §07 Punkt 8 wird deshalb **nicht** als erledigt markiert. Dieser Spike
-plus der Config-Grundbaustein sind der erste, sicher verifizierbare
-Teil-Deliverable davon.
+- **Kein** `insteadOf`-Pfad-Präfix-Trick (`warden:8080/my-gitlab.de/repo.git`) — er
+  macht die Remotes un-kanonisch und leakt die Warden-Adresse. Schema-Rewrite statt
+  Pfad-Encoding (§1.1).
+- **Kein** MITM-TLS im Warden — er bleibt Klartext-HTTP hinter der internen Netz-Grenze.
+- **Kein** separater Warden-Container oder Guard pro Host — ein Warden, der nach Host
+  routet, genügt (§2).
+- **Keine** implizite/automatisch befüllte Host-Liste — explizite Endpoints,
+  default-deny für alles Ungenannte.
+- **Keine** Geheimnisse in `warden.toml`; **keine** Policy/`GITLAB_MODE`/`GITLAB_URL` in
+  `.env` (§3.5).
+- **Keine** getrennten git-/API-Tokens pro Host — ein Token deckt beides (§4.1).
+- **Kein** un-überschreibbarer globaler Quota-Deckel — die Quote ist per-Endpoint (§3.3).
 
-> **✅ Folgearbeit 1–3 ERLEDIGT** (Commits `feat(config): Punkt 8 Folgearbeit
-> — Per-Host-Credentials`, `feat(guards): Punkt 8 Folgearbeit —
-> Host→Upstream-Auflösung + State-Keying`). Ausdrücklich **innerhalb** des
-> Warden-Python-Pakets, ohne CLI-/Compose-Änderungen (4) und ohne den
-> Container-Test (5) — diese beiden bleiben als **„8b"** benannte, separate
-> Folgearbeit offen (siehe unten).
->
-> **1. Host→Upstream-Auflösung.** `core/transport.py::UpstreamRouter` löst
-> jetzt den `Host`-Header pro Request auf. Single-Target (`[git.urls] hosts`
-> leer/fehlend): der Router ignoriert den Header komplett und liefert immer
-> denselben, aus `Config.api_url`/den bisherigen Tokens gebauten `Upstream` —
-> bit-identisch zum Vorzustand, unabhängig davon, was ein Client als Host
-> sendet. Multi-Target: pro gelistetem Host wird ein eigener `Upstream` gebaut
-> (Basis-URL regelbasiert `https://<host>[/api/v4]`, Tokens aus
-> `Config.host_credentials`), `resolve(header)` normalisiert
-> (case/port/trailing-dot) und liefert `None` bei unbekanntem Host.
-> `GitGuard`/`ApiGuard` halten seither `router: UpstreamRouter` statt
-> `transport: Upstream`; `core/guard.py::host_gate` (neues, kernel-eigenes
-> M6-Gate, Teil von `kernel_gates`, läuft vor `enrich`/`capability_gate`/
-> `decide`) prüft `intent.host` gegen `Config.host_allowed` und deny't R6 bei
-> unbekanntem Host — damit ist `Config.host_allowed` jetzt genau dort
-> verdrahtet, wo Abschnitt 6 es zuvor bewusst ausgespart hatte. Jede
-> `Intent`-Implementierung (`GitIntent`/`ApiIntent`/`GraphqlIntent`) trägt den
-> rohen `Host`-Header (`parse()` setzt ihn); `MrOwnership` löst pro Aufruf
-> über den Router auf statt einen fest injizierten `Upstream` zu halten.
->
-> **2. Per-Host-Credentials.** `core/config_load.py`: Slug-Ableitung
-> (lowercase, `[^a-z0-9]`→`_`, uppercase) für jeden zusätzlichen Host,
-> `GITLAB_READ_TOKEN__<SLUG>`/`GITLAB_WRITE_TOKEN__<SLUG>` (+ `_FILE`-Varianten
-> über den bestehenden `_secret()`-Helfer). Der erste gelistete Host bleibt
-> Alias der bestehenden `GITLAB_READ_TOKEN`/`GITLAB_WRITE_TOKEN`. Zwei Hosts,
-> die auf denselben Slug abbilden, werfen beim Config-Laden fail-closed einen
-> `ConfigError` (`_resolve_host_credentials`), bevor überhaupt ein Token
-> nachgeschlagen wird. Fehlende Tokens für einen zusätzlichen Host brechen den
-> Start ab, exakt wie beim Primärhost (abhängig vom `GITLAB_MODE`:
-> `read-only` verlangt nur den Read-Token, `read-write` beide).
->
-> **3. State-Keying `(host, project)`.** `agent_branches`
-> (`guards/git/state.py::BranchState`) und `agent_mrs`
-> (`guards/gitlab_api/state.py::MrState`) tragen jetzt eine `host`-Spalte als
-> Teil des Primärschlüssels; `replace_branches`/`replace_mrs`/`add_branch`/
-> `upsert_mr` nehmen `host` als ersten Parameter. `reconcile_branches`/
-> `reconcile_mrs` iterieren über `Config.effective_hosts` (Multi-Target:
-> `host_order`; Single-Target: ein synthetischer `implicit_host`, aus
-> `GITLAB_URL` abgeleitet) statt einmalig zu laufen. `open_branches()`/
-> `open_mrs()` bleiben bewusst **global/ungefiltert** — die Quote
-> (`max_open_branches`/`max_open_mrs`) war schon vor Multi-Target ein
-> einziger projektübergreifender Deckel, kein Per-Projekt-Limit; Multi-Target
-> erweitert diesen Deckel konsistent über alle Hosts, statt eine neue
-> Semantik einzuführen. Für Single-Host ist das **keine sichtbare
-> Verhaltensänderung** (ein einziger, konstanter Host-Schlüsselwert für alle
-> Zeilen).
->
-> **Schema-Version-Bump 1 → 2** (`core/state.py::CURRENT_SCHEMA_VERSION`):
-> notwendig, weil `CREATE TABLE IF NOT EXISTS` eine neue Spalte nicht in eine
-> bereits bestehende Tabelle nachzieht. Die Fail-closed-Prüfung
-> (`_check_and_stamp_schema_version`) wurde deshalb von „nur *neuer* als
-> `CURRENT_SCHEMA_VERSION` bricht ab" auf „*jede* Version außer `0`
-> (frischer Datei) und `CURRENT_SCHEMA_VERSION` bricht ab" verschärft — eine
-> ältere, bereits existierende v1-DB wird beim Hochfahren mit einem
-> `SchemaError` abgelehnt statt still mit der alten (spaltenlosen)
-> Tabellenform weiterzulaufen. Konsistent mit „State ist pre-1.0 wegwerfbar":
-> der Operator löscht die Datei, kein Migrationslauf nötig.
->
-> Tests: `tests/test_host_routing.py` (Host-Auflösung inkl. End-to-End-Request
-> über zwei Hosts + Deny für unbekannten Host, `reconcile_branches` pro Host),
-> `tests/test_config.py` (Slug-Mechanik, Alias des ersten Hosts, `_FILE`-
-> Variante, fehlende Tokens, Kollision), `tests/test_git_state.py`/
-> `tests/test_api_state.py` (zwei Hosts mit gleichem Projektpfad → getrennte
-> Zähler), `tests/test_state.py` (Schema-Fail-closed jetzt auch für ältere
-> Version). 390 passed (367 Baseline + 23 neue), ruff/format/mypy grün.
->
-> **„8b" — weiterhin NICHT Teil dieser Folgearbeit, separat zu planen:**
->
-> 4. CLI-/Compose-seitige DNS-Aliase, `git_routing.py`-Anpassung für mehrere
->    kanonische Hosts (heute rewrited `git_routing.py` genau *einen*
->    konfigurierten `GITLAB_URL` auf `gitlab-warden`), Rendering der
->    Agent-Instruktionen für mehrere Remotes.
-> 5. Der im Plandokument geforderte Container-Test (zwei erreichbare Hosts,
->    ein dritter abgelehnt) — setzt 4 voraus (braucht echte, per Compose
->    verdrahtete DNS-Aliase, nicht nur Unit-Mocks).
->
-> **Fertig-Kriterium für Punkt 8 insgesamt bleibt weiterhin offen**, bis 8b
-> (4–5) nachgezogen ist; §07 Punkt 8 wird deshalb **weiterhin nicht** als
-> erledigt markiert — der Warden-interne Mechanismus (Host-Routing,
-> Credentials, State-Keying) ist jetzt vollständig und getestet, aber ohne
-> CLI/Compose-Verdrahtung kann kein Deployment tatsächlich mehrere Hosts
-> nutzen.
+## 8. Umsetzungsstand
+
+- **Im Warden-Paket vorhanden (in einer frühen, an dieses Dokument anzugleichenden
+  Form):** Host-Routing (`UpstreamRouter` + `host_gate`), per-Host-Credential-Auflösung
+  und State-Keying `(host, project)`.
+- **Offen:** das `warden.toml`-Schema §3 (`[git.rules]` + `[[git.endpoint]]`-Array mit
+  `type`-Feld und Regel-Kaskade), das gruppierte `read_tokens`/`write_tokens`-Format
+  §4.1 und die Access-Mode-Ableitung §4.2 im Config-Loader; die `.env`-Aufräumung §3.5;
+  die CLI-Schicht §6 (`doctor`/`init`); die Compose-/Rendering-Schicht (`src/catraz/…`)
+  — DNS-Aliase für mehrere Hosts, `git_routing.py` für mehrere kanonische Hosts,
+  Instruktions-Rendering für mehrere Remotes, `no_proxy`-Einträge; sowie ein
+  Container-Test mit zwei erreichbaren Hosts und einem abgelehnten dritten.
+
+Der Schritt gilt erst als erledigt, wenn ein Deployment über die CLI/Compose-Schicht
+tatsächlich mehrere Hosts bedienen kann.
