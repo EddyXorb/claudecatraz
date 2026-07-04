@@ -444,10 +444,9 @@ def _probe_gitlab_tokens(
     write_tokens: dict[str, str],
     f: Findings,
 ) -> None:
-    """Best-effort online probe, per configured endpoint token (lifted from the
-    old two-fixed-token probe, §6 point 3): catch expired/swapped/wrong-scope
-    tokens, one host at a time. Degrades silently to "not probed" when a host
-    can't be reached — never a hard failure.
+    """Best-effort online probe, per configured endpoint token: catch
+    expired/swapped/wrong-scope tokens, one host at a time. Degrades silently
+    to "not probed" when a host can't be reached — never a hard failure.
 
     Only ``type = "gitlab"`` endpoints have a defined REST surface to probe
     (``personal_access_tokens/self``, ``/user``); ``plain`` endpoints are
@@ -601,15 +600,16 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
 
 
 def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Effective endpoint-catalog table, per host (§09 step 03): default set +
-    activations for each configured ``[[git.endpoint]]``.
+    """Effective endpoint-catalog table, per host: default set + activations
+    for each configured ``[[git.endpoint]]``.
 
     A thin section — the actual report is fetched from the running warden's
-    read-only ``/policy`` admin route (one section per host since the REST
-    guard's per-host actions rebuild) and formatted by ``catraz.endpoints``;
-    doctor.py only wires it into the Findings list, so this module doesn't
-    grow with the catalog (see ``catraz.endpoints.fetch_policy_report``).
-    The §4 action cross-checks (write_token / ``git.push`` coherence) live in
+    read-only ``/policy`` admin route (one section per host) and formatted by
+    ``catraz.endpoints``; doctor.py only wires it into the Findings list, so
+    this module doesn't grow with the catalog (see
+    :func:`catraz.endpoints.fetch_policy_report`).
+
+    The action cross-checks (write_token / ``git.push`` coherence) live in
     :func:`check_action_coherence` below — they're a static, host-side parse
     of ``warden.toml`` (like :func:`check_tokens`), not a live-report read, so
     unlike this function they don't need the stack to be up.
@@ -652,16 +652,16 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
 
 
 def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None:
-    """§4 cross-checks between a host's effective ``actions`` and its tokens/
+    """Cross-checks between a host's effective ``actions`` and its tokens/
     other actions — always ``WARN``, never ``BAD``: these are coherence traps
     (a configured action that can never fire), not security problems, so the
-    Warden never fails startup over them either (§4).
+    Warden never fails startup over them either.
 
     Static and host-side, like :func:`check_tokens`: parses ``warden.toml``
     and the grouped token files itself (doctor never imports the Warden's
-    Python, A2), computing each host's effective actions with the same
-    cascade the Warden uses (:func:`_effective_actions_for_host`) so the two
-    sides can't drift, then warning on:
+    Python), computing each host's effective actions with the same cascade
+    the Warden uses (:func:`_effective_actions_for_host`) so the two sides
+    can't drift, then warning on:
 
     - a write action configured with no ``write_token`` for that host — the
       endpoint is effectively read-only.
@@ -671,7 +671,7 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
       to trigger a pipeline for.
 
     Deliberately silent on dead quotas (``max_open_mrs`` set without
-    ``mr.create``, etc.) — harmless, the counter is simply never reached (§4).
+    ``mr.create``, etc.) — harmless, the counter is simply never reached.
     """
     mode = _gitlab_mode(env)
     if mode == "off":
@@ -714,13 +714,13 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
 
 
 def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
-    """§05.3/§05.6 — active agent profile + credential-mode consistency.
+    """Active agent profile + credential-mode consistency check.
 
-    `credentials.mode = "sync"` keeps the pre-Schritt-7 check (sandbox seed
-    present, not root-owned — the trap `entrypoint.py` hard-coded: Docker
-    auto-creates a bind target as root when the source file is missing).
-    `credentials.mode = "persistent"` (claude's default, §05.6) instead
-    checks the per-repo state dir itself: present, mode 0700.
+    `credentials.mode = "sync"` checks that the sandbox seed is present and
+    not root-owned — Docker auto-creates a bind target as root when the
+    source file is missing, which `entrypoint.py` doesn't handle.
+    `credentials.mode = "persistent"` (claude's default) instead checks the
+    per-repo state dir itself: present, mode 0700.
     """
     from catraz.agents import load_manifest, resolve_agent_profile
     from catraz.errors import CliError as _CliError
@@ -777,8 +777,8 @@ def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
 
 
 def check_net(root: Path, f: Findings) -> None:
-    # Admin/audit moved from TCP (172.31.0.2:9090) to a per-project unix socket
-    # under .catraz/state/warden/run/. The socket file only exists while the stack runs.
+    # Admin/audit is reachable over a per-project unix socket under
+    # .catraz/state/warden/run/. The socket file only exists while the stack runs.
     sock = root / ".catraz" / "state" / "warden" / "run" / "admin.sock"
     if sock.exists():
         f.ok("net", "admin socket present (stack up)")
@@ -917,7 +917,7 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     claude_secrets = cat / "secrets" / "claude"
     claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
     claude_secrets.chmod(0o700)
-    # §05.3/§05.6: the active agent profile's persistent-state + debug-log dirs.
+    # The active agent profile's persistent-state + debug-log dirs.
     # Best-effort default ("claude") if AGENT_PROFILE is unset/unresolvable —
     # `check_agent` is the authoritative validator, this is just dir plumbing.
     profile = (env.get("AGENT_PROFILE") or "claude").strip() or "claude"
@@ -934,9 +934,9 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     ]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
-    # `read_tokens`/`write_tokens` (§4.1, §6): the grouped, multi-endpoint token
-    # files `doctor`/the Warden read `host -> token` from. Scaffolded unconditionally
-    # (like the legacy per-token SECRETS below) so `catraz init` always leaves a
+    # `read_tokens`/`write_tokens`: the grouped, multi-endpoint token files
+    # `doctor`/the Warden read `host -> token` from. Scaffolded unconditionally
+    # (like the per-token SECRETS below) so `catraz init` always leaves a
     # parseable, empty pair behind, mode 0600, ready for `<host> <token>` lines.
     secret_files = ["read_tokens", "write_tokens"] + [f for f, _, _ in SECRETS]
     if mode == "api_key":

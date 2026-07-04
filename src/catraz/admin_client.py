@@ -1,11 +1,11 @@
-"""Minimal HTTP GET over the warden admin Unix socket (§04.3).
+"""Minimal HTTP GET over the warden admin Unix socket.
 
 Zero third-party dependencies by design (catraz.pyproject declares none) —
 this is a thin wrapper around ``http.client`` pointed at a Unix socket
 instead of TCP. Used by ``catraz doctor``'s endpoint-catalog section to query
 the running warden's read-only ``/policy`` route (warden/warden/app.py)
-instead of guessing at catalog contents client-side (A2: catraz never imports
-or executes warden's Python — it only ships it as a container asset, see
+instead of guessing at catalog contents client-side: catraz never imports
+or executes warden's Python — it only ships it as a container asset (see
 ``[tool.hatch.build.targets.wheel.force-include]`` in pyproject.toml).
 """
 

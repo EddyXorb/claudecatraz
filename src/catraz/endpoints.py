@@ -1,17 +1,14 @@
-"""Endpoint-catalog CLI support (§09 step 03, docs/design/agentic-workflow/04-cli.md
-``doctor``): the ``/policy`` admin-route fetch.
+"""Endpoint-catalog CLI support for ``catraz doctor``: the ``/policy``
+admin-route fetch.
 
 Catalog ids and their meaning are only known to the running warden — catraz
-never imports warden's Python (A2), it only ships it as a container asset
-(see pyproject.toml's force-include). This module only fetches the live
+never imports warden's Python, it only ships it as a container asset (see
+pyproject.toml's force-include). This module only fetches the live
 ``/policy`` report (``admin_client.get_json``); ``catraz.doctor`` formats it.
 
-``[api.endpoints].enable`` (the former CLI-writable activation list, and the
-now-removed ``catraz allow-endpoint`` command that wrote it) is gone ersatzlos
-along with the warden-side config section it targeted (§09 §5): activation is
-now each host's ``actions`` in ``warden.toml``'s ``[git]``/``[[git.endpoint]]``,
-which ``catraz init`` scaffolds and ``catraz doctor`` cross-checks — there is
-no CLI-writable equivalent here.
+Endpoint activation is each host's ``actions`` in ``warden.toml``'s
+``[git]``/``[[git.endpoint]]`` tables, which ``catraz init`` scaffolds and
+``catraz doctor`` cross-checks — there is no CLI-writable equivalent here.
 """
 
 from __future__ import annotations
