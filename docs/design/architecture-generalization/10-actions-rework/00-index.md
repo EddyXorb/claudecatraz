@@ -25,7 +25,7 @@ commit); a higher number requires all lower ones. Update the Status column
 | 03 | [`03-gitlab-guard.md`](03-gitlab-guard.md) | rewrite REST guard onto recognizers (`guards/git/gitlab/`) | 01, 02 | ✅ |
 | 04 | [`04-kernel-and-assembly.md`](04-kernel-and-assembly.md) | kernel action gates, delete capability layer, derive type sets from `SUPPORTED` | 01–03 | ✅ |
 | 05 | [`05-report-and-cli.md`](05-report-and-cli.md) | `/policy` report over all guards; catraz template/`init`/`doctor` | 01–04 | ✅ |
-| 06 | [`06-redteam-e2e-cleanup.md`](06-redteam-e2e-cleanup.md) | red-team/e2e coverage, sweep for leftovers, doc cross-refs | 01–05 | ⬜ |
+| 06 | [`06-redteam-e2e-cleanup.md`](06-redteam-e2e-cleanup.md) | red-team/e2e coverage, sweep for leftovers, doc cross-refs | 01–05 | ✅ |
 
 The two level-03 files touch shared wiring (`app.py`, `context.py`) — each may
 only change the import/registration lines of **its own** guard.

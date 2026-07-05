@@ -32,19 +32,19 @@ warden/
 │   ├── app.py              # Starlette routing               ← W4
 │   ├── __main__.py         # uvicorn bootstrap + reconcile   ← W16
 │   ├── errors.py           # deny / git-reject responses     ← W13
-│   ├── core/               # kernel: pipeline (run_guarded), Intent/Decision,
-│   │                       #   rules, capabilities, audit, state, config (§03.2/03.3)
+│   ├── core/               # kernel: pipeline (Guard.handle, kernel_gates), Intent/Decision,
+│   │                       #   Action/Criticality/Recognizer, rules, audit, state, config
 │   └── guards/
-│       ├── git/            # git Smart-HTTP guard: pktline, ref policy, GitGuard ← W7
-│       └── gitlab_api/     # GitLab REST guard: catalog, read table, ApiGuard,
-│                           #   ownership/reconcile, upstream token injection ← W6
+│       └── git/            # the git namespace: shared Action vocabulary + endpoint types
+│           ├── transport/  # git Smart-HTTP guard: pktline, ref recognizers, GitGuard ← W7
+│           └── gitlab/     # GitLab REST guard: recognizers, ApiGuard, reconcile,
+│                           #   upstream token injection ← W6
 └── tests/                  # policy / pktline / quota / api / git / redteam
 ```
 
-The policy cores (`guards/*/policy.py`, `guards/git/pktline.py`, `core/model.py`,
-`core/capabilities.py`, the catalog) are transport-free and pure — the foundation of the
-test strategy and auditability (W2). Full module tree →
-[`docs/design/agentic-workflow/02-warden.md`](../docs/design/agentic-workflow/02-warden.md).
+The policy cores (`guards/*/policy.py`, `guards/git/transport/pktline.py`, `core/model.py`,
+`core/guard.py`, the recognizer catalogs) are transport-free and pure — the foundation of the
+test strategy and auditability (W2).
 
 ## Develop
 

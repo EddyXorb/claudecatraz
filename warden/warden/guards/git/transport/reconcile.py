@@ -1,8 +1,8 @@
 """git guard reconcile: rebuild the branch-quota counter from upstream truth.
 
 Uses only the forge-neutral ``warden.core.transport`` — no
-``guards.gitlab``/``guards.gitlab_api`` import, so the git guard's reconcile
-never depends on the REST-API guard's own reconcile.
+``guards.git.gitlab`` import, so the git guard's reconcile never depends on
+the REST-API guard's own reconcile.
 """
 
 from __future__ import annotations

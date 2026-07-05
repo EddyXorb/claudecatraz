@@ -156,8 +156,11 @@ def _git(cwd, *args, check=True):
     )
 
 
-@pytest.fixture
-def e2e(tmp_path):
+def _run_e2e(tmp_path, *, actions=None):
+    """Build a real upstream `git http-backend` plus a real Warden in front of
+    it, on the git-namespace action vocabulary. ``actions`` overrides the
+    endpoint's effective actions (default: inherit the built-in default).
+    """
     import uvicorn
 
     # 1. throwaway bare upstream repo
@@ -191,7 +194,7 @@ def e2e(tmp_path):
         branch_prefixes=("claude/",),
         allowed_projects=("repo",),
         state_db_path=str(tmp_path / "state.db"),
-        git_endpoints=(GitEndpoint(host=backend_host, type="plain"),),
+        git_endpoints=(GitEndpoint(host=backend_host, type="plain", actions=actions),),
         git_credentials={
             Config.normalize_host(backend_host): HostCredentials(read_token="r", write_token="w")
         },
@@ -220,6 +223,19 @@ def e2e(tmp_path):
         server.should_exit = True
         thread.join(timeout=5)
         backend.shutdown()
+
+
+@pytest.fixture
+def e2e(tmp_path):
+    yield from _run_e2e(tmp_path)
+
+
+@pytest.fixture
+def e2e_no_branch_push(tmp_path):
+    # repo.branch.create stays on (so the first, branch-creating push
+    # succeeds) but repo.branch.push is off — an update to that same branch
+    # must then be denied, naming that specific action.
+    yield from _run_e2e(tmp_path, actions=("repo.read", "repo.branch.create"))
 
 
 def _seed_clone(tmp_path, remote, branch):
@@ -254,3 +270,21 @@ def test_push_forbidden_branch_is_rejected(e2e):
     res = _git(work, "push", "origin", "main", check=False)
     assert res.returncode != 0
     assert "warden: R2" in (res.stderr + res.stdout)
+
+
+def test_push_update_denied_when_branch_push_disabled_names_the_action(e2e_no_branch_push):
+    # New ids, full pipeline: the create succeeds (repo.branch.create is on),
+    # the follow-up update to the same branch is denied per-ref, naming the
+    # specific disabled action rather than a blunt reject.
+    tmp_path, remote = e2e_no_branch_push
+    work, _ = _seed_clone(tmp_path, remote, "claude/feature")
+
+    created = _git(work, "push", "-q", "origin", "claude/feature", check=False)
+    assert created.returncode == 0, created.stderr
+
+    (work / "file.txt").write_text("updated")
+    _git(work, "add", ".")
+    _git(work, "commit", "-q", "-m", "second")
+    updated = _git(work, "push", "origin", "claude/feature", check=False)
+    assert updated.returncode != 0
+    assert "action repo.branch.push not enabled" in (updated.stderr + updated.stdout)

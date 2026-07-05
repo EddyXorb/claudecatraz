@@ -43,7 +43,7 @@ pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
 # ── fixed multi-endpoint fixture data (cascade example) ───────────────────────
 
 HOST_FULL = "full-forge.test"  # gitlab, no `actions` override -> domain default
-HOST_REVIEW = "review-forge.test"  # gitlab, actions = [repo.read, project.mr.comment]
+HOST_REVIEW = "review-forge.test"  # gitlab, actions = [repo.read, project.read, project.mr.comment]
 HOST_PLAIN = "plain-forge.test"  # plain, no `actions` override -> default ∩ type
 PROJECT = "acme/demo"
 
@@ -77,7 +77,7 @@ allowed_projects = ["{PROJECT}"]
 host = "{HOST_REVIEW}"
 type = "gitlab"
 allowed_projects = ["{PROJECT}"]
-actions = ["repo.read", "project.mr.comment"]
+actions = ["repo.read", "project.read", "project.mr.comment"]
 
 [[git.endpoint]]                        # plain: no override -> default ∩ type
 host = "{HOST_PLAIN}"
@@ -208,6 +208,14 @@ def _rest_mr_note_path(project: str, iid: int) -> str:
     return f"/api/v4/projects/{project.replace('/', '%2F')}/merge_requests/{iid}/notes"
 
 
+def _rest_mr_diff_path(project: str, iid: int) -> str:
+    return f"/api/v4/projects/{project.replace('/', '%2F')}/merge_requests/{iid}/diffs"
+
+
+def _rest_mr_merge_path(project: str, iid: int) -> str:
+    return f"/api/v4/projects/{project.replace('/', '%2F')}/merge_requests/{iid}/merge"
+
+
 def _assert_routed(status: int, body: str, host: str, label: str) -> None:
     """The request cleared every gate (host + project + action) and reached
     out to its upstream (`forward()`, or — for a REST comment, whose
@@ -235,7 +243,7 @@ def _assert_denied(status: int, body: str, *, rule: str, reason_contains: list[s
 def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: str) -> None:
     """A matched write recognizer (e.g. `mr.create`) whose *action* is enabled
     for `host` still cannot reach `forward()` in this test's environment: the
-    REST-API guard's own MR-quota reconcile (`guards.gitlab_api.reconcile`)
+    REST-API guard's own MR-quota reconcile (`guards.git.gitlab.reconcile`)
     calls out to the (deliberately absent, per "Nicht tun" — no real forge)
     upstream at boot for every allowed project on every configured host, and
     `core.transport.for_each_host_project` leaves the guard's state
@@ -292,9 +300,9 @@ def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
-    """Review-only override: `actions = ["repo.read", "project.mr.comment"]`
-    narrows this host relative to the full default — but selectively, not
-    blanket:
+    """Review-only override: `actions = ["repo.read", "project.read",
+    "project.mr.comment"]` narrows this host relative to the full default —
+    but selectively, not blanket:
 
     - Fetch discovery stays allowed (routed) — `repo.read` is enabled.
     - Push discovery (advertise-receive) *also* routes: advertise always
@@ -302,7 +310,12 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
       document §6) — a disabled push denies at `receive-pack`, per ref, not
       at discovery. This test only probes discovery, so it cannot observe
       that denial directly; it is covered at the unit level in
-      `warden/tests/transport/test_recognizers.py` and `test_policy.py`.
+      `warden/tests/transport/test_recognizers.py` and `test_policy.py`, and
+      through a real `git push` in `warden/tests/test_git_e2e.py`.
+    - MR diffs route (`project.read` is enabled; the diff endpoint falls
+      through the same catch-all read recognizer as any other project read —
+      a deliberate carve-out: MR diffs are visible under `project.read` alone,
+      with no `repo.read` needed).
     - `project.mr.create` is denied (not in this host's effective actions) —
       same status/rule as
       ``test_two_hosts_with_different_actions_behave_differently_on_the_same_guard``
@@ -311,6 +324,18 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
       proving the narrowing is selective: two REST writes on the very same
       host, one denied and one allowed, per the configured `actions` list
       alone.
+    - Merge is denied regardless of config (R4, the criticality gate) — a
+      config that could never enable it in the first place, unlike R6.
+
+    A real, in-container push denial and an "API-with-repo.read-off" probe
+    (repo.read disabled while project.read stays on) are deliberately not
+    repeated here: both are already proven end-to-end by `full_decide`-based
+    unit tests (`warden/tests/redteam/test_bypass.py`, `warden/tests/gitlab/
+    test_recognizers.py`) that exercise the identical real parse -> recognize
+    -> kernel_gates -> decide pipeline this container also runs — adding a
+    fourth docker endpoint (or raw pkt-line-over-`docker compose exec`
+    plumbing) here would only re-prove wiring already covered by the git
+    advertise/REST probes above, not anything genuinely uncovered.
     """
     status, body = _probe(
         live_stack, host=HOST_REVIEW, path=_git_advertise_path(PROJECT, push=False)
@@ -321,6 +346,9 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
         live_stack, host=HOST_REVIEW, path=_git_advertise_path(PROJECT, push=True)
     )
     _assert_routed(status, body, HOST_REVIEW, "push discovery (advertise-receive)")
+
+    status, body = _probe(live_stack, host=HOST_REVIEW, path=_rest_mr_diff_path(PROJECT, 1))
+    _assert_routed(status, body, HOST_REVIEW, "project.read (mr diff)")
 
     status, body = _probe(
         live_stack,
@@ -344,6 +372,11 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
         body={"body": "hi"},
     )
     _assert_routed(status, body, HOST_REVIEW, "project.mr.comment (mr.note)")
+
+    status, body = _probe(
+        live_stack, host=HOST_REVIEW, path=_rest_mr_merge_path(PROJECT, 1), method="PUT"
+    )
+    _assert_denied(status, body, rule="R4", reason_contains=["irreversible"])
 
 
 @pytest.mark.slow

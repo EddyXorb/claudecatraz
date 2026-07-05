@@ -1,5 +1,13 @@
 # 08 — Multi-Target: mehrere git-/Forge-Instanzen pro `.catraz`
 
+> **Superseded:** the `actions` doctrine anticipated in §3.1 (linking forward
+> to 09's per-endpoint action list) was carried through 09-endpoint-actions.md
+> and then replaced wholesale by
+> [`10-actions-rework.md`](10-actions-rework.md): the invariant REST read
+> table, the `git.fetch`/`git.push` transport verbs, and the eight-action
+> vocabulary no longer exist. The endpoint/host/rules-cascade doctrine on this
+> page is otherwise still current.
+
 Ein `.catraz`-Ordner bedient mehrere Upstream-Instanzen (z.B. `gitlab.com`, ein
 self-hosted `my-gitlab.de`, ein privater git-Server) über **einen** Warden-Prozess,
 der das Ziel am HTTP-`Host`-Header erkennt. Der Agent behält kanonische Remotes; die
