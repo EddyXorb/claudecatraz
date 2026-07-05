@@ -17,7 +17,7 @@ from .core.config import Config
 from .core.guard import Guard
 from .core.state import State
 from .core.transport import UpstreamRouter
-from .guards.git.guard import GitGuard
+from .guards.git.transport.guard import GitGuard
 from .guards.gitlab_api.guard import ApiGuard, GraphqlGuard
 
 

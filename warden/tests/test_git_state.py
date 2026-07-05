@@ -16,7 +16,7 @@ endpoint's rows — see the two-hosts tests below.
 from __future__ import annotations
 
 from warden.core.state import State
-from warden.guards.git.state import BranchState
+from warden.guards.git.transport.state import BranchState
 
 
 def _branch_state() -> BranchState:

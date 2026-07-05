@@ -7,7 +7,7 @@ branches (short buffers, missing flush, non-hex length, no capabilities).
 
 from __future__ import annotations
 
-from warden.guards.git.pktline import (
+from warden.guards.git.transport.pktline import (
     FLUSH,
     _find_command_end,
     capabilities,

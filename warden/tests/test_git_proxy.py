@@ -13,11 +13,12 @@ from warden.context import build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
-from warden.guards.git.actions import REPO_BRANCH_PUSH, REPO_READ
-from warden.guards.git.pktline import FLUSH, pkt_line
+from warden.guards.git.actions import REPO_BRANCH_CREATE, REPO_BRANCH_PUSH, REPO_READ
+from warden.guards.git.transport.pktline import FLUSH, pkt_line
 
 ZERO = "0" * 40
 SHA1 = "1" * 40
+SHA2 = "2" * 40
 CAPS = "report-status side-band-64k atomic"
 RECV = "/git/group/proj.git/git-receive-pack"
 
@@ -297,10 +298,11 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
     assert "READ-TOKEN" in base64.b64decode(auth.split(" ", 1)[1]).decode()
 
 
-# --- action gate: repo.read/repo.branch.push per host ---------------------------
-# `capability_gate` consults `policy.action_gate` for all three operations
-# (advertise/upload-pack/receive-pack), so a `repo.branch.push`-disabled host
-# is denied already at push *discovery* — before the client sends the pack.
+# --- action gate: per-ref-command recognized actions, per host -----------------
+# `capability_gate` consults `policy.action_gate`. advertise/upload-pack always
+# recognize `{repo.read}` — push discovery reads refs, it never writes — so a
+# disabled `repo.branch.*` action no longer denies at discovery; the denial
+# moves to `receive-pack`, per ref-command, naming the specific action.
 
 
 def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
@@ -316,23 +318,37 @@ def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
     return _client_with(cfg)
 
 
-async def test_action_gate_denies_push_advertise_when_git_push_not_enabled(respx_router):
-    # Push discovery (advertise ?service=git-receive-pack) denied BEFORE any
-    # pack is sent; no upstream route is registered at all here, so an
-    # accidental fall-through to `forward` would fail loudly (respx raises).
+async def test_push_discovery_passes_with_every_repo_branch_action_disabled(respx_router):
+    # Push discovery recognizes {repo.read}, not a repo.branch.* action, so it
+    # passes even when every write action is disabled — the denial moves to
+    # receive-pack (below).
+    respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
+        return_value=httpx.Response(200, content=b"001e# service=git-receive-pack\n")
+    )
     async with _client_with_actions((REPO_READ.id,)) as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
-    assert resp.status_code == 403
-    body = resp.json()
-    assert body["rule"] == "R6"
-    assert REPO_BRANCH_PUSH.id in body["reason"]
+    assert resp.status_code == 200
 
 
-async def test_action_gate_denies_receive_pack_when_git_push_not_enabled(respx_router):
+async def test_action_gate_denies_receive_pack_create_when_repo_branch_create_not_enabled(
+    respx_router,
+):
     async with _client_with_actions((REPO_READ.id,)) as c:
-        body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
+        body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])  # create: old oid is zero
         resp = await c.post(RECV, content=body)
     assert resp.status_code == 200  # in-band rejection, git convention
+    assert b"warden: R6" in resp.content
+    assert REPO_BRANCH_CREATE.id.encode() in resp.content
+
+
+async def test_action_gate_denies_receive_pack_push_when_repo_branch_push_not_enabled(
+    respx_router,
+):
+    async with _client_with_actions((REPO_READ.id, REPO_BRANCH_CREATE.id)) as c:
+        # update: neither oid is zero — an existing branch moving its tip.
+        body = make_push([(SHA1, SHA2, "refs/heads/claude/feature")])
+        resp = await c.post(RECV, content=body)
+    assert resp.status_code == 200
     assert b"warden: R6" in resp.content
     assert REPO_BRANCH_PUSH.id.encode() in resp.content
 

@@ -1,8 +1,8 @@
 """Unit tests for the pure policy cores: every rule R0-R6, default-deny.
 
-The kernel gates (:func:`warden.core.guard.kernel_gates`) run first, then each
+The kernel gates (``warden.core.guard.kernel_gates``) run first, then each
 guard's own pure ``decide``; each guard's ``full_decide`` composes exactly
-that sequence. The :func:`decide` helper below dispatches on the intent type
+that sequence. The ``decide`` helper below dispatches on the intent type
 to call the right guard's ``full_decide``.
 """
 
@@ -12,10 +12,10 @@ import pytest
 
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.model import Decision, StateView, TokenKind
-from warden.guards.git import policy as git_policy
-from warden.guards.git.intent import GitIntent
-from warden.guards.git.pktline import RefCommand
-from warden.guards.git.policy import check_ref
+from warden.guards.git import actions as git_actions
+from warden.guards.git.transport import policy as git_policy
+from warden.guards.git.transport.intent import GitIntent
+from warden.guards.git.transport.pktline import RefCommand
 from warden.guards.gitlab_api import policy as api_policy
 from warden.guards.gitlab_api.catalog.activation import build_effective_table
 from warden.guards.gitlab_api.intent import ApiIntent
@@ -376,17 +376,27 @@ def test_git_multiref_quota_accounts_within_batch(cfg):
 
 
 def test_git_tag_push_rejected_with_tag_message(cfg):
-    # B3 fix: a tag push is an irreversible verb (M4) — R4, not R2.
-    rules = cfg.effective_rules(HOST)
-    assert rules.max_open_branches is not None and rules.max_writes_per_hour is not None
-    d = check_ref(
-        RefCommand(ZERO, SHA, "refs/tags/claude/v1"),
-        StateView(),
-        cfg,
-        rules.max_open_branches,
-        rules.max_writes_per_hour,
-    )
+    # A tag push is an irreversible verb (M4) — R4, denied by the recognized
+    # action's criticality before check_ref ever runs.
+    d = decide(_git((ZERO, SHA, "refs/tags/claude/v1")), StateView(), cfg)
     assert not d.allow and d.rule == "R4" and "tag" in d.reason
+
+
+def test_git_tag_and_branch_delete_denied_by_criticality_even_with_every_action_enabled():
+    # IRREVERSIBLE actions are compiled-in denies: even a (misconfigured) host
+    # whose endpoint explicitly lists every action id, tag/delete included,
+    # still gets R4 — the criticality check runs before the membership check.
+    cfg = Config(
+        allowed_projects=("group/proj",),
+        git_endpoints=(
+            GitEndpoint(host=HOST, type="gitlab", actions=tuple(sorted(git_actions.by_id))),
+        ),
+        git_credentials=_OPEN_CREDENTIALS,
+    )
+    tag = decide(_git((ZERO, SHA, "refs/tags/claude/v1")), StateView(), cfg)
+    delete = decide(_git((SHA, ZERO, "refs/heads/claude/feature")), StateView(), cfg)
+    assert not tag.allow and tag.rule == "R4"
+    assert not delete.allow and delete.rule == "R4"
 
 
 def test_git_project_not_allowlisted_denied(cfg):

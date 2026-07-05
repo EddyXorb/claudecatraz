@@ -22,10 +22,10 @@ class GitIntent(Intent):
     # Audit-facing verb, not always an HTTP method: advertise→"GET",
     # upload-pack→"POST", receive-pack→"push" (kept for JSONL compatibility).
     _method: str
-    # Raw `Host` header, read by the guard's parse() (§07 Punkt 8 follow-up).
-    # `core.guard.host_gate` checks this against `Config.host_allowed`; the
-    # guard itself resolves the canonical host (for `UpstreamRouter`/state
-    # keys) via `Config.resolve_target_host(_host)`.
+    # Raw `Host` header, read by the guard's parse(). `core.guard.host_gate`
+    # checks this against `Config.host_allowed`; the guard itself resolves
+    # the canonical host (for `UpstreamRouter`/state keys) via
+    # `Config.resolve_target_host(_host)`.
     _host: str = ""
     # Set by the guard's parse(), never derived here: True for receive-pack
     # and for push discovery (advertise with ?service=git-receive-pack) — the
@@ -34,7 +34,7 @@ class GitIntent(Intent):
     service: str = "git-upload-pack"  # advertise only
     ref_commands: list[RefCommand] = field(default_factory=list)  # receive-pack only
     # Plumbing `forward` needs to stream the *unchanged* body upstream
-    # (SHA-preserving, W7.3) — not decision-relevant, just carried along.
+    # (SHA-preserving) — not decision-relevant, just carried along.
     head: bytes = b""
     rest: Optional[AsyncIterator[bytes]] = None
     content_type: str = "application/x-git-receive-pack-request"
@@ -42,8 +42,8 @@ class GitIntent(Intent):
     sideband: bool = False
     # receive-pack only: the request's Content-Length, when the client sent one
     # (git normally does). None when absent (e.g. chunked transfer) — the size
-    # gate (R5, §07 Punkt 6.3) then has nothing cheap to check against and lets
-    # the push through; it is a cap on the common case, not packfile parsing.
+    # gate (R5) then has nothing cheap to check against and lets the push
+    # through; it is a cap on the common case, not packfile parsing.
     push_bytes: Optional[int] = None
 
     @property

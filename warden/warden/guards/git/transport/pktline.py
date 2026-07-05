@@ -1,7 +1,7 @@
 """pkt-line parsing for the git Smart-HTTP receive-pack command section.
 
 Transport-free and pure: turns the bytes that precede the PACK payload into a
-list of :class:`RefCommand`. One of the pure modules the test and audit strategy rests on.
+list of ``RefCommand``.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def parse_commands(head: bytes) -> list[RefCommand]:
     """Parse pkt-line ref commands until the first flush-pkt (``0000``).
 
     Expects enough buffered bytes to cover the command section (see
-    :func:`read_until_flush`).
+    ``read_until_flush``).
     """
     head = decompress_if_gzip(head)
     cmds: list[RefCommand] = []

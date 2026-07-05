@@ -1,16 +1,10 @@
-"""Golden tests for the capability-invariant layer (§03.4, B2,
-§06-migration.md Schritt 3/4): known requests → expected capability sets, plus
-the cross-channel invariant that a FORBIDDEN hit denies with R4 regardless of
-channel or endpoint-specific checks.
+"""Golden tests for the capability-invariant layer: known REST requests →
+expected capability sets, plus the invariant that a FORBIDDEN hit denies with
+R4 regardless of endpoint-specific checks.
 
-Schritt 4 moved the write-endpoint table into the catalog package and took the
-merge endpoint out of it entirely (it is now a built-in deny invariant, not a
-catalog row — ``catalog.builtin``); Schritt 5 split the vocabulary/FORBIDDEN
-set (kernel, ``warden.core.capabilities``) from the per-guard intent→capability
-mappings (``guards.git.policy.git_ref_capabilities``,
-``guards.gitlab_api.catalog.entries.api_capabilities``) — this file's golden
-tables were updated accordingly; see ``tests/catalog/`` for the catalog/
-activation-specific tests Schritt 4 added.
+git no longer uses this layer — irreversible git ref-commands are denied by
+their recognized action's criticality (see ``tests/transport/test_recognizers.py``
+and ``test_policy.py``).
 """
 
 from __future__ import annotations
@@ -20,10 +14,6 @@ import pytest
 from warden.core.capabilities import FORBIDDEN, Capability, forbidden_check
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.model import StateView
-from warden.guards.git import policy as git_policy
-from warden.guards.git.intent import GitIntent
-from warden.guards.git.pktline import RefCommand
-from warden.guards.git.policy import git_ref_capabilities
 from warden.guards.gitlab_api.catalog import (
     DEFAULT_ENABLED,
     WRITE_ENDPOINTS,
@@ -35,11 +25,6 @@ from warden.guards.gitlab_api.catalog import (
 from warden.guards.gitlab_api.catalog.builtin import is_builtin_merge_endpoint
 from warden.guards.gitlab_api.intent import ApiIntent
 from warden.guards.gitlab_api.policy import full_decide as api_decide
-
-ZERO = "0" * 40
-SHA = "a" * 40
-SHA2 = "b" * 40
-
 
 HOST = "gitlab.example"
 
@@ -128,40 +113,6 @@ def test_forbidden_check_names_every_violated_capability():
     d = forbidden_check(frozenset({Capability.MERGES, Capability.DELETES_REF}))
     assert d is not None
     assert "merges" in d.reason and "deletes_ref" in d.reason
-
-
-# --- git: intent -> capability mapping (trivial and exact, §03.4) ----------
-
-
-@pytest.mark.parametrize(
-    "old,new,ref,expected",
-    [
-        # Non-deleting tag push: creates_tag.
-        (ZERO, SHA, "refs/tags/claude/v1", {Capability.CREATES_TAG}),
-        (SHA, SHA2, "refs/tags/claude/v1", {Capability.CREATES_TAG}),
-        # Any delete: deletes_ref, regardless of ref type.
-        (SHA, ZERO, "refs/tags/claude/v1", {Capability.DELETES_REF}),
-        (SHA, ZERO, "refs/heads/claude/feature", {Capability.DELETES_REF}),
-        # Branch create inside the namespace: creates_ref only.
-        (ZERO, SHA, "refs/heads/claude/feature", {Capability.CREATES_REF}),
-        # Branch create outside the namespace: both creates_ref and
-        # writes_outside_namespace (neither forbidden by itself).
-        (
-            ZERO,
-            SHA,
-            "refs/heads/main",
-            {Capability.CREATES_REF, Capability.WRITES_OUTSIDE_NAMESPACE},
-        ),
-        # Fast-forward update (neither create nor delete) inside namespace:
-        # no capability at all.
-        (SHA, SHA2, "refs/heads/claude/feature", set()),
-        # Fast-forward update outside the namespace: writes_outside_namespace only.
-        (SHA, SHA2, "refs/heads/main", {Capability.WRITES_OUTSIDE_NAMESPACE}),
-    ],
-)
-def test_git_ref_capabilities_golden_table(cfg, old, new, ref, expected):
-    caps = git_ref_capabilities(RefCommand(old, new, ref), cfg)
-    assert caps == frozenset(expected)
 
 
 # --- REST: every CATALOG row, plus the field-dependent merge alias --------
@@ -296,32 +247,6 @@ def test_is_builtin_merge_endpoint(method, path, expected):
 # --- end-to-end via decide(): the invariant holds on both channels --------
 
 
-def test_e2e_git_tag_push_denied_r4(cfg):
-    req = GitIntent(
-        _project="group/proj",
-        operation="receive-pack",
-        _method="push",
-        _writes=True,
-        _host=HOST,
-        ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
-    )
-    d = git_policy.full_decide(req, StateView(), cfg)
-    assert not d.allow and d.rule == "R4"
-
-
-def test_e2e_git_branch_delete_denied_r4(cfg):
-    req = GitIntent(
-        _project="group/proj",
-        operation="receive-pack",
-        _method="push",
-        _writes=True,
-        _host=HOST,
-        ref_commands=[RefCommand(SHA, ZERO, "refs/heads/claude/feature")],
-    )
-    d = git_policy.full_decide(req, StateView(), cfg)
-    assert not d.allow and d.rule == "R4"
-
-
 def test_e2e_api_merge_endpoint_denied_r4(cfg):
     d = api_decide(_api("PUT", "/projects/group%2Fproj/merge_requests/7/merge"), StateView(), cfg)
     assert not d.allow and d.rule == "R4"
@@ -357,22 +282,3 @@ def test_e2e_capability_layer_denies_even_without_endpoint_checks(cfg):
     d = api_decide(req, StateView(), cfg)
     assert not d.allow and d.rule == "R4"
     assert "forbidden capability" in d.reason
-
-
-def test_e2e_capability_layer_denies_git_even_if_check_ref_logic_is_bypassed(cfg):
-    """Mirrors the API-side proof above for git: the capability gate runs for
-    every ref-command *before* the guard's ``check_ref`` loop (kernel
-    sequence, §03.2), so a tag push is denied at that first pass —
-    independent of whatever ``check_ref`` itself would separately decide.
-    """
-    req = GitIntent(
-        _project="group/proj",
-        operation="receive-pack",
-        _method="push",
-        _writes=True,
-        _host=HOST,
-        ref_commands=[RefCommand(ZERO, SHA, "refs/tags/claude/v1")],
-    )
-    d = git_policy.full_decide(req, StateView(), cfg)
-    assert not d.allow and d.rule == "R4"
-    assert "forbidden capability" in d.reason  # came from the capability layer, not check_ref

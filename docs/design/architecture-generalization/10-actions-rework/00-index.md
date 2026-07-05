@@ -21,7 +21,7 @@ commit); a higher number requires all lower ones. Update the Status column
 | --- | --- | --- | --- | --- |
 | 01 | [`01-core-model.md`](01-core-model.md) | core types: `Action`, `Criticality`, `Recognizer`, `EndpointType` | — | ✅ |
 | 02 | [`02-vocabulary-and-config.md`](02-vocabulary-and-config.md) | git-namespace vocabulary + config cascade on new ids (with temporary bridge) | 01 | ✅ |
-| 03 | [`03-transport-guard.md`](03-transport-guard.md) | rewrite git smart-HTTP guard onto recognizers (`guards/git/transport/`) | 01, 02 | ⬜ |
+| 03 | [`03-transport-guard.md`](03-transport-guard.md) | rewrite git smart-HTTP guard onto recognizers (`guards/git/transport/`) | 01, 02 | ✅ |
 | 03 | [`03-gitlab-guard.md`](03-gitlab-guard.md) | rewrite REST guard onto recognizers (`guards/git/gitlab/`) | 01, 02 | ⬜ |
 | 04 | [`04-kernel-and-assembly.md`](04-kernel-and-assembly.md) | kernel action gates, delete capability layer, derive type sets from `SUPPORTED` | 01–03 | ⬜ |
 | 05 | [`05-report-and-cli.md`](05-report-and-cli.md) | `/policy` report over all guards; catraz template/`init`/`doctor` | 01–04 | ⬜ |

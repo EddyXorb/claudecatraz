@@ -24,7 +24,7 @@ from warden.core.model import Decision
 from warden.core.rules import R6
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter, base_urls
-from warden.guards.git.guard import GitGuard
+from warden.guards.git.transport.guard import GitGuard
 
 PROJ = "group%2Fproj"
 

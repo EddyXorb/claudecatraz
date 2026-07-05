@@ -89,36 +89,3 @@ assert DEFAULT <= ALL, "DEFAULT must be a subset of ALL"
 assert not any(action.criticality is Criticality.IRREVERSIBLE for action in DEFAULT), (
     "DEFAULT must contain no IRREVERSIBLE action"
 )
-
-
-# --- _BRIDGE_10_03: deleted once 03-transport-guard rewrites the git guard onto
-# per-ref recognizers. `action_for_git_operation` keeps today's git guard
-# (`.policy.action_gate`) working against the new vocabulary in the meantime.
-
-_UPLOAD_SERVICE = "git-upload-pack"
-_RECEIVE_SERVICE = "git-receive-pack"
-
-
-def action_for_git_operation(operation: str, service: str = _UPLOAD_SERVICE) -> str:
-    """_BRIDGE_10_03: map a git Smart-HTTP operation (+ ``service``) to a vocabulary id.
-
-    Coarse on purpose: ``receive-pack`` and push discovery both return
-    ``repo.branch.push`` regardless of what the batch actually does — per-ref
-    precision (branch vs. tag, create vs. delete) is 03-transport-guard's job.
-    ``service`` only matters for ``"advertise"``, which carries a ``?service=``
-    query param telling fetch discovery apart from push discovery.
-
-    Raises ``ValueError`` on an operation/service outside this closed set — a
-    programmer error, never a config problem.
-    """
-    if operation == "upload-pack":
-        return REPO_READ.id
-    if operation == "receive-pack":
-        return REPO_BRANCH_PUSH.id
-    if operation == "advertise":
-        if service == _UPLOAD_SERVICE:
-            return REPO_READ.id
-        if service == _RECEIVE_SERVICE:
-            return REPO_BRANCH_PUSH.id
-        raise ValueError(f"advertise: unknown service {service!r}")
-    raise ValueError(f"unknown git operation {operation!r}")

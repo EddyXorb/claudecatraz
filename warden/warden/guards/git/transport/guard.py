@@ -1,9 +1,9 @@
 """git Smart-HTTP guard: all three operations — advertise, upload-pack,
-receive-pack — dispatched via :class:`GitGuard` hooks per-operation.
+receive-pack — dispatched via ``GitGuard`` hooks per-operation.
 
 Forge-agnostic in logic (no GitLab vocabulary). Credential injection and
-response streaming come from the forge-neutral :mod:`warden.core.transport`
-(§07 Punkt 6, step 1) — this guard never imports ``guards.gitlab.upstream``.
+response streaming come from the forge-neutral ``warden.core.transport`` —
+this guard never imports ``guards.gitlab.upstream``.
 """
 
 from __future__ import annotations
@@ -14,15 +14,15 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from ...core.audit import AuditLog
-from ...core.config import Config, normalize_project
-from ...core.guard import Guard
-from ...core.model import Decision, StateView, TokenKind
-from ...core.rules import R1
-from ...core.state import State
-from ...core.transport import UpstreamRouter, stream_upstream
-from ...errors import deny_json
-from . import policy
+from ....core.audit import AuditLog
+from ....core.config import Config, normalize_project
+from ....core.guard import Guard
+from ....core.model import Decision, StateView, TokenKind
+from ....core.rules import R1
+from ....core.state import State
+from ....core.transport import UpstreamRouter, stream_upstream
+from ....errors import deny_json
+from . import policy, recognizers
 from .errors import git_reject_response
 from .intent import GitIntent
 from .pktline import capabilities, parse_commands, read_until_flush
@@ -46,7 +46,7 @@ def _forward_encoding(request: Request) -> dict[str, str]:
 
 
 def _content_length(request: Request) -> Optional[int]:
-    """Read ``Content-Length`` for the cheap push-size gate (R5, §07 Punkt 6.3).
+    """Read ``Content-Length`` for the cheap push-size gate (R5).
 
     No packfile parsing: an absent/non-numeric header (chunked transfer)
     yields ``None`` — the size gate simply has nothing to check then.
@@ -56,7 +56,7 @@ def _content_length(request: Request) -> Optional[int]:
 
 
 class GitGuard(Guard[GitIntent]):
-    """All three git Smart-HTTP operations dispatched via :meth:`Guard.handle`.
+    """All three git Smart-HTTP operations dispatched via ``Guard.handle``.
 
     Reads (advertise/upload-pack) are read-only except push discovery, which
     carries the write token but never performs a ref write. receive-pack is always a write.
@@ -80,12 +80,11 @@ class GitGuard(Guard[GitIntent]):
 
     def state_view(self, host: str) -> StateView:
         """This guard's own per-guard lock + its own branch counter, scoped to
-        ``host`` (§07 Punkt 6 step 4; per-endpoint since step 04). Locked
-        until *this* guard reconciled — a broken REST-API upstream never
-        locks git, and vice versa.
+        ``host``. Locked until *this* guard reconciled — a broken REST-API
+        upstream never locks git, and vice versa.
 
         ``host`` is normalised but not resolved/validated here: this runs
-        *before* the kernel's ``host_gate`` (§2), so an unrecognised host must
+        *before* the kernel's ``host_gate``, so an unrecognised host must
         not raise — it simply queries a key nothing was ever recorded under,
         yielding harmless zero counts; ``host_gate`` denies the request right
         after regardless of what this view reports.
@@ -100,20 +99,18 @@ class GitGuard(Guard[GitIntent]):
         )
 
     async def reconcile(self) -> bool:
-        """Rebuild the branch-quota counter from upstream truth (§07 Punkt 6, step 4).
+        """Rebuild the branch-quota counter from upstream truth.
 
         Own reconcile, independent of the REST-API guard's MR reconcile: rebuilds
         only this guard's own branch counter and, on success, unlocks only its own
-        per-guard lock (:meth:`~warden.core.state.State.mark_reconciled`). A
-        failure here leaves *this* guard fail-safe-locked but never touches the
-        REST-API guard's lock — one guard's permanently unreachable upstream can
-        never block the other.
+        per-guard lock (``State.mark_reconciled``). A failure here leaves *this*
+        guard fail-safe-locked but never touches the REST-API guard's lock —
+        one guard's permanently unreachable upstream can never block the other.
 
-        No endpoints configured (the former ``GITLAB_MODE=off``) makes no
-        upstream call either: :func:`~warden.core.transport.for_each_host_project`
-        simply iterates zero hosts and returns ``True``, so this guard still
-        unlocks and the warden serves (and then denies) instead of staying
-        fail-safe-locked.
+        No endpoints configured makes no upstream call either:
+        ``for_each_host_project`` simply iterates zero hosts and returns
+        ``True``, so this guard still unlocks and the warden serves (and then
+        denies) instead of staying fail-safe-locked.
         """
         ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
         if ok:
@@ -122,7 +119,7 @@ class GitGuard(Guard[GitIntent]):
 
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for receive-pack;
-        the untouched PACK payload streams through :attr:`GitIntent.rest`."""
+        the untouched PACK payload streams through ``GitIntent.rest``."""
         project = _project(request)
         host = request.headers.get("host", "")
         if request.method == "GET":
@@ -169,19 +166,13 @@ class GitGuard(Guard[GitIntent]):
         return intent
 
     def capability_gate(self, intent: GitIntent, cfg: Config) -> Optional[Decision]:
-        """Runs the action gate first, for every operation, so a
-        ``repo.branch.push``-disabled host is denied already at ``advertise``
-        — the push-discovery request, before the client sends the pack — not
-        only at ``receive-pack``. The capability-invariant check
-        (tag/merge/delete, R4) stays receive-pack-only; it has no meaning for
-        a read.
+        """Recognize -> deny if any recognized action is irreversible or not
+        enabled for the host. Runs for every operation, including
+        ``advertise``, so a disabled push is denied already at discovery.
+
+        Interim home for this check until the kernel absorbs it directly.
         """
-        denied = policy.action_gate(intent, cfg)
-        if denied is not None:
-            return denied
-        if intent.operation == "receive-pack":
-            return policy.capability_gate(intent, cfg)
-        return None
+        return policy.action_gate(intent, cfg)
 
     def decide(self, intent: GitIntent, state: StateView, cfg: Config) -> Decision:
         if intent.operation == "receive-pack":
@@ -252,10 +243,11 @@ class GitGuard(Guard[GitIntent]):
     def deny_response(self, intent: GitIntent, decision: Decision, state: StateView) -> Response:
         """Per-ref rejection for receive-pack: client sees which ref failed and why.
 
-        Refs that individually pass :func:`policy.check_ref` but were denied at
-        the whole-push level (e.g. R6 project or capability gate) report the overall
-        ``decision``, never a misleading "ok". advertise/upload-pack denials get
-        a plain JSON body instead — there is no per-ref shape for a read.
+        Each ref reports its own action-gate/R2/R5 decision; a ref that
+        individually clears both but was denied at the whole-push level
+        (e.g. R6 project, or R5 push size) reports the overall ``decision``,
+        never a misleading "ok". advertise/upload-pack denials get a plain
+        JSON body instead — there is no per-ref shape for a read.
         """
         if intent.operation != "receive-pack":
             return deny_json(decision)
@@ -267,12 +259,21 @@ class GitGuard(Guard[GitIntent]):
         )
         per_ref = []
         for cmd in intent.ref_commands:
-            d = policy.check_ref(cmd, state, self.cfg, max_open_branches, max_writes_per_hour)
+            d = policy.ref_action_gate(cmd, intent.host, self.cfg)
+            if d is None:
+                d = policy.check_ref(cmd, state, self.cfg, max_open_branches, max_writes_per_hour)
             per_ref.append(d if not d.allow else decision)
         per_ref = per_ref or [decision]
         return git_reject_response(per_ref, refs or [""], sideband=intent.sideband)
 
     def audit_fields(self, intent: GitIntent) -> Mapping[str, Any]:
         if intent.operation == "receive-pack":
-            return {"refs": [f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in intent.ref_commands]}
-        return {"op": intent.operation, "service": intent.service}
+            actions = sorted(
+                {a.id for cmd in intent.ref_commands for a in recognizers.ref_command_action(cmd)}
+            )
+            return {
+                "refs": [f"{c.old[:8]}→{c.new[:8]} {c.ref}" for c in intent.ref_commands],
+                "actions": actions,
+            }
+        actions = sorted(a.id for a in recognizers.recognize(intent))
+        return {"op": intent.operation, "service": intent.service, "actions": actions}

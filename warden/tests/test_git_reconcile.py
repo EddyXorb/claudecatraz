@@ -17,8 +17,8 @@ from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
 from warden.guards.git.actions import REPO_READ
-from warden.guards.git.guard import GitGuard
-from warden.guards.git.reconcile import reconcile_branches
+from warden.guards.git.transport.guard import GitGuard
+from warden.guards.git.transport.reconcile import reconcile_branches
 
 HOST = "gitlab.example"
 

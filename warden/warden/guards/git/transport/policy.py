@@ -1,18 +1,20 @@
 """git guard policy: pure, per-ref rules for a receive-pack push.
 
-Branch namespace, delete/tag defense-in-depth, quotas — everything genuinely git-specific.
-Mode gate (R0) and the project resource allowlist (R6) are the kernel's job.
+Branch namespace and quotas are the only checks left here — irreversible
+verbs (tag push, branch/tag delete) are denied by the recognized action's
+criticality, before any of this runs. Mode gate (R0) and the project
+resource allowlist (R6, project scope) are the kernel's job.
 
 Rules enforced:
   R2  git write limits   push only to branches under allowed <branch_prefix>.
-  R4  Irreversible verbs tag pushes and branch deletes never permitted.
+  R4  Irreversible verb  a recognized IRREVERSIBLE action is never enabled.
   R5  Quota & rate       max open branches, max writes/hour, max push size;
                          locked state denies (fail-safe).
-  R6  Action allowlist   :func:`action_gate`: the mapped repo.* action must be
-                         in the host's effective actions — same rule id as
-                         the kernel's project allowlist, both instances of
-                         the same "resource/action outside the configured
-                         boundary" meta-rule (M6).
+  R6  Action allowlist   the recognized action must be in the host's
+                         effective actions — same rule id as the kernel's
+                         project allowlist, both instances of the same
+                         "resource/action outside the configured boundary"
+                         meta-rule (M6).
 """
 
 from __future__ import annotations
@@ -20,47 +22,48 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Optional
 
-from ...core.capabilities import Capability, forbidden_check
-from ...core.config import Config
-from ...core.guard import kernel_gates
-from ...core.model import Decision, StateView, TokenKind
-from ...core.rules import R2, R4, R5, R6
-from .actions import action_for_git_operation
+from ....core.actions import Action, Criticality
+from ....core.config import Config
+from ....core.guard import kernel_gates
+from ....core.model import Decision, StateView, TokenKind
+from ....core.rules import R2, R4, R5, R6
+from . import recognizers
 from .intent import GitIntent
 from .pktline import RefCommand
 
 
-def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
-    """Map one git ref-command to capabilities — trivial and exact.
-
-    Mirrors the special cases in :func:`check_ref` (defense-in-depth):
-    this mapping must be enough to trigger :func:`~warden.core.capabilities.forbidden_check`.
-
-    * Delete (all-zero) is ``deletes_ref`` regardless of ref type.
-    * Non-delete push to ``refs/tags/*`` is ``creates_tag``.
-    * Branch write: ``creates_ref`` when creating new branch, plus ``writes_outside_namespace``
-      when outside ``cfg.branch_prefixes``.
+def _action_decision(actions: frozenset[Action], host: str, cfg: Config) -> Optional[Decision]:
+    """Deny if any recognized action is irreversible (R4) or missing from the
+    host's effective actions (R6). An empty ``actions`` set — an unrecognized
+    ref shape — denies fail-closed under R6 too.
     """
-    if cmd.is_delete:
-        return frozenset({Capability.DELETES_REF})
-    if cmd.ref.startswith("refs/tags/"):
-        return frozenset({Capability.CREATES_TAG})
-    ref = cmd.ref.removeprefix("refs/heads/")
-    caps: set[Capability] = {Capability.CREATES_REF} if cmd.is_create else set()
-    if not cfg.in_branch_namespace(ref):
-        caps.add(Capability.WRITES_OUTSIDE_NAMESPACE)
-    return frozenset(caps)
+    if not actions:
+        return Decision(False, R6, "no recognized action for this request")
+    for action in sorted(actions, key=lambda a: a.id):
+        if action.criticality is Criticality.IRREVERSIBLE:
+            return Decision(False, R4, f"action {action.id} is irreversible, never permitted")
+        if action.id not in cfg.effective_actions(host):
+            return Decision(False, R6, f"action {action.id} not enabled for host {host!r}")
+    return None
+
+
+def ref_action_gate(cmd: RefCommand, host: str, cfg: Config) -> Optional[Decision]:
+    """The criticality/membership gate for one ref-command, used both by
+    ``action_gate`` (batch-atomic) and by the guard's per-ref deny
+    response (each ref names its own denied action).
+    """
+    return _action_decision(recognizers.ref_command_action(cmd), host, cfg)
 
 
 def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
-    """Deny a git-transport operation whose mapped action is missing from the
-    host's effective actions.
+    """Deny a git-transport operation whose recognized action(s) are missing
+    from the host's effective actions, or are irreversible.
 
     Runs for all three operations — crucially ``advertise`` — so a
-    ``repo.branch.push``-disabled host is denied already at push discovery,
-    before the client ever sends the pack (same shape as the mode-gate/``_writes`` path).
-    ``advertise`` carries the requested backend in ``intent.service``, which
-    tells fetch-discovery from push-discovery apart.
+    ``repo.read``-disabled host is denied already at push/fetch discovery,
+    before the client ever sends a pack. For ``receive-pack``, every
+    ref-command is checked; the first denial rejects the whole batch,
+    matching ``decide``'s per-ref quota atomicity.
 
     Relies on the kernel's host gate (R6) having already run and passed for
     ``intent.host``: a host with no ``[[git.endpoint]]`` entry is denied
@@ -69,19 +72,10 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
     default" — both return the same non-empty default — so this gate must
     never be the first thing to see an unconfigured host.
     """
-    action = action_for_git_operation(intent.operation, intent.service)
-    if action not in cfg.effective_actions(intent.host):
-        return Decision(False, R6, f"action {action!r} not enabled for host {intent.host!r}")
-    return None
-
-
-def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
-    """Kernel hook: check capabilities per ref command, atomic across push.
-
-    First hit denies the whole push, matching :func:`decide`'s batch atomicity.
-    """
+    if intent.operation != "receive-pack":
+        return _action_decision(recognizers.recognize(intent), intent.host, cfg)
     for cmd in intent.ref_commands:
-        denied = forbidden_check(git_ref_capabilities(cmd, cfg))
+        denied = ref_action_gate(cmd, intent.host, cfg)
         if denied is not None:
             return denied
     return None
@@ -90,7 +84,10 @@ def capability_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
 def check_ref(
     cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
 ) -> Decision:
-    """``max_open_branches``/``max_writes_per_hour`` are the endpoint's own
+    """R2/R5 for one ref-command already cleared by ``action_gate`` — a
+    tag or a delete never reaches here, both denied earlier as irreversible.
+
+    ``max_open_branches``/``max_writes_per_hour`` are the endpoint's own
     resolved ceilings (``Config.effective_rules(intent.host)``) —
     stateful quotas are per-endpoint, never a global ``Config`` field, so the
     caller resolves the cascade once per request and passes the concrete
@@ -98,18 +95,11 @@ def check_ref(
     cascade merge itself — so the caller, not this function, is where the
     ``None``-after-cascade invariant is asserted).
     """
-    if cmd.ref.startswith("refs/tags/"):  # tags are never namespace branches
-        # Irreversible verb ("never" capability) — R4, not R2.
-        return Decision(False, R4, "tag pushes are not permitted")
-    ref = cmd.ref
-    if ref.startswith("refs/heads/"):
-        ref = ref[len("refs/heads/") :]
+    ref = cmd.ref.removeprefix("refs/heads/")
     if not cfg.in_branch_namespace(ref):  # R2
         return Decision(
             False, R2, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}"
         )
-    if cmd.is_delete:  # Irreversible verb — R4, not R2.
-        return Decision(False, R4, f"deleting branch {ref!r} is forbidden")
     if state.locked:  # Fail-safe
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if cmd.is_create and state.open_branches >= max_open_branches:  # R5
@@ -120,7 +110,7 @@ def check_ref(
 
 
 def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
-    """Per ref-command: prefix / delete / create-count / rate.
+    """Per ref-command: prefix / create-count / rate.
 
     Atomic: a single forbidden command rejects the whole push. Quotas are accounted
     within the batch — N creates against ``max_open_branches - 1`` must reject.
@@ -133,7 +123,7 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
             R5,
             f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({cfg.max_push_bytes})",
         )
-    rules = cfg.effective_rules(intent.host)  # step 04: per-endpoint quota ceiling
+    rules = cfg.effective_rules(intent.host)
     max_open_branches, max_writes_per_hour = rules.max_open_branches, rules.max_writes_per_hour
     assert max_open_branches is not None and max_writes_per_hour is not None, (
         "effective_rules always resolves every field to a concrete built-in default"
@@ -162,16 +152,13 @@ def full_decide(
     project_allowed: Optional[Callable[[str], bool]] = None,
 ) -> Decision:
     """Compose the kernel gates with this guard's pure ``decide`` for callers
-    outside :meth:`core.guard.Guard.handle` (tests, and any offline "what would
+    outside ``core.guard.Guard.handle`` (tests, and any offline "what would
     happen to this push" evaluator) that need the *whole* effective decision,
-    not just this module's slice — mirrors
-    ``guards.gitlab_api.policy.full_decide``.
+    not just this module's slice — mirrors ``guards.gitlab_api.policy.full_decide``.
     """
     d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
     if d is None:
         d = action_gate(intent, cfg)
-    if d is None:
-        d = capability_gate(intent, cfg)
     if d is None:
         d = decide(intent, state, cfg)
     return d
