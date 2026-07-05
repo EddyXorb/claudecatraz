@@ -22,9 +22,17 @@ class Recognizer(ABC, Generic[IntentT]):
     ``recognize`` may return an empty set even when ``matches`` is true: a
     matched request whose fields carry no known meaning yields no action,
     which denies fail-closed rather than guessing.
+
+    ``possible_actions`` is the static union of every action ``recognize``
+    could ever return for this row, independent of any concrete intent — a
+    row whose action depends on a request field (e.g. ``state_event``) lists
+    every field value's action here, not just the one a given request hits.
+    Nothing in the request pipeline reads it; it exists for introspection
+    (the policy report).
     """
 
     id: str
+    possible_actions: frozenset[Action]
 
     @abstractmethod
     def matches(self, intent: IntentT) -> bool: ...

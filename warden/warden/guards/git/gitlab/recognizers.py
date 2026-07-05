@@ -77,10 +77,21 @@ class FieldSpec:
 ActionFn = Callable[[ApiIntent], "frozenset[Action]"]
 
 
-def _static(*actions: Action) -> ActionFn:
-    """An action set independent of request fields."""
-    frozen = frozenset(actions)
-    return lambda intent: frozen
+@dataclass(frozen=True)
+class _StaticActions:
+    """An ``ActionFn`` independent of request fields, exposing the fixed set
+    it returns so ``RestRecognizer.__post_init__`` can derive
+    ``possible_actions`` from it without a second, hand-kept literal.
+    """
+
+    actions: frozenset[Action]
+
+    def __call__(self, intent: ApiIntent) -> frozenset[Action]:
+        return self.actions
+
+
+def _static(*actions: Action) -> _StaticActions:
+    return _StaticActions(frozenset(actions))
 
 
 _MR_STATE_ACTIONS: Mapping[object, Action] = {
@@ -162,6 +173,13 @@ class RestRecognizer(Recognizer[ApiIntent]):
     rows; a read row leaves them at their defaults. A ``BRANCH_NAMESPACE`` row
     with ``namespace_field=None`` resolves its branch via the iid -> MR
     upstream lookup (``intent.mr_source_ok``) instead of a literal field.
+
+    ``possible_actions`` (the policy report's static view of this row,
+    required by ``Recognizer``) is derived automatically from ``action_fn``
+    when it is a ``_static`` set — there is nothing to declare twice. A
+    field-conditional row must pass ``possible_actions_override`` instead
+    (the full range of its lookup table), enforced in ``__post_init__`` so a
+    new field-conditional row can't silently ship without one.
     """
 
     id: str
@@ -172,6 +190,18 @@ class RestRecognizer(Recognizer[ApiIntent]):
     namespace_field: Optional[str] = None
     quota_kind: Optional[QuotaKind] = None
     decision_fields: tuple[FieldSpec, ...] = ()
+    possible_actions_override: Optional[frozenset[Action]] = None
+
+    def __post_init__(self) -> None:
+        resolved = self.possible_actions_override
+        if resolved is None:
+            if not isinstance(self.action_fn, _StaticActions):
+                raise TypeError(
+                    f"{self.id!r}: a field-conditional action_fn must pass "
+                    "possible_actions_override explicitly"
+                )
+            resolved = self.action_fn.actions
+        object.__setattr__(self, "possible_actions", resolved)
 
     @functools.cached_property
     def regex(self) -> re.Pattern[str]:
@@ -235,6 +265,7 @@ CATALOG: tuple[RestRecognizer, ...] = (
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
         quota_kind=QuotaKind.MR_UPDATE,
         decision_fields=(FieldSpec("state_event", Location.BODY),),
+        possible_actions_override=frozenset(_MR_STATE_ACTIONS.values()),
     ),
     RestRecognizer(
         id="mr.merge",
@@ -332,6 +363,7 @@ CATALOG: tuple[RestRecognizer, ...] = (
         scope_kind=ScopeKind.QUOTA_BY_KIND,
         quota_kind=QuotaKind.ISSUE_UPDATE,
         decision_fields=(FieldSpec("state_event", Location.BODY),),
+        possible_actions_override=frozenset(_ISSUE_STATE_ACTIONS.values()),
     ),
     RestRecognizer(
         id="issue.note",
@@ -367,6 +399,7 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/search",
         action_fn=_search_scope,
         decision_fields=(FieldSpec("scope", Location.QUERY),),
+        possible_actions_override=frozenset(_SEARCH_SCOPE_ACTIONS.values()),
     ),
     RestRecognizer(
         id="read.group_search",
@@ -374,6 +407,7 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/groups/{id}/search",
         action_fn=_search_scope,
         decision_fields=(FieldSpec("scope", Location.QUERY),),
+        possible_actions_override=frozenset(_SEARCH_SCOPE_ACTIONS.values()),
     ),
     RestRecognizer(
         id="read.projects",

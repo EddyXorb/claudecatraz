@@ -62,9 +62,14 @@ async def test_policy_route_reports_the_effective_table(cfg):
     host_report = body["hosts"]["gitlab.example"]
     ids = {row["id"] for row in host_report["catalog"]}
     assert "mr.create" in ids and "branch.create" in ids and "mr.merge" in ids
+    # git transport rows: previously the report only walked the REST catalog
+    # and these appeared as names without rows.
+    assert "git.read" in ids and "git.receive_pack" in ids
     assert "project.mr.create" in host_report["actions"]
     # repo.branch.create is default-on in the new vocabulary.
     assert "repo.branch.create" in host_report["actions"]
+    # merge is a named denial, not a hardcoded builtin_deny string.
+    assert "project.mr.merge" in host_report["denials"]
     await ctx.router.aclose()
 
 

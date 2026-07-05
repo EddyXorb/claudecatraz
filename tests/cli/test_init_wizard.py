@@ -210,23 +210,41 @@ class TestMultiEndpointScaffold:
         text = toml_path.read_text(encoding="utf-8")
         data = tomllib.loads(text)
         assert data["git"]["actions"] == [
-            "git.fetch",
-            "git.push",
-            "mr.create",
-            "mr.comment",
-            "mr.update",
-            "pipeline.trigger",
+            "repo.read",
+            "repo.branch.create",
+            "repo.branch.push",
+            "project.read",
+            "project.mr.create",
+            "project.mr.edit",
+            "project.mr.close",
+            "project.mr.comment",
+            "project.ci.trigger",
+            "instance.projects.read",
+            "instance.users.read",
+            "instance.meta.read",
         ]
-        # Vocabulary comment documents both default and non-default actions.
+        # Vocabulary comment documents both default and opt-in/never actions.
         for action in (
-            "git.fetch",
-            "git.push",
-            "mr.create",
-            "mr.comment",
-            "mr.update",
-            "pipeline.trigger",
-            "branch.create",
-            "issue.create",
+            "repo.read",
+            "repo.branch.create",
+            "repo.branch.push",
+            "repo.branch.delete",
+            "repo.tag.create",
+            "repo.tag.delete",
+            "project.read",
+            "project.mr.create",
+            "project.mr.edit",
+            "project.mr.close",
+            "project.mr.comment",
+            "project.mr.merge",
+            "project.ci.trigger",
+            "project.issue.create",
+            "project.issue.edit",
+            "project.issue.close",
+            "project.issue.comment",
+            "instance.projects.read",
+            "instance.users.read",
+            "instance.meta.read",
         ):
             assert action in text
         assert "[api.endpoints]" not in text

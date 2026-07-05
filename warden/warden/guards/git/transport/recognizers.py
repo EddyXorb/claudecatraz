@@ -58,6 +58,7 @@ class GitRecognizer(Recognizer[GitIntent]):
     id: str
     operations: frozenset[str]
     recognize_fn: Callable[[GitIntent], frozenset[Action]]
+    possible_actions: frozenset[Action]
 
     def matches(self, intent: GitIntent) -> bool:
         return intent.operation in self.operations
@@ -67,8 +68,26 @@ class GitRecognizer(Recognizer[GitIntent]):
 
 
 CATALOG: tuple[GitRecognizer, ...] = (
-    GitRecognizer("git.read", frozenset({"advertise", "upload-pack"}), _read_actions),
-    GitRecognizer("git.receive_pack", frozenset({"receive-pack"}), _receive_pack_actions),
+    GitRecognizer(
+        "git.read",
+        frozenset({"advertise", "upload-pack"}),
+        _read_actions,
+        frozenset({git_actions.REPO_READ}),
+    ),
+    GitRecognizer(
+        "git.receive_pack",
+        frozenset({"receive-pack"}),
+        _receive_pack_actions,
+        frozenset(
+            {
+                git_actions.REPO_BRANCH_CREATE,
+                git_actions.REPO_BRANCH_PUSH,
+                git_actions.REPO_BRANCH_DELETE,
+                git_actions.REPO_TAG_CREATE,
+                git_actions.REPO_TAG_DELETE,
+            }
+        ),
+    ),
 )
 
 

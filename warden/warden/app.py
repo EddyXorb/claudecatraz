@@ -17,7 +17,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from .context import AppContext
-from .guards.git.gitlab.report import endpoint_table_report
+from .guards.git.report import endpoint_table_report
 
 # Static log-viewer page — a package asset, not routing code.
 _VIEWER_HTML_PATH = Path(__file__).parent / "static" / "viewer.html"
@@ -90,7 +90,7 @@ async def _policy(request: Request) -> JSONResponse:
     ``catraz doctor`` uses this to show catalog ids and state.
     """
     ctx: AppContext = request.app.state.ctx
-    return JSONResponse(endpoint_table_report(ctx.cfg))
+    return JSONResponse(endpoint_table_report(ctx.cfg, ctx.guards))
 
 
 async def _viewer(request: Request) -> HTMLResponse:

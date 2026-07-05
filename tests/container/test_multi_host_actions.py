@@ -43,7 +43,7 @@ pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
 # ── fixed multi-endpoint fixture data (cascade example) ───────────────────────
 
 HOST_FULL = "full-forge.test"  # gitlab, no `actions` override -> domain default
-HOST_REVIEW = "review-forge.test"  # gitlab, actions = [git.fetch, mr.comment]
+HOST_REVIEW = "review-forge.test"  # gitlab, actions = [repo.read, project.mr.comment]
 HOST_PLAIN = "plain-forge.test"  # plain, no `actions` override -> default ∩ type
 PROJECT = "acme/demo"
 
@@ -60,8 +60,10 @@ allowed_projects = ["{PROJECT}"]
 # Domain default: the full built-in action set, spelled out explicitly so the
 # FULL and PLAIN hosts' cascade below is visible in this file rather than
 # relying on the code-side built-in default.
-actions = ["git.fetch", "git.push", "mr.create", "mr.comment", "mr.update",
-           "pipeline.trigger"]
+actions = ["repo.read", "repo.branch.create", "repo.branch.push",
+           "project.read", "project.mr.create", "project.mr.edit",
+           "project.mr.close", "project.mr.comment", "project.ci.trigger",
+           "instance.projects.read", "instance.users.read", "instance.meta.read"]
 
 [git.rules]
 branch_prefixes = ["claude/"]
@@ -75,7 +77,7 @@ allowed_projects = ["{PROJECT}"]
 host = "{HOST_REVIEW}"
 type = "gitlab"
 allowed_projects = ["{PROJECT}"]
-actions = ["git.fetch", "mr.comment"]
+actions = ["repo.read", "project.mr.comment"]
 
 [[git.endpoint]]                        # plain: no override -> default ∩ type
 host = "{HOST_PLAIN}"
@@ -262,21 +264,21 @@ def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: s
 @pytest.mark.slow
 def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
     """Full default: a `gitlab` endpoint with no `actions` override inherits
-    the domain default, which includes both `git.push` and `mr.create` —
-    both clear the action gate.
+    the domain default, which includes both `repo.branch.push` and
+    `project.mr.create` — both clear the action gate.
 
-    `git.push` (advertise-receive) never touches quota state, so it reaches
-    `forward()` and gets this test's usual "routed" 500 (absent upstream).
-    `mr.create` does consult quota state first — and in this environment
-    (deliberately no real forge behind any of the three hosts) that state can
-    never finish reconciling, so it denies R5 "state locked" instead of
-    reaching `forward()`; see `_assert_action_gate_cleared_but_state_locked`
-    for why that is still the correct, specific proof that the action gate
-    passed (as opposed to `review-only`'s R3 "not enabled" for the same
-    request shape).
+    Advertise (either service) always recognizes to `repo.read` — it never
+    touches quota state, so it reaches `forward()` and gets this test's usual
+    "routed" 500 (absent upstream). `mr.create` does consult quota state
+    first — and in this environment (deliberately no real forge behind any
+    of the three hosts) that state can never finish reconciling, so it
+    denies R5 "state locked" instead of reaching `forward()`; see
+    `_assert_action_gate_cleared_but_state_locked` for why that is still the
+    correct, specific proof that the action gate passed (as opposed to
+    `review-only`'s R6 "not enabled" for the same request shape).
     """
     status, body = _probe(live_stack, host=HOST_FULL, path=_git_advertise_path(PROJECT, push=True))
-    _assert_routed(status, body, HOST_FULL, "git.push (advertise-receive)")
+    _assert_routed(status, body, HOST_FULL, "push discovery (advertise-receive)")
 
     status, body = _probe(
         live_stack,
@@ -290,34 +292,35 @@ def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
-    """Review-only override: `actions = ["git.fetch", "mr.comment"]` narrows
-    this host relative to the full default — but selectively, not blanket:
+    """Review-only override: `actions = ["repo.read", "project.mr.comment"]`
+    narrows this host relative to the full default — but selectively, not
+    blanket:
 
-    - `git.fetch` stays allowed (routed).
-    - `git.push` is denied cleanly at the advertise phase (git guard's
-      `action_gate`) — before the client ever sends a pack.
-    - `mr.create` is denied (not in this host's per-host effective REST
-      table) — same status/rule as
+    - Fetch discovery stays allowed (routed) — `repo.read` is enabled.
+    - Push discovery (advertise-receive) *also* routes: advertise always
+      recognizes to `repo.read` regardless of service, by design (main
+      document §6) — a disabled push denies at `receive-pack`, per ref, not
+      at discovery. This test only probes discovery, so it cannot observe
+      that denial directly; it is covered at the unit level in
+      `warden/tests/transport/test_recognizers.py` and `test_policy.py`.
+    - `project.mr.create` is denied (not in this host's effective actions) —
+      same status/rule as
       ``test_two_hosts_with_different_actions_behave_differently_on_the_same_guard``
-      in ``warden/tests/test_api_proxy.py`` (403, R3).
-    - `mr.comment` (a `mr.note` recognizer) stays allowed (routed) — proving
-      the narrowing is selective: two REST writes on the very same host,
-      one denied and one allowed, per the configured `actions` list alone.
+      in ``warden/tests/test_api_proxy.py`` (403, R6).
+    - `project.mr.comment` (a `mr.note` recognizer) stays allowed (routed) —
+      proving the narrowing is selective: two REST writes on the very same
+      host, one denied and one allowed, per the configured `actions` list
+      alone.
     """
     status, body = _probe(
         live_stack, host=HOST_REVIEW, path=_git_advertise_path(PROJECT, push=False)
     )
-    _assert_routed(status, body, HOST_REVIEW, "git.fetch (advertise-upload)")
+    _assert_routed(status, body, HOST_REVIEW, "fetch discovery (advertise-upload)")
 
     status, body = _probe(
         live_stack, host=HOST_REVIEW, path=_git_advertise_path(PROJECT, push=True)
     )
-    _assert_denied(
-        status,
-        body,
-        rule="R6",
-        reason_contains=["git.push", "not enabled", HOST_REVIEW],
-    )
+    _assert_routed(status, body, HOST_REVIEW, "push discovery (advertise-receive)")
 
     status, body = _probe(
         live_stack,
@@ -329,8 +332,8 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
     _assert_denied(
         status,
         body,
-        rule="R3",
-        reason_contains=["write endpoint not in allowlist", "merge_requests"],
+        rule="R6",
+        reason_contains=["project.mr.create", "not enabled", HOST_REVIEW],
     )
 
     status, body = _probe(
@@ -340,22 +343,22 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
         method="POST",
         body={"body": "hi"},
     )
-    _assert_routed(status, body, HOST_REVIEW, "mr.comment (mr.note)")
+    _assert_routed(status, body, HOST_REVIEW, "project.mr.comment (mr.note)")
 
 
 @pytest.mark.slow
 def test_plain_endpoint_fetch_and_push_routed(live_stack: Stack) -> None:
     """Plain, inherited type-cut: a `plain`-type endpoint with no `actions`
     override inherits the domain default intersected with its type's
-    vocabulary ({git.fetch, git.push} — no forge/REST actions at all).
-    Spot-check only: both git transport verbs still clear the action gate
-    and are routed; there is no meaningful REST `mr.*` path on a `plain` host
-    to probe (`type = "plain"` has no REST base at all,
-    `core.transport.base_urls`)."""
+    vocabulary (`repo.read`/`repo.branch.create`/`repo.branch.push` — no
+    forge/REST actions at all). Spot-check only: both git transport
+    operations still clear the action gate and are routed; there is no
+    meaningful REST `mr.*` path on a `plain` host to probe (`type = "plain"`
+    has no REST base at all, `core.transport.base_urls`)."""
     status, body = _probe(
         live_stack, host=HOST_PLAIN, path=_git_advertise_path(PROJECT, push=False)
     )
-    _assert_routed(status, body, HOST_PLAIN, "git.fetch (advertise-upload)")
+    _assert_routed(status, body, HOST_PLAIN, "fetch discovery (advertise-upload)")
 
     status, body = _probe(live_stack, host=HOST_PLAIN, path=_git_advertise_path(PROJECT, push=True))
-    _assert_routed(status, body, HOST_PLAIN, "git.push (advertise-receive)")
+    _assert_routed(status, body, HOST_PLAIN, "push discovery (advertise-receive)")

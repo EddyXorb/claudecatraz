@@ -31,18 +31,17 @@ def _write_grouped(root: Path, filename: str, tokens: dict[str, str]) -> None:
 
 class TestEffectiveActionsCascade:
     def test_endpoint_override_wins_unfiltered(self) -> None:
-        endpoint = {"type": "plain", "actions": ("mr.create",)}
+        endpoint = {"type": "plain", "actions": ("project.mr.create",)}
         # Explicit override is returned as-is, even though "plain" can't
-        # actually support mr.create — that's the warden loader's ConfigError
-        # to raise at config-build time, not doctor's to re-check.
-        assert doctor._effective_actions_for_host(None, endpoint) == ("mr.create",)
+        # actually support project.mr.create — that's the warden loader's
+        # ConfigError to raise at config-build time, not doctor's to re-check.
+        assert doctor._effective_actions_for_host(None, endpoint) == ("project.mr.create",)
 
     def test_domain_default_used_when_no_override(self) -> None:
         endpoint = {"type": "gitlab", "actions": None}
-        assert doctor._effective_actions_for_host(("git.fetch", "mr.comment"), endpoint) == (
-            "git.fetch",
-            "mr.comment",
-        )
+        assert doctor._effective_actions_for_host(
+            ("repo.read", "project.mr.comment"), endpoint
+        ) == ("repo.read", "project.mr.comment")
 
     def test_builtin_default_used_when_nothing_set(self) -> None:
         endpoint = {"type": "gitlab", "actions": None}
@@ -50,7 +49,11 @@ class TestEffectiveActionsCascade:
 
     def test_plain_type_cuts_inherited_forge_actions(self) -> None:
         endpoint = {"type": "plain", "actions": None}
-        assert doctor._effective_actions_for_host(None, endpoint) == ("git.fetch", "git.push")
+        assert doctor._effective_actions_for_host(None, endpoint) == (
+            "repo.read",
+            "repo.branch.create",
+            "repo.branch.push",
+        )
 
     def test_gitlab_type_keeps_full_inherited_default(self) -> None:
         endpoint = {"type": "gitlab", "actions": None}
@@ -65,9 +68,9 @@ class TestReadGitActionsDefault:
     def test_reads_domain_actions(self, tmp_path: Path) -> None:
         _write_config(
             tmp_path,
-            '[git]\nactions = ["git.fetch", "mr.comment"]\n',
+            '[git]\nactions = ["repo.read", "project.mr.comment"]\n',
         )
-        assert doctor._read_git_actions_default(tmp_path) == ("git.fetch", "mr.comment")
+        assert doctor._read_git_actions_default(tmp_path) == ("repo.read", "project.mr.comment")
 
     def test_absent_key_is_none(self, tmp_path: Path) -> None:
         _write_config(tmp_path, "[git.rules]\n")
@@ -82,10 +85,10 @@ class TestReadGitEndpointsActions:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "mr.comment"]\n',
+            'actions = ["repo.read", "project.mr.comment"]\n',
         )
         endpoints = doctor._read_git_endpoints(tmp_path)
-        assert endpoints[0]["actions"] == ("git.fetch", "mr.comment")
+        assert endpoints[0]["actions"] == ("repo.read", "project.mr.comment")
 
     def test_no_actions_key_is_none(self, tmp_path: Path) -> None:
         _write_config(tmp_path, '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n')
@@ -103,15 +106,15 @@ class TestCheckActionCoherence:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "mr.comment"]\n',
+            'actions = ["repo.read", "project.mr.comment"]\n',
         )
-        # No write_tokens file at all -> mr.comment is a write action with no token.
+        # No write_tokens file at all -> project.mr.comment is a write action with no token.
         f = doctor.Findings()
         doctor.check_action_coherence(tmp_path, {}, f)
         assert any(
             i[0] == doctor.WARN
             and "gitlab.com" in i[2]
-            and "mr.comment" in i[2]
+            and "project.mr.comment" in i[2]
             and "write_token" in i[2]
             for i in f.items
         )
@@ -121,7 +124,7 @@ class TestCheckActionCoherence:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "mr.comment"]\n',
+            'actions = ["repo.read", "project.mr.comment"]\n',
         )
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
         f = doctor.Findings()
@@ -129,21 +132,21 @@ class TestCheckActionCoherence:
         assert not any(i[0] == doctor.WARN and "write_token" in i[2] for i in f.items)
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_git_fetch_only_never_warns_about_write_token(self, tmp_path: Path) -> None:
+    def test_repo_read_only_never_warns_about_write_token(self, tmp_path: Path) -> None:
         _write_config(
             tmp_path,
-            '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = ["git.fetch"]\n',
+            '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = ["repo.read"]\n',
         )
         f = doctor.Findings()
         doctor.check_action_coherence(tmp_path, {}, f)
         assert not any(i[0] == doctor.WARN for i in f.items)
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_mr_create_without_git_push_warns(self, tmp_path: Path) -> None:
+    def test_mr_create_without_branch_write_warns(self, tmp_path: Path) -> None:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "mr.create"]\n',
+            'actions = ["repo.read", "project.mr.create"]\n',
         )
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
         f = doctor.Findings()
@@ -151,30 +154,32 @@ class TestCheckActionCoherence:
         assert any(
             i[0] == doctor.WARN
             and "gitlab.com" in i[2]
-            and "mr.create" in i[2]
-            and "git.push" in i[2]
+            and "project.mr.create" in i[2]
+            and "repo.branch" in i[2]
             for i in f.items
         )
         assert not any(i[0] == doctor.BAD for i in f.items)
 
-    def test_mr_create_with_git_push_no_warning(self, tmp_path: Path) -> None:
+    def test_mr_create_with_branch_push_no_warning(self, tmp_path: Path) -> None:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "git.push", "mr.create"]\n',
+            'actions = ["repo.read", "repo.branch.push", "project.mr.create"]\n',
         )
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
         f = doctor.Findings()
         doctor.check_action_coherence(tmp_path, {}, f)
         assert not any(
-            "mr.create" in i[2] and "git.push" in i[2] for i in f.items if i[0] == doctor.WARN
+            "project.mr.create" in i[2] and "repo.branch" in i[2]
+            for i in f.items
+            if i[0] == doctor.WARN
         )
 
-    def test_pipeline_trigger_without_git_push_warns(self, tmp_path: Path) -> None:
+    def test_ci_trigger_without_branch_write_warns(self, tmp_path: Path) -> None:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "pipeline.trigger"]\n',
+            'actions = ["repo.read", "project.ci.trigger"]\n',
         )
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
         f = doctor.Findings()
@@ -182,19 +187,19 @@ class TestCheckActionCoherence:
         assert any(
             i[0] == doctor.WARN
             and "gitlab.com" in i[2]
-            and "pipeline.trigger" in i[2]
-            and "git.push" in i[2]
+            and "project.ci.trigger" in i[2]
+            and "repo.branch" in i[2]
             for i in f.items
         )
         assert not any(i[0] == doctor.BAD for i in f.items)
 
     def test_dead_quota_is_silent(self, tmp_path: Path) -> None:
-        """max_open_mrs set without mr.create is harmless — no warning at all."""
+        """max_open_mrs set without project.mr.create is harmless — no warning at all."""
         _write_config(
             tmp_path,
             "[git.rules]\nmax_open_mrs = 5\n\n"
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "git.push"]\n',
+            'actions = ["repo.read", "repo.branch.push"]\n',
         )
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
         f = doctor.Findings()
@@ -204,7 +209,8 @@ class TestCheckActionCoherence:
     def test_gitlab_mode_off_short_circuits(self, tmp_path: Path) -> None:
         _write_config(
             tmp_path,
-            '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = ["mr.comment"]\n',
+            '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
+            'actions = ["project.mr.comment"]\n',
         )
         f = doctor.Findings()
         doctor.check_action_coherence(tmp_path, {"GITLAB_MODE": "off"}, f)
@@ -220,7 +226,7 @@ class TestCheckActionCoherence:
         _write_config(
             tmp_path,
             '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["git.fetch", "mr.create", "pipeline.trigger"]\n\n'
+            'actions = ["repo.read", "project.mr.create", "project.ci.trigger"]\n\n'
             '[[git.endpoint]]\nhost = "plain.example"\ntype = "plain"\n',
         )
         f = doctor.Findings()

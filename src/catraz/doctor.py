@@ -39,32 +39,74 @@ SECRETS = [
 OK, WARN, BAD = "ok", "warn", "bad"
 
 # --- Action vocabulary — a small, doctor-only mirror of the Warden's action
-# catalog + cascade (warden/warden/guards/gitlab_api/actions.py,
+# vocabulary + cascade (warden/warden/guards/git/actions.py,
 # warden/warden/core/config.py Config.effective_actions). catraz never imports
 # warden's Python, it only ships it as a container asset, so this is
-# reimplemented here rather than shared. Doctor only needs the vocabulary, the
-# write-set, and the built-in default to reproduce the same per-host
+# reimplemented here rather than shared. Doctor only needs the ids, their
+# criticality, and the built-in default to reproduce the same per-host
 # effective-actions cascade for its cross-checks — not the full
 # recognizer-level mapping the Warden owns.
-GIT_FETCH = "git.fetch"
-GIT_PUSH = "git.push"
-FORGE_ACTIONS: frozenset[str] = frozenset(
-    {"mr.create", "mr.comment", "mr.update", "pipeline.trigger", "branch.create", "issue.create"}
+#
+# Twenty ids, three scopes (repo/project/instance). The four IRREVERSIBLE ids
+# are compiled-in denials — never configurable, never in ALL_ACTIONS's write
+# set for coherence purposes since the Warden always denies them regardless
+# of config.
+READ_ACTIONS: frozenset[str] = frozenset(
+    {
+        "repo.read",
+        "project.read",
+        "instance.projects.read",
+        "instance.users.read",
+        "instance.meta.read",
+    }
 )
-# The full closed vocabulary: git transport verbs + forge (REST) actions.
-ALL_ACTIONS: frozenset[str] = FORGE_ACTIONS | {GIT_FETCH, GIT_PUSH}
-# Built-in default — same six ids as the Warden's guards.gitlab_api.actions.DEFAULT_ACTIONS.
+IRREVERSIBLE_ACTIONS: frozenset[str] = frozenset(
+    {"repo.branch.delete", "repo.tag.create", "repo.tag.delete", "project.mr.merge"}
+)
+ALL_ACTIONS: frozenset[str] = (
+    READ_ACTIONS
+    | IRREVERSIBLE_ACTIONS
+    | {
+        "repo.branch.create",
+        "repo.branch.push",
+        "project.mr.create",
+        "project.mr.edit",
+        "project.mr.close",
+        "project.mr.comment",
+        "project.ci.trigger",
+        "project.issue.create",
+        "project.issue.edit",
+        "project.issue.close",
+        "project.issue.comment",
+    }
+)
+# Built-in default — the twelve ✔ rows: same ids as the Warden's
+# guards.git.actions.DEFAULT.
 DEFAULT_ACTIONS: tuple[str, ...] = (
-    GIT_FETCH,
-    GIT_PUSH,
-    "mr.create",
-    "mr.comment",
-    "mr.update",
-    "pipeline.trigger",
+    "repo.read",
+    "repo.branch.create",
+    "repo.branch.push",
+    "project.read",
+    "project.mr.create",
+    "project.mr.edit",
+    "project.mr.close",
+    "project.mr.comment",
+    "project.ci.trigger",
+    "instance.projects.read",
+    "instance.users.read",
+    "instance.meta.read",
 )
-# Every action except git.fetch is a write — git.fetch is the only read.
-WRITE_ACTIONS: frozenset[str] = ALL_ACTIONS - {GIT_FETCH}
-_PLAIN_ACTIONS: frozenset[str] = frozenset({GIT_FETCH, GIT_PUSH})
+# Every non-read action is a write — includes the never-class ids (a
+# misconfigured explicit list containing one is the Warden loader's
+# ConfigError to raise, not doctor's write-token coherence check).
+WRITE_ACTIONS: frozenset[str] = ALL_ACTIONS - READ_ACTIONS
+# repo.* ids only — the git transport guard's SUPPORTED set, what a "plain"
+# endpoint (no REST guard) can enforce.
+_PLAIN_ACTIONS: frozenset[str] = frozenset(a for a in ALL_ACTIONS if a.startswith("repo."))
+# A branch push or a branch create — either lets a source branch reach the
+# remote, which is what the mr.create/pipeline.trigger coherence checks below
+# actually need.
+_BRANCH_WRITE_ACTIONS: frozenset[str] = frozenset({"repo.branch.create", "repo.branch.push"})
 
 DOCTOR_SECTIONS = [
     "docker",
@@ -346,12 +388,13 @@ def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
 
 
 def _actions_valid_for_type(endpoint_type: str) -> frozenset[str]:
-    """Mirrors the Warden's ``actions_valid_for_type``: a ``plain``
-    endpoint only has the two transport verbs; everything else (``gitlab``,
-    or an unrecognized/blank type) gets the full vocabulary. Doctor is
-    advisory — an unrecognized ``type`` here is not doctor's to re-police
-    (the Warden's loader already fail-closes on it at config-parse time), so
-    it just falls back to the permissive case instead of raising.
+    """Mirrors the Warden's per-type derivation (union of each composing
+    guard's ``SUPPORTED``): a ``plain`` endpoint only has the ``repo.*`` ids
+    (its git transport guard); everything else (``gitlab``, or an
+    unrecognized/blank type) gets the full vocabulary. Doctor is advisory —
+    an unrecognized ``type`` here is not doctor's to re-police (the Warden's
+    loader already fail-closes on it at config-parse time), so it just falls
+    back to the permissive case instead of raising.
     """
     if endpoint_type == "plain":
         return _PLAIN_ACTIONS
@@ -606,12 +649,18 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
     A thin section — the actual report is fetched from the running warden's
     read-only ``/policy`` admin route (one section per host) and formatted by
     ``catraz.endpoints``; doctor.py only wires it into the Findings list, so
-    this module doesn't grow with the catalog (see
-    :func:`catraz.endpoints.fetch_policy_report`).
+    this module doesn't grow with the catalog.
 
-    The action cross-checks (write_token / ``git.push`` coherence) live in
-    :func:`check_action_coherence` below — they're a static, host-side parse
-    of ``warden.toml`` (like :func:`check_tokens`), not a live-report read, so
+    Each host's report carries its effective (enabled) action ids, one
+    catalog row per recognizer (each with the actions it could recognize —
+    id, criticality, whether it's a built-in default, whether currently
+    active), and ``denials``: the IRREVERSIBLE ids present in the catalog,
+    named explicitly since the Warden always denies them regardless of
+    config.
+
+    The action cross-checks (write_token / branch-write coherence) live in
+    ``check_action_coherence`` below — they're a static, host-side parse of
+    ``warden.toml`` (like ``check_tokens``), not a live-report read, so
     unlike this function they don't need the stack to be up.
     """
     from catraz.admin_client import AdminUnreachable
@@ -635,19 +684,29 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
         f.ok("endpoints", "no hosts configured yet")
         return
     for host, host_report in hosts.items():
-        rows = host_report["catalog"]
-        active = [r for r in rows if r["active"]]
-        inactive = [r for r in rows if not r["active"]]
+        active_ids: list[str] = host_report["actions"]
+        denials: list[str] = host_report.get("denials", [])
+        default_by_id: dict[str, bool] = {}
+        all_ids: set[str] = set()
+        for row in host_report["catalog"]:
+            for a in row["actions"]:
+                all_ids.add(a["id"])
+                default_by_id.setdefault(a["id"], a["default"])
         active_desc = ", ".join(
-            f"{r['id']}[{r['enabled_via']}]" if r["enabled_via"] != "default" else r["id"]
-            for r in active
+            aid if default_by_id.get(aid, True) else f"{aid}[config]" for aid in active_ids
         )
-        f.ok("endpoints", f"{host}: {len(active)} active: {active_desc or '(none)'}")
+        f.ok("endpoints", f"{host}: {len(active_ids)} active: {active_desc or '(none)'}")
+        inactive = sorted(all_ids - set(active_ids) - set(denials))
         if inactive:
             f.ok(
                 "endpoints",
-                f"{host}: {len(inactive)} in catalog but not enabled: "
-                f"{', '.join(r['id'] for r in inactive)}",
+                f"{host}: {len(inactive)} in catalog but not enabled: {', '.join(inactive)}",
+            )
+        if denials:
+            f.ok(
+                "endpoints",
+                f"{host}: {len(denials)} compiled-in denial(s), never configurable: "
+                f"{', '.join(sorted(denials))}",
             )
 
 
@@ -665,13 +724,14 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
 
     - a write action configured with no ``write_token`` for that host — the
       endpoint is effectively read-only.
-    - ``mr.create`` without ``git.push`` — the MR's source branch can never
-      be created.
-    - ``pipeline.trigger`` without ``git.push`` — same reasoning, no branch
-      to trigger a pipeline for.
+    - ``project.mr.create`` without ``repo.branch.create``/``repo.branch.push``
+      — the MR's source branch can never reach the remote.
+    - ``project.ci.trigger`` without ``repo.branch.create``/``repo.branch.push``
+      — same reasoning, no branch to trigger a pipeline for.
 
     Deliberately silent on dead quotas (``max_open_mrs`` set without
-    ``mr.create``, etc.) — harmless, the counter is simply never reached.
+    ``project.mr.create``, etc.) — harmless, the counter is simply never
+    reached.
     """
     mode = _gitlab_mode(env)
     if mode == "off":
@@ -696,20 +756,22 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
                 "or drop the write action(s) from its `actions`",
             )
 
-        if "mr.create" in actions and GIT_PUSH not in actions:
+        if "project.mr.create" in actions and not (actions & _BRANCH_WRITE_ACTIONS):
             f.warn(
                 "endpoints",
-                f"{host}: `mr.create` is configured without `git.push` — the MR's source "
-                "branch can never be created",
-                "add `git.push` to this host's `actions` (or drop `mr.create`)",
+                f"{host}: `project.mr.create` is configured without `repo.branch.create`/"
+                "`repo.branch.push` — the MR's source branch can never reach the remote",
+                "add `repo.branch.create` or `repo.branch.push` to this host's `actions` "
+                "(or drop `project.mr.create`)",
             )
 
-        if "pipeline.trigger" in actions and GIT_PUSH not in actions:
+        if "project.ci.trigger" in actions and not (actions & _BRANCH_WRITE_ACTIONS):
             f.warn(
                 "endpoints",
-                f"{host}: `pipeline.trigger` is configured without `git.push` — there is "
-                "no branch to trigger a pipeline for",
-                "add `git.push` to this host's `actions` (or drop `pipeline.trigger`)",
+                f"{host}: `project.ci.trigger` is configured without `repo.branch.create`/"
+                "`repo.branch.push` — there is no branch to trigger a pipeline for",
+                "add `repo.branch.create` or `repo.branch.push` to this host's `actions` "
+                "(or drop `project.ci.trigger`)",
             )
 
 
