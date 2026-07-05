@@ -20,7 +20,7 @@ import pytest
 
 from warden.core.config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
 from warden.core.config_load import _parse_token_file, from_env
-from warden.guards.gitlab_api.actions import DEFAULT_ACTIONS
+from warden.guards.git.actions import DEFAULT as GIT_DEFAULT
 
 
 # --- project_allowed -----------------------------------------------------------
@@ -546,7 +546,7 @@ def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
         "[git]\n"
-        'actions = ["git.fetch", "git.push", "mr.comment"]\n'
+        'actions = ["repo.read", "repo.branch.push", "project.mr.comment"]\n'
         "\n"
         "[[git.endpoint]]\n"
         'host = "gitlab.com"\n'
@@ -556,10 +556,10 @@ def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
         "[[git.endpoint]]\n"
         'host = "my-gitlab.de"\n'
         'type = "gitlab"\n'
-        'actions = ["git.fetch", "mr.comment"]\n'
+        'actions = ["repo.read", "project.mr.comment"]\n'
     )
     cfg = from_env({}, strict=True, toml_path=str(toml))
-    assert cfg.git_actions == ("git.fetch", "git.push", "mr.comment")
+    assert cfg.git_actions == ("repo.read", "repo.branch.push", "project.mr.comment")
 
     gitlab_com = cfg.endpoint_for("gitlab.com")
     assert gitlab_com is not None
@@ -567,54 +567,62 @@ def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
 
     my_gitlab = cfg.endpoint_for("my-gitlab.de")
     assert my_gitlab is not None
-    assert my_gitlab.actions == ("git.fetch", "mr.comment")
+    assert my_gitlab.actions == ("repo.read", "project.mr.comment")
 
 
 def test_effective_actions_endpoint_override_replaces_completely():
     cfg = Config(
-        git_actions=("git.fetch", "git.push", "mr.create", "mr.comment"),
+        git_actions=("repo.read", "repo.branch.push", "project.mr.create", "project.mr.comment"),
         git_endpoints=(
             GitEndpoint(
                 host="my-gitlab.de",
                 type="gitlab",
-                actions=("git.fetch", "mr.comment"),
+                actions=("repo.read", "project.mr.comment"),
             ),
         ),
     )
-    assert cfg.effective_actions("my-gitlab.de") == ("git.fetch", "mr.comment")
+    assert cfg.effective_actions("my-gitlab.de") == ("repo.read", "project.mr.comment")
 
 
 def test_effective_actions_missing_endpoint_key_inherits_domain():
     cfg = Config(
-        git_actions=("git.fetch", "git.push", "mr.create"),
+        git_actions=("repo.read", "repo.branch.push", "project.mr.create"),
         git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),),
     )
-    assert cfg.effective_actions("gitlab.com") == ("git.fetch", "git.push", "mr.create")
+    assert cfg.effective_actions("gitlab.com") == (
+        "repo.read",
+        "repo.branch.push",
+        "project.mr.create",
+    )
 
 
 def test_effective_actions_missing_domain_falls_back_to_builtin_default():
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),))
-    assert cfg.effective_actions("gitlab.com") == DEFAULT_ACTIONS
+    assert cfg.effective_actions("gitlab.com") == tuple(sorted(action.id for action in GIT_DEFAULT))
 
 
-def test_effective_actions_plain_endpoint_inherits_domain_cut_to_transport():
-    """A `plain` endpoint that inherits `[git].actions` gets the forge ids
-    silently filtered out — no error, unlike an explicit override."""
+def test_effective_actions_plain_endpoint_inherits_domain_cut_to_repo_ids():
+    """A `plain` endpoint that inherits `[git].actions` gets every non-``repo.*``
+    id silently filtered out — no error, unlike an explicit override."""
     cfg = Config(
-        git_actions=("git.fetch", "git.push", "mr.create", "mr.comment"),
+        git_actions=("repo.read", "repo.branch.push", "project.mr.create", "project.mr.comment"),
         git_endpoints=(GitEndpoint(host="personal-gitserver.it", type="plain"),),
     )
-    assert cfg.effective_actions("personal-gitserver.it") == ("git.fetch", "git.push")
+    assert cfg.effective_actions("personal-gitserver.it") == ("repo.read", "repo.branch.push")
 
 
 def test_effective_actions_plain_endpoint_falls_back_to_builtin_default_cut():
     cfg = Config(git_endpoints=(GitEndpoint(host="personal-gitserver.it", type="plain"),))
-    assert cfg.effective_actions("personal-gitserver.it") == ("git.fetch", "git.push")
+    assert cfg.effective_actions("personal-gitserver.it") == (
+        "repo.branch.create",
+        "repo.branch.push",
+        "repo.read",
+    )
 
 
 def test_effective_actions_explicit_empty_list_is_distinguishable_from_absent():
     cfg = Config(
-        git_actions=("git.fetch", "git.push"),
+        git_actions=("repo.read", "repo.branch.push"),
         git_endpoints=(GitEndpoint(host="my-gitlab.de", type="gitlab", actions=()),),
     )
     assert cfg.effective_actions("my-gitlab.de") == ()
@@ -622,7 +630,7 @@ def test_effective_actions_explicit_empty_list_is_distinguishable_from_absent():
 
 def test_git_actions_unknown_id_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('[git]\nactions = ["git.fetch", "mr.creat"]\n')  # typo
+    toml.write_text('[git]\nactions = ["repo.read", "repo.reed"]\n')  # typo
     with pytest.raises(ConfigError, match="unknown action id"):
         from_env({}, strict=True, toml_path=str(toml))
 
@@ -631,17 +639,17 @@ def test_git_endpoint_actions_unknown_id_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
         '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-        'actions = ["git.fetch", "mr.creat"]\n'  # typo
+        'actions = ["repo.read", "repo.reed"]\n'  # typo
     )
     with pytest.raises(ConfigError, match="unknown action id"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_git_endpoint_explicit_forge_action_on_plain_type_aborts_startup(tmp_path):
+def test_git_endpoint_explicit_invalid_action_on_plain_type_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
         '[[git.endpoint]]\nhost = "personal-gitserver.it"\ntype = "plain"\n'
-        'actions = ["git.fetch", "mr.create"]\n'
+        'actions = ["repo.read", "project.mr.create"]\n'
     )
     with pytest.raises(ConfigError, match="not valid for type"):
         from_env({}, strict=True, toml_path=str(toml))
@@ -649,7 +657,7 @@ def test_git_endpoint_explicit_forge_action_on_plain_type_aborts_startup(tmp_pat
 
 def test_git_actions_non_list_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('[git]\nactions = "git.fetch"\n')
+    toml.write_text('[git]\nactions = "repo.read"\n')
     with pytest.raises(ConfigError, match="must be a list of strings"):
         from_env({}, strict=True, toml_path=str(toml))
 
@@ -657,7 +665,7 @@ def test_git_actions_non_list_aborts_startup(tmp_path):
 def test_git_endpoint_actions_non_list_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
-        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = "git.fetch"\n'
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = "repo.read"\n'
     )
     with pytest.raises(ConfigError, match="must be a list of strings"):
         from_env({}, strict=True, toml_path=str(toml))

@@ -6,19 +6,23 @@ from __future__ import annotations
 
 import pytest
 
-from warden.guards.gitlab_api.actions import DEFAULT_ACTIONS
+from warden.guards.git.actions import DEFAULT as GIT_DEFAULT
 from warden.guards.gitlab_api.catalog import write_endpoints as entries_mod
 from warden.guards.gitlab_api.catalog.activation import EffectiveTable, build_effective_table
 from warden.guards.gitlab_api.catalog.errors import CatalogConfigError
 from warden.guards.gitlab_api.catalog.model import EndpointKind, Recognizer, ScopeKind
 from warden.guards.gitlab_api.catalog.write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS
 
+_DEFAULT_ACTION_IDS = tuple(sorted(a.id for a in GIT_DEFAULT))
+
 # --- default behaviour (behaviour preservation across the actions rebuild) --
 
 
 def test_default_actions_activate_exactly_the_default_recognizer_set():
-    table = build_effective_table(DEFAULT_ACTIONS)
-    assert {e.id for e in table.entries} == DEFAULT_ENABLED
+    # repo.branch.create is default-on in the new vocabulary (unlike the old
+    # REST-only DEFAULT_ENABLED), so its recognizer joins the activated set.
+    table = build_effective_table(_DEFAULT_ACTION_IDS)
+    assert {e.id for e in table.entries} == DEFAULT_ENABLED | {"branch.create"}
     assert all(v == "default" for v in table.enabled_via.values())
 
 
@@ -29,53 +33,53 @@ def test_empty_actions_activates_nothing():
 
 
 def test_mr_comment_folds_to_its_three_recognizers():
-    table = build_effective_table(("mr.comment",))
+    table = build_effective_table(("project.mr.comment",))
     assert {e.id for e in table.entries} == {"mr.note", "mr.discussion", "mr.discussion_reply"}
 
 
 def test_actions_without_mr_create_do_not_match_mr_create_path():
     # default-deny: mr.create's recognizer must be entirely absent, not just
     # "present but inactive" — match_endpoint has nothing to find.
-    table = build_effective_table(("mr.comment",))
+    table = build_effective_table(("project.mr.comment",))
     assert "mr.create" not in {e.id for e in table.entries}
 
 
 def test_actions_list_can_add_a_non_default_entry():
-    table = build_effective_table(tuple(DEFAULT_ACTIONS) + ("branch.create",))
+    table = build_effective_table(_DEFAULT_ACTION_IDS + ("project.issue.create",))
     ids = {e.id for e in table.entries}
-    assert "branch.create" in ids
-    assert table.enabled_via["branch.create"] == "config:branch.create"
+    assert "issue.create" in ids
+    assert table.enabled_via["issue.create"] == "config:project.issue.create"
     assert all(table.enabled_via[i] == "default" for i in DEFAULT_ENABLED if i in table.enabled_via)
 
 
 def test_actions_list_can_shrink_the_default_set():
-    reduced = tuple(a for a in DEFAULT_ACTIONS if a != "pipeline.trigger")
+    reduced = tuple(a for a in _DEFAULT_ACTION_IDS if a != "project.ci.trigger")
     table = build_effective_table(reduced)
     assert "pipeline.trigger" not in {e.id for e in table.entries}
 
 
 def test_duplicate_action_in_list_is_tolerated():
-    table = build_effective_table(("mr.create", "mr.create"))
+    table = build_effective_table(("project.mr.create", "project.mr.create"))
     assert [e.id for e in table.entries] == ["mr.create"]
 
 
-def test_transport_actions_are_ignored_here():
-    # git.fetch/git.push gate nothing in the REST guard's table (the git
-    # guard's own action gate consumes them) — they must never raise nor add
-    # a row.
-    table = build_effective_table(("git.fetch", "git.push", "mr.create"))
+def test_ids_with_no_rest_recognizer_are_ignored_here():
+    # repo.read/repo.branch.push gate nothing in the REST guard's table (the
+    # git guard's own action gate consumes them) — they must never raise nor
+    # add a row.
+    table = build_effective_table(("repo.read", "repo.branch.push", "project.mr.create"))
     assert {e.id for e in table.entries} == {"mr.create"}
 
 
 def test_read_table_is_untouched_by_actions():
     # The REST-Read table (read_endpoints.py) is not action-addressable at
     # all — build_effective_table only ever touches WRITE_ENDPOINTS, never
-    # the read catalog, regardless of whether git.fetch is present.
+    # the read catalog, regardless of whether repo.read is present.
     from warden.guards.gitlab_api.catalog.read_endpoints import READ_ENDPOINTS
 
-    with_fetch = build_effective_table(("git.fetch", "mr.create"))
-    without_fetch = build_effective_table(("mr.create",))
-    assert {e.id for e in with_fetch.entries} == {e.id for e in without_fetch.entries}
+    with_read = build_effective_table(("repo.read", "project.mr.create"))
+    without_read = build_effective_table(("project.mr.create",))
+    assert {e.id for e in with_read.entries} == {e.id for e in without_read.entries}
     assert READ_ENDPOINTS  # sanity: the read table exists and is unrelated
 
 
@@ -111,15 +115,18 @@ def test_enabling_a_forbidden_capability_entry_raises(monkeypatch):
 
     monkeypatch.setattr(activation_mod, "WRITE_ENDPOINTS", entries_mod.WRITE_ENDPOINTS)
 
+    import warden.guards.git.actions as git_actions_mod
     import warden.guards.gitlab_api.actions as actions_mod
 
-    fake_action_map = dict(actions_mod.ACTION_TO_RECOGNIZERS)
-    fake_action_map["hypothetical.action"] = ("hypothetical.forbidden",)
-    monkeypatch.setattr(actions_mod, "ACTION_TO_RECOGNIZERS", fake_action_map)
-    monkeypatch.setattr(actions_mod, "FORGE_ACTIONS", frozenset(fake_action_map))
-    monkeypatch.setattr(
-        actions_mod, "ALL_ACTIONS", actions_mod.ALL_ACTIONS | {"hypothetical.action"}
+    fake_bridge = dict(actions_mod._BRIDGE_10_03_RECOGNIZER_TO_ACTION)
+    fake_bridge["hypothetical.forbidden"] = "hypothetical.action"
+    monkeypatch.setattr(actions_mod, "_BRIDGE_10_03_RECOGNIZER_TO_ACTION", fake_bridge)
+
+    fake_by_id = dict(git_actions_mod.by_id)
+    fake_by_id["hypothetical.action"] = git_actions_mod.Action(
+        "hypothetical.action", git_actions_mod.Criticality.WRITE
     )
+    monkeypatch.setattr(git_actions_mod, "by_id", fake_by_id)
 
     with pytest.raises(CatalogConfigError, match="forbidden capabilities"):
         build_effective_table(("hypothetical.action",))

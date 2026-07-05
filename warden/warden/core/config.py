@@ -129,10 +129,10 @@ class Config:
     # default-deny, not "feature off").
     git_rules: GitRules = field(default_factory=GitRules)
     # [git].actions domain default. None ⇒ the key is absent from
-    # warden.toml, meaning the built-in default (guards.gitlab_api.actions.
-    # DEFAULT_ACTIONS) applies — same "absent != empty" contract as git_rules'
-    # individual fields, kept at the whole-list granularity since actions
-    # replace completely rather than merging per-key.
+    # warden.toml, meaning the built-in default (guards.git.actions.DEFAULT)
+    # applies — same "absent != empty" contract as git_rules' individual
+    # fields, kept at the whole-list granularity since actions replace
+    # completely rather than merging per-key.
     git_actions: Optional[tuple[str, ...]] = None
     git_endpoints: tuple[GitEndpoint, ...] = ()
     # Per-endpoint tokens resolved from the grouped read_tokens/write_tokens
@@ -270,35 +270,36 @@ class Config:
         """Per-host action cascade, same ``_cascade`` mechanic as
         :meth:`effective_rules`: the endpoint's own ``actions`` if set, else
         ``git_actions`` (the domain default), else the built-in default
-        (:data:`~warden.guards.gitlab_api.actions.DEFAULT_ACTIONS`).
-        The list **replaces** completely — never merged, just like
-        ``branch_prefixes``.
+        (:data:`~warden.guards.git.actions.DEFAULT`). The list **replaces**
+        completely — never merged, just like ``branch_prefixes``.
 
         The ``type``-cut applies only to an *inherited* value: a
         ``plain`` endpoint that falls through to ``git_actions``/the built-in
-        default is silently intersected with
-        :func:`~warden.guards.gitlab_api.actions.actions_valid_for_type` for
-        its ``type`` — no error, since every mixed deployment would otherwise
-        be forced to override every ``plain`` endpoint explicitly. An
-        *explicit* endpoint override is returned as-is, unfiltered here: a
-        type-impossible id in it is a ``ConfigError`` raised by the loader at
-        config-build time (``core.config_load``), never silently dropped.
+        default is silently intersected with its type's valid action ids
+        (:data:`~warden.guards.git.endpoints.ENDPOINT_TYPES`) — no error,
+        since every mixed deployment would otherwise be forced to override
+        every ``plain`` endpoint explicitly. An *explicit* endpoint override
+        is returned as-is, unfiltered here: a type-impossible id in it is a
+        ``ConfigError`` raised by the loader at config-build time
+        (``core.config_load``), never silently dropped.
 
-        Deferred import (matching ``config_load._parse_actions``): the catalog
-        is guard-owned, ``Config`` only threads the plain ``tuple[str, ...]``
-        values through.
+        Deferred import (matching ``config_load._parse_actions``): the
+        vocabulary is guard-owned, ``Config`` only threads the plain
+        ``tuple[str, ...]`` values through.
         """
-        from ..guards.gitlab_api.actions import DEFAULT_ACTIONS, actions_valid_for_type
+        from ..guards.git.actions import DEFAULT
+        from ..guards.git.endpoints import ENDPOINT_TYPES
 
         endpoint = self.endpoint_for(host)
         override = endpoint.actions if endpoint is not None else None
         if override is not None:
             return override
 
-        inherited = _cascade(None, self.git_actions, DEFAULT_ACTIONS)
+        builtin_default = tuple(sorted(action.id for action in DEFAULT))
+        inherited = _cascade(None, self.git_actions, builtin_default)
         if endpoint is None:
             return inherited
-        valid_for_type = actions_valid_for_type(endpoint.type)
+        valid_for_type = ENDPOINT_TYPES[endpoint.type].valid_action_ids
         return tuple(action for action in inherited if action in valid_for_type)
 
     def git_project_allowed(self, host: str, project: str) -> bool:

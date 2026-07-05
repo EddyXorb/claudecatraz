@@ -73,9 +73,9 @@ def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
     if not isinstance(raw, list) or not all(isinstance(a, str) for a in raw):
         raise ConfigError(f"{context} must be a list of strings, got {raw!r}")
 
-    from ..guards.gitlab_api.actions import ALL_ACTIONS
+    from ..guards.git.actions import by_id
 
-    unknown = sorted(set(raw) - ALL_ACTIONS)
+    unknown = sorted(set(raw) - set(by_id))
     if unknown:
         raise ConfigError(f"{context}: unknown action id(s) {unknown!r}")
     return tuple(raw)
@@ -157,9 +157,9 @@ def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
         # Explicit endpoint override with a type-impossible id is always a
         # mistake — unlike the inherited default (cut quietly in
         # Config.effective_actions), this aborts startup here.
-        from ..guards.gitlab_api.actions import actions_valid_for_type
+        from ..guards.git.endpoints import ENDPOINT_TYPES
 
-        valid_for_type = actions_valid_for_type(endpoint_type)
+        valid_for_type = ENDPOINT_TYPES[endpoint_type].valid_action_ids
         invalid = sorted(set(actions) - valid_for_type)
         if invalid:
             raise ConfigError(

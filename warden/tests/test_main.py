@@ -44,7 +44,7 @@ def test_main_exits_2_on_catalog_config_error(monkeypatch, tmp_path):
     # host) and raises CatalogConfigError fail-closed on an unknown action id —
     # this must abort exactly like any other fail-closed startup error, not
     # surface as a raw traceback. A hand-built Config bypasses the loader's own
-    # ALL_ACTIONS validation (core.config_load._parse_actions), same as a
+    # vocabulary validation (core.config_load._parse_actions), same as a
     # malformed [[git.endpoint]] actions override would if that check were ever
     # skipped. state_db_path/audit_log_path are set to in-memory/stdout,
     # log_path to a tmp file, so this exercises the real construction path

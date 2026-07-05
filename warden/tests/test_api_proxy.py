@@ -10,7 +10,6 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from warden.guards.gitlab_api.actions import DEFAULT_ACTIONS
 from warden.guards.gitlab_api.catalog.write_endpoints import WRITE_ENDPOINTS
 from warden.guards.gitlab_api.guard import _needs_source_lookup
 from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
@@ -165,9 +164,9 @@ async def test_discussion_reply_non_namespace_denied(client, respx_router):
 
 
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
-    resp = await client.post(
-        f"/api/v4/projects/{PROJ}/repository/branches", json={"branch": "claude/x"}
-    )
+    # project.issue.create is opt-in, not default-on — this endpoint stays
+    # unmatched (and thus denied) with no config override.
+    resp = await client.post(f"/api/v4/projects/{PROJ}/issues", json={"title": "x"})
     assert resp.status_code == 403
     assert resp.json()["rule"] == "R3"
 
@@ -388,19 +387,22 @@ async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client
 
 
 def _activated_client_ctx(cfg, respx_router):
-    """Build a fresh app/ctx/client with branch.create activated beyond the
-    default set — the shared ``client``/``ctx`` fixtures use the plain
-    default activation, so this scenario needs its own wiring.
+    """Build a fresh app/ctx/client with project.issue.create activated beyond
+    the default set — the shared ``client``/``ctx`` fixtures use the plain
+    default activation (which does not include the opt-in issue.* family), so
+    this scenario needs its own wiring.
     """
     from warden.app import create_app
     from warden.context import build_context
     from warden.core.audit import AuditLog
     from warden.core.state import State
+    from warden.guards.git.actions import DEFAULT as git_default
 
     endpoint = cfg.git_endpoints[0]
+    default_actions = tuple(sorted(action.id for action in git_default))
     activated_cfg = replace(
         cfg,
-        git_endpoints=(replace(endpoint, actions=tuple(DEFAULT_ACTIONS) + ("branch.create",)),),
+        git_endpoints=(replace(endpoint, actions=default_actions + ("project.issue.create",)),),
     )
     state = State(":memory:")
     state.mark_reconciled("git")
@@ -412,29 +414,13 @@ def _activated_client_ctx(cfg, respx_router):
 async def test_config_activated_entry_is_reachable_and_forwards(cfg, respx_router):
     ctx, app = _activated_client_ctx(cfg, respx_router)
     transport = httpx.ASGITransport(app=app)
-    route = respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
-        return_value=httpx.Response(201, json={"name": "claude/x"})
+    route = respx_router.route(method="POST", url__regex=r".*/issues$").mock(
+        return_value=httpx.Response(201, json={"iid": 1})
     )
     async with httpx.AsyncClient(transport=transport, base_url="http://gitlab.example") as c:
-        resp = await c.post(
-            f"/api/v4/projects/{PROJ}/repository/branches",
-            json={"branch": "claude/x", "ref": "claude/y"},
-        )
+        resp = await c.post(f"/api/v4/projects/{PROJ}/issues", json={"title": "x"})
     assert resp.status_code == 201
     assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
-    await ctx.router.aclose()
-
-
-async def test_config_activated_entry_wrong_prefix_still_denied(cfg, respx_router):
-    ctx, app = _activated_client_ctx(cfg, respx_router)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://gitlab.example") as c:
-        resp = await c.post(
-            f"/api/v4/projects/{PROJ}/repository/branches",
-            json={"branch": "main", "ref": "main"},
-        )
-    assert resp.status_code == 403
-    assert resp.json()["rule"] == "R2"
     await ctx.router.aclose()
 
 
@@ -447,29 +433,48 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
     logf = tmp_path / "audit.jsonl"
     ctx.audit._path = str(logf)
     ctx.audit.start()
-    respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
-        return_value=httpx.Response(201, json={"name": "claude/x"})
+    respx_router.route(method="POST", url__regex=r".*/issues$").mock(
+        return_value=httpx.Response(201, json={"iid": 1})
     )
     respx_router.route(method="POST", url__regex=r".*/merge_requests$").mock(
         return_value=httpx.Response(201, json={"iid": 1})
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://gitlab.example") as c:
-        await c.post(
-            f"/api/v4/projects/{PROJ}/repository/branches",
-            json={"branch": "claude/x", "ref": "claude/y"},
-        )
+        await c.post(f"/api/v4/projects/{PROJ}/issues", json={"title": "x"})
         await c.post(
             f"/api/v4/projects/{PROJ}/merge_requests",
             json={"source_branch": "claude/x", "target_branch": "main"},
         )
     await ctx.audit.stop()
     records = [json.loads(line) for line in logf.read_text().splitlines()]
-    branch_event = next(r for r in records if r["path"].endswith("/repository/branches"))
+    issue_event = next(r for r in records if r["path"].endswith("/issues"))
     mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
-    assert branch_event["enabled_via"] == "config:branch.create"
+    assert issue_event["enabled_via"] == "config:project.issue.create"
     assert "enabled_via" not in mr_event  # default-activated entry: no marking
     await ctx.router.aclose()
+
+
+async def test_branch_create_is_reachable_by_default(client, respx_router):
+    # repo.branch.create is default-on — no config override needed.
+    route = respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
+        return_value=httpx.Response(201, json={"name": "claude/x"})
+    )
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/repository/branches",
+        json={"branch": "claude/x", "ref": "claude/y"},
+    )
+    assert resp.status_code == 201
+    assert route.calls.last.request.headers["private-token"] == "WRITE-TOKEN"
+
+
+async def test_branch_create_wrong_prefix_still_denied(client, respx_router):
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/repository/branches",
+        json={"branch": "main", "ref": "main"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["rule"] == "R2"
 
 
 # --- per-host effective tables, one guard, two hosts ---------------------------
@@ -497,7 +502,7 @@ async def test_two_hosts_with_different_actions_behave_differently_on_the_same_g
         state_db_path=":memory:",
         git_endpoints=(
             GitEndpoint(host=host_a, type="gitlab"),
-            GitEndpoint(host=host_b, type="gitlab", actions=("git.fetch", "mr.comment")),
+            GitEndpoint(host=host_b, type="gitlab", actions=("repo.read", "project.mr.comment")),
         ),
         git_credentials={
             host_a: HostCredentials(read_token="r", write_token="w"),

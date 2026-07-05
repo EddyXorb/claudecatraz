@@ -97,12 +97,26 @@ async def test_graphql_read_query_also_denied(client, respx_router):
     assert resp.status_code == 403 and resp.json()["rule"] == "R6"
 
 
-async def test_api_branch_creation_default_denied(client, respx_router):
+async def test_api_branch_creation_outside_namespace_denied(client, respx_router):
+    # repo.branch.create is default-on (one knob covers both the git-push and
+    # REST wires) — the namespace boundary (R2) is what must still hold for a
+    # branch name outside the allowed prefixes.
+    resp = await client.post(
+        f"/api/v4/projects/{PROJ}/repository/branches",
+        json={"branch": "main", "ref": "main"},
+    )
+    assert resp.status_code == 403 and resp.json()["rule"] == "R2"
+
+
+async def test_api_branch_creation_in_namespace_allowed_by_default(client, respx_router):
+    respx_router.route(method="POST", url__regex=r".*/repository/branches$").mock(
+        return_value=httpx.Response(201, json={"name": "claude/x"})
+    )
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/repository/branches",
         json={"branch": "claude/x", "ref": "main"},
     )
-    assert resp.status_code == 403 and resp.json()["rule"] == "R3"
+    assert resp.status_code == 201
 
 
 async def test_push_prefix_lookalike_blocked(client, respx_router):

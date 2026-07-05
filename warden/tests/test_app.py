@@ -64,8 +64,11 @@ async def test_policy_route_reports_the_effective_table(cfg):
     assert "mr.create" in ids and "branch.create" in ids
     mr_create = next(row for row in host_report["catalog"] if row["id"] == "mr.create")
     assert mr_create["default"] is True and mr_create["active"] is True
+    # repo.branch.create is default-on in the new vocabulary, so its
+    # recognizer is active even though DEFAULT_ENABLED (the REST-only marker
+    # `row["default"]` reports) still excludes it.
     branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
-    assert branch_create["default"] is False and branch_create["active"] is False
+    assert branch_create["default"] is False and branch_create["active"] is True
     assert body["builtin_deny"] == ["mr.merge"]
     await ctx.router.aclose()
 
@@ -75,16 +78,16 @@ async def test_policy_route_reflects_activation_config(cfg):
     endpoint = cfg.git_endpoints[0]
     activated = replace(
         cfg,
-        git_endpoints=(replace(endpoint, actions=("mr.create", "branch.create")),),
+        git_endpoints=(replace(endpoint, actions=("project.mr.create", "project.issue.create")),),
     )
     ctx = build_context(activated, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/policy")
     body = resp.json()
     host_report = body["hosts"]["gitlab.example"]
-    branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
-    assert branch_create["active"] is True
-    assert branch_create["enabled_via"] == "config:branch.create"
+    issue_create = next(row for row in host_report["catalog"] if row["id"] == "issue.create")
+    assert issue_create["active"] is True
+    assert issue_create["enabled_via"] == "config:project.issue.create"
     mr_note = next(row for row in host_report["catalog"] if row["id"] == "mr.note")
     assert mr_note["active"] is False  # not in this endpoint's actions override
     await ctx.router.aclose()

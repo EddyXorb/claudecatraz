@@ -13,7 +13,7 @@ from warden.context import build_context
 from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
-from warden.guards.git.actions import GIT_FETCH, GIT_PUSH
+from warden.guards.git.actions import REPO_BRANCH_PUSH, REPO_READ
 from warden.guards.git.pktline import FLUSH, pkt_line
 
 ZERO = "0" * 40
@@ -297,10 +297,10 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
     assert "READ-TOKEN" in base64.b64decode(auth.split(" ", 1)[1]).decode()
 
 
-# --- action gate: git.fetch/git.push per host ----------------------------------
+# --- action gate: repo.read/repo.branch.push per host ---------------------------
 # `capability_gate` consults `policy.action_gate` for all three operations
-# (advertise/upload-pack/receive-pack), so a `git.push`-disabled host is
-# denied already at push *discovery* — before the client sends the pack.
+# (advertise/upload-pack/receive-pack), so a `repo.branch.push`-disabled host
+# is denied already at push *discovery* — before the client sends the pack.
 
 
 def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
@@ -320,21 +320,21 @@ async def test_action_gate_denies_push_advertise_when_git_push_not_enabled(respx
     # Push discovery (advertise ?service=git-receive-pack) denied BEFORE any
     # pack is sent; no upstream route is registered at all here, so an
     # accidental fall-through to `forward` would fail loudly (respx raises).
-    async with _client_with_actions((GIT_FETCH,)) as c:
+    async with _client_with_actions((REPO_READ.id,)) as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
     body = resp.json()
     assert body["rule"] == "R6"
-    assert "git.push" in body["reason"]
+    assert REPO_BRANCH_PUSH.id in body["reason"]
 
 
 async def test_action_gate_denies_receive_pack_when_git_push_not_enabled(respx_router):
-    async with _client_with_actions((GIT_FETCH,)) as c:
+    async with _client_with_actions((REPO_READ.id,)) as c:
         body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
         resp = await c.post(RECV, content=body)
     assert resp.status_code == 200  # in-band rejection, git convention
     assert b"warden: R6" in resp.content
-    assert b"git.push" in resp.content
+    assert REPO_BRANCH_PUSH.id.encode() in resp.content
 
 
 async def test_action_gate_allows_fetch_advertise_and_upload_pack_when_only_git_fetch_enabled(
@@ -346,7 +346,7 @@ async def test_action_gate_allows_fetch_advertise_and_upload_pack_when_only_git_
     respx_router.route(method="POST", url__regex=r".*/git-upload-pack$").mock(
         return_value=httpx.Response(200, content=b"fetched-pack")
     )
-    async with _client_with_actions((GIT_FETCH,)) as c:
+    async with _client_with_actions((REPO_READ.id,)) as c:
         advertise = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
         upload = await c.post("/git/group/proj.git/git-upload-pack", content=b"0032want ...")
     assert advertise.status_code == 200
@@ -361,7 +361,7 @@ async def test_action_gate_full_default_allows_fetch_and_push(respx_router):
     respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
         return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
     )
-    async with _client_with_actions((GIT_FETCH, GIT_PUSH)) as c:
+    async with _client_with_actions((REPO_READ.id, REPO_BRANCH_PUSH.id)) as c:
         fetch_advertise = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
         push_advertise = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
     assert fetch_advertise.status_code == 200

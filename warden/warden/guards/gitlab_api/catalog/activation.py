@@ -46,7 +46,7 @@ EMPTY_TABLE = EffectiveTable(entries=(), enabled_via={})
 
 def build_effective_table(actions: tuple[str, ...]) -> EffectiveTable:
     """Build one host's effective table from its effective actions
-    (``Config.effective_actions(host)``). Raises
+    (``Config.effective_actions(host)``, new git-namespace ids). Raises
     :class:`CatalogConfigError` on validation failures:
 
     * an action id outside the closed vocabulary — a defence-in-depth
@@ -56,27 +56,29 @@ def build_effective_table(actions: tuple[str, ...]) -> EffectiveTable:
     * activating a recognizer whose static capabilities intersect ``FORBIDDEN``
       (no scoping-check taming mechanism exists yet).
 
-    Only the **REST** (forge) actions in ``actions`` are relevant here —
-    ``git.fetch``/``git.push`` are transport-only verbs the git guard's own
-    action gate consumes; they are silently skipped, never an error.
+    Ids with no REST recognizer behind them (``repo.read``, ``repo.branch.push``,
+    ``project.read``, ``instance.*``, …) are silently skipped, never an error —
+    they are the git transport guard's or the read path's concern.
     """
-    # Deferred import: the action catalog lives in the guard's own `actions`
-    # module, one level up from this `catalog` package — importing it at
-    # module load time here would tie the catalog package to it eagerly for
-    # no benefit (matches `core.config.effective_actions`'s deferred-import
-    # rationale: the catalog is guard-owned).
-    from ..actions import ACTION_TO_RECOGNIZERS, ALL_ACTIONS, DEFAULT_ACTIONS, FORGE_ACTIONS
+    # Deferred imports: both tables are guard-owned — the catalog package
+    # stays decoupled from them at module load time (matches
+    # `core.config.effective_actions`'s deferred-import rationale).
+    from ...git.actions import DEFAULT as default_actions
+    from ...git.actions import by_id as all_action_ids
+    from ..actions import _BRIDGE_10_03_RECOGNIZER_TO_ACTION
 
+    default_ids = frozenset(action.id for action in default_actions)
     catalog_by_id = {e.id: e for e in WRITE_ENDPOINTS}
+    recognizers_for_action: dict[str, list[str]] = {}
+    for recognizer_id, action_id in _BRIDGE_10_03_RECOGNIZER_TO_ACTION.items():
+        recognizers_for_action.setdefault(action_id, []).append(recognizer_id)
 
     entries: list[Recognizer] = []
     enabled_via: dict[str, str] = {}
     for action_id in actions:
-        if action_id not in FORGE_ACTIONS:
-            if action_id not in ALL_ACTIONS:
-                raise CatalogConfigError(f"unknown action id {action_id!r}")
-            continue  # a valid transport verb (git.fetch/git.push) — the git guard's concern
-        for recognizer_id in ACTION_TO_RECOGNIZERS[action_id]:
+        if action_id not in all_action_ids:
+            raise CatalogConfigError(f"unknown action id {action_id!r}")
+        for recognizer_id in recognizers_for_action.get(action_id, ()):
             if recognizer_id in enabled_via:  # tolerate an accidental duplicate action
                 continue
             entry = catalog_by_id[recognizer_id]
@@ -90,7 +92,7 @@ def build_effective_table(actions: tuple[str, ...]) -> EffectiveTable:
                 )
             entries.append(entry)
             enabled_via[recognizer_id] = (
-                "default" if action_id in DEFAULT_ACTIONS else f"config:{action_id}"
+                "default" if action_id in default_ids else f"config:{action_id}"
             )
 
     return EffectiveTable(entries=tuple(entries), enabled_via=enabled_via)

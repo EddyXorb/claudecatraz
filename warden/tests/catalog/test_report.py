@@ -48,7 +48,7 @@ def test_report_no_configured_hosts_yields_an_empty_hosts_map():
 def test_host_report_has_actions_and_catalog_keys():
     host_report = endpoint_table_report(_cfg())["hosts"][_HOST]
     assert set(host_report.keys()) == {"actions", "catalog"}
-    assert "mr.create" in host_report["actions"]
+    assert "project.mr.create" in host_report["actions"]
 
 
 def test_report_every_row_has_the_stable_key_set():
@@ -71,12 +71,14 @@ def test_report_mr_create_row_values():
     assert row["decision_fields"] == [{"name": "source_branch", "location": "body"}]
 
 
-def test_report_branch_create_row_not_active_by_default():
+def test_report_branch_create_row_is_active_by_default():
+    # repo.branch.create is default-on in the new vocabulary (it covers both
+    # the git-push-create-branch wire and this REST endpoint with one knob).
     host_report = endpoint_table_report(_cfg())["hosts"][_HOST]
     row = next(r for r in host_report["catalog"] if r["id"] == "branch.create")
-    assert row["default"] is False
-    assert row["active"] is False
-    assert row["enabled_via"] is None
+    assert row["default"] is False  # DEFAULT_ENABLED (the REST-only marker) excludes it
+    assert row["active"] is True
+    assert row["enabled_via"] == "default"
     assert row["capabilities"] == ["creates_ref"]
 
 
@@ -96,7 +98,7 @@ def test_two_hosts_with_different_actions_get_independent_sections():
         allowed_projects=("group/proj",),
         git_endpoints=(
             GitEndpoint(host="full.example", type="gitlab"),
-            GitEndpoint(host="review-only.example", type="gitlab", actions=("mr.comment",)),
+            GitEndpoint(host="review-only.example", type="gitlab", actions=("project.mr.comment",)),
         ),
     )
     report = endpoint_table_report(cfg)

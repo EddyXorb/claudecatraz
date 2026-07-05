@@ -1,5 +1,5 @@
-"""Tests for the action catalog: maps action IDs to recognizer/transport
-mapping, the built-in default, and the `type`-dependent vocabulary.
+"""_BRIDGE_10_03: the recognizer-id -> new-vocabulary-action-id bridge, plus
+the git transport guard's coarse operation -> action mapping.
 """
 
 from __future__ import annotations
@@ -8,84 +8,31 @@ import pytest
 
 from warden.guards.git import actions as git_actions
 from warden.guards.gitlab_api import actions as gitlab_actions
-from warden.guards.gitlab_api.catalog.write_endpoints import DEFAULT_ENABLED, WRITE_ENDPOINTS
+from warden.guards.gitlab_api.catalog.write_endpoints import WRITE_ENDPOINTS
 
 
-def test_action_to_recognizers_covers_every_write_endpoint_exactly_once() -> None:
+def test_bridge_covers_every_write_endpoint_exactly_once() -> None:
     known_ids = {ep.id for ep in WRITE_ENDPOINTS}
-    covered_by: dict[str, str] = {}
-    for action, recognizer_ids in gitlab_actions.ACTION_TO_RECOGNIZERS.items():
-        for recognizer_id in recognizer_ids:
-            assert recognizer_id in known_ids, (
-                f"{action!r} references unknown recognizer {recognizer_id!r}"
-            )
-            assert recognizer_id not in covered_by, (
-                f"{recognizer_id!r} double-mapped by {covered_by.get(recognizer_id)!r} "
-                f"and {action!r}"
-            )
-            covered_by[recognizer_id] = action
-    assert covered_by.keys() == known_ids
+    bridge = gitlab_actions._BRIDGE_10_03_RECOGNIZER_TO_ACTION
+    assert set(bridge) == known_ids
+    for action_id in bridge.values():
+        assert action_id in git_actions.by_id
 
 
-def test_mr_comment_covers_exactly_note_discussion_and_reply() -> None:
-    assert gitlab_actions.ACTION_TO_RECOGNIZERS[gitlab_actions.MR_COMMENT] == (
-        "mr.note",
-        "mr.discussion",
-        "mr.discussion_reply",
-    )
-
-
-def test_default_actions_span_exactly_default_enabled_plus_transport() -> None:
-    rest_recognizers = {
-        recognizer_id
-        for action in gitlab_actions.DEFAULT_ACTIONS
-        for recognizer_id in gitlab_actions.ACTION_TO_RECOGNIZERS.get(action, ())
-    }
-    assert rest_recognizers == DEFAULT_ENABLED
-    assert git_actions.GIT_FETCH in gitlab_actions.DEFAULT_ACTIONS
-    assert git_actions.GIT_PUSH in gitlab_actions.DEFAULT_ACTIONS
-
-
-def test_actions_valid_for_type_plain() -> None:
-    assert gitlab_actions.actions_valid_for_type("plain") == {
-        git_actions.GIT_FETCH,
-        git_actions.GIT_PUSH,
-    }
-
-
-def test_actions_valid_for_type_gitlab_contains_all_eight() -> None:
-    valid = gitlab_actions.actions_valid_for_type("gitlab")
-    assert len(valid) == 8
-    assert valid == gitlab_actions.ALL_ACTIONS
-    assert valid == {
-        "git.fetch",
-        "git.push",
-        "mr.create",
-        "mr.comment",
-        "mr.update",
-        "pipeline.trigger",
-        "branch.create",
-        "issue.create",
-    }
-
-
-def test_actions_valid_for_type_github_not_implemented() -> None:
-    with pytest.raises(ValueError):
-        gitlab_actions.actions_valid_for_type("github")
-
-
-def test_actions_valid_for_type_unknown_type() -> None:
-    with pytest.raises(ValueError):
-        gitlab_actions.actions_valid_for_type("bogus")
+def test_mr_comment_recognizers_all_bridge_to_project_mr_comment() -> None:
+    bridge = gitlab_actions._BRIDGE_10_03_RECOGNIZER_TO_ACTION
+    assert bridge["mr.note"] == git_actions.PROJECT_MR_COMMENT.id
+    assert bridge["mr.discussion"] == git_actions.PROJECT_MR_COMMENT.id
+    assert bridge["mr.discussion_reply"] == git_actions.PROJECT_MR_COMMENT.id
 
 
 @pytest.mark.parametrize(
     "operation,service,expected",
     [
-        ("advertise", "git-upload-pack", git_actions.GIT_FETCH),
-        ("upload-pack", "git-upload-pack", git_actions.GIT_FETCH),
-        ("advertise", "git-receive-pack", git_actions.GIT_PUSH),
-        ("receive-pack", "git-receive-pack", git_actions.GIT_PUSH),
+        ("advertise", "git-upload-pack", git_actions.REPO_READ.id),
+        ("upload-pack", "git-upload-pack", git_actions.REPO_READ.id),
+        ("advertise", "git-receive-pack", git_actions.REPO_BRANCH_PUSH.id),
+        ("receive-pack", "git-receive-pack", git_actions.REPO_BRANCH_PUSH.id),
     ],
 )
 def test_action_for_git_operation(operation: str, service: str, expected: str) -> None:

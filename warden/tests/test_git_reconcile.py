@@ -16,7 +16,7 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
-from warden.guards.git.actions import GIT_FETCH
+from warden.guards.git.actions import REPO_READ
 from warden.guards.git.guard import GitGuard
 from warden.guards.git.reconcile import reconcile_branches
 
@@ -148,16 +148,17 @@ async def test_reconcile_branches_skips_a_closed_endpoint():
 # --- reconcile is independent of `actions` --------------------------------------
 
 
-async def test_reconcile_ignores_a_host_with_no_git_push_action(respx_router):
-    """A host whose effective actions are just ``git.fetch`` (no ``git.push``)
-    must still reconcile exactly like any other open endpoint: reconcile only
-    ever does GETs and is never gated by the action gate — it doesn't even
-    consult ``effective_actions``. A per-restart withdrawn
-    ``git.push`` leaves existing branches untouched, only unable to grow."""
+async def test_reconcile_ignores_a_host_with_no_push_action(respx_router):
+    """A host whose effective actions are just ``repo.read`` (no
+    ``repo.branch.push``) must still reconcile exactly like any other open
+    endpoint: reconcile only ever does GETs and is never gated by the action
+    gate — it doesn't even consult ``effective_actions``. A per-restart
+    withdrawn ``repo.branch.push`` leaves existing branches untouched, only
+    unable to grow."""
     cfg = Config(
         branch_prefixes=("claude/",),
         allowed_projects=("group/proj",),
-        git_endpoints=(GitEndpoint(host=HOST, type="gitlab", actions=(GIT_FETCH,)),),
+        git_endpoints=(GitEndpoint(host=HOST, type="gitlab", actions=(REPO_READ.id,)),),
         git_credentials={HOST: HostCredentials(read_token="r", write_token="w")},
     )
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(

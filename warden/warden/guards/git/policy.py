@@ -8,10 +8,10 @@ Rules enforced:
   R4  Irreversible verbs tag pushes and branch deletes never permitted.
   R5  Quota & rate       max open branches, max writes/hour, max push size;
                          locked state denies (fail-safe).
-  R6  Action allowlist   :func:`action_gate`: git.fetch/git.push must be in
-                         the host's effective actions — same rule id as the
-                         kernel's project allowlist, both instances of the
-                         same "resource/action outside the configured
+  R6  Action allowlist   :func:`action_gate`: the mapped repo.* action must be
+                         in the host's effective actions — same rule id as
+                         the kernel's project allowlist, both instances of
+                         the same "resource/action outside the configured
                          boundary" meta-rule (M6).
 """
 
@@ -53,23 +53,21 @@ def git_ref_capabilities(cmd: RefCommand, cfg: Config) -> frozenset[Capability]:
 
 
 def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
-    """Deny a git-transport operation whose mapped action
-    (:func:`~.actions.action_for_git_operation`) is missing from the host's
-    effective actions (:meth:`~warden.core.config.Config.effective_actions`).
+    """Deny a git-transport operation whose mapped action is missing from the
+    host's effective actions.
 
     Runs for all three operations — crucially ``advertise`` — so a
-    ``git.push``-disabled host is denied already at push discovery, before the
-    client ever sends the pack (same shape as the mode-gate/``_writes`` path).
-    ``advertise`` carries the requested backend in ``intent.service``;
-    :func:`~.actions.action_for_git_operation` reads it to tell fetch-discovery
-    from push-discovery apart.
+    ``repo.branch.push``-disabled host is denied already at push discovery,
+    before the client ever sends the pack (same shape as the mode-gate/``_writes`` path).
+    ``advertise`` carries the requested backend in ``intent.service``, which
+    tells fetch-discovery from push-discovery apart.
 
-    Relies on :func:`~warden.core.guard.host_gate` (R6) having already run and
-    passed for ``intent.host``: a host with no ``[[git.endpoint]]`` entry is
-    denied there first. This matters because ``effective_actions`` cannot
-    itself distinguish "no endpoint" from "endpoint inheriting the domain/
-    built-in default" — both return the same non-empty default — so this gate
-    must never be the first thing to see an unconfigured host.
+    Relies on the kernel's host gate (R6) having already run and passed for
+    ``intent.host``: a host with no ``[[git.endpoint]]`` entry is denied
+    there first. This matters because ``effective_actions`` cannot itself
+    distinguish "no endpoint" from "endpoint inheriting the domain/built-in
+    default" — both return the same non-empty default — so this gate must
+    never be the first thing to see an unconfigured host.
     """
     action = action_for_git_operation(intent.operation, intent.service)
     if action not in cfg.effective_actions(intent.host):
