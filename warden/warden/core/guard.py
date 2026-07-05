@@ -1,29 +1,22 @@
 """Kernel pipeline: template method for the deny-short-circuit /
 record-before-forward / audit sequence.
 
-:class:`Guard` is the ABC every guard subclasses; :meth:`Guard.handle` is the
-one place the sequence is built — a guard supplies the parts (abstract hooks),
-the kernel owns the order, and a guard cannot reorder or skip a step because it
-never sees the sequence, only its own hooks.
+``Guard`` is the ABC every guard subclasses; ``Guard.handle`` is the one
+place the sequence is built — a guard supplies the parts (abstract hooks),
+the kernel owns the order, and a guard cannot reorder or skip a step because
+it never sees the sequence, only its own hooks.
 
 Sequence ``Guard.handle`` guarantees, in this order:
 
-1. ``guard.parse`` — transport → :class:`~warden.core.model.Intent`. No credential yet.
-2. :func:`kernel_gates` — guard-agnostic deny gates:
-   a. Host allowlist (§2, §4.2) — default-deny for a ``Host`` header outside
-      the configured ``[[git.endpoint]]`` list, or whose endpoint currently
-      has no usable read credential (``access_mode`` is ``closed``); an empty
-      list denies every host. This is what denies a wholly unconfigured
-      deployment (the former ``GITLAB_MODE=off``) — there is no separate
-      global mode-gate anymore.
-   b. Mode-gate writes — a write is denied unless the target host's
-      ``access_mode`` (:meth:`~warden.core.config.Config.access_mode`) is
-      ``read-write``; a ``closed`` host never reaches this, host allowlist
-      already denied it. Runs *before* ``enrich`` so credential-using lookups
-      are unreachable on a read-only host.
-   c. Resource allowlist — enforced once, not per-guard, before ``enrich``.
-3. ``guard.enrich`` — unpure lookups a check declared it needs.
-4. Capability invariants (``core.capabilities.FORBIDDEN``) via :meth:`Guard.capability_gate`.
+1. ``guard.parse`` — transport → an ``Intent``. No credential yet.
+2. Recognize: the first matching row in ``guard.catalog`` yields the
+   recognized action set for this intent — empty when nothing matches.
+3. ``kernel_gates`` — guard-agnostic deny gates, all before ``enrich``:
+   host allowlist, mode-gate writes, project allowlist, an unmatched/empty
+   write, the criticality gate (any recognized action at or above
+   ``Criticality.IRREVERSIBLE`` denies), the action gate (every recognized
+   action must be enabled for the host).
+4. ``guard.enrich`` — unpure lookups a check declared it needs.
 5. ``guard.decide`` — pure, guard-specific, default-deny.
 6. Audit — logged on *every* exit (allow or deny).
 7. ``guard.record`` before ``guard.forward`` — write durably counted before upstream call.
@@ -41,10 +34,12 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from .actions import Action, Criticality
 from .audit import AuditEvent, AuditLog
 from .config import Config
 from .model import Decision, Intent, StateView
-from .rules import R0, R6
+from .recognizer import Recognizer, first_match
+from .rules import R0, R3, R4, R6
 from .state import State
 
 
@@ -95,21 +90,68 @@ def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Option
     return None
 
 
-def kernel_gates(
-    intent: Intent, cfg: Config, project_allowed: Callable[[str], bool]
-) -> Optional[Decision]:
-    """The guard-agnostic deny gates, in kernel order (module docstring, step 2).
+def criticality_gate(recognized: frozenset[Action]) -> Optional[Decision]:
+    """R4: any recognized action at or above ``Criticality.IRREVERSIBLE`` is
+    never permitted, regardless of configuration.
+    """
+    blocked = sorted(a.id for a in recognized if a.criticality >= Criticality.IRREVERSIBLE)
+    if not blocked:
+        return None
+    return Decision(False, R4, f"action {blocked[0]} is irreversible, never permitted")
 
-    One definition: :meth:`Guard.handle` runs this on every pipeline request,
-    and each guard's ``full_decide`` composes it with the guard's pure
-    ``decide`` so unit tests exercise exactly the effective order — never a
-    re-derived copy of it.
+
+def action_gate(
+    recognized: frozenset[Action], effective: frozenset[str], host: str
+) -> Optional[Decision]:
+    """R6: every recognized action id must be enabled for ``host``.
+
+    ``effective`` is the host's effective action ids, passed in rather than
+    derived here, so a caller (production: ``Config.effective_actions``;
+    tests: an arbitrary override) controls what "enabled" means without
+    threading ``Config``/``host`` resolution through this function too.
+    """
+    missing = sorted(a.id for a in recognized if a.id not in effective)
+    if not missing:
+        return None
+    return Decision(False, R6, f"action {missing[0]} not enabled for host {host!r}")
+
+
+def kernel_gates(
+    intent: Intent,
+    cfg: Config,
+    project_allowed: Callable[[str], bool],
+    recognized: frozenset[Action],
+    effective_actions: Optional[frozenset[str]] = None,
+) -> Optional[Decision]:
+    """The guard-agnostic deny gates, in kernel order (module docstring).
+
+    One definition: ``Guard.handle`` runs this on every pipeline request, and
+    each guard's ``full_decide`` composes it with the guard's pure ``decide``
+    so unit tests exercise exactly the effective order — never a re-derived
+    copy of it.
+
+    ``recognized`` is this intent's whole action set (the guard's ``catalog``
+    matched via ``first_match``, already computed by the caller since the
+    catalog is guard-specific). An unmatched or empty-recognized *write*
+    denies right here (R3) — a read falls through unchanged, since the
+    project-bound read pass-through is the guard's own ``decide``'s job.
     """
     denied = host_gate(intent.host, cfg)
     if denied is None and intent.writes:
         denied = mode_gate_writes(intent.host, cfg)
     if denied is None:
         denied = project_gate(intent.project, project_allowed)
+    if denied is None and intent.writes and not recognized:
+        denied = Decision(False, R3, "no recognized action for this request")
+    if denied is None:
+        denied = criticality_gate(recognized)
+    if denied is None:
+        effective = (
+            effective_actions
+            if effective_actions is not None
+            else frozenset(cfg.effective_actions(intent.host))
+        )
+        denied = action_gate(recognized, effective, intent.host)
     return denied
 
 
@@ -120,9 +162,12 @@ class Guard(ABC, Generic[IntentT]):
     """The parts a guard supplies to :meth:`handle`.
 
     ``name`` is the audit ``guard`` value (bare strings: ``"git"``/``"api"``).
-    Each hook either does I/O (parse/enrich/record/forward/deny_response) or is pure
-    (capability_gate/decide) — only the pure half carries capability invariant and
-    default-deny guarantees.
+    ``catalog``/``supported`` are the guard's recognizer table and the action
+    set it declares itself capable of gating — the kernel recognizes and
+    gates generically from these, so a guard hook does I/O
+    (parse/enrich/record/forward/deny_response) or is pure default-deny logic
+    (``decide``) only; the criticality/enablement checks are no longer a
+    per-guard hook.
     """
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog) -> None:
@@ -134,14 +179,31 @@ class Guard(ABC, Generic[IntentT]):
     @abstractmethod
     def name(self) -> str: ...
 
+    @property
+    @abstractmethod
+    def catalog(self) -> tuple[Recognizer[IntentT], ...]:
+        """This guard's recognizer table, most specific row first.
+
+        The kernel matches it via ``first_match`` right after ``parse`` to
+        get the intent's recognized action set.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def supported(self) -> frozenset[Action]:
+        """The action set this guard is capable of gating.
+
+        The static ceiling — never what a deployment has actually enabled
+        (``Config.effective_actions``).
+        """
+        ...
+
     @abstractmethod
     async def parse(self, request: Request) -> IntentT: ...
 
     @abstractmethod
     async def enrich(self, intent: IntentT) -> IntentT: ...
-
-    @abstractmethod
-    def capability_gate(self, intent: IntentT, cfg: Config) -> Optional[Decision]: ...
 
     @abstractmethod
     def decide(self, intent: IntentT, state: StateView, cfg: Config) -> Decision: ...
@@ -212,11 +274,14 @@ class Guard(ABC, Generic[IntentT]):
         intent = await self.parse(request)
         view = self.state_view(intent.host)
 
-        decision = kernel_gates(intent, self.cfg, self.project_allowed)
+        match = first_match(self.catalog, intent)
+        recognized: frozenset[Action] = (
+            match.recognize(intent) if match is not None else frozenset()
+        )
+
+        decision = kernel_gates(intent, self.cfg, self.project_allowed, recognized)
         if decision is None:
             intent = await self.enrich(intent)
-            decision = self.capability_gate(intent, self.cfg)
-        if decision is None:
             decision = self.decide(intent, view, self.cfg)
 
         upstream_status: Optional[int]

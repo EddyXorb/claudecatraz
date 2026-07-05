@@ -30,11 +30,12 @@ from ....core.state import State
 from ....core.transport import UpstreamRouter, stream_upstream
 from ....errors import deny_json
 from .. import actions as git_actions
+from . import actions as gitlab_actions
 from .intent import ApiIntent
 from .mr_namespace import MrNamespace
 from .parsing import extract_fields, iid_from_path, project_from_path, raw_query, raw_rest_path
-from .policy import capability_gate, decide
-from .recognizers import RestRecognizer, ScopeKind, match_request
+from .policy import decide
+from .recognizers import CATALOG, RestRecognizer, ScopeKind, match_request
 from .reconcile import reconcile_mrs
 from .state import MrState
 
@@ -66,6 +67,14 @@ class ApiGuard(Guard[ApiIntent]):
     @property
     def name(self) -> str:
         return "api"
+
+    @property
+    def catalog(self) -> tuple[RestRecognizer, ...]:
+        return CATALOG
+
+    @property
+    def supported(self) -> frozenset[Action]:
+        return gitlab_actions.SUPPORTED
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
         super().__init__(cfg, state, audit)
@@ -185,7 +194,7 @@ class ApiGuard(Guard[ApiIntent]):
         )
         # Match once against the catalog to know which fields this specific
         # recognizer declares; the same match is recomputed (pure, cheap) by
-        # policy.capability_gate/decide — see recognizers.match_request.
+        # the kernel and by policy.decide — see recognizers.match_request.
         match = match_request(intent)
         intent.fields = extract_fields(request, body, match)
         return intent
@@ -203,9 +212,6 @@ class ApiGuard(Guard[ApiIntent]):
                 intent.host, intent.project, intent.iid
             )
         return intent
-
-    def capability_gate(self, intent: ApiIntent, cfg: Config) -> Optional[Decision]:
-        return capability_gate(intent, cfg, self._effective_for(intent.host))
 
     def decide(self, intent: ApiIntent, state: StateView, cfg: Config) -> Decision:
         return decide(intent, state, cfg, self._effective_for(intent.host))

@@ -1,9 +1,8 @@
 """The kernel: pipeline template, policy types, rule registry, audit, quota state, config.
 
 Everything a guard needs from the trust boundary that is *not itself* GitLab/git-specific:
-the pipeline template method (:meth:`core.guard.Guard.handle`), shared policy value types
-(:mod:`core.model`), the rule registry, capability vocabulary, typed audit event,
-durable quota state.
+the pipeline template method (``core.guard.Guard.handle``), shared policy value types
+(``core.model``), the rule registry, typed audit event, durable quota state.
 
 No GitLab/git vocabulary lives here (``core.config.Config`` is the one documented exception).
 """
@@ -11,11 +10,12 @@ No GitLab/git vocabulary lives here (``core.config.Config`` is the one documente
 from __future__ import annotations
 
 from .audit import AUDIT_SCHEMA_VERSION, AuditEvent, AuditLog, build_event, redact
-from .capabilities import FORBIDDEN, Capability, forbidden_check
 from .config import Config, ConfigError, normalize_project
 from .config_load import from_env
 from .guard import (
     Guard,
+    action_gate,
+    criticality_gate,
     kernel_gates,
     mode_gate_writes,
     project_gate,
@@ -43,7 +43,6 @@ from .state import CURRENT_SCHEMA_VERSION, SchemaError, State
 __all__ = [
     "AUDIT_SCHEMA_VERSION",
     "CURRENT_SCHEMA_VERSION",
-    "FORBIDDEN",
     "GITLAB_NAMESPACE",
     "KERNEL_NAMESPACE",
     "R0",
@@ -56,7 +55,6 @@ __all__ = [
     "RULES",
     "AuditEvent",
     "AuditLog",
-    "Capability",
     "Config",
     "ConfigError",
     "Decision",
@@ -68,9 +66,10 @@ __all__ = [
     "State",
     "StateView",
     "TokenKind",
+    "action_gate",
     "build_event",
     "compile_template",
-    "forbidden_check",
+    "criticality_gate",
     "from_env",
     "kernel_gates",
     "mode_gate_writes",

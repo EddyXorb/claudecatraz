@@ -299,10 +299,12 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
 
 
 # --- action gate: per-ref-command recognized actions, per host -----------------
-# `capability_gate` consults `policy.action_gate`. advertise/upload-pack always
-# recognize `{repo.read}` — push discovery reads refs, it never writes — so a
-# disabled `repo.branch.*` action no longer denies at discovery; the denial
-# moves to `receive-pack`, per ref-command, naming the specific action.
+# The kernel's action gate recognizes via the guard's catalog. advertise/
+# upload-pack always recognize `{repo.read}` — push discovery reads refs, it
+# never writes — so a disabled `repo.branch.*` action no longer denies at
+# discovery; the denial moves to `receive-pack`, per ref-command (via
+# `deny_response`'s own `policy.ref_action_gate` recomputation), naming the
+# specific action.
 
 
 def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:

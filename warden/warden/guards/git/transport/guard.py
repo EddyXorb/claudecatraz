@@ -14,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from ....core.actions import Action
 from ....core.audit import AuditLog
 from ....core.config import Config, normalize_project
 from ....core.guard import Guard
@@ -22,6 +23,7 @@ from ....core.rules import R1
 from ....core.state import State
 from ....core.transport import UpstreamRouter, stream_upstream
 from ....errors import deny_json
+from . import actions as transport_actions
 from . import policy, recognizers
 from .errors import git_reject_response
 from .intent import GitIntent
@@ -65,6 +67,14 @@ class GitGuard(Guard[GitIntent]):
     @property
     def name(self) -> str:
         return "git"
+
+    @property
+    def catalog(self) -> tuple[recognizers.GitRecognizer, ...]:
+        return recognizers.CATALOG
+
+    @property
+    def supported(self) -> frozenset[Action]:
+        return transport_actions.SUPPORTED
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
         super().__init__(cfg, state, audit)
@@ -164,15 +174,6 @@ class GitGuard(Guard[GitIntent]):
         # git needs no unpure lookups; unlike REST guard's MR
         # source-branch-namespace check, no credential-backed lookup happens here.
         return intent
-
-    def capability_gate(self, intent: GitIntent, cfg: Config) -> Optional[Decision]:
-        """Recognize -> deny if any recognized action is irreversible or not
-        enabled for the host. Runs for every operation, including
-        ``advertise``, so a disabled push is denied already at discovery.
-
-        Interim home for this check until the kernel absorbs it directly.
-        """
-        return policy.action_gate(intent, cfg)
 
     def decide(self, intent: GitIntent, state: StateView, cfg: Config) -> Decision:
         if intent.operation == "receive-pack":

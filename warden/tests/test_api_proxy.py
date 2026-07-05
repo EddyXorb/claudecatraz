@@ -164,11 +164,11 @@ async def test_discussion_reply_non_namespace_denied(client, respx_router):
 
 
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
-    # project.issue.create is opt-in, not default-on — this endpoint stays
-    # unmatched (and thus denied) with no config override.
+    # project.issue.create is opt-in, not default-on — the request matches
+    # the recognizer but the action gate denies it with no config override.
     resp = await client.post(f"/api/v4/projects/{PROJ}/issues", json={"title": "x"})
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R3"
+    assert resp.json()["rule"] == "R6"
 
 
 async def test_project_outside_allowlist_denied(client, respx_router):
@@ -549,7 +549,7 @@ async def test_two_hosts_with_different_actions_behave_differently_on_the_same_g
 
     assert mr_on_a.status_code == 201  # host A: default actions include mr.create
     assert mr_on_b.status_code == 403  # host B: mr.create not in its actions
-    assert mr_on_b.json()["rule"] == "R3"
+    assert mr_on_b.json()["rule"] == "R6"
     assert comment_on_b.status_code == 201  # host B: mr.comment is active
 
     await ctx.router.aclose()

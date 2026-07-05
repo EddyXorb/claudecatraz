@@ -1,24 +1,21 @@
 """GitLab REST guard policy: pure decide over the recognizer catalog.
 
-Every matched request is a set of recognized actions (`recognizers.CATALOG`);
-`capability_gate` denies an irreversible action or one the host's config
-doesn't enable, `decide` handles what is left: read pass-through, or a
-write's branch-namespace/quota check.
-
-Interim placement (until the kernel absorbs both, see `04-kernel-and-assembly`):
-the criticality check and the effective-actions membership check both live in
-`capability_gate`, which the kernel already calls before `decide`.
+Every matched request is a set of recognized actions (`recognizers.CATALOG`).
+The kernel's criticality/action gates deny an irreversible action, or one the
+host's config doesn't enable, before `decide` ever runs; `decide` handles
+what is left: read pass-through, or a write's branch-namespace/quota check.
 
 Rules enforced:
   R1  Read pass-through   matched read action allowed with the READ token.
   R2  Branch namespace     a literal branch field (source_branch/ref/branch)
       must lie in the agent's configured namespace.
-  R3  API write filter    an unmatched/unrecognized/not-enabled write, or an
+  R3  API write filter    an unmatched/unrecognized write, or an
       unverifiable iid -> MR namespace lookup, is denied.
   R4  Irreversible verbs  any recognized action at IRREVERSIBLE criticality —
-      never permitted, regardless of config.
+      never permitted, regardless of config (kernel gate).
   R5  Quota & rate        max open MRs, max writes/hour; locked state denies.
-  R6  Project boundary    unmatched/not-enabled projectless reads; GraphQL.
+  R6  Project boundary    unmatched/not-enabled projectless reads; GraphQL;
+      a recognized action not enabled for the host (kernel gate).
 
 Rule ids are `core.rules` constants, never bare literals.
 """
@@ -27,11 +24,11 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ....core.actions import Action, Criticality
+from ....core.actions import Action
 from ....core.config import Config
 from ....core.guard import kernel_gates
 from ....core.model import Decision, StateView, TokenKind
-from ....core.rules import R1, R2, R3, R4, R5, R6
+from ....core.rules import R1, R2, R3, R5, R6
 from .intent import ApiIntent
 from .recognizers import QuotaKind, RestRecognizer, ScopeKind, match_request
 
@@ -47,29 +44,6 @@ def _recognize(intent: ApiIntent) -> tuple[Optional[RestRecognizer], frozenset[A
     if match is None:
         return None, frozenset()
     return match, match.recognize(intent)
-
-
-def capability_gate(
-    intent: ApiIntent, cfg: Config, effective_actions: frozenset[str]
-) -> Optional[Decision]:
-    """Kernel hook: deny an irreversible action, or one not enabled for this host.
-
-    GraphQL is left to ``decide`` (its own explicit reason); it never
-    recognizes an action, so there is nothing to check here.
-    """
-    if intent.is_graphql:
-        return None
-    _, recognized = _recognize(intent)
-    if not recognized:
-        return None  # nothing to check; decide() default-denies
-    if any(a.criticality is Criticality.IRREVERSIBLE for a in recognized):
-        names = ", ".join(sorted(a.id for a in recognized))
-        return Decision(False, R4, f"irreversible action denied: {names}")
-    missing = sorted(a.id for a in recognized if a.id not in effective_actions)
-    if missing:
-        rule = R3 if intent.writes else R6
-        return Decision(False, rule, f"action(s) not enabled for this host: {missing}")
-    return None
 
 
 def decide(
@@ -180,9 +154,10 @@ def full_decide(
     """
     if effective_actions is None:
         effective_actions = frozenset(cfg.effective_actions(intent.host))
-    d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed)
-    if d is None:
-        d = capability_gate(intent, cfg, effective_actions)
+    _, recognized = _recognize(intent)
+    d = kernel_gates(
+        intent, cfg, project_allowed or cfg.project_allowed, recognized, effective_actions
+    )
     if d is None:
         d = decide(intent, state, cfg, effective_actions)
     return d

@@ -413,9 +413,10 @@ def test_git_project_not_allowlisted_denied(cfg):
 
 
 def test_git_empty_push_denied(cfg):
-    # A push that carries no ref commands has nothing to authorise → default-deny.
+    # A push that carries no ref commands recognizes no action — the kernel's
+    # unmatched/empty-recognized write gate denies it (R3) before `decide` runs.
     d = decide(_git(), StateView(), cfg)
-    assert not d.allow and d.rule == "R2"
+    assert not d.allow and d.rule == "R3"
 
 
 # --- remaining allow / default-deny edges --------------------------------------
