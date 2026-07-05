@@ -51,3 +51,7 @@ host; everything else is denied.
 
 - Main doc = *what/why*; step subfolder = *how*, derived from it. On
   contradiction the main doc wins — report, don't guess.
+- Step files carry numeric prefixes (`01-`, `02-`, …): the number is the
+  dependency level — same number = independent, parallelizable; a higher
+  number requires all lower ones. `00-index.md` gives the overview and tracks
+  progress.
