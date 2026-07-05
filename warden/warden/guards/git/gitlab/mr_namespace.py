@@ -1,9 +1,7 @@
-"""MR source-branch-namespace lookup (§07 Punkt 4, folded here in §07 Punkt 6
-step 5 from the now-dissolved ``guards.gitlab.forge.GitForge``; host dimension
-per §07 Punkt 8 follow-up).
+"""MR source-branch-namespace lookup: an upstream GET, cached briefly.
 
 Implementation detail of the REST-API guard, not a shared class — it needs
-only the forge-neutral :mod:`warden.core.transport` to reach upstream.
+only the forge-neutral transport module to reach upstream.
 """
 
 from __future__ import annotations
@@ -11,22 +9,21 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
-from ...core.config import Config
-from ...core.model import TokenKind
-from ...core.transport import UpstreamRouter, project_id
+from ....core.config import Config
+from ....core.model import TokenKind
+from ....core.transport import UpstreamRouter, project_id
 
 
 class MrNamespace:
     """Credential-backed ``source_branch`` lookup, with a short-TTL cache
     (performance only, never security — a cache hit still reflects a lookup
-    made within the last :attr:`_ttl` seconds).
+    made within the last 30 seconds).
 
-    Resolves the ``Upstream`` per call from the raw ``Host`` header via
-    :class:`~warden.core.transport.UpstreamRouter` (§07 Punkt 8 follow-up) —
-    the MR being checked lives on whichever host the current request
-    targeted, never a fixed one from construction time. The cache key
-    includes the canonical host so two hosts sharing a project path/iid never
-    share a cache entry.
+    Resolves the upstream per call from the raw ``Host`` header — the MR
+    being checked lives on whichever host the current request targeted,
+    never a fixed one from construction time. The cache key includes the
+    canonical host so two hosts sharing a project path/iid never share a
+    cache entry.
     """
 
     def __init__(
@@ -41,9 +38,9 @@ class MrNamespace:
     async def source_in_namespace(self, host: str, project: str, iid: int) -> Optional[bool]:
         """True iff the MR's ``source_branch`` lies in the allowed branch namespace.
 
-        Author-independent by design (§07 Punkt 4): blast-radius containment is
-        the branch namespace, not who opened the MR — a namespace branch is the
-        agent's exclusive push area regardless of author.
+        Author-independent by design: blast-radius containment is the branch
+        namespace, not who opened the MR — a namespace branch is the agent's
+        exclusive push area regardless of author.
 
         ``host`` is the raw ``Host`` header (as carried on ``Intent.host``) —
         resolved here to both the canonical cache-key host and the request's

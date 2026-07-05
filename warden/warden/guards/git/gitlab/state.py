@@ -1,20 +1,14 @@
 """The REST-API guard's own quota table: ``agent_mrs``, living in the same
-SQLite file as :mod:`warden.core.state` via the shared
-:class:`~warden.core.state.StateStore` — never a second connection.
+SQLite file as core state via the shared store — never a second connection.
 
-Folded here from the now-dissolved ``guards.gitlab.state.ForgeState``
-(§07 Punkt 6, step 5): branch tracking lives in the git guard's own
-:mod:`warden.guards.git.state`; this table is the REST-API guard's MR-quota
-domain only.
-
-Keyed by ``(host, project, iid)`` with a **per-endpoint** :meth:`open_mrs`
-count for the same reasons :mod:`warden.guards.git.state` is — see that
-module's docstring, this table's shape mirrors it exactly.
+Branch tracking lives in the git guard's own state table; this one is the
+REST-API guard's MR-quota domain only. Keyed by ``(host, project, iid)`` with
+a per-endpoint ``open_mrs`` count, mirroring that module's shape.
 """
 
 from __future__ import annotations
 
-from ...core.state import StateStore
+from ....core.state import StateStore
 
 _MR_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_mrs (

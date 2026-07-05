@@ -17,7 +17,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from .context import AppContext
-from .guards.gitlab_api.catalog import endpoint_table_report
+from .guards.git.gitlab.report import endpoint_table_report
 
 # Static log-viewer page — a package asset, not routing code.
 _VIEWER_HTML_PATH = Path(__file__).parent / "static" / "viewer.html"

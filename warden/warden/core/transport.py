@@ -2,10 +2,10 @@
 
 Read- vs. write-token chosen per :class:`~warden.core.model.Decision`. REST
 uses ``PRIVATE-TOKEN`` header; git Smart-HTTP uses HTTP-Basic ``oauth2:<token>``.
-Shared by both the git guard and the GitLab REST-API guard — a core module,
-not a guard-owned one, so neither guard depends on the other to reach
-upstream (§07 Punkt 6). The git guard depends on this module only, never on
-anything under ``guards.gitlab_api``.
+Shared by both the git transport guard and the GitLab REST-API guard — a core
+module, not a guard-owned one, so neither guard depends on the other to reach
+upstream. The transport guard depends on this module only, never on anything
+under ``guards.git.gitlab``.
 """
 
 from __future__ import annotations
@@ -292,8 +292,8 @@ async def for_each_host_project(
     state fail-closed-locked rather than trust an undercounted/stale view.
 
     ``hosts`` is the caller's job to narrow to currently-open endpoints
-    (step 04: :func:`~warden.guards.git.reconcile.reconcile_branches` /
-    :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs` filter
+    (:func:`~warden.guards.git.reconcile.reconcile_branches` /
+    :func:`~warden.guards.git.gitlab.reconcile.reconcile_mrs` filter
     ``cfg.git_endpoints`` via ``cfg.access_mode(...) != "closed"`` *before*
     calling here) — this loop trusts that contract and calls
     :meth:`UpstreamRouter.for_host` unconditionally. A ``closed`` host slipping

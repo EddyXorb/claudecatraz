@@ -10,10 +10,10 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from warden.guards.gitlab_api.catalog.write_endpoints import WRITE_ENDPOINTS
-from warden.guards.gitlab_api.guard import _needs_source_lookup
-from warden.guards.gitlab_api.parsing import iid_from_path as _iid_from_path
-from warden.guards.gitlab_api.parsing import project_from_path as _project_from_path
+from warden.guards.git.gitlab.guard import _needs_source_lookup
+from warden.guards.git.gitlab.parsing import iid_from_path as _iid_from_path
+from warden.guards.git.gitlab.parsing import project_from_path as _project_from_path
+from warden.guards.git.gitlab.recognizers import CATALOG
 
 PROJ = "group%2Fproj"
 
@@ -351,17 +351,17 @@ async def test_graphql_deny_is_audited(client, ctx, tmp_path):
 
 
 def test_needs_source_lookup_true_for_note_endpoint():
-    ep = next(e for e in WRITE_ENDPOINTS if e.id == "mr.note")
+    ep = next(e for e in CATALOG if e.id == "mr.note")
     assert _needs_source_lookup(ep)
 
 
 def test_needs_source_lookup_false_for_mr_create():
-    ep = next(e for e in WRITE_ENDPOINTS if e.id == "mr.create")
+    ep = next(e for e in CATALOG if e.id == "mr.create")
     assert not _needs_source_lookup(ep)
 
 
-def test_needs_source_lookup_false_for_entry_with_no_checks():
-    ep = next(e for e in WRITE_ENDPOINTS if e.id == "issue.create")
+def test_needs_source_lookup_false_for_entry_with_no_namespace_scope():
+    ep = next(e for e in CATALOG if e.id == "issue.create")
     assert not _needs_source_lookup(ep)
 
 
@@ -450,7 +450,7 @@ async def test_config_activated_entry_marked_in_audit_default_entry_is_not(
     records = [json.loads(line) for line in logf.read_text().splitlines()]
     issue_event = next(r for r in records if r["path"].endswith("/issues"))
     mr_event = next(r for r in records if r["path"].endswith("/merge_requests"))
-    assert issue_event["enabled_via"] == "config:project.issue.create"
+    assert issue_event["enabled_via"] == ["project.issue.create"]
     assert "enabled_via" not in mr_event  # default-activated entry: no marking
     await ctx.router.aclose()
 

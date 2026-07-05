@@ -48,9 +48,12 @@ _ALLOWED_FIELDS = {
     "open_mrs",
     "open_branches",
     "writes_last_hour",
-    # Marks a decision against a catalog entry activated beyond the default set.
-    # Additive and optional; no AUDIT_SCHEMA_VERSION bump needed (field-allowlist
+    # The recognized action id(s) a REST request matched. Additive and
+    # optional; no AUDIT_SCHEMA_VERSION bump needed (field-allowlist
     # redaction was designed to admit extensions without version bump).
+    "actions",
+    # Which of those action ids reach beyond the shipped DEFAULT set — a
+    # deployment's config had to explicitly enable them.
     "enabled_via",
 }
 

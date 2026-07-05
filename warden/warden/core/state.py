@@ -7,7 +7,7 @@ Kernel-owned: counters and fail-safe locking are resource-agnostic (M5), keyed b
 ``guard``/``kind`` strings. Module has no forge vocabulary — each guard owns its
 own domain table on the shared connection: branches in
 :class:`~warden.guards.git.state.BranchState`, MRs in
-:class:`~warden.guards.gitlab_api.state.MrState`.
+:class:`~warden.guards.git.gitlab.state.MrState`.
 
 Schema versioning via SQLite's ``PRAGMA user_version`` — fail-closed (A9), not
 migrated: see :meth:`StateStore._check_and_stamp_schema_version` for why a
@@ -70,7 +70,7 @@ class StateStore:
     """The connection owner: one SQLite connection (WAL + ``synchronous=FULL``),
     shared by core state and every guard's own domain state (the git guard's
     :class:`~warden.guards.git.state.BranchState`, the REST-API guard's
-    :class:`~warden.guards.gitlab_api.state.MrState`) so they stay one writer on
+    :class:`~warden.guards.git.gitlab.state.MrState`) so they stay one writer on
     one file, never a second connection.
 
     Checks and stamps the schema version at connect time, before any table
@@ -213,7 +213,7 @@ class State:
         reconciles successfully; open_mrs/open_branches default to 0 — each
         guard fills its own domain count via its own ``state_view`` override (the
         git guard's :meth:`~warden.guards.git.guard.GitGuard.state_view`, the
-        REST-API guard's :meth:`~warden.guards.gitlab_api.guard.ApiGuard.state_view`).
+        REST-API guard's :meth:`~warden.guards.git.gitlab.guard.ApiGuard.state_view`).
 
         ``host`` scopes :meth:`writes_last_hour` to that endpoint (step 04) —
         the caller passes the request's own host (see ``core.guard.Guard.handle``).

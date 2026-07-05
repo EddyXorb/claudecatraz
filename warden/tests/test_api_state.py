@@ -1,23 +1,21 @@
-"""MrState (§E, W8, §6.11, §07 Punkt 6 step 5, §07 Punkt 8 follow-up): the
-REST-API guard's own MR-quota table (``agent_mrs``), built on the same
-:class:`~warden.core.state.StateStore` core state uses. Branch tracking
-(``agent_branches``) lives in the git guard's own
+"""MrState: the REST-API guard's own MR-quota table (``agent_mrs``), built on
+the same :class:`~warden.core.state.StateStore` core state uses. Branch
+tracking (``agent_branches``) lives in the git guard's own
 :class:`~warden.guards.git.state.BranchState` — see :mod:`test_git_state`.
-Folded here from the now-dissolved ``guards.gitlab.state.ForgeState``.
 
 This counter is what the REST-API guard's R5 quota reads via
-:meth:`~warden.guards.gitlab_api.guard.ApiGuard.state_view`, so an off-by-one
+:meth:`~warden.guards.git.gitlab.guard.ApiGuard.state_view`, so an off-by-one
 here would directly mis-gate writes.
 
-:meth:`~warden.guards.gitlab_api.state.MrState.open_mrs` is per-endpoint since
-step 04 (state-keying): it always takes a ``host`` and only counts that
-endpoint's rows — see the two-hosts tests below.
+:meth:`~warden.guards.git.gitlab.state.MrState.open_mrs` is per-endpoint: it
+always takes a ``host`` and only counts that endpoint's rows — see the
+two-hosts tests below.
 """
 
 from __future__ import annotations
 
 from warden.core.state import State
-from warden.guards.gitlab_api.state import MrState
+from warden.guards.git.gitlab.state import MrState
 
 
 def _mr_state() -> MrState:

@@ -13,12 +13,11 @@ import pytest
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.model import Decision, StateView, TokenKind
 from warden.guards.git import actions as git_actions
+from warden.guards.git.gitlab import policy as api_policy
+from warden.guards.git.gitlab.intent import ApiIntent
 from warden.guards.git.transport import policy as git_policy
 from warden.guards.git.transport.intent import GitIntent
 from warden.guards.git.transport.pktline import RefCommand
-from warden.guards.gitlab_api import policy as api_policy
-from warden.guards.gitlab_api.catalog.activation import build_effective_table
-from warden.guards.gitlab_api.intent import ApiIntent
 
 ZERO = "0" * 40
 SHA = "a" * 40
@@ -153,10 +152,11 @@ def test_r6_project_not_in_allowlist_denied(cfg):
 
 
 def test_r6_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
-    # issue.create ships with checks=() — this pins down that the project
-    # boundary (R6, a kernel gate run before any entry-specific check) still
-    # applies to an entry that checks nothing of its own.
-    effective = build_effective_table(("project.issue.create",))
+    # issue.create has no branch-namespace scope of its own — this pins down
+    # that the project boundary (R6, a kernel gate run before any
+    # entry-specific check) still applies to an entry that checks nothing of
+    # its own beyond quota.
+    effective = frozenset({"project.issue.create"})
     req = ApiIntent(
         _project="other/secret",
         _method="POST",

@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, unquote
 
 from starlette.requests import Request
 
-from .catalog import Location, Recognizer
+from .recognizers import Location, RestRecognizer
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
 _API_PREFIX = "/api/v4"
@@ -22,7 +22,9 @@ def raw_rest_path(request: Request) -> str:
 
     ASGI servers decode ``scope["path"]`` — which would turn ``group%2Fproj`` into
     a two-segment ``group/proj`` and break id extraction and forwarding. We read
-    ``raw_path`` to preserve the encoding all the way to gitlab.com.
+    ``raw_path`` to preserve the encoding all the way to gitlab.com. A
+    ``/api/graphql*`` path has no ``/api/v4`` prefix to strip, so it passes
+    through unchanged — which is exactly what marks it as GraphQL downstream.
 
     Deliberately query-less: path matching/decision operate on the path alone.
     The query string is extracted separately and reattached only when forwarding.
@@ -39,7 +41,7 @@ def raw_query(request: Request) -> str:
     """Raw query string (percent-encoding intact), for the upstream URL only.
 
     The *decision* reads decoded fields via ``request.query_params`` (folded
-    into ``intent.fields`` by :func:`extract_fields`); this preserves
+    into ``intent.fields`` by ``extract_fields``); this preserves
     the exact wire bytes GitLab must see — without it, a query-dependent decision
     could pass on a value the upstream request never actually carries.
     """
@@ -77,23 +79,25 @@ def parse_body_fields(body: bytes, content_type: str) -> dict[str, Any]:
     return {}
 
 
-def extract_fields(request: Request, body: bytes, ep: Optional[Recognizer]) -> dict[str, Any]:
+def extract_fields(
+    request: Request, body: bytes, match: Optional[RestRecognizer]
+) -> dict[str, Any]:
     """Pull the decision fields for this request.
 
-    For an unmatched write or any read (``ep is None``) this stays query-only.
+    An unmatched request needs none — nothing recognizes it either way.
 
-    For a matched recognizer: only the fields the entry *declares*
-    (:attr:`Recognizer.decision_fields`) are read, each strictly from its
-    declared location (body or query) — never a blind merge of both.
-    A body-declared field that only appears in the query string (or vice versa)
+    For a matched recognizer: only the fields it *declares*
+    (``RestRecognizer.decision_fields``) are read, each strictly from its
+    declared location (body or query) — never a blind merge of both. A
+    body-declared field that only appears in the query string (or vice versa)
     is simply absent from the decision, exactly as if the caller never sent it.
     """
-    if ep is None:
-        return dict(request.query_params)
+    if match is None:
+        return {}
     query_fields = dict(request.query_params)
     body_fields = parse_body_fields(body, request.headers.get("content-type", ""))
     fields: dict[str, Any] = {}
-    for spec in ep.decision_fields:
+    for spec in match.decision_fields:
         source = query_fields if spec.location is Location.QUERY else body_fields
         if spec.name in source:
             fields[spec.name] = source[spec.name]

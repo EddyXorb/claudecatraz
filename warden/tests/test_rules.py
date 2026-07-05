@@ -18,10 +18,10 @@ from warden.core.rules import (
     qualify,
     rule,
 )
+from warden.guards.git.gitlab.intent import ApiIntent
+from warden.guards.git.gitlab.policy import full_decide as decide
 from warden.guards.git.transport.pktline import RefCommand
 from warden.guards.git.transport.policy import ref_action_gate
-from warden.guards.gitlab_api.intent import ApiIntent
-from warden.guards.gitlab_api.policy import full_decide as decide
 
 ZERO = "0" * 40
 SHA = "a" * 40
@@ -96,8 +96,8 @@ def _api(method, path, **fields) -> ApiIntent:
 
 
 # One representative request per rule id the policy can emit — a smoke test
-# that every id `decide()`/`check_ref()` actually produce traces back to the
-# registry (the invariant the whole module exists to guarantee).
+# that every id `decide()`/`ref_action_gate()` actually produce traces back to
+# the registry (the invariant the whole module exists to guarantee).
 @pytest.mark.parametrize(
     "make_decision",
     [

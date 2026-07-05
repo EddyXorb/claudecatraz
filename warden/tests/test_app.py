@@ -61,15 +61,10 @@ async def test_policy_route_reports_the_effective_table(cfg):
     body = resp.json()
     host_report = body["hosts"]["gitlab.example"]
     ids = {row["id"] for row in host_report["catalog"]}
-    assert "mr.create" in ids and "branch.create" in ids
-    mr_create = next(row for row in host_report["catalog"] if row["id"] == "mr.create")
-    assert mr_create["default"] is True and mr_create["active"] is True
-    # repo.branch.create is default-on in the new vocabulary, so its
-    # recognizer is active even though DEFAULT_ENABLED (the REST-only marker
-    # `row["default"]` reports) still excludes it.
-    branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
-    assert branch_create["default"] is False and branch_create["active"] is True
-    assert body["builtin_deny"] == ["mr.merge"]
+    assert "mr.create" in ids and "branch.create" in ids and "mr.merge" in ids
+    assert "project.mr.create" in host_report["actions"]
+    # repo.branch.create is default-on in the new vocabulary.
+    assert "repo.branch.create" in host_report["actions"]
     await ctx.router.aclose()
 
 
@@ -85,11 +80,7 @@ async def test_policy_route_reflects_activation_config(cfg):
         resp = await c.get("/policy")
     body = resp.json()
     host_report = body["hosts"]["gitlab.example"]
-    issue_create = next(row for row in host_report["catalog"] if row["id"] == "issue.create")
-    assert issue_create["active"] is True
-    assert issue_create["enabled_via"] == "config:project.issue.create"
-    mr_note = next(row for row in host_report["catalog"] if row["id"] == "mr.note")
-    assert mr_note["active"] is False  # not in this endpoint's actions override
+    assert set(host_report["actions"]) == {"project.mr.create", "project.issue.create"}
     await ctx.router.aclose()
 
 

@@ -17,7 +17,6 @@ from .core.config import ConfigError
 from .core.config_load import from_env
 from .core.logging_setup import configure_logging
 from .core.state import SchemaError, State
-from .guards.gitlab_api.catalog import CatalogConfigError
 
 log = logging.getLogger("warden")
 
@@ -88,11 +87,10 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except (ConfigError, CatalogConfigError, SchemaError) as exc:
-        # All three are fail-closed startup aborts: bad config (shape or
-        # catalog-activation), or a state DB this build cannot understand.
-        # None should ever surface as a traceback — a clean message and a
-        # non-zero exit is the contract.
+    except (ConfigError, SchemaError) as exc:
+        # Both are fail-closed startup aborts: bad config, or a state DB this
+        # build cannot understand. Neither should ever surface as a
+        # traceback — a clean message and a non-zero exit is the contract.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

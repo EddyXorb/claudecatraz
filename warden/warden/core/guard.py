@@ -84,7 +84,7 @@ def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Option
     """Resource allowlist — the single source of truth, shared by every guard.
 
     An empty ``project`` passes; projectless requests are gated by the guard's
-    own ``decide`` (see ``guards.gitlab_api.read_endpoints``).
+    own ``decide`` (see ``guards.git.gitlab.recognizers``).
 
     ``project_allowed`` is a callable, not raw ``Config``, so a guard
     whose forge resolves numeric-id aliases can widen the check beyond

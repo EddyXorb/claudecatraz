@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from warden.core.config import Config, GitEndpoint, GitRules, HostCredentials
 from warden.core.state import State
-from warden.guards.gitlab_api.intent import ApiIntent
-from warden.guards.gitlab_api.policy import full_decide as decide
+from warden.guards.git.gitlab.intent import ApiIntent
+from warden.guards.git.gitlab.policy import full_decide as decide
 
 HOST = "gitlab.example"
 _OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)

@@ -147,7 +147,7 @@ class Config:
         group prefixes. GitLab also accepts a project's
         numeric id interchangeably with its path; matching that form is a
         REST-API-guard concept (the id is only known after reconcile talks to
-        GitLab) — see ``guards.gitlab_api.guard.ApiGuard.project_allowed``,
+        GitLab) — see ``guards.git.gitlab.guard.ApiGuard.project_allowed``,
         not this method.
         """
         project = normalize_project(project)
@@ -228,7 +228,7 @@ class Config:
         """:attr:`effective_hosts`, trimmed to endpoints that currently have a
         usable read credential. The single definition shared by
         :func:`~warden.guards.git.reconcile.reconcile_branches`
-        and :func:`~warden.guards.gitlab_api.reconcile.reconcile_mrs` — a
+        and :func:`~warden.guards.git.gitlab.reconcile.reconcile_mrs` — a
         ``closed`` endpoint is unreachable via ``host_gate`` anyway (R6) and
         never needs reconciling (see :func:`~warden.core.transport.for_each_host_project`'s
         docstring for why passing a closed host through would be a bug, not a

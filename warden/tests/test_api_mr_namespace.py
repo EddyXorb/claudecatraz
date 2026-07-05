@@ -1,9 +1,5 @@
-"""mr_namespace.py (W6.2, §07 Punkt 4/6, §07 Punkt 8 follow-up): the REST-API guard's MR
-source-branch-namespace rule + its cache.
-
-Folded here from the now-dissolved ``guards.gitlab.forge.GitForge`` (§07
-Punkt 6 step 5) — see ``test_api_reconcile.py`` for the reconcile/pagination
-side.
+"""mr_namespace.py: the REST-API guard's MR source-branch-namespace rule + its
+cache. See ``test_api_reconcile.py`` for the reconcile/pagination side.
 """
 
 from __future__ import annotations
@@ -11,7 +7,7 @@ from __future__ import annotations
 import httpx
 
 from warden.core.transport import UpstreamRouter
-from warden.guards.gitlab_api.mr_namespace import MrNamespace
+from warden.guards.git.gitlab.mr_namespace import MrNamespace
 
 HOST = "gitlab.example"  # matches the `cfg` fixture's `[[git.endpoint]]` host (conftest.py)
 

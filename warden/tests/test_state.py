@@ -1,9 +1,8 @@
-"""state.py (W8, §6.11): quota counting, the rolling write-window, and the
-fail-safe lock that holds until the first reconcile — the core-only state.
-Branch counter tests live in :mod:`test_git_state` (they exercise
-:class:`~warden.guards.git.state.BranchState`); MR counter tests live in
-:mod:`test_api_state` (:class:`~warden.guards.gitlab_api.state.MrState`) —
-neither is core.
+"""core.state: quota counting, the rolling write-window, and the fail-safe
+lock that holds until the first reconcile — the core-only state. Branch
+counter tests live in ``test_git_state`` (``guards.git.transport.state.BranchState``);
+MR counter tests live in ``test_api_state`` (``guards.git.gitlab.state.MrState``)
+— neither is core.
 
 These counters are what the policy's R5 quotas read, so an off-by-one or a
 missed time-window here would directly mis-gate writes.
@@ -21,8 +20,8 @@ from warden.core.state import (
     SchemaError,
     State,
 )
+from warden.guards.git.gitlab.state import MrState
 from warden.guards.git.transport.state import BranchState
-from warden.guards.gitlab_api.state import MrState
 
 
 def _clocked(start=1000.0):

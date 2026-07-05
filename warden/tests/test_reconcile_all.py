@@ -29,9 +29,7 @@ def _git(ctx):
 
 
 def _api(ctx):
-    # ApiGuard and GraphqlGuard both name themselves "api"; the reconciling one
-    # is the ApiGuard, distinguished by its own MR state.
-    return next(g for g in ctx.guards if g.name == "api" and hasattr(g, "mr_state"))
+    return next(g for g in ctx.guards if g.name == "api")
 
 
 def _mock_branches_ok(router):
