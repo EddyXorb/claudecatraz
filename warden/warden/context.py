@@ -32,7 +32,7 @@ class AppContext:
     async def aclose(self) -> None:
         """Tear down every long-lived resource the composition root created.
 
-        Bundled here so callers (``__main__``) never need to know the
+        Bundled here so callers (__main__) never need to know the
         individual collaborators exist, let alone their shutdown order.
         """
         await self.router.aclose()
@@ -41,7 +41,7 @@ class AppContext:
 
     async def reconcile_all(self) -> bool:
         """Reconcile every guard, each unlocking only its own per-guard lock on
-        success (see :meth:`~warden.core.state.State.is_reconciled`). Returns
+        success (see State.is_reconciled). Returns
         True iff *all* guards succeeded — used only for the startup/periodic log
         line, not to gate anything: the locks are per guard, so a guard whose
         upstream is permanently unreachable stays fail-safe-locked and denies,
@@ -64,16 +64,16 @@ def build_context(
     """Assemble the transport and every shipped guard, then the root context.
 
     The one place that decides which guards exist and what each is given —
-    a guard sees only the collaborators its own ``__init__`` declares.
-    ``UpstreamRouter`` is forge-neutral, host-aware transport, built here and
+    a guard sees only the collaborators its own __init__ declares.
+    UpstreamRouter is forge-neutral, host-aware transport, built here and
     shared (one connection pool, regardless of host count) by the git guard
     and the REST-API guard (which also serves and denies GraphQL) — neither
     guard depends on the other to reach it.
 
-    ``client`` is an escape hatch for tests that need a non-default
-    ``httpx.AsyncClient`` (e.g. a real end-to-end test whose upstream serves
+    client is an escape hatch for tests that need a non-default
+    httpx.AsyncClient (e.g. a real end-to-end test whose upstream serves
     a self-signed cert); every production caller omits it and gets
-    ``UpstreamRouter``'s own default client.
+    UpstreamRouter's own default client.
     """
     router = UpstreamRouter(cfg, client=client)
     guards: list[Guard[Any]] = [

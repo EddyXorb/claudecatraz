@@ -39,18 +39,18 @@ async def _list_agent_mrs(upstream: Upstream, cfg: Config, pid: str) -> list[tup
 async def reconcile_mrs(
     cfg: Config, router: UpstreamRouter, mr_state: MrState
 ) -> tuple[bool, set[str]]:
-    """Rebuild ``agent_mrs`` and the numeric-id alias set for every allowed
+    """Rebuild agent_mrs and the numeric-id alias set for every allowed
     project, on every currently open configured endpoint.
 
-    Iterates ``cfg.open_hosts`` (not ``cfg.effective_hosts``) — see
-    ``guards.git.reconcile.reconcile_branches``'s docstring for the full
+    Iterates cfg.open_hosts (not cfg.effective_hosts) — see
+    guards.git.reconcile.reconcile_branches's docstring for the full
     rationale, identical here. The numeric-id alias set is a plain union
     across hosts (project-id widening does not need to know which host an id
-    came from — ``ApiGuard.project_allowed`` only asks "is this id known",
-    never "on which host"). Returns ``(ok, resolved_ids)``. The host x
+    came from — ApiGuard.project_allowed only asks "is this id known",
+    never "on which host"). Returns (ok, resolved_ids). The host x
     project loop and its fail-safe handling live in
-    ``core.transport.for_each_host_project`` (shared with the git guard's
-    ``reconcile_branches``), which trusts that the ``hosts`` it is given are
+    core.transport.for_each_host_project (shared with the git guard's
+    reconcile_branches), which trusts that the hosts it is given are
     already open; this function supplies only the
     id-resolution/MR-listing/replace domain logic.
     """

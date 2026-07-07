@@ -1,9 +1,9 @@
 """git Smart-HTTP guard: all three operations — advertise, upload-pack,
-receive-pack — dispatched via ``GitGuard`` hooks per-operation.
+receive-pack — dispatched via GitGuard hooks per-operation.
 
 Forge-agnostic in logic (no GitLab vocabulary). Credential injection and
-response streaming come from the forge-neutral ``warden.core.transport`` —
-this guard never imports ``guards.gitlab.upstream``.
+response streaming come from the forge-neutral warden.core.transport —
+this guard never imports guards.gitlab.upstream.
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ from .state import BranchState
 
 
 def _project(request: Request) -> str:
-    """Canonical project path (no ``.git``) for state keys, gate and upstream.
+    """Canonical project path (no .git) for state keys, gate and upstream.
 
-    git appends ``.git`` to the repo path while the reconcile/allowlist forms use
-    the bare path; normalising here keeps the ``agent_branches`` key consistent
+    git appends .git to the repo path while the reconcile/allowlist forms use
+    the bare path; normalising here keeps the agent_branches key consistent
     so a branch is not counted twice and reconcile can prune push-recorded rows."""
     return normalize_project(str(request.path_params["project"]))
 
@@ -48,17 +48,17 @@ def _forward_encoding(request: Request) -> dict[str, str]:
 
 
 def _content_length(request: Request) -> Optional[int]:
-    """Read ``Content-Length`` for the cheap push-size gate (R5).
+    """Read Content-Length for the cheap push-size gate (R5).
 
     No packfile parsing: an absent/non-numeric header (chunked transfer)
-    yields ``None`` — the size gate simply has nothing to check then.
+    yields None — the size gate simply has nothing to check then.
     """
     raw = request.headers.get("content-length")
     return int(raw) if raw and raw.isdigit() else None
 
 
 class GitGuard(Guard[GitIntent]):
-    """All three git Smart-HTTP operations dispatched via ``Guard.handle``.
+    """All three git Smart-HTTP operations dispatched via Guard.handle.
 
     Reads (advertise/upload-pack) are read-only except push discovery, which
     carries the write token but never performs a ref write. receive-pack is always a write.
@@ -90,13 +90,13 @@ class GitGuard(Guard[GitIntent]):
 
     def state_view(self, host: str) -> StateView:
         """This guard's own per-guard lock + its own branch counter, scoped to
-        ``host``. Locked until *this* guard reconciled — a broken REST-API
+        host. Locked until *this* guard reconciled — a broken REST-API
         upstream never locks git, and vice versa.
 
-        ``host`` is normalised but not resolved/validated here: this runs
-        *before* the kernel's ``host_gate``, so an unrecognised host must
+        host is normalised but not resolved/validated here: this runs
+        *before* the kernel's host_gate, so an unrecognised host must
         not raise — it simply queries a key nothing was ever recorded under,
-        yielding harmless zero counts; ``host_gate`` denies the request right
+        yielding harmless zero counts; host_gate denies the request right
         after regardless of what this view reports.
         """
         if not self.state.is_reconciled(self.name):
@@ -113,13 +113,13 @@ class GitGuard(Guard[GitIntent]):
 
         Own reconcile, independent of the REST-API guard's MR reconcile: rebuilds
         only this guard's own branch counter and, on success, unlocks only its own
-        per-guard lock (``State.mark_reconciled``). A failure here leaves *this*
+        per-guard lock (State.mark_reconciled). A failure here leaves *this*
         guard fail-safe-locked but never touches the REST-API guard's lock —
         one guard's permanently unreachable upstream can never block the other.
 
         No endpoints configured makes no upstream call either:
-        ``for_each_host_project`` simply iterates zero hosts and returns
-        ``True``, so this guard still unlocks and the warden serves (and then
+        for_each_host_project simply iterates zero hosts and returns
+        True, so this guard still unlocks and the warden serves (and then
         denies) instead of staying fail-safe-locked.
         """
         ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
@@ -129,7 +129,7 @@ class GitGuard(Guard[GitIntent]):
 
     async def parse(self, request: Request) -> GitIntent:
         """Buffer only the pkt-line command section (KB-sized) for receive-pack;
-        the untouched PACK payload streams through ``GitIntent.rest``."""
+        the untouched PACK payload streams through GitIntent.rest."""
         project = _project(request)
         host = request.headers.get("host", "")
         if request.method == "GET":
@@ -246,7 +246,7 @@ class GitGuard(Guard[GitIntent]):
 
         Each ref reports its own action-gate/R2/R5 decision; a ref that
         individually clears both but was denied at the whole-push level
-        (e.g. R6 project, or R5 push size) reports the overall ``decision``,
+        (e.g. R6 project, or R5 push size) reports the overall decision,
         never a misleading "ok". advertise/upload-pack denials get a plain
         JSON body instead — there is no per-ref shape for a read.
         """

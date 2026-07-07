@@ -1,9 +1,9 @@
 """The git-namespace action vocabulary: repo/project/instance scopes.
 
 Twenty ids, closed set — no wildcards, no inheritance, config lists replace
-completely. ``DEFAULT`` is what a host gets when no ``actions`` override
-applies anywhere in its config cascade; every ``Criticality.IRREVERSIBLE``
-action is a compiled-in deny and therefore excluded from ``DEFAULT`` by
+completely. DEFAULT is what a host gets when no actions override
+applies anywhere in its config cascade; every Criticality.IRREVERSIBLE
+action is a compiled-in deny and therefore excluded from DEFAULT by
 construction, never by a separate list that could drift.
 """
 

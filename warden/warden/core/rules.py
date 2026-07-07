@@ -1,11 +1,11 @@
 """Central rule registry: one place for rule ids, preventing string literal drift.
 
-Every :class:`~warden.core.model.Decision` carries a bare rule id ("R0".."R6")
-for the audit log. Callers import :data:`R0`..:data:`R6` instead of literals,
-and :func:`rule` resolves a bare id to its definition (meta-rule + summary),
+Every warden.core.model.Decision carries a bare rule id ("R0".."R6")
+for the audit log. Callers import R0..R6 instead of literals,
+and rule resolves a bare id to its definition (meta-rule + summary),
 so typos fail loudly instead of silently reaching the audit log.
 
-**Kernel namespace (prepared, not yet active).** Reserve ``core.*`` namespace
+**Kernel namespace (prepared, not yet active).** Reserve core.* namespace
 for kernel-enforced decisions once a second guard makes bare ids ambiguous.
 """
 
@@ -70,10 +70,10 @@ RULES: Mapping[str, RuleDef] = {d.id: d for d in _DEFS}
 
 
 def rule(rule_id: str) -> RuleDef:
-    """Resolve a bare rule id to its :class:`RuleDef`.
+    """Resolve a bare rule id to its RuleDef.
 
-    Raises :class:`KeyError` for an id outside the registry — every
-    ``Decision.rule`` must trace back to a defined rule; an unregistered id
+    Raises KeyError for an id outside the registry — every
+    Decision.rule must trace back to a defined rule; an unregistered id
     reaching this function is a bug in the caller, not a value to tolerate.
     """
     return RULES[rule_id]
@@ -86,11 +86,11 @@ GITLAB_NAMESPACE: Final = "gitlab"
 
 
 def qualify(rule_id: str, *, namespace: str = GITLAB_NAMESPACE) -> str:
-    """Build a namespaced rule id (``"gitlab.R4"``, ``"core.R5"``).
+    """Build a namespaced rule id ("gitlab.R4", "core.R5").
 
     Not used for logging yet (module docstring) — a helper the guard-rename
     step can call once a second guard makes bare ids ambiguous. Validates
-    ``rule_id`` against the registry so a namespaced id can never reference a
+    rule_id against the registry so a namespaced id can never reference a
     rule that does not exist.
     """
     rule(rule_id)  # raises KeyError on an unregistered id

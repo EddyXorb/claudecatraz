@@ -1,9 +1,9 @@
 """GitLab REST guard intent: the parsed, decision-relevant shape of one request.
 
-A ``/api/graphql*`` request produces this same shape; ``is_graphql`` marks it
+A /api/graphql* request produces this same shape; is_graphql marks it
 so policy can deny it with one explicit reason instead of relying on it
 matching (and failing to match) every REST recognizer in the catalog.
-``guards.git.intent`` is the transport guard's own, unrelated counterpart.
+guards.git.intent is the transport guard's own, unrelated counterpart.
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ class ApiIntent(Intent):
 
     _project: str
     _method: str
-    # Raw `Host` header; `core.guard.host_gate` checks it against
-    # `Config.host_allowed`, the guard resolves the canonical host (for
-    # `UpstreamRouter`/state keys) via `Config.resolve_target_host(_host)`.
+    # Raw Host header; core.guard.host_gate checks it against
+    # Config.host_allowed, the guard resolves the canonical host (for
+    # UpstreamRouter/state keys) via Config.resolve_target_host(_host).
     _host: str = ""
 
     path: str = ""  # REST path after /api/v4 — unstripped for /api/graphql*

@@ -1,10 +1,10 @@
 """Endpoint types for the git namespace: guard composition + valid action ids.
 
-``"github"`` stays a reserved, not-yet-implemented type — it is rejected in
-``warden.core.config_load``, never listed here.
+"github" stays a reserved, not-yet-implemented type — it is rejected in
+warden.core.config_load, never listed here.
 
 A type's valid action ids are the union of its composing guards' own
-``SUPPORTED`` sets (``transport.actions.SUPPORTED``/``gitlab.actions.SUPPORTED``
+SUPPORTED sets (transport.actions.SUPPORTED/gitlab.actions.SUPPORTED
 — each guard's own vocabulary module, qualified access, never a guard class:
 this module and core stay guard-class-free, config validation needs these
 ids before any guard is ever instantiated).
@@ -23,7 +23,7 @@ from .transport import actions as transport_actions
 
 @dataclass(frozen=True)
 class GitEndpointType:
-    """One ``[[git.endpoint]] type`` value: its guard composition plus the
+    """One [[git.endpoint]] type value: its guard composition plus the
     action ids valid for it.
     """
 
@@ -38,7 +38,7 @@ _SUPPORTED_BY_GUARD: Mapping[str, frozenset[Action]] = {
 
 
 def _valid_action_ids(guards: tuple[str, ...]) -> frozenset[str]:
-    """Union of each named guard's ``SUPPORTED`` action ids."""
+    """Union of each named guard's SUPPORTED action ids."""
     supported: frozenset[Action] = frozenset()
     for name in guards:
         supported |= _SUPPORTED_BY_GUARD[name]

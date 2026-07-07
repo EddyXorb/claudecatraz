@@ -1,26 +1,29 @@
 """Kernel pipeline: template method for the deny-short-circuit /
 record-before-forward / audit sequence.
 
-``Guard`` is the ABC every guard subclasses; ``Guard.handle`` is the one
-place the sequence is built — a guard supplies the parts (abstract hooks),
+Guard is the ABC (abstract base class, from Python's abc module) every guard
+subclasses: it declares the hooks a guard must implement but leaves them
+unimplemented, so a subclass cannot be instantiated until it fills them all
+in. Guard.handle is the one place the sequence is built — a guard supplies
+the parts (abstract hooks),
 the kernel owns the order, and a guard cannot reorder or skip a step because
 it never sees the sequence, only its own hooks.
 
-Sequence ``Guard.handle`` guarantees, in this order:
+Sequence Guard.handle guarantees, in this order:
 
-1. ``guard.parse`` — transport → an ``Intent``. No credential yet.
-2. Recognize: the first matching row in ``guard.catalog`` yields the
+1. guard.parse — transport → an Intent. No credential yet.
+2. Recognize: the first matching row in guard.catalog yields the
    recognized action set for this intent — empty when nothing matches.
-3. ``kernel_gates`` — guard-agnostic deny gates, all before ``enrich``:
+3. kernel_gates — guard-agnostic deny gates, all before enrich:
    host allowlist, mode-gate writes, project allowlist, an unmatched/empty
    write, the criticality gate (any recognized action at or above
-   ``Criticality.IRREVERSIBLE`` denies), the action gate (every recognized
+   Criticality.IRREVERSIBLE denies), the action gate (every recognized
    action must be enabled for the host).
-4. ``guard.enrich`` — unpure lookups a check declared it needs.
-5. ``guard.decide`` — pure, guard-specific, default-deny.
+4. guard.enrich — unpure lookups a check declared it needs.
+5. guard.decide — pure, guard-specific, default-deny.
 6. Audit — logged on *every* exit (allow or deny).
-7. ``guard.record`` before ``guard.forward`` — write durably counted before upstream call.
-8. ``guard.forward`` only reachable once ``decision.allow`` — deny calls ``guard.deny_response``.
+7. guard.record before guard.forward — write durably counted before upstream call.
+8. guard.forward only reachable once decision.allow — deny calls guard.deny_response.
 """
 
 from __future__ import annotations
@@ -44,12 +47,12 @@ from .state import State
 
 
 def mode_gate_writes(host: str, cfg: Config) -> Optional[Decision]:
-    """M0: deny a write to a host whose access mode is not ``read-write``.
+    """M0: deny a write to a host whose access mode is not read-write.
 
-    Per-host (step 05) — there is no more global mode. A ``closed`` host is
-    already denied earlier by :func:`host_gate` (R6), so by the time this
-    runs the only two possibilities left are ``read-only`` (deny) and
-    ``read-write`` (allow).
+    Per-host (step 05) — there is no more global mode. A closed host is
+    already denied earlier by host_gate (R6), so by the time this
+    runs the only two possibilities left are read-only (deny) and
+    read-write (allow).
     """
     access = cfg.access_mode(host)
     if access != "read-write":
@@ -58,17 +61,17 @@ def mode_gate_writes(host: str, cfg: Config) -> Optional[Decision]:
 
 
 def host_gate(host: str, cfg: Config) -> Optional[Decision]:
-    """M6: default-deny for a ``Host`` header outside the configured
-    ``[[git.endpoint]]`` list (§2, §07 Punkt 8 follow-up).
+    """M6: default-deny for a Host header outside the configured
+    [[git.endpoint]] list (§2, §07 Punkt 8 follow-up).
 
     Real default-deny (step 03): an empty endpoint list denies every host, not
     "allow everything" — an operator lists every routable host explicitly.
-    ``Config.host_allowed`` also denies a *known* host whose endpoint is
-    currently ``closed`` (no usable read credential), so a host that
-    ``UpstreamRouter.resolve`` would return ``None`` for is always denied here
+    Config.host_allowed also denies a *known* host whose endpoint is
+    currently closed (no usable read credential), so a host that
+    UpstreamRouter.resolve would return None for is always denied here
     first, never reaching a "kernel_gates already denied" assertion downstream.
     Guard-agnostic and kernel-owned like every other gate in
-    :func:`kernel_gates`, since every guard's request carries a host.
+    kernel_gates, since every guard's request carries a host.
     """
     if not cfg.host_allowed(host):
         return Decision(False, R6, f"host {host!r} not in the multi-target allowlist")
@@ -78,12 +81,12 @@ def host_gate(host: str, cfg: Config) -> Optional[Decision]:
 def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Optional[Decision]:
     """Resource allowlist — the single source of truth, shared by every guard.
 
-    An empty ``project`` passes; projectless requests are gated by the guard's
-    own ``decide`` (see ``guards.git.gitlab.recognizers``).
+    An empty project passes; projectless requests are gated by the guard's
+    own decide (see guards.git.gitlab.recognizers).
 
-    ``project_allowed`` is a callable, not raw ``Config``, so a guard
+    project_allowed is a callable, not raw Config, so a guard
     whose forge resolves numeric-id aliases can widen the check beyond
-    ``cfg.project_allowed``'s path-only match.
+    cfg.project_allowed's path-only match.
     """
     if project and not project_allowed(project):
         return Decision(False, R6, f"project {project!r} not in allowlist")
@@ -91,7 +94,7 @@ def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Option
 
 
 def criticality_gate(recognized: frozenset[Action]) -> Optional[Decision]:
-    """R4: any recognized action at or above ``Criticality.IRREVERSIBLE`` is
+    """R4: any recognized action at or above Criticality.IRREVERSIBLE is
     never permitted, regardless of configuration.
     """
     blocked = sorted(a.id for a in recognized if a.criticality >= Criticality.IRREVERSIBLE)
@@ -103,12 +106,12 @@ def criticality_gate(recognized: frozenset[Action]) -> Optional[Decision]:
 def action_gate(
     recognized: frozenset[Action], effective: frozenset[str], host: str
 ) -> Optional[Decision]:
-    """R6: every recognized action id must be enabled for ``host``.
+    """R6: every recognized action id must be enabled for host.
 
-    ``effective`` is the host's effective action ids, passed in rather than
-    derived here, so a caller (production: ``Config.effective_actions``;
+    effective is the host's effective action ids, passed in rather than
+    derived here, so a caller (production: Config.effective_actions;
     tests: an arbitrary override) controls what "enabled" means without
-    threading ``Config``/``host`` resolution through this function too.
+    threading Config/host resolution through this function too.
     """
     missing = sorted(a.id for a in recognized if a.id not in effective)
     if not missing:
@@ -125,16 +128,16 @@ def kernel_gates(
 ) -> Optional[Decision]:
     """The guard-agnostic deny gates, in kernel order (module docstring).
 
-    One definition: ``Guard.handle`` runs this on every pipeline request, and
-    each guard's ``full_decide`` composes it with the guard's pure ``decide``
+    One definition: Guard.handle runs this on every pipeline request, and
+    each guard's full_decide composes it with the guard's pure decide
     so unit tests exercise exactly the effective order — never a re-derived
     copy of it.
 
-    ``recognized`` is this intent's whole action set (the guard's ``catalog``
-    matched via ``first_match``, already computed by the caller since the
+    recognized is this intent's whole action set (the guard's catalog
+    matched via first_match, already computed by the caller since the
     catalog is guard-specific). An unmatched or empty-recognized *write*
     denies right here (R3) — a read falls through unchanged, since the
-    project-bound read pass-through is the guard's own ``decide``'s job.
+    project-bound read pass-through is the guard's own decide's job.
     """
     denied = host_gate(intent.host, cfg)
     if denied is None and intent.writes:
@@ -159,14 +162,14 @@ IntentT = TypeVar("IntentT", bound=Intent)
 
 
 class Guard(ABC, Generic[IntentT]):
-    """The parts a guard supplies to :meth:`handle`.
+    """The parts a guard supplies to handle.
 
-    ``name`` is the audit ``guard`` value (bare strings: ``"git"``/``"api"``).
-    ``catalog``/``supported`` are the guard's recognizer table and the action
+    name is the audit guard value (bare strings: "git"/"api").
+    catalog/supported are the guard's recognizer table and the action
     set it declares itself capable of gating — the kernel recognizes and
     gates generically from these, so a guard hook does I/O
     (parse/enrich/record/forward/deny_response) or is pure default-deny logic
-    (``decide``) only; the criticality/enablement checks are no longer a
+    (decide) only; the criticality/enablement checks are no longer a
     per-guard hook.
     """
 
@@ -184,7 +187,7 @@ class Guard(ABC, Generic[IntentT]):
     def catalog(self) -> tuple[Recognizer[IntentT], ...]:
         """This guard's recognizer table, most specific row first.
 
-        The kernel matches it via ``first_match`` right after ``parse`` to
+        The kernel matches it via first_match right after parse to
         get the intent's recognized action set.
         """
         ...
@@ -195,7 +198,7 @@ class Guard(ABC, Generic[IntentT]):
         """The action set this guard is capable of gating.
 
         The static ceiling — never what a deployment has actually enabled
-        (``Config.effective_actions``).
+        (Config.effective_actions).
         """
         ...
 
@@ -224,15 +227,15 @@ class Guard(ABC, Generic[IntentT]):
     def routes(self) -> list[Route]:
         """The Starlette routes this guard serves.
 
-        The guard owns its own paths so ``app.py`` stays generic assembly
+        The guard owns its own paths so app.py stays generic assembly
         instead of hand-listing every guard's endpoints.
         """
         ...
 
     def project_allowed(self, project: str) -> bool:
         """M6 membership hook. Default: the config allowlist by path
-        (``cfg.project_allowed``). A guard whose forge resolves numeric-id
-        aliases (e.g. ``ApiGuard``) overrides this to also accept those.
+        (cfg.project_allowed). A guard whose forge resolves numeric-id
+        aliases (e.g. ApiGuard) overrides this to also accept those.
         """
         return self.cfg.project_allowed(project)
 
@@ -242,7 +245,7 @@ class Guard(ABC, Generic[IntentT]):
         domain (e.g. the git/REST-API branch/MR counters) overrides this to
         return the combined snapshot instead.
 
-        ``host`` is the request's raw ``Host`` header (step 04, state-keying):
+        host is the request's raw Host header (step 04, state-keying):
         the stateful quotas are per-endpoint now, so the snapshot must be
         scoped to the endpoint the request is actually addressed to.
         """
@@ -265,7 +268,7 @@ class Guard(ABC, Generic[IntentT]):
     async def handle(self, request: Request) -> Response:
         """The kernel: guarantees the pipeline order regardless of guard.
 
-        Uses only resource-agnostic collaborators (``cfg``/``state``/``audit``),
+        Uses only resource-agnostic collaborators (cfg/state/audit),
         never a guard's own I/O clients, which stay encapsulated in the subclass.
         """
         correlation_id = str(uuid.uuid4())

@@ -3,12 +3,12 @@
 Reads stream through with the read token (R1); writes are matched against
 the recognizer catalog, source-branch-namespace checked, quota-checked, then
 forwarded with the write token — or denied with a 403 that never leaks a
-GitLab response. ``/api/graphql*`` shares this same pipeline and is always
-denied (`intent.is_graphql`) — an unmodelled channel, never a separate guard.
+GitLab response. /api/graphql* shares this same pipeline and is always
+denied (intent.is_graphql) — an unmodelled channel, never a separate guard.
 
 Self-contained GitLab domain logic: the MR source-branch-namespace lookup
-(`.mr_namespace`), MR/project-id reconcile (`.reconcile`) and the MR-quota
-table (`.state`) are this guard's own implementation details, reachable by no
+(.mr_namespace), MR/project-id reconcile (.reconcile) and the MR-quota
+table (.state) are this guard's own implementation details, reachable by no
 other guard.
 """
 
@@ -44,15 +44,15 @@ _DEFAULT_ACTION_IDS: frozenset[str] = frozenset(a.id for a in git_actions.DEFAUL
 
 def _needs_source_lookup(match: RestRecognizer) -> bool:
     """Check if the matched recognizer requires a source-branch-namespace
-    lookup: a ``BRANCH_NAMESPACE`` scope whose branch is *not* literally in
-    the request (``namespace_field is None``) — the request carries only an
+    lookup: a BRANCH_NAMESPACE scope whose branch is *not* literally in
+    the request (namespace_field is None) — the request carries only an
     iid, so the branch must be resolved via the iid -> MR upstream lookup."""
     return match.scope_kind is ScopeKind.BRANCH_NAMESPACE and match.namespace_field is None
 
 
 def _non_default_actions(recognized: frozenset[Action]) -> Optional[tuple[str, ...]]:
     """Audit marking: which recognized action ids are outside the shipped
-    ``DEFAULT`` set — ``None`` when every recognized action is a default (the
+    DEFAULT set — None when every recognized action is a default (the
     field is additive, only present once a deployment's config explicitly
     reaches beyond the default)."""
     ids = tuple(sorted(a.id for a in recognized if a.id not in _DEFAULT_ACTION_IDS))
@@ -60,8 +60,8 @@ def _non_default_actions(recognized: frozenset[Action]) -> Optional[tuple[str, .
 
 
 class ApiGuard(Guard[ApiIntent]):
-    """The REST write pipeline's hooks — dispatched via ``Guard.handle`` from
-    the routes ``routes`` returns.
+    """The REST write pipeline's hooks — dispatched via Guard.handle from
+    the routes routes returns.
     """
 
     @property
@@ -103,7 +103,7 @@ class ApiGuard(Guard[ApiIntent]):
             # GraphQL can express every write the REST filter blocks (create a
             # tag, merge an MR) in a single mutation — routed through this same
             # guard so it goes through the same pipeline, always denied
-            # (`intent.is_graphql`), never proxied upstream.
+            # (intent.is_graphql), never proxied upstream.
             Route(
                 "/api/graphql",
                 self.handle,
@@ -119,9 +119,9 @@ class ApiGuard(Guard[ApiIntent]):
     def _effective_for(self, host: str) -> frozenset[str]:
         """This host's effective action ids, or an empty set if none is
         configured — every action then default-denies rather than crashing.
-        A host with no ``[[git.endpoint]]`` entry can only reach here before
-        the kernel's ``host_gate`` has run: ``parse`` runs ahead of it, same
-        as ``state_view`` (see its docstring).
+        A host with no [[git.endpoint]] entry can only reach here before
+        the kernel's host_gate has run: parse runs ahead of it, same
+        as state_view (see its docstring).
         """
         return self._effective_by_host.get(self.cfg.normalize_host(host), frozenset())
 
@@ -135,12 +135,12 @@ class ApiGuard(Guard[ApiIntent]):
     def state_view(self, host: str) -> StateView:
         """This guard's own snapshot: its per-guard fail-safe lock + writes
         counter plus this domain's MR count — never branches (the git guard
-        tracks those) — all scoped to ``host`` (per-endpoint).
+        tracks those) — all scoped to host (per-endpoint).
         Locked until *this* guard reconciled; a broken git upstream never
         locks the REST-API guard, and vice versa.
 
-        See ``GitGuard.state_view`` for why ``host`` is normalised but not
-        resolved/validated here (this runs before ``host_gate``).
+        See GitGuard.state_view for why host is normalised but not
+        resolved/validated here (this runs before host_gate).
         """
         if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
@@ -155,14 +155,14 @@ class ApiGuard(Guard[ApiIntent]):
         """Rebuild the MR counter + numeric-id aliases from GitLab truth.
 
         Rebuilds only this guard's own MR counter/aliases and, on success,
-        unlocks only its own per-guard lock (``State.mark_reconciled``). A
+        unlocks only its own per-guard lock (State.mark_reconciled). A
         failure leaves *this* guard fail-safe-locked but never touches the
         git guard's lock — one guard's permanently unreachable upstream can
         never block the other.
 
         No endpoints configured makes no upstream call either:
-        ``for_each_host_project`` simply iterates zero hosts and returns
-        ``True``, so the guard still unlocks itself and the warden serves
+        for_each_host_project simply iterates zero hosts and returns
+        True, so the guard still unlocks itself and the warden serves
         (then denies) requests without ever contacting GitLab.
         """
         ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
@@ -173,8 +173,8 @@ class ApiGuard(Guard[ApiIntent]):
 
     async def parse(self, request: Request) -> ApiIntent:
         """Parse method/path/project/fields/body into the decision intent.
-        ``raw_query`` is kept separate from path for matching (matching stays query-less)
-        but carried for ``forward``.
+        raw_query is kept separate from path for matching (matching stays query-less)
+        but carried for forward.
         """
         rest_path = raw_rest_path(request)
         query = raw_query(request)

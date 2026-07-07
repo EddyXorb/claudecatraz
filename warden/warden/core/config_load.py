@@ -1,20 +1,20 @@
-"""Env + warden.toml → :class:`~warden.core.config.Config`.
+"""Env + warden.toml → warden.core.config.Config.
 
-The loading half of the config layer: :mod:`warden.core.config` holds the pure,
-frozen :class:`~warden.core.config.Config` value (what the policy consumes);
+The loading half of the config layer: warden.core.config holds the pure,
+frozen warden.core.config.Config value (what the policy consumes);
 this module holds everything that *produces* one — secret files, TOML parsing,
 env-over-file precedence, and the hard fail-closed validation.
 
 One source of truth per setting: policy tunables (branch namespace,
-quotas, allowlists) live only in ``warden.toml``'s ``[git.rules]``/
-``[[git.endpoint]]``; forge identity/credentials live only in the grouped
-``read_tokens``/``write_tokens`` secret files. There is no global operating
+quotas, allowlists) live only in warden.toml's [git.rules]/
+[[git.endpoint]]; forge identity/credentials live only in the grouped
+read_tokens/write_tokens secret files. There is no global operating
 mode and no startup-fatal token requirement — a per-host access mode
-(:meth:`~warden.core.config.Config.access_mode`) is derived purely from which
+(warden.core.config.Config.access_mode) is derived purely from which
 of that host's tokens are present. A host with no usable read token is simply
-``closed`` (a logged warning, see :func:`_warn_closed_endpoints`), never a
+closed (a logged warning, see _warn_closed_endpoints), never a
 startup abort: the warden still boots (fail-closed *degrade*, not fail-stop)
-and every operation against that host is denied by ``core.guard.host_gate``.
+and every operation against that host is denied by core.guard.host_gate.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ _RESERVED_ENDPOINT_TYPES = frozenset({"github"})
 def _secret(env: Mapping[str, str], name: str) -> str:
     """Read a secret from <name>_FILE (compose secret / mounted file) if set, else <name>.
     File wins so the running stack reads /run/secrets/…; the bare env var stays the fallback
-    for tests and bare `docker run`. Trailing newline (common in token files) is stripped."""
+    for tests and bare docker run. Trailing newline (common in token files) is stripped."""
     path = env.get(f"{name}_FILE")
     if path:
         try:
@@ -56,12 +56,12 @@ def _secret(env: Mapping[str, str], name: str) -> str:
 
 
 def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
-    """Parse an ``actions`` list-key (``[git].actions`` or a per-endpoint
-    ``actions``).
+    """Parse an actions list-key ([git].actions or a per-endpoint
+    actions).
 
-    Absent (``raw is None``, the key isn't in the table) stays ``None`` — "no
+    Absent (raw is None, the key isn't in the table) stays None — "no
     opinion here, the cascade falls through". Present — including
-    ``[]`` — becomes a tuple, deliberately kept distinguishable from absent
+    [] — becomes a tuple, deliberately kept distinguishable from absent
     (an explicit empty list means "may do nothing", not "inherit").
 
     Fail-closed: not a list of strings, or an id outside the closed
@@ -82,10 +82,10 @@ def _parse_actions(raw: object, context: str) -> Optional[tuple[str, ...]]:
 
 
 def _parse_rules(table: Mapping[str, object], context: str) -> GitRules:
-    """Parse a ``rules``-shaped table (``[git.rules]`` or an endpoint's inline
-    ``rules = {...}``) into a :class:`GitRules` override.
+    """Parse a rules-shaped table ([git.rules] or an endpoint's inline
+    rules = {...}) into a GitRules override.
 
-    An absent key stays ``None`` (no opinion at this level); an unknown key is a
+    An absent key stays None (no opinion at this level); an unknown key is a
     typo, not a silently-ignored setting, so it aborts startup.
     """
     unknown = set(table) - _KNOWN_RULE_KEYS
@@ -118,7 +118,7 @@ def _parse_rules(table: Mapping[str, object], context: str) -> GitRules:
 
 
 def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
-    """Parse one ``[[git.endpoint]]`` table entry into a :class:`GitEndpoint`."""
+    """Parse one [[git.endpoint]] table entry into a GitEndpoint."""
     if not isinstance(raw, Mapping):
         raise ConfigError(f"warden.toml [[git.endpoint]] #{index}: must be a table")
 
@@ -179,12 +179,12 @@ def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
 def _parse_git(
     file: Mapping[str, object],
 ) -> tuple[GitRules, Optional[tuple[str, ...]], tuple[GitEndpoint, ...]]:
-    """Parse ``[git.rules]``/``[git].actions`` (domain defaults) and
-    ``[[git.endpoint]]`` (one entry per host) into the endpoint-taxonomy config
+    """Parse [git.rules]/[git].actions (domain defaults) and
+    [[git.endpoint]] (one entry per host) into the endpoint-taxonomy config
     surface.
 
-    Fail-closed: an unknown ``type``, a duplicate ``host``, an unknown key in
-    any ``rules`` table, or an unknown/type-invalid ``actions`` id aborts
+    Fail-closed: an unknown type, a duplicate host, an unknown key in
+    any rules table, or an unknown/type-invalid actions id aborts
     startup rather than silently misconfiguring policy.
     """
     git = file.get("git", {})
@@ -219,10 +219,10 @@ def _parse_git(
 
 
 def _parse_token_file(env: Mapping[str, str], name: str) -> dict[str, str]:
-    """Parse a grouped ``<host> <token>`` secrets file (``<name>_FILE`` or the
-    bare ``<name>`` env var, via :func:`_secret`) into a host -> token map.
+    """Parse a grouped <host> <token> secrets file (<name>_FILE or the
+    bare <name> env var, via _secret) into a host -> token map.
 
-    Split on the first run of whitespace; blank lines and ``#`` comments are
+    Split on the first run of whitespace; blank lines and # comments are
     skipped; a duplicate host (after normalisation) aborts startup.
     """
     content = _secret(env, name)
@@ -247,7 +247,7 @@ def _resolve_git_endpoint_credentials(
     env: Mapping[str, str], git_endpoints: tuple[GitEndpoint, ...]
 ) -> dict[str, HostCredentials]:
     """Resolve each endpoint's read/write tokens from the grouped
-    ``read_tokens``/``write_tokens`` files, keyed by normalised host."""
+    read_tokens/write_tokens files, keyed by normalised host."""
     read_tokens = _parse_token_file(env, "READ_TOKENS")
     write_tokens = _parse_token_file(env, "WRITE_TOKENS")
     creds: dict[str, HostCredentials] = {}
@@ -260,7 +260,7 @@ def _resolve_git_endpoint_credentials(
 
 
 def _warn_closed_endpoints(cfg: Config) -> None:
-    """Log why each endpoint that resolves to ``closed`` is closed.
+    """Log why each endpoint that resolves to closed is closed.
 
     Fail-closed-degrade, not fail-stop: a missing or write-without-read
     credential never aborts startup, it only disables that one endpoint.
@@ -303,21 +303,21 @@ def from_env(
     strict: bool = True,
     toml_path: Optional[str] = None,
 ) -> Config:
-    """Build a :class:`Config`.
+    """Build a Config.
 
     **One source of truth per setting.** Policy tunables
-    (``branch_prefixes``, the ``max_*`` limits, ``allowed_projects``) come from
-    ``warden.toml`` only — no env override left. Secrets (the grouped
-    ``read_tokens``/``write_tokens`` files) and infra (host, ports, paths)
+    (branch_prefixes, the max_* limits, allowed_projects) come from
+    warden.toml only — no env override left. Secrets (the grouped
+    read_tokens/write_tokens files) and infra (host, ports, paths)
     come from env only.
 
-    With ``strict`` (the production path) a malformed ``warden.toml`` still
+    With strict (the production path) a malformed warden.toml still
     aborts startup — a non-positive quota or an empty/blank branch-prefix
     namespace is nonsensical regardless of deployment. There is no
     startup-fatal *credential* requirement: a host with no usable read
-    token simply resolves ``closed`` (fail-closed *degrade*, logged by
-    :func:`_warn_closed_endpoints`), and a deployment with no endpoints at all
-    boots and denies everything via ``core.guard.host_gate``.
+    token simply resolves closed (fail-closed *degrade*, logged by
+    _warn_closed_endpoints), and a deployment with no endpoints at all
+    boots and denies everything via core.guard.host_gate.
     """
     env = env if env is not None else os.environ
     file = _load_toml(toml_path or env.get("WARDEN_CONFIG_PATH", DEFAULT_TOML_PATH))
@@ -341,13 +341,13 @@ def from_env(
     def _tunable_branch_prefixes(
         list_key: str, legacy_scalar_key: str, default: tuple[str, ...]
     ) -> tuple[str, ...]:
-        """Resolve ``branch_prefixes`` — one namespace-list setting, one source.
+        """Resolve branch_prefixes — one namespace-list setting, one source.
 
-        ``warden.toml`` may set the list form (``branch_prefixes = [...]``) or
-        the legacy scalar form (``branch_prefix = "..."``, kept as a
+        warden.toml may set the list form (branch_prefixes = [...]) or
+        the legacy scalar form (branch_prefix = "...", kept as a
         one-element list) — never both, that would be two sources of truth
         for the same namespace. Emptiness (empty list, empty element) is *not*
-        rejected here — :func:`_validate` does that so the error message is
+        rejected here — _validate does that so the error message is
         consistent whichever source produced the value.
         """
         has_list = list_key in file
@@ -414,9 +414,9 @@ def _validate(cfg: Config) -> None:
 
     No credential (or allowlist) requirement aborts startup — a git_endpoint
     with a missing/inconsistent token is fail-closed-*degrade*: the endpoint
-    simply resolves ``closed`` (a logged warning, see
-    ``_warn_closed_endpoints``), never an abort; and an empty ``allowed_projects``
-    just means ``project_allowed()`` denies everything, so the warden boots
+    simply resolves closed (a logged warning, see
+    _warn_closed_endpoints), never an abort; and an empty allowed_projects
+    just means project_allowed() denies everything, so the warden boots
     (dev-env runs offline) and every op stays denied until a project is
     allowed.
     """
@@ -435,9 +435,9 @@ def _validate(cfg: Config) -> None:
 def _branch_prefixes_problems(cfg: Config) -> list[str]:
     """Fail-closed validation of the branch namespace.
 
-    An empty list or an empty element would make :meth:`Config.in_branch_namespace`
-    accept *any* branch name (``"".startswith("")`` is always true) — checked once
-    here, unconditionally (:func:`_validate`).
+    An empty list or an empty element would make Config.in_branch_namespace
+    accept *any* branch name ("".startswith("") is always true) — checked once
+    here, unconditionally (_validate).
     """
     if not cfg.branch_prefixes:
         return ["BRANCH_PREFIX must be non-empty"]

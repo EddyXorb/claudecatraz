@@ -34,7 +34,7 @@ from .pktline import RefCommand
 
 def _action_decision(actions: frozenset[Action], host: str, cfg: Config) -> Optional[Decision]:
     """Deny if any recognized action is irreversible (R4) or missing from the
-    host's effective actions (R6). An empty ``actions`` set — an unrecognized
+    host's effective actions (R6). An empty actions set — an unrecognized
     ref shape — denies fail-closed under R6 too.
     """
     if not actions:
@@ -49,7 +49,7 @@ def _action_decision(actions: frozenset[Action], host: str, cfg: Config) -> Opti
 
 def ref_action_gate(cmd: RefCommand, host: str, cfg: Config) -> Optional[Decision]:
     """The criticality/membership gate for one ref-command, used both by
-    ``action_gate`` (batch-atomic) and by the guard's per-ref deny
+    action_gate (batch-atomic) and by the guard's per-ref deny
     response (each ref names its own denied action).
     """
     return _action_decision(recognizers.ref_command_action(cmd), host, cfg)
@@ -59,15 +59,15 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
     """Deny a git-transport operation whose recognized action(s) are missing
     from the host's effective actions, or are irreversible.
 
-    Runs for all three operations — crucially ``advertise`` — so a
-    ``repo.read``-disabled host is denied already at push/fetch discovery,
-    before the client ever sends a pack. For ``receive-pack``, every
+    Runs for all three operations — crucially advertise — so a
+    repo.read-disabled host is denied already at push/fetch discovery,
+    before the client ever sends a pack. For receive-pack, every
     ref-command is checked; the first denial rejects the whole batch,
-    matching ``decide``'s per-ref quota atomicity.
+    matching decide's per-ref quota atomicity.
 
     Relies on the kernel's host gate (R6) having already run and passed for
-    ``intent.host``: a host with no ``[[git.endpoint]]`` entry is denied
-    there first. This matters because ``effective_actions`` cannot itself
+    intent.host: a host with no [[git.endpoint]] entry is denied
+    there first. This matters because effective_actions cannot itself
     distinguish "no endpoint" from "endpoint inheriting the domain/built-in
     default" — both return the same non-empty default — so this gate must
     never be the first thing to see an unconfigured host.
@@ -84,16 +84,16 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
 def check_ref(
     cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
 ) -> Decision:
-    """R2/R5 for one ref-command already cleared by ``action_gate`` — a
+    """R2/R5 for one ref-command already cleared by action_gate — a
     tag or a delete never reaches here, both denied earlier as irreversible.
 
-    ``max_open_branches``/``max_writes_per_hour`` are the endpoint's own
-    resolved ceilings (``Config.effective_rules(intent.host)``) —
-    stateful quotas are per-endpoint, never a global ``Config`` field, so the
+    max_open_branches/max_writes_per_hour are the endpoint's own
+    resolved ceilings (Config.effective_rules(intent.host)) —
+    stateful quotas are per-endpoint, never a global Config field, so the
     caller resolves the cascade once per request and passes the concrete
-    ints through (``GitRules``' fields are ``Optional`` — sentinels for the
+    ints through (GitRules' fields are Optional — sentinels for the
     cascade merge itself — so the caller, not this function, is where the
-    ``None``-after-cascade invariant is asserted).
+    None-after-cascade invariant is asserted).
     """
     ref = cmd.ref.removeprefix("refs/heads/")
     if not cfg.in_branch_namespace(ref):  # R2
@@ -113,7 +113,7 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     """Per ref-command: prefix / create-count / rate.
 
     Atomic: a single forbidden command rejects the whole push. Quotas are accounted
-    within the batch — N creates against ``max_open_branches - 1`` must reject.
+    within the batch — N creates against max_open_branches - 1 must reject.
     """
     if not intent.ref_commands:
         return Decision(False, R2, "no ref commands in push")
@@ -151,8 +151,8 @@ def full_decide(
     cfg: Config,
     project_allowed: Optional[Callable[[str], bool]] = None,
 ) -> Decision:
-    """Compose the kernel gates with this guard's pure ``decide`` for callers
-    outside ``Guard.handle`` (tests, and any offline "what would happen to
+    """Compose the kernel gates with this guard's pure decide for callers
+    outside Guard.handle (tests, and any offline "what would happen to
     this push" evaluator) that need the whole effective decision, not just
     this module's slice.
     """

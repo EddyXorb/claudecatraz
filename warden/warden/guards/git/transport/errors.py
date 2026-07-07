@@ -1,5 +1,5 @@
-"""git Smart-HTTP reject responses: a correctly framed ``report-status``
-over the side-band so ``git push`` shows a clear ``! [remote rejected] … (warden: R2 …)``."""
+"""git Smart-HTTP reject responses: a correctly framed report-status
+over the side-band so git push shows a clear ! [remote rejected] … (warden: R2 …)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ GIT_RECEIVE_RESULT = "application/x-git-receive-pack-result"
 
 
 def git_reject_body(decisions: list[Decision], refs: list[str], *, sideband: bool) -> bytes:
-    """Build a `report-status` payload rejecting every ref with the deny reason."""
+    """Build a report-status payload rejecting every ref with the deny reason."""
     inner = pkt_line(b"unpack ok\n")
     for ref, d in zip(refs, decisions):
         reason = f"warden: {d.rule} {d.reason}"

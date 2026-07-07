@@ -1,7 +1,7 @@
 """pkt-line parsing for the git Smart-HTTP receive-pack command section.
 
 Transport-free and pure: turns the bytes that precede the PACK payload into a
-list of ``RefCommand``.
+list of RefCommand.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def pkt_line(data: bytes) -> bytes:
 
 @dataclass(frozen=True)
 class RefCommand:
-    """A single ref update from a `receive-pack` push: ``<old> <new> <ref>``."""
+    """A single ref update from a receive-pack push: <old> <new> <ref>."""
 
     old: str
     new: str
@@ -52,10 +52,10 @@ def decompress_if_gzip(head: bytes) -> bytes:
 
 
 def parse_commands(head: bytes) -> list[RefCommand]:
-    """Parse pkt-line ref commands until the first flush-pkt (``0000``).
+    """Parse pkt-line ref commands until the first flush-pkt (0000).
 
     Expects enough buffered bytes to cover the command section (see
-    ``read_until_flush``).
+    read_until_flush).
     """
     head = decompress_if_gzip(head)
     cmds: list[RefCommand] = []

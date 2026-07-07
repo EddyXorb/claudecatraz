@@ -1,7 +1,7 @@
 """The git guard's Intent: forge-agnostic, covers all three git Smart-HTTP
-operations (advertise, upload-pack, receive-pack) dispatched on ``operation``.
+operations (advertise, upload-pack, receive-pack) dispatched on operation.
 
-``writes`` is False except for receive-pack push and push discovery
+writes is False except for receive-pack push and push discovery
 (advertise with ?service=git-receive-pack), both of which must carry the write token.
 """
 

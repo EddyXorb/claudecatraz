@@ -1,11 +1,11 @@
 """Forge-neutral httpx transport: token injection and project mapping.
 
-Read- vs. write-token chosen per :class:`~warden.core.model.Decision`. REST
-uses ``PRIVATE-TOKEN`` header; git Smart-HTTP uses HTTP-Basic ``oauth2:<token>``.
+Read- vs. write-token chosen per warden.core.model.Decision. REST
+uses PRIVATE-TOKEN header; git Smart-HTTP uses HTTP-Basic oauth2:<token>.
 Shared by both the git transport guard and the GitLab REST-API guard — a core
 module, not a guard-owned one, so neither guard depends on the other to reach
 upstream. The transport guard depends on this module only, never on anything
-under ``guards.git.gitlab``.
+under guards.git.gitlab.
 """
 
 from __future__ import annotations
@@ -40,18 +40,18 @@ _DROP_RESPONSE_HEADERS = {"content-encoding", "transfer-encoding", "connection",
 
 
 def project_id(project: str) -> str:
-    """URL-encode ``group/sub/proj`` → ``group%2Fsub%2Fproj`` for the REST path."""
+    """URL-encode group/sub/proj → group%2Fsub%2Fproj for the REST path."""
     return quote(normalize_project(project), safe="")
 
 
 def base_urls(endpoint: GitEndpoint) -> tuple[str, Optional[str]]:
-    """Base URLs derived from ``endpoint.host`` + ``endpoint.type`` (step 03,
-    point 1) — the replacement for the old free-form ``Config.api_url``: every
+    """Base URLs derived from endpoint.host + endpoint.type (step 03,
+    point 1) — the replacement for the old free-form Config.api_url: every
     host is explicit, and its URL form follows straight from its declared
-    ``type``, never from an env var.
+    type, never from an env var.
 
-    Returns ``(git_base, api_base)``; ``api_base`` is ``None`` for a type with
-    no REST surface (``plain``). ``github`` is reserved (rejected at parse
+    Returns (git_base, api_base); api_base is None for a type with
+    no REST surface (plain). github is reserved (rejected at parse
     time, step 01) until its guard exists, so it never reaches here.
     """
     if endpoint.type == "gitlab":
@@ -64,9 +64,9 @@ def base_urls(endpoint: GitEndpoint) -> tuple[str, Optional[str]]:
 class Upstream:
     """One endpoint's transport: base URLs + read/write tokens, forge-neutral.
 
-    Built exclusively by :class:`UpstreamRouter` from a :class:`GitEndpoint`
-    (never from a whole :class:`Config` clone) — the endpoint's own
-    ``host``/``type`` and its resolved :class:`~.config.HostCredentials` are
+    Built exclusively by UpstreamRouter from a GitEndpoint
+    (never from a whole Config clone) — the endpoint's own
+    host/type and its resolved warden.core.config.HostCredentials are
     the only inputs a request needs once the router has resolved it.
     """
 
@@ -173,16 +173,16 @@ class Upstream:
 class UpstreamRouter:
     """Host → Upstream resolution (§2), shared by the git guard and the
     REST-API guard so neither re-derives its own routing. One shared
-    ``httpx.AsyncClient`` (connection pooling) regardless of how many hosts
+    httpx.AsyncClient (connection pooling) regardless of how many hosts
     are configured.
 
-    Built straight from ``cfg.git_endpoints`` (step 03): one ``Upstream`` per
-    endpoint whose :meth:`Config.access_mode` is not ``"closed"`` — an
-    endpoint with no usable read credential never gets a routable ``Upstream``
+    Built straight from cfg.git_endpoints (step 03): one Upstream per
+    endpoint whose Config.access_mode is not "closed" — an
+    endpoint with no usable read credential never gets a routable Upstream
     at all. Every host is explicit; there is no single-target special case.
-    :meth:`resolve` normalises the raw ``Host`` header
-    (:meth:`Config.normalize_host`) and looks it up in that map, returning
-    ``None`` for an unknown *or* closed host (default-deny, R6).
+    resolve normalises the raw Host header
+    (Config.normalize_host) and looks it up in that map, returning
+    None for an unknown *or* closed host (default-deny, R6).
     """
 
     def __init__(self, cfg: Config, *, client: Optional[httpx.AsyncClient] = None) -> None:
@@ -204,18 +204,18 @@ class UpstreamRouter:
             )
 
     def resolve(self, host_header: str) -> Optional[Upstream]:
-        """Resolve the raw ``Host`` header to this request's ``Upstream``.
+        """Resolve the raw Host header to this request's Upstream.
 
-        ``None`` means an unknown or ``closed`` host (default-deny) — the
+        None means an unknown or closed host (default-deny) — the
         caller must turn that into a denial, never fall back to some default
         upstream.
         """
         return self._by_host.get(self._cfg.normalize_host(host_header))
 
     def for_host(self, host: str) -> Upstream:
-        """Direct, non-header lookup for reconcile: ``host`` must be one this
-        router actually built an ``Upstream`` for (an open endpoint's host
-        from ``cfg.effective_hosts``), so the lookup never misses."""
+        """Direct, non-header lookup for reconcile: host must be one this
+        router actually built an Upstream for (an open endpoint's host
+        from cfg.effective_hosts), so the lookup never misses."""
         return self._by_host[self._cfg.normalize_host(host)]
 
     async def aclose(self) -> None:
@@ -251,8 +251,8 @@ async def get_paginated(upstream: Upstream, path: str) -> list[Any]:
     """Fetch every page of a GitLab-shaped list endpoint (W8.2).
 
     Without this a project with >100 agent branches/MRs would only count the
-    first page, undercount the quota, and wrongly ``allow`` further writes.
-    Follows the ``X-Next-Page`` header until it is empty. Generic REST-listing
+    first page, undercount the quota, and wrongly allow further writes.
+    Follows the X-Next-Page header until it is empty. Generic REST-listing
     helper on the transport, not a forge concept — reused by the git guard's
     own branch reconcile and the GitLab REST-API guard's own MR reconcile,
     so neither depends on the other for it.
@@ -277,30 +277,30 @@ async def for_each_host_project(
     fn: Callable[[Upstream, str, str], Awaitable[None]],
 ) -> bool:
     """Shared fail-safe reconcile loop (§6.11, §07 Punkt 8 follow-up): iterate
-    ``hosts`` times every allowed project, calling ``fn(upstream, host,
-    project)`` for each combination.
+    hosts times every allowed project, calling fn(upstream, host,
+    project) for each combination.
 
     Forge-neutral on purpose — both the git guard's branch reconcile and the
     REST-API guard's MR reconcile had their own copy of this exact double
-    loop; this is the one definition, living in ``core`` so neither guard
-    depends on the other to get it (§07 Punkt 6). ``fn`` carries all the
+    loop; this is the one definition, living in core so neither guard
+    depends on the other to get it (§07 Punkt 6). fn carries all the
     domain-specific work (listing + replacing that guard's own state table);
-    a combination whose ``fn`` raises is logged (using ``label`` — e.g.
-    ``"git"``/``"api"`` — to tell the guards' log lines apart) and skipped,
+    a combination whose fn raises is logged (using label — e.g.
+    "git"/"api" — to tell the guards' log lines apart) and skipped,
     never aborting the rest of the loop. Returns True only if every
     combination completed without raising; False tells the caller to keep its
     state fail-closed-locked rather than trust an undercounted/stale view.
 
-    ``hosts`` is the caller's job to narrow to currently-open endpoints
-    (:func:`~warden.guards.git.reconcile.reconcile_branches` /
-    :func:`~warden.guards.git.gitlab.reconcile.reconcile_mrs` filter
-    ``cfg.git_endpoints`` via ``cfg.access_mode(...) != "closed"`` *before*
+    hosts is the caller's job to narrow to currently-open endpoints
+    (warden.guards.git.reconcile.reconcile_branches /
+    warden.guards.git.gitlab.reconcile.reconcile_mrs filter
+    cfg.git_endpoints via cfg.access_mode(...) != "closed" *before*
     calling here) — this loop trusts that contract and calls
-    :meth:`UpstreamRouter.for_host` unconditionally. A ``closed`` host slipping
+    UpstreamRouter.for_host unconditionally. A closed host slipping
     through would be a caller bug, not an expected runtime state, so it is
-    allowed to raise ``KeyError`` rather than being silently swallowed (this
+    allowed to raise KeyError rather than being silently swallowed (this
     function used to catch it here itself, before both callers pre-filtered —
-    see the git history around the ``closed``-endpoint reconcile crash fix).
+    see the git history around the closed-endpoint reconcile crash fix).
     """
     ok = True
     for host in hosts:

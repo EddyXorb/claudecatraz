@@ -1,6 +1,6 @@
-"""Operational logging setup: one stdlib ``logging`` config for the whole process.
+"""Operational logging setup: one stdlib logging config for the whole process.
 
-Separate from :mod:`warden.core.audit` on purpose — the audit log is a
+Separate from warden.core.audit on purpose — the audit log is a
 structured, versioned security record; this module is plain operational
 logging (startup warnings, reconcile failures, ...), formatted for humans and
 written both to stderr and to a file under the bind-mounted log directory.

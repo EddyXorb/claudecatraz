@@ -1,5 +1,5 @@
 """Pure request-shape helpers for the REST guard: the pieces
-``ApiGuard.parse`` composes from.
+ApiGuard.parse composes from.
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ _API_PREFIX = "/api/v4"
 def raw_rest_path(request: Request) -> str:
     """REST path after /api/v4, keeping percent-encoding (e.g. %2F in project ids).
 
-    ASGI servers decode ``scope["path"]`` — which would turn ``group%2Fproj`` into
-    a two-segment ``group/proj`` and break id extraction and forwarding. We read
-    ``raw_path`` to preserve the encoding all the way to gitlab.com. A
-    ``/api/graphql*`` path has no ``/api/v4`` prefix to strip, so it passes
+    ASGI servers decode scope["path"] — which would turn group%2Fproj into
+    a two-segment group/proj and break id extraction and forwarding. We read
+    raw_path to preserve the encoding all the way to gitlab.com. A
+    /api/graphql* path has no /api/v4 prefix to strip, so it passes
     through unchanged — which is exactly what marks it as GraphQL downstream.
 
     Deliberately query-less: path matching/decision operate on the path alone.
@@ -40,8 +40,8 @@ def raw_rest_path(request: Request) -> str:
 def raw_query(request: Request) -> str:
     """Raw query string (percent-encoding intact), for the upstream URL only.
 
-    The *decision* reads decoded fields via ``request.query_params`` (folded
-    into ``intent.fields`` by ``extract_fields``); this preserves
+    The *decision* reads decoded fields via request.query_params (folded
+    into intent.fields by extract_fields); this preserves
     the exact wire bytes GitLab must see — without it, a query-dependent decision
     could pass on a value the upstream request never actually carries.
     """
@@ -87,7 +87,7 @@ def extract_fields(
     An unmatched request needs none — nothing recognizes it either way.
 
     For a matched recognizer: only the fields it *declares*
-    (``RestRecognizer.decision_fields``) are read, each strictly from its
+    (RestRecognizer.decision_fields) are read, each strictly from its
     declared location (body or query) — never a blind merge of both. A
     body-declared field that only appears in the query string (or vice versa)
     is simply absent from the decision, exactly as if the caller never sent it.

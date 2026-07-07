@@ -1,7 +1,7 @@
 """Map a git Smart-HTTP intent to the actions it performs.
 
 advertise (either service) and upload-pack never write a ref, so both
-recognize to ``repo.read`` — push discovery carries the write token but only
+recognize to repo.read — push discovery carries the write token but only
 reads refs; the actual write is receive-pack's pack payload. receive-pack
 recognizes each ref-command independently and unions the result over the
 batch, so one push can require several actions at once.
@@ -25,7 +25,7 @@ def ref_command_action(cmd: RefCommand) -> frozenset[Action]:
     Delete is checked before create so a degenerate all-zero-to-all-zero
     command (never sent by real git, but not excluded by the wire format)
     recognizes as a delete rather than a create. A ref outside
-    ``refs/heads/``/``refs/tags/`` recognizes to nothing — fail-closed.
+    refs/heads/ / refs/tags/ recognizes to nothing — fail-closed.
     """
     if cmd.ref.startswith("refs/heads/"):
         if cmd.is_delete:
@@ -92,6 +92,6 @@ CATALOG: tuple[GitRecognizer, ...] = (
 
 
 def recognize(intent: GitIntent) -> frozenset[Action]:
-    """Whole-intent action set via ``CATALOG``. Empty when unmatched."""
+    """Whole-intent action set via CATALOG. Empty when unmatched."""
     row = first_match(CATALOG, intent)
     return row.recognize(intent) if row is not None else frozenset()

@@ -1,8 +1,8 @@
 """Core policy data types: pure values shared by kernel and every guard.
 
-Kept guard-agnostic on purpose: no forge vocabulary (MR, ``iid``, ref) lives here,
+Kept guard-agnostic on purpose: no forge vocabulary (MR, iid, ref) lives here,
 only what the kernel pipeline and audit/state layers need from *any* intent.
-Guard-specific intent shapes live with their guard and satisfy :class:`Intent` structurally.
+Guard-specific intent shapes live with their guard and satisfy Intent structurally.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class Decision:
 
 @dataclass(frozen=True)
 class StateView:
-    """Snapshot of quota counters. ``locked`` ⇒ fail-safe deny."""
+    """Snapshot of quota counters. locked ⇒ fail-safe deny."""
 
     open_mrs: int = 0
     open_branches: int = 0
@@ -41,14 +41,14 @@ class Intent(Protocol):
 
     Deliberately minimal (read-only properties):
 
-    * ``writes`` — derived by the guard's parser, never from a :class:`Decision`.
-      Allows read-only mode-gate to run *before* ``enrich``, keeping credentials unreachable.
-    * ``project`` — what the resource-allowlist gate needs.
-    * ``method`` — the audit envelope's verb (HTTP method for REST, ``"push"`` for git).
-    * ``host`` — the raw ``Host`` header the guard's parser read off the request
-      (§07 Punkt 8 follow-up). What ``core.guard.host_gate`` checks against
-      ``Config.host_allowed``; a guard resolves the *canonical* host (for
-      ``UpstreamRouter``/state keys) via ``Config.resolve_target_host(host)``.
+    * writes — derived by the guard's parser, never from a Decision.
+      Allows read-only mode-gate to run *before* enrich, keeping credentials unreachable.
+    * project — what the resource-allowlist gate needs.
+    * method — the audit envelope's verb (HTTP method for REST, "push" for git).
+    * host — the raw Host header the guard's parser read off the request
+      (§07 Punkt 8 follow-up). What core.guard.host_gate checks against
+      Config.host_allowed; a guard resolves the *canonical* host (for
+      UpstreamRouter/state keys) via Config.resolve_target_host(host).
 
     Guard-specific fields live on the concrete Intent dataclass in that guard's package.
     """

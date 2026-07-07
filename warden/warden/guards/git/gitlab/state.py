@@ -1,9 +1,9 @@
-"""The REST-API guard's own quota table: ``agent_mrs``, living in the same
+"""The REST-API guard's own quota table: agent_mrs, living in the same
 SQLite file as core state via the shared store — never a second connection.
 
 Branch tracking lives in the git guard's own state table; this one is the
-REST-API guard's MR-quota domain only. Keyed by ``(host, project, iid)`` with
-a per-endpoint ``open_mrs`` count, mirroring that module's shape.
+REST-API guard's MR-quota domain only. Keyed by (host, project, iid) with
+a per-endpoint open_mrs count, mirroring that module's shape.
 """
 
 from __future__ import annotations

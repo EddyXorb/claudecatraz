@@ -1,17 +1,17 @@
 """JSON-serialisable summary of every guard's recognizer catalog, per host.
 
-Served by the admin ``/policy`` route so the CLI can learn a configured
+Served by the admin /policy route so the CLI can learn a configured
 host's effective actions and catalog state without a runtime Python import.
 One section per host; within a host, one sub-list per guard composing that
-host's endpoint type (``guards.git.endpoints.ENDPOINT_TYPES``) — a ``plain``
-host shows only the transport guard's rows, a ``gitlab`` host shows both.
+host's endpoint type (guards.git.endpoints.ENDPOINT_TYPES) — a plain
+host shows only the transport guard's rows, a gitlab host shows both.
 
-Every row is a recognizer from that guard's own ``catalog``: its id, the
+Every row is a recognizer from that guard's own catalog: its id, the
 actions it can possibly recognize (with criticality, default membership, and
 whether currently active for this host), and its quota kind where one
-applies. A row's action(s) at ``Criticality.IRREVERSIBLE`` are always
+applies. A row's action(s) at Criticality.IRREVERSIBLE are always
 inactive by construction (the kernel's criticality gate denies them
-regardless of config) — ``denials`` collects those ids per host so a never
+regardless of config) — denials collects those ids per host so a never
 class action is named explicitly instead of hidden inside a row.
 """
 
@@ -48,9 +48,9 @@ def _guards_by_composition_name(guards: list[Guard[Any]]) -> Mapping[str, Guard[
 
 
 def endpoint_table_report(cfg: Config, guards: list[Guard[Any]]) -> dict[str, Any]:
-    """Build the ``/policy`` response body: one section per configured host.
+    """Build the /policy response body: one section per configured host.
 
-    ``guards`` is the running ``AppContext``'s guard instances — the report
+    guards is the running AppContext's guard instances — the report
     walks the actual objects handling requests, never a fresh set built for
     reporting only.
     """

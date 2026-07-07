@@ -1,10 +1,10 @@
 """Starlette app + routing: agent port vs. admin port.
 
 Generic assembly only: stays at the top of the package, free of guard internals.
-Each guard in ``ctx.guards`` supplies its own routes (:meth:`~warden.core.guard.Guard.routes`);
-this module never imports a concrete guard class, only :mod:`warden.context`'s guard-agnostic
-:class:`~warden.context.AppContext`. The pipeline every route runs through lives
-in :mod:`warden.core.guard`.
+Each guard in ctx.guards supplies its own routes (Guard.routes);
+this module never imports a concrete guard class, only warden.context's guard-agnostic
+AppContext. The pipeline every route runs through lives
+in warden.core.guard.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def create_app(ctx: AppContext) -> Starlette:
     """Agent-facing app on port 8080: API proxy + git Smart-HTTP.
 
     Generic assembly: every guard supplies its own routes
-    (:meth:`~warden.core.guard.Guard.routes`); this module never lists
+    (Guard.routes); this module never lists
     guard endpoints, staying free of guard-policy internals.
     """
     # The /git/ prefix is load-bearing: it separates git Smart-HTTP routes from
@@ -87,7 +87,7 @@ async def _policy(request: Request) -> JSONResponse:
     """Read-only summary of the effective endpoint catalog, per host (admin net only).
 
     Every entry: whether part of the default set, whether activated for that host.
-    ``catraz doctor`` uses this to show catalog ids and state.
+    catraz doctor uses this to show catalog ids and state.
     """
     ctx: AppContext = request.app.state.ctx
     return JSONResponse(endpoint_table_report(ctx.cfg, ctx.guards))
