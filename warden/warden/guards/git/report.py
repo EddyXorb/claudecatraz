@@ -6,10 +6,10 @@ One section per host; within a host, one sub-list per guard composing that
 host's endpoint type (guards.git.endpoints.ENDPOINT_TYPES) — a plain
 host shows only the transport guard's rows, a gitlab host shows both.
 
-Every row is a recognizer from that guard's own catalog: its id, the
-actions it can possibly recognize (with criticality, default membership, and
-whether currently active for this host), and its quota kind where one
-applies. A row's action(s) at Criticality.IRREVERSIBLE are always
+Every row is a recognizer from that guard's own recognizer table: its id,
+the actions it can possibly recognize (with criticality, default membership,
+whether currently active for this host, and its quota kind where one
+applies). A row's action(s) at Criticality.IRREVERSIBLE are always
 inactive by construction (the kernel's criticality gate denies them
 regardless of config) — denials collects those ids per host so a never
 class action is named explicitly instead of hidden inside a row.
@@ -24,6 +24,7 @@ from ...core.config import Config
 from ...core.guard import Guard
 from . import actions as git_actions
 from .endpoints import ENDPOINT_TYPES
+from .gitlab import actions as gitlab_actions
 from .gitlab.guard import ApiGuard
 from .transport.guard import GitGuard
 
@@ -70,7 +71,7 @@ def _host_report(cfg: Config, host: str, by_name: Mapping[str, Guard[Any]]) -> d
         guard = by_name.get(guard_name)
         if guard is None:
             continue
-        for row in guard.catalog:
+        for row in guard.recognizers:
             row_report, row_denials = _row_report(row, effective)
             catalog.append({"guard": guard_name, **row_report})
             denials |= row_denials
@@ -89,20 +90,14 @@ def _row_report(row: Any, effective: frozenset[str]) -> tuple[dict[str, Any], se
         never = action.criticality is Criticality.IRREVERSIBLE
         if never:
             denials.add(action.id)
+        quota_kind = gitlab_actions.QUOTA_KIND.get(action.id)
         actions.append(
             {
                 "id": action.id,
                 "criticality": action.criticality.name,
                 "default": action.id in _DEFAULT_IDS,
                 "active": action.id in effective and not never,
+                "quota_kind": quota_kind.value if quota_kind is not None else None,
             }
         )
-    quota_kind = getattr(row, "quota_kind", None)
-    return (
-        {
-            "id": row.id,
-            "actions": actions,
-            "quota_kind": quota_kind.value if quota_kind is not None else None,
-        },
-        denials,
-    )
+    return ({"id": row.id, "actions": actions}, denials)

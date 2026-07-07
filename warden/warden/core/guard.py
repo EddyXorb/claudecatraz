@@ -12,7 +12,7 @@ it never sees the sequence, only its own hooks.
 Sequence Guard.handle guarantees, in this order:
 
 1. guard.parse — transport → an Intent. No credential yet.
-2. Recognize: the first matching row in guard.catalog yields the
+2. Recognize: the first matching row in guard.recognizers yields the
    recognized action set for this intent — empty when nothing matches.
 3. kernel_gates — guard-agnostic deny gates, all before enrich:
    host allowlist, mode-gate writes, project allowlist, an unmatched/empty
@@ -41,7 +41,7 @@ from .actions import Action, Criticality
 from .audit import AuditEvent, AuditLog
 from .config import Config
 from .model import Decision, Intent, StateView
-from .recognizer import Recognizer, first_match
+from .recognizer import Recognizer, first_recognized
 from .rules import R0, R3, R4, R6
 from .state import State
 
@@ -133,9 +133,9 @@ def kernel_gates(
     so unit tests exercise exactly the effective order — never a re-derived
     copy of it.
 
-    recognized is this intent's whole action set (the guard's catalog
-    matched via first_match, already computed by the caller since the
-    catalog is guard-specific). An unmatched or empty-recognized *write*
+    recognized is this intent's whole action set (the guard's recognizers
+    matched via first_recognized, already computed by the caller since the
+    list is guard-specific). An unmatched or empty-recognized *write*
     denies right here (R3) — a read falls through unchanged, since the
     project-bound read pass-through is the guard's own decide's job.
     """
@@ -165,9 +165,9 @@ class Guard(ABC, Generic[IntentT]):
     """The parts a guard supplies to handle.
 
     name is the audit guard value (bare strings: "git"/"api").
-    catalog/supported are the guard's recognizer table and the action
-    set it declares itself capable of gating — the kernel recognizes and
-    gates generically from these, so a guard hook does I/O
+    recognizers/supported_actions are the guard's recognizer table and the
+    action set it declares itself capable of gating — the kernel recognizes
+    and gates generically from these, so a guard hook does I/O
     (parse/enrich/record/forward/deny_response) or is pure default-deny logic
     (decide) only; the criticality/enablement checks are no longer a
     per-guard hook.
@@ -184,17 +184,17 @@ class Guard(ABC, Generic[IntentT]):
 
     @property
     @abstractmethod
-    def catalog(self) -> tuple[Recognizer[IntentT], ...]:
+    def recognizers(self) -> tuple[Recognizer[IntentT], ...]:
         """This guard's recognizer table, most specific row first.
 
-        The kernel matches it via first_match right after parse to
-        get the intent's recognized action set.
+        The kernel calls through it via first_recognized right after parse
+        to get the intent's recognized action set.
         """
         ...
 
     @property
     @abstractmethod
-    def supported(self) -> frozenset[Action]:
+    def supported_actions(self) -> frozenset[Action]:
         """The action set this guard is capable of gating.
 
         The static ceiling — never what a deployment has actually enabled
@@ -277,10 +277,7 @@ class Guard(ABC, Generic[IntentT]):
         intent = await self.parse(request)
         view = self.state_view(intent.host)
 
-        match = first_match(self.catalog, intent)
-        recognized: frozenset[Action] = (
-            match.recognize(intent) if match is not None else frozenset()
-        )
+        recognized = first_recognized(self.recognizers, intent) or frozenset[Action]()
 
         decision = kernel_gates(intent, self.cfg, self.project_allowed, recognized)
         if decision is None:

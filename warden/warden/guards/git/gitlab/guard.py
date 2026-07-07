@@ -69,11 +69,11 @@ class ApiGuard(Guard[ApiIntent]):
         return "api"
 
     @property
-    def catalog(self) -> tuple[RestRecognizer, ...]:
+    def recognizers(self) -> tuple[RestRecognizer, ...]:
         return CATALOG
 
     @property
-    def supported(self) -> frozenset[Action]:
+    def supported_actions(self) -> frozenset[Action]:
         return gitlab_actions.SUPPORTED
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
@@ -221,13 +221,15 @@ class ApiGuard(Guard[ApiIntent]):
         if decision.token != TokenKind.WRITE:
             return
         match = match_request(intent)
-        assert match is not None and match.quota_kind is not None, (
-            "an allowed write always matched a recognizer with a quota kind"
-        )
+        assert match is not None, "an allowed write always matched a recognizer"
+        recognized = match(intent) or frozenset()
+        action = next(iter(recognized), None)
+        quota_kind = gitlab_actions.QUOTA_KIND.get(action.id) if action is not None else None
+        assert quota_kind is not None, "an allowed write's action always has a quota kind"
         host = self.cfg.resolve_target_host(intent.host)
         assert host is not None, "kernel_gates already denied an unresolved host"
         ref_or_iid = str(intent.iid or intent.project)
-        self.state.record_write("api", host, match.quota_kind.value, ref_or_iid)
+        self.state.record_write("api", host, quota_kind.value, ref_or_iid)
 
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:
         # Raw query is reattached here at transport boundary only, never in intent.path
@@ -249,10 +251,12 @@ class ApiGuard(Guard[ApiIntent]):
 
     def audit_fields(self, intent: ApiIntent) -> Mapping[str, Any]:
         match = match_request(intent)
-        recognized = match.recognize(intent) if match is not None else frozenset()
+        recognized = (match(intent) or frozenset()) if match is not None else frozenset()
+        action = next(iter(recognized), None)
+        quota_kind = gitlab_actions.QUOTA_KIND.get(action.id) if action is not None else None
         fields: dict[str, Any] = {
             "path": intent.path,
-            "kind": match.quota_kind.value if match is not None and match.quota_kind else None,
+            "kind": quota_kind.value if quota_kind is not None else None,
         }
         if recognized:
             fields["actions"] = tuple(sorted(a.id for a in recognized))

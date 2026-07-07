@@ -10,10 +10,10 @@ batch, so one push can require several actions at once.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from ....core.actions import Action
-from ....core.recognizer import Recognizer, first_match
+from ....core.recognizer import Recognizer, first_recognized
 from .. import actions as git_actions
 from .intent import GitIntent
 from .pktline import RefCommand
@@ -60,11 +60,8 @@ class GitRecognizer(Recognizer[GitIntent]):
     recognize_fn: Callable[[GitIntent], frozenset[Action]]
     possible_actions: frozenset[Action]
 
-    def matches(self, intent: GitIntent) -> bool:
-        return intent.operation in self.operations
-
-    def recognize(self, intent: GitIntent) -> frozenset[Action]:
-        return self.recognize_fn(intent)
+    def __call__(self, intent: GitIntent) -> Optional[frozenset[Action]]:
+        return self.recognize_fn(intent) if intent.operation in self.operations else None
 
 
 CATALOG: tuple[GitRecognizer, ...] = (
@@ -93,5 +90,4 @@ CATALOG: tuple[GitRecognizer, ...] = (
 
 def recognize(intent: GitIntent) -> frozenset[Action]:
     """Whole-intent action set via CATALOG. Empty when unmatched."""
-    row = first_match(CATALOG, intent)
-    return row.recognize(intent) if row is not None else frozenset()
+    return first_recognized(CATALOG, intent) or frozenset()

@@ -1,11 +1,11 @@
-"""Tests for the core action model: Criticality, Action, Recognizer, first_match."""
+"""Tests for the core action model: Criticality, Action, Recognizer, first_recognized."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from warden.core.actions import Action, Criticality
-from warden.core.recognizer import Recognizer, first_match
+from warden.core.recognizer import Recognizer, first_recognized
 
 # --- Criticality --------------------------------------------------------
 
@@ -38,7 +38,7 @@ def test_action_is_usable_as_a_frozenset_member():
     assert a in actions
 
 
-# --- Recognizer / first_match --------------------------------------------
+# --- Recognizer / first_recognized ----------------------------------------
 
 
 @dataclass(frozen=True)
@@ -61,29 +61,28 @@ class _DummyRecognizer(Recognizer[_DummyIntent]):
             Action(id=action_id, criticality=Criticality.READ) for action_id in action_ids
         )
 
-    def matches(self, intent: _DummyIntent) -> bool:
-        return intent.method == self._method
-
-    def recognize(self, intent: _DummyIntent) -> frozenset[Action]:
-        return self._actions
+    def __call__(self, intent: _DummyIntent) -> frozenset[Action] | None:
+        return self._actions if intent.method == self._method else None
 
 
-def test_first_match_returns_the_first_of_two_overlapping_rows():
+def test_first_recognized_returns_the_first_of_two_overlapping_rows():
     first = _DummyRecognizer("first", "GET", frozenset({"x.read"}))
     second = _DummyRecognizer("second", "GET", frozenset({"x.other"}))
 
-    assert first_match([first, second], _intent("GET")) is first
+    # the *first* row wins, not a union of both
+    result = first_recognized([first, second], _intent("GET"))
+    assert result is not None
+    assert {a.id for a in result} == {"x.read"}
 
 
-def test_first_match_returns_none_when_nothing_matches():
+def test_first_recognized_returns_none_when_nothing_matches():
     catalog = [_DummyRecognizer("only", "GET", frozenset({"x.read"}))]
 
-    assert first_match(catalog, _intent("POST")) is None
+    assert first_recognized(catalog, _intent("POST")) is None
 
 
 def test_matched_recognizer_may_legally_recognize_no_action():
     recognizer = _DummyRecognizer("empty", "GET", frozenset())
     intent = _intent("GET")
 
-    assert recognizer.matches(intent) is True
-    assert recognizer.recognize(intent) == frozenset()
+    assert recognizer(intent) == frozenset()

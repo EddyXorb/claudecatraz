@@ -114,7 +114,7 @@ def test_catalog_row_matches_and_recognizes(expected_id, method, path, fields, e
     match = match_request(intent)
     assert match is not None, f"no recognizer matched {method} {path}"
     assert match.id == expected_id
-    recognized = match.recognize(intent)
+    recognized = match(intent)
     assert {a.id for a in recognized} == set(expected_actions)
 
 
@@ -142,7 +142,7 @@ def test_mr_update_state_event_matrix(state_event, expected):
     intent = _intent("PUT", "/projects/1/merge_requests/7", **fields)
     match = match_request(intent)
     assert match is not None and match.id == "mr.update"
-    assert {a.id for a in match.recognize(intent)} == expected
+    assert {a.id for a in match(intent)} == expected
 
 
 # --- state_event matrix: issues (no merge concept) ----------------------------
@@ -163,7 +163,7 @@ def test_issue_update_state_event_matrix(state_event, expected):
     intent = _intent("PUT", "/projects/1/issues/7", **fields)
     match = match_request(intent)
     assert match is not None and match.id == "issue.update"
-    assert {a.id for a in match.recognize(intent)} == expected
+    assert {a.id for a in match(intent)} == expected
 
 
 # --- search scope matrix -------------------------------------------------------
@@ -187,14 +187,14 @@ def test_search_scope_matrix(scope, expected):
     intent = _intent("GET", "/search", **fields)
     match = match_request(intent)
     assert match is not None and match.id == "read.search"
-    assert {a.id for a in match.recognize(intent)} == expected
+    assert {a.id for a in match(intent)} == expected
 
 
 def test_group_search_unknown_scope_denied():
     intent = _intent("GET", "/groups/1/search", scope="wiki_blobs")
     match = match_request(intent)
     assert match is not None and match.id == "read.group_search"
-    assert match.recognize(intent) == frozenset()
+    assert match(intent) == frozenset()
 
 
 # --- the content line ----------------------------------------------------------
@@ -219,7 +219,7 @@ def test_content_line(path, expected_action):
     intent = _intent("GET", path)
     match = match_request(intent)
     assert match is not None
-    assert {a.id for a in match.recognize(intent)} == {expected_action}
+    assert {a.id for a in match(intent)} == {expected_action}
 
 
 @pytest.mark.parametrize(

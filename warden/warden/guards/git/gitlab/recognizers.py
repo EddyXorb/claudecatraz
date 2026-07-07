@@ -6,7 +6,7 @@ through to. Every row's action set is computed by its own action_fn: a
 static set for most rows, a field-conditional lookup for the handful whose
 meaning depends on a request field (state_event, search scope) — an
 unrecognised field value yields an empty set, which is always a deny
-(core.recognizer.Recognizer.recognize's fail-closed contract).
+(the fail-closed contract every Recognizer call obeys).
 """
 
 from __future__ import annotations
@@ -15,28 +15,12 @@ import functools
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Mapping, Optional, cast
+from typing import Callable, Mapping, Optional
 
 from ....core.actions import Action
-from ....core.recognizer import Recognizer, first_match
+from ....core.recognizer import Recognizer
 from .. import actions as git_actions
 from .intent import ApiIntent
-
-
-class QuotaKind(str, Enum):
-    """What a write recognizer touches — drives quota accounting (R5) and
-    the audit log's kind field. Only MR gates anything beyond the
-    blanket writes-per-hour rate limit (the open-MR count)."""
-
-    MR = "mr"
-    MR_NOTE = "mr_note"
-    MR_UPDATE = "mr_update"
-    MR_MERGE = "mr_merge"
-    CI_TRIGGER = "ci_trigger"
-    BRANCH_CREATE = "branch_create"
-    ISSUE_CREATE = "issue_create"
-    ISSUE_UPDATE = "issue_update"
-    ISSUE_NOTE = "issue_note"
 
 
 class ScopeKind(str, Enum):
@@ -168,11 +152,13 @@ def _methods(*methods: str) -> frozenset[str]:
 class RestRecognizer(Recognizer[ApiIntent]):
     """One catalog row: method(s) + path template -> action set.
 
-    scope_kind/namespace_field/quota_kind are the scope-policy
-    payload policy.decide_scope consumes — meaningful only for write
-    rows; a read row leaves them at their defaults. A BRANCH_NAMESPACE row
-    with namespace_field=None resolves its branch via the iid -> MR
-    upstream lookup (intent.mr_source_ok) instead of a literal field.
+    scope_kind/namespace_field are the scope-policy payload
+    policy.decide_scope consumes — meaningful only for write rows; a read
+    row leaves them at their defaults. A BRANCH_NAMESPACE row with
+    namespace_field=None resolves its branch via the iid -> MR upstream
+    lookup (intent.mr_source_ok) instead of a literal field. Quota kind is
+    not declared here — it is a function of the recognized action, not of
+    the row (guards.git.gitlab.actions.QUOTA_KIND).
 
     possible_actions (the policy report's static view of this row,
     required by Recognizer) is derived automatically from action_fn
@@ -188,7 +174,6 @@ class RestRecognizer(Recognizer[ApiIntent]):
     action_fn: ActionFn
     scope_kind: Optional[ScopeKind] = None
     namespace_field: Optional[str] = None
-    quota_kind: Optional[QuotaKind] = None
     decision_fields: tuple[FieldSpec, ...] = ()
     possible_actions_override: Optional[frozenset[Action]] = None
 
@@ -208,17 +193,24 @@ class RestRecognizer(Recognizer[ApiIntent]):
         return _compile(self.template)
 
     def matches(self, intent: ApiIntent) -> bool:
+        """Method/path test only, kept independent of __call__ so callers
+        that need this specific row (not just its recognized actions —
+        policy.decide_scope, ApiGuard.parse/enrich/record/audit_fields) can
+        find it via match_request without recomputing action_fn."""
         return intent.method.upper() in self.methods and bool(
             self.regex.fullmatch(intent.path.rstrip("/"))
         )
 
-    def recognize(self, intent: ApiIntent) -> frozenset[Action]:
-        return self.action_fn(intent)
+    def __call__(self, intent: ApiIntent) -> Optional[frozenset[Action]]:
+        return self.action_fn(intent) if self.matches(intent) else None
 
 
 def match_request(intent: ApiIntent) -> Optional[RestRecognizer]:
     """First CATALOG row matching intent, or None."""
-    return cast(Optional[RestRecognizer], first_match(CATALOG, intent))
+    for row in CATALOG:
+        if row.matches(intent):
+            return row
+    return None
 
 
 _POST = _methods("POST")
@@ -235,7 +227,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         action_fn=_static(git_actions.PROJECT_MR_CREATE),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
         namespace_field="source_branch",
-        quota_kind=QuotaKind.MR,
         decision_fields=(FieldSpec("source_branch", Location.BODY),),
     ),
     RestRecognizer(
@@ -244,7 +235,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/merge_requests/{iid}/notes",
         action_fn=_static(git_actions.PROJECT_MR_COMMENT),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
-        quota_kind=QuotaKind.MR_NOTE,
     ),
     RestRecognizer(
         id="mr.discussion",
@@ -252,7 +242,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/merge_requests/{iid}/discussions",
         action_fn=_static(git_actions.PROJECT_MR_COMMENT),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
-        quota_kind=QuotaKind.MR_NOTE,
     ),
     RestRecognizer(
         id="mr.discussion_reply",
@@ -260,7 +249,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/merge_requests/{iid}/discussions/{discussion_id}/notes",
         action_fn=_static(git_actions.PROJECT_MR_COMMENT),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
-        quota_kind=QuotaKind.MR_NOTE,
     ),
     RestRecognizer(
         id="mr.update",
@@ -268,7 +256,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/merge_requests/{iid}",
         action_fn=_mr_state_event,
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
-        quota_kind=QuotaKind.MR_UPDATE,
         decision_fields=(FieldSpec("state_event", Location.BODY),),
         possible_actions_override=frozenset(_MR_STATE_ACTIONS.values()),
     ),
@@ -282,7 +269,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         # MR upstream lookup here would only be a wasted (unmocked-in-tests,
         # credential-backed) call for a request that can never be allowed.
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.MR_MERGE,
     ),
     RestRecognizer(
         id="pipeline.trigger",
@@ -291,7 +277,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
         namespace_field="ref",
-        quota_kind=QuotaKind.CI_TRIGGER,
         decision_fields=(FieldSpec("ref", Location.BODY),),
     ),
     RestRecognizer(
@@ -300,7 +285,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/merge_requests/{iid}/pipelines",
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
-        quota_kind=QuotaKind.CI_TRIGGER,
     ),
     RestRecognizer(
         id="pipeline.retry",
@@ -308,7 +292,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/pipelines/{pipeline_id}/retry",
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.CI_TRIGGER,
     ),
     RestRecognizer(
         id="pipeline.cancel",
@@ -316,7 +299,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/pipelines/{pipeline_id}/cancel",
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.CI_TRIGGER,
     ),
     RestRecognizer(
         id="job.retry",
@@ -324,7 +306,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/jobs/{job_id}/retry",
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.CI_TRIGGER,
     ),
     RestRecognizer(
         id="job.cancel",
@@ -332,7 +313,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/jobs/{job_id}/cancel",
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.CI_TRIGGER,
     ),
     RestRecognizer(
         id="job.play",
@@ -340,7 +320,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/jobs/{job_id}/play",
         action_fn=_static(git_actions.PROJECT_CI_TRIGGER),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.CI_TRIGGER,
     ),
     RestRecognizer(
         id="branch.create",
@@ -349,7 +328,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         action_fn=_static(git_actions.REPO_BRANCH_CREATE),
         scope_kind=ScopeKind.BRANCH_NAMESPACE,
         namespace_field="branch",
-        quota_kind=QuotaKind.BRANCH_CREATE,
         decision_fields=(FieldSpec("branch", Location.BODY),),
     ),
     RestRecognizer(
@@ -358,7 +336,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/issues",
         action_fn=_static(git_actions.PROJECT_ISSUE_CREATE),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.ISSUE_CREATE,
     ),
     RestRecognizer(
         id="issue.update",
@@ -366,7 +343,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/issues/{iid}",
         action_fn=_issue_state_event,
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.ISSUE_UPDATE,
         decision_fields=(FieldSpec("state_event", Location.BODY),),
         possible_actions_override=frozenset(_ISSUE_STATE_ACTIONS.values()),
     ),
@@ -376,7 +352,6 @@ CATALOG: tuple[RestRecognizer, ...] = (
         template="/projects/{id}/issues/{iid}/notes",
         action_fn=_static(git_actions.PROJECT_ISSUE_COMMENT),
         scope_kind=ScopeKind.QUOTA_BY_KIND,
-        quota_kind=QuotaKind.ISSUE_NOTE,
     ),
     # --- reads, project-bound (most specific first) ----------------------
     RestRecognizer(

@@ -131,16 +131,33 @@ def test_denied_action_is_inactive_even_if_explicitly_configured():
     assert delete_action["active"] is False
 
 
-# --- quota_kind: gitlab rows only ---------------------------------------------
+# --- quota_kind: per action, gitlab actions only ------------------------------
 
 
-def test_quota_kind_present_on_gitlab_rows_absent_on_transport_rows():
+def test_quota_kind_present_on_gitlab_actions_absent_on_transport_actions():
     host_report = _report(_cfg(git_endpoints=(GitEndpoint(host=_HOST, type="gitlab"),)))["hosts"][
         _HOST
     ]
     rows_by_id = {row["id"]: row for row in host_report["catalog"]}
-    assert rows_by_id["mr.create"]["quota_kind"] == "mr"
-    assert rows_by_id["git.read"]["quota_kind"] is None
+    mr_create_action = rows_by_id["mr.create"]["actions"][0]
+    assert mr_create_action["id"] == "project.mr.create"
+    assert mr_create_action["quota_kind"] == "mr"
+    git_read_action = rows_by_id["git.read"]["actions"][0]
+    assert git_read_action["quota_kind"] is None
+
+
+def test_quota_kind_differs_by_action_within_a_multi_action_row():
+    # mr.update's single row recognizes to edit/close/merge depending on
+    # state_event — quota kind is a function of which action ends up
+    # recognized, not a single value for the whole row.
+    host_report = _report(_cfg(git_endpoints=(GitEndpoint(host=_HOST, type="gitlab"),)))["hosts"][
+        _HOST
+    ]
+    rows_by_id = {row["id"]: row for row in host_report["catalog"]}
+    actions_by_id = {a["id"]: a for a in rows_by_id["mr.update"]["actions"]}
+    assert actions_by_id["project.mr.edit"]["quota_kind"] == "mr_update"
+    assert actions_by_id["project.mr.close"]["quota_kind"] == "mr_update"
+    assert actions_by_id["project.mr.merge"]["quota_kind"] is None
 
 
 # --- per-host activation differs when two hosts have different actions -------

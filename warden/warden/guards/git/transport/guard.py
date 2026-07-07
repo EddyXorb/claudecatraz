@@ -69,11 +69,11 @@ class GitGuard(Guard[GitIntent]):
         return "git"
 
     @property
-    def catalog(self) -> tuple[recognizers.GitRecognizer, ...]:
+    def recognizers(self) -> tuple[recognizers.GitRecognizer, ...]:
         return recognizers.CATALOG
 
     @property
-    def supported(self) -> frozenset[Action]:
+    def supported_actions(self) -> frozenset[Action]:
         return transport_actions.SUPPORTED
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog, router: UpstreamRouter) -> None:
