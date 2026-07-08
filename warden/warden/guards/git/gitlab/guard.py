@@ -224,12 +224,12 @@ class ApiGuard(Guard[ApiIntent]):
         assert match is not None, "an allowed write always matched a recognizer"
         recognized = match(intent) or frozenset()
         action = next(iter(recognized), None)
-        quota_kind = gitlab_actions.QUOTA_KIND.get(action.id) if action is not None else None
+        quota_kind = action.quota_kind if action is not None else None
         assert quota_kind is not None, "an allowed write's action always has a quota kind"
         host = self.cfg.resolve_target_host(intent.host)
         assert host is not None, "kernel_gates already denied an unresolved host"
         ref_or_iid = str(intent.iid or intent.project)
-        self.state.record_write("api", host, quota_kind.value, ref_or_iid)
+        self.state.record_write("api", host, quota_kind, ref_or_iid)
 
     async def forward(self, request: Request, intent: ApiIntent, decision: Decision) -> Response:
         # Raw query is reattached here at transport boundary only, never in intent.path
@@ -253,10 +253,9 @@ class ApiGuard(Guard[ApiIntent]):
         match = match_request(intent)
         recognized = (match(intent) or frozenset()) if match is not None else frozenset()
         action = next(iter(recognized), None)
-        quota_kind = gitlab_actions.QUOTA_KIND.get(action.id) if action is not None else None
         fields: dict[str, Any] = {
             "path": intent.path,
-            "kind": quota_kind.value if quota_kind is not None else None,
+            "kind": action.quota_kind if action is not None else None,
         }
         if recognized:
             fields["actions"] = tuple(sorted(a.id for a in recognized))

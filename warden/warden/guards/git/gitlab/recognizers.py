@@ -157,8 +157,8 @@ class RestRecognizer(Recognizer[ApiIntent]):
     row leaves them at their defaults. A BRANCH_NAMESPACE row with
     namespace_field=None resolves its branch via the iid -> MR upstream
     lookup (intent.mr_source_ok) instead of a literal field. Quota kind is
-    not declared here — it is a function of the recognized action, not of
-    the row (guards.git.gitlab.actions.QUOTA_KIND).
+    not declared here — it is carried on the recognized action itself
+    (Action.quota_kind), not on the recognizer.
 
     possible_actions (the policy report's static view of this row,
     required by Recognizer) is derived automatically from action_fn

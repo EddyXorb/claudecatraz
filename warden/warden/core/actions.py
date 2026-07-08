@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Optional
 
 
 class Criticality(IntEnum):
@@ -23,8 +24,12 @@ class Action:
     """One named effect a request can have, with its criticality.
 
     The id is an opaque string to every consumer in core: never parsed, no
-    grammar enforced. Frozen and hashable so actions can live in sets.
+    grammar enforced. quota_kind is the same — an opaque tag a namespace
+    attaches so its guard knows which quota bucket this action spends (None
+    for reads and for the never-permitted irreversible actions); core stores
+    it and never interprets it. Frozen and hashable so actions can live in sets.
     """
 
     id: str
     criticality: Criticality
+    quota_kind: Optional[str] = None

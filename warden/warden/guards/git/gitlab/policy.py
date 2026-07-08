@@ -29,7 +29,7 @@ from ....core.config import Config
 from ....core.guard import kernel_gates
 from ....core.model import Decision, StateView, TokenKind
 from ....core.rules import R1, R2, R3, R5, R6
-from . import actions as gitlab_actions
+from .. import actions as git_actions
 from .intent import ApiIntent
 from .recognizers import RestRecognizer, ScopeKind, match_request
 
@@ -134,19 +134,17 @@ def _quota_check(
     recognized: frozenset[Action], state: StateView, max_open_mrs: int, max_writes_per_hour: int
 ) -> Optional[Decision]:
     """max_open_mrs/max_writes_per_hour are the endpoint's own resolved
-    ceilings (Config.effective_rules(intent.host)). Quota kind is looked up
-    from the recognized action (guards.git.gitlab.actions.QUOTA_KIND), not
-    declared per row — a write recognizes to exactly one action by the time
-    this runs.
+    ceilings (Config.effective_rules(intent.host)). The open-MR ceiling
+    applies to whichever action carries the MR quota kind — read off the
+    recognized action itself, since a write recognizes to exactly one action
+    by the time this runs.
     """
     if state.locked:  # Fail-safe: never "empty = free"
         return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
     if state.writes_last_hour >= max_writes_per_hour:
         return Decision(False, R5, f"rate limit reached ({max_writes_per_hour}/h)")
     action = next(iter(recognized))
-    if gitlab_actions.QUOTA_KIND.get(action.id) is gitlab_actions.QuotaKind.MR and (
-        state.open_mrs >= max_open_mrs
-    ):
+    if action.quota_kind == git_actions.QuotaKind.MR.value and state.open_mrs >= max_open_mrs:
         return Decision(False, R5, f"max open MRs reached ({max_open_mrs})")
     return None
 

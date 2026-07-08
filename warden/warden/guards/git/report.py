@@ -24,7 +24,6 @@ from ...core.config import Config
 from ...core.guard import Guard
 from . import actions as git_actions
 from .endpoints import ENDPOINT_TYPES
-from .gitlab import actions as gitlab_actions
 from .gitlab.guard import ApiGuard
 from .transport.guard import GitGuard
 
@@ -65,20 +64,22 @@ def _host_report(cfg: Config, host: str, by_name: Mapping[str, Guard[Any]]) -> d
     assert endpoint is not None, "host comes from cfg.effective_hosts, so its endpoint exists"
     composition = ENDPOINT_TYPES[endpoint.type].type.guards
 
-    catalog: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     denials: set[str] = set()
     for guard_name in composition:
         guard = by_name.get(guard_name)
         if guard is None:
             continue
-        for row in guard.recognizers:
-            row_report, row_denials = _row_report(row, effective)
-            catalog.append({"guard": guard_name, **row_report})
+        for recognizer in guard.recognizers:
+            row_report, row_denials = _row_report(recognizer, effective)
+            rows.append({"guard": guard_name, **row_report})
             denials |= row_denials
 
+    # The "catalog" key is the /policy contract the CLI (catraz doctor) parses;
+    # the local list is named rows to match the guard-level "recognizers".
     return {
         "actions": sorted(effective),
-        "catalog": catalog,
+        "catalog": rows,
         "denials": sorted(denials),
     }
 
@@ -90,14 +91,13 @@ def _row_report(row: Any, effective: frozenset[str]) -> tuple[dict[str, Any], se
         never = action.criticality is Criticality.IRREVERSIBLE
         if never:
             denials.add(action.id)
-        quota_kind = gitlab_actions.QUOTA_KIND.get(action.id)
         actions.append(
             {
                 "id": action.id,
                 "criticality": action.criticality.name,
                 "default": action.id in _DEFAULT_IDS,
                 "active": action.id in effective and not never,
-                "quota_kind": quota_kind.value if quota_kind is not None else None,
+                "quota_kind": action.quota_kind,
             }
         )
     return ({"id": row.id, "actions": actions}, denials)
