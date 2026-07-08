@@ -43,14 +43,14 @@ def test_action_is_usable_as_a_frozenset_member():
 
 @dataclass(frozen=True)
 class _DummyIntent:
-    writes: bool
+    needs_write: bool
     project: str
     method: str
     host: str
 
 
 def _intent(method: str) -> _DummyIntent:
-    return _DummyIntent(writes=False, project="group/proj", method=method, host="example.test")
+    return _DummyIntent(needs_write=False, project="group/proj", method=method, host="example.test")
 
 
 class _DummyRecognizer(Recognizer[_DummyIntent]):

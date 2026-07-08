@@ -17,8 +17,8 @@ from .guard import (
     action_gate,
     criticality_gate,
     kernel_gates,
-    mode_gate_writes,
     project_gate,
+    write_credential_gate,
 )
 from .model import Decision, Intent, StateView, TokenKind
 from .path_template import compile_template
@@ -72,10 +72,10 @@ __all__ = [
     "criticality_gate",
     "from_env",
     "kernel_gates",
-    "mode_gate_writes",
     "normalize_project",
     "project_gate",
     "qualify",
     "redact",
     "rule",
+    "write_credential_gate",
 ]

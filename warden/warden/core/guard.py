@@ -15,8 +15,8 @@ Sequence Guard.handle guarantees, in this order:
 2. Recognize: the first matching row in guard.recognizers yields the
    recognized action set for this intent — empty when nothing matches.
 3. kernel_gates — guard-agnostic deny gates, all before enrich:
-   host allowlist, mode-gate writes, project allowlist, an unmatched/empty
-   write, the criticality gate (any recognized action at or above
+   host allowlist, write-credential gate, project allowlist, an
+   unmatched/empty write, the criticality gate (any recognized action at or above
    Criticality.IRREVERSIBLE denies), the action gate (every recognized
    action must be enabled for the host).
 4. guard.enrich — unpure lookups a check declared it needs.
@@ -46,17 +46,25 @@ from .rules import R0, R3, R4, R6
 from .state import State
 
 
-def mode_gate_writes(host: str, cfg: Config) -> Optional[Decision]:
-    """M0: deny a write to a host whose access mode is not read-write.
+def write_credential_gate(host: str, cfg: Config) -> Optional[Decision]:
+    """Deny a request that needs the write token to a host that has no usable
+    write credential.
 
-    Per-host (step 05) — there is no more global mode. A closed host is
-    already denied earlier by host_gate (R6), so by the time this
-    runs the only two possibilities left are read-only (deny) and
-    read-write (allow).
+    This is the credential axis, orthogonal to the action taxonomy: git push
+    discovery recognizes to repo.read (a read action, always enabled) yet
+    still needs the write token upstream, so no action-level gate can catch
+    it — this one does. Without it a push-discovery request to a read-only
+    host would be forwarded with an absent write token instead of denied.
+
+    Per-host: a closed host is already denied earlier by host_gate (R6), so by
+    the time this runs the only two possibilities left are read-only (deny)
+    and read-write (allow).
     """
     access = cfg.access_mode(host)
     if access != "read-write":
-        return Decision(False, R0, f"writes disabled for host {host!r} (access_mode={access!r})")
+        return Decision(
+            False, R0, f"write token unavailable for host {host!r} (access_mode={access!r})"
+        )
     return None
 
 
@@ -140,11 +148,11 @@ def kernel_gates(
     project-bound read pass-through is the guard's own decide's job.
     """
     denied = host_gate(intent.host, cfg)
-    if denied is None and intent.writes:
-        denied = mode_gate_writes(intent.host, cfg)
+    if denied is None and intent.needs_write:
+        denied = write_credential_gate(intent.host, cfg)
     if denied is None:
         denied = project_gate(intent.project, project_allowed)
-    if denied is None and intent.writes and not recognized:
+    if denied is None and intent.needs_write and not recognized:
         denied = Decision(False, R3, "no recognized action for this request")
     if denied is None:
         denied = criticality_gate(recognized)

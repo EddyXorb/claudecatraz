@@ -59,12 +59,12 @@ def decide(
 
     match, recognized = _recognize(intent)
     if not recognized:
-        kind = "write" if intent.writes else "read"
+        kind = "write" if intent.needs_write else "read"
         reason = f"{kind} endpoint not in allowlist: {intent.method} {intent.path}"
-        return Decision(False, R3 if intent.writes else R6, reason)
+        return Decision(False, R3 if intent.needs_write else R6, reason)
     assert match is not None  # non-empty recognized implies a match
 
-    if not intent.writes:
+    if not intent.needs_write:
         return Decision(True, R1, "read pass-through", TokenKind.READ)
 
     return decide_scope(intent, match, recognized, state, cfg)

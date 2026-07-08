@@ -41,7 +41,7 @@ class ApiIntent(Intent):
         return self.path.startswith(_GRAPHQL_PREFIX)
 
     @property
-    def writes(self) -> bool:
+    def needs_write(self) -> bool:
         if self.is_graphql:
             return False  # never forwarded, regardless of HTTP method
         return self.method.upper() not in _READ_METHODS

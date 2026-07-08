@@ -1,8 +1,10 @@
 """The git guard's Intent: forge-agnostic, covers all three git Smart-HTTP
 operations (advertise, upload-pack, receive-pack) dispatched on operation.
 
-writes is False except for receive-pack push and push discovery
-(advertise with ?service=git-receive-pack), both of which must carry the write token.
+needs_write is False except for receive-pack push and push discovery
+(advertise with ?service=git-receive-pack), both of which must carry the
+write token — push discovery reads refs but still needs it, which is exactly
+why the flag is about the credential, not about changing state.
 """
 
 from __future__ import annotations
@@ -29,8 +31,8 @@ class GitIntent(Intent):
     _host: str = ""
     # Set by the guard's parse(), never derived here: True for receive-pack
     # and for push discovery (advertise with ?service=git-receive-pack) — the
-    # write token it needs must never reach upstream in read-only/off mode.
-    _writes: bool = False
+    # write token it needs must never reach upstream on a read-only host.
+    _needs_write: bool = False
     service: str = "git-upload-pack"  # advertise only
     ref_commands: list[RefCommand] = field(default_factory=list)  # receive-pack only
     # Plumbing `forward` needs to stream the *unchanged* body upstream
@@ -47,8 +49,8 @@ class GitIntent(Intent):
     push_bytes: Optional[int] = None
 
     @property
-    def writes(self) -> bool:
-        return self._writes
+    def needs_write(self) -> bool:
+        return self._needs_write
 
     @property
     def project(self) -> str:

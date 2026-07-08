@@ -52,7 +52,7 @@ def _push(*ref_commands: RefCommand) -> GitIntent:
         _project="group/proj",
         operation="receive-pack",
         _method="push",
-        _writes=True,
+        _needs_write=True,
         _host=HOST,
         ref_commands=list(ref_commands),
     )

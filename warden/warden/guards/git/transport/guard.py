@@ -140,7 +140,7 @@ class GitGuard(Guard[GitIntent]):
                 _method="GET",
                 _host=host,
                 service=service,
-                _writes=(service == "git-receive-pack"),
+                _needs_write=(service == "git-receive-pack"),
             )
         if request.url.path.endswith("git-receive-pack"):
             head, rest = await read_until_flush(request.stream())
@@ -152,7 +152,7 @@ class GitGuard(Guard[GitIntent]):
                 operation="receive-pack",
                 _method="push",
                 _host=host,
-                _writes=True,
+                _needs_write=True,
                 ref_commands=commands,
                 head=head,
                 rest=rest,
@@ -178,7 +178,7 @@ class GitGuard(Guard[GitIntent]):
     def decide(self, intent: GitIntent, state: StateView, cfg: Config) -> Decision:
         if intent.operation == "receive-pack":
             return policy.decide(intent, state, cfg)
-        if intent.writes:
+        if intent.needs_write:
             return Decision(True, R1, "push discovery", TokenKind.WRITE)
         return Decision(True, R1, "read pass-through", TokenKind.READ)
 

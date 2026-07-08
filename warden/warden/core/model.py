@@ -41,8 +41,12 @@ class Intent(Protocol):
 
     Deliberately minimal (read-only properties):
 
-    * writes — derived by the guard's parser, never from a Decision.
-      Allows read-only mode-gate to run *before* enrich, keeping credentials unreachable.
+    * needs_write — whether this request needs the upstream write token,
+      derived by the guard's parser, never from a Decision. Note this is the
+      credential axis, not "changes state": git push discovery reads refs but
+      still needs the write token, so needs_write is True for it. Lets the
+      write-credential gate run *before* enrich, keeping credentials
+      unreachable for a request that will be denied.
     * project — what the resource-allowlist gate needs.
     * method — the audit envelope's verb (HTTP method for REST, "push" for git).
     * host — the raw Host header the guard's parser read off the request
@@ -54,7 +58,7 @@ class Intent(Protocol):
     """
 
     @property
-    def writes(self) -> bool: ...
+    def needs_write(self) -> bool: ...
 
     @property
     def project(self) -> str: ...

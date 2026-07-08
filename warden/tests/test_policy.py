@@ -297,7 +297,7 @@ def _git(*cmds) -> GitIntent:
         _project="group/proj.git",
         operation="receive-pack",
         _method="push",
-        _writes=True,
+        _needs_write=True,
         _host=HOST,
         ref_commands=[RefCommand(*c) for c in cmds],
     )
@@ -404,7 +404,7 @@ def test_git_project_not_allowlisted_denied(cfg):
         _project="other/x.git",
         operation="receive-pack",
         _method="push",
-        _writes=True,
+        _needs_write=True,
         _host=HOST,
         ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
     )
@@ -438,7 +438,7 @@ def test_mr_update_without_merge_intent_allowed(cfg):
 
 def test_closed_host_denies_reads_and_writes():
     """A host with no usable read token is `closed`: both reads and writes
-    are denied — by `host_gate`'s R6, before `mode_gate_writes` (or any
+    are denied — by `host_gate`'s R6, before `write_credential_gate` (or any
     guard-specific decide) ever runs."""
     cfg_closed = Config(
         allowed_projects=("group/proj",),
@@ -463,7 +463,7 @@ def test_closed_host_denies_reads_and_writes():
             _project="group/proj",
             operation="receive-pack",
             _method="push",
-            _writes=True,
+            _needs_write=True,
             _host=HOST,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
@@ -475,7 +475,7 @@ def test_closed_host_denies_reads_and_writes():
 
 def test_read_only_host_denies_writes_allows_reads():
     """A host with a read token but no write token is `read-only`: reads
-    pass (R1), writes are denied (R0) by the per-host `mode_gate_writes`."""
+    pass (R1), writes are denied (R0) by the per-host `write_credential_gate`."""
     cfg_ro = Config(
         allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
@@ -499,7 +499,7 @@ def test_read_only_host_denies_writes_allows_reads():
             _project="group/proj",
             operation="receive-pack",
             _method="push",
-            _writes=True,
+            _needs_write=True,
             _host=HOST,
             ref_commands=[RefCommand(ZERO, SHA, "refs/heads/claude/x")],
         ),
