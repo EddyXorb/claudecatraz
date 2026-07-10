@@ -90,7 +90,7 @@ def _init_sync_credentials(root: Path, env_path: Path, args: argparse.Namespace,
         out.info("• --skip-sync: skipping credential import")
     elif auth_mode == "subscription" and _credentials_mode(root) == "persistent":
         out.info(
-            "• this agent profile uses persistent credentials (§05.6) — "
+            "• this agent profile uses persistent credentials — "
             "run `claude login` inside the container (`catraz run shell`) once; "
             "state persists in .catraz/state/<profile>/"
         )
@@ -156,13 +156,8 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
             shutil.copy2(readme_src, readme_dst)
             out.info("• created .catraz/README.md (tier guide)")
 
-    # Stage inherited config/ and secrets/ BEFORE seeding the default templates, so an
-    # inherited Dockerfile / warden.toml / allowlist / squid.conf wins. _init_config_templates
-    # only copies a default when the file is absent (`not dst.exists()`), so it now fills just
-    # the gaps the source did not provide instead of pre-empting the inherited copy (in
-    # interactive mode stage_inherited skips existing files, so order — not its `yes` flag —
-    # is what made the inherited config get dropped). Also lets the wizard read staged values
-    # as defaults.
+    # Stage inherited config before seeding defaults, so inherited files win;
+    # _init_config_templates only fills gaps the source didn't provide.
     if inherited:
         stage_inherited(cat, inherited, yes=args.yes, out=out)
 

@@ -23,18 +23,15 @@ def _write_grouped(root: Path, filename: str, tokens: dict[str, str]) -> None:
     (secrets_dir / filename).write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
-# ---------------------------------------------------------------------------
 # _effective_actions_for_host / _actions_valid_for_type — the reimplemented
 # cascade, mirroring warden.core.config.Config.effective_actions.
-# ---------------------------------------------------------------------------
 
 
 class TestEffectiveActionsCascade:
     def test_endpoint_override_wins_unfiltered(self) -> None:
         endpoint = {"type": "plain", "actions": ("project.mr.create",)}
-        # Explicit override is returned as-is, even though "plain" can't
-        # actually support project.mr.create — that's the warden loader's
-        # ConfigError to raise at config-build time, not doctor's to re-check.
+        # Explicit override is returned as-is even though "plain" can't actually
+        # support project.mr.create — that's the warden loader's ConfigError to raise.
         assert doctor._effective_actions_for_host(None, endpoint) == ("project.mr.create",)
 
     def test_domain_default_used_when_no_override(self) -> None:
@@ -96,9 +93,7 @@ class TestReadGitEndpointsActions:
         assert endpoints[0]["actions"] is None
 
 
-# ---------------------------------------------------------------------------
 # check_action_coherence — the per-host warnings.
-# ---------------------------------------------------------------------------
 
 
 class TestCheckActionCoherence:

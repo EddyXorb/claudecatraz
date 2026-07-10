@@ -46,7 +46,7 @@ def test_base_cmd_includes_override_when_present(tmp_path: Path) -> None:
     assert str(tmp_path / ".catraz/compose.override.yml") in compose.base_cmd(tmp_path)
 
 
-# ── §07 — per-host DNS-alias/no_proxy compose fragment ──────────────────────
+# ── per-host DNS-alias/no_proxy compose fragment ──────────────────────
 
 
 def _write_endpoints(tmp_path: Path, hosts: list[str]) -> None:
@@ -79,10 +79,8 @@ def test_render_hosts_fragment_lists_every_host_as_alias(tmp_path: Path) -> None
     assert "- gitlab.com" in text
     assert "- my-gitlab.de" in text
     assert "agent-net" in text
-    # The compose *service* is necessarily named gitlab-warden (compose needs
-    # a key to attach the alias to) — the no-leak rule is about the agent's
-    # own remotes/rendered instructions, checked in test_claude_md.py /
-    # test_adapter_conformance.py, not about this internal compose wiring.
+    # The compose *service* is necessarily named gitlab-warden (needs a key
+    # for the alias) — no-leak checks are about the agent's own remotes, not this.
 
 
 def test_render_hosts_fragment_no_proxy_includes_every_host_plus_loopback(

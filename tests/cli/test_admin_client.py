@@ -1,4 +1,4 @@
-"""catraz.admin_client (§04.3): minimal HTTP-over-Unix-socket GET, zero deps."""
+"""catraz.admin_client: minimal HTTP-over-Unix-socket GET, zero deps."""
 
 from __future__ import annotations
 

@@ -1,10 +1,6 @@
-"""Unit tests for the pure logic in the `catraz` CLI.
-
-Tests cover the parts that don't need Docker: project-path validation,
-.env round-tripping, allowed_projects precedence, and service aliases.
-
-Run:  python3 -m pytest tests/cli/ -q
-"""
+"""Unit tests for the pure logic in the `catraz` CLI: project-path
+validation, .env round-tripping, allowed_projects precedence, and service
+aliases — the parts that don't need Docker."""
 
 from pathlib import Path
 import pytest
@@ -91,7 +87,7 @@ def test_set_env_values_appends_absent_key(tmp_path: Path) -> None:
     assert envfile.load_env(p)["NEW_KEY"] == "value"
 
 
-# ── allowed_projects resolution (single source: warden.toml, §3.5) ───────────────
+# ── allowed_projects resolution (single source: warden.toml) ───────────────
 
 
 def _project(tmp_path: Path, toml_projects: list[str] | None = None) -> None:

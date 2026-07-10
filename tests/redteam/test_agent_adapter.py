@@ -1,17 +1,8 @@
-"""Red-Team tests for §05.5 — Adapter-Conformance-Harness, container level.
-
-Extends the existing docker-compose-based Red-Team suite (`tests/redteam/`)
-with the Agent-Layer dimension named in §05-agent-layer.md §05.5: no Forge
-credential in the agent process/home, and `modes.remote=false` fails closed
-instead of leaving a half-configured daemon. Follows the same fixture/marker
-pattern as `test_shadow_mount.py`'s `live_stack` (docker-compose, requires a
-real ANTHROPIC_API_KEY + Docker — @slow, not CI-gated) so this module works
-identically to the rest of the suite in environments where Docker can't run
-(e.g. this sandbox): the whole file is skipped, loudly, via `pytestmark`.
-
-The unit-level half of the harness (no Docker needed, runs everywhere) is
-`tests/container/test_adapter_conformance.py`.
-"""
+"""Red-Team tests for the Adapter-Conformance-Harness, container level.
+Checks the Agent-Layer dimension: no Forge credential in the agent
+process/home, and `modes.remote=false` fails closed instead of leaving a
+half-configured daemon. Requires Docker + a real ANTHROPIC_API_KEY (@slow);
+the unit-level half is `tests/container/test_adapter_conformance.py`."""
 
 import os
 import shutil
@@ -84,8 +75,8 @@ def _compose_exec(live_stack: Path, *cmd: str) -> subprocess.CompletedProcess[st
 
 @pytest.mark.slow
 def test_agent_process_env_carries_no_gitlab_token(live_stack: Path) -> None:
-    """§05.5/A11: the agent process must never see a GitLab token — the
-    Warden holds it, not the agent container."""
+    """The agent process must never see a GitLab token — the Warden holds
+    it, not the agent container."""
     r = _compose_exec(live_stack, "env")
     assert r.returncode == 0
     for marker in ("GITLAB_READ_TOKEN", "GITLAB_WRITE_TOKEN", "GITLAB_API_TOKEN"):
@@ -111,7 +102,7 @@ def test_agent_home_has_no_gitlab_token_file(live_stack: Path) -> None:
 def test_git_insteadof_points_at_warden_not_gitlab_directly(live_stack: Path) -> None:
     """git_routing.configure_git_warden() must have rewired the canonical
     GitLab remote to the Warden — the agent's own git never talks to GitLab
-    directly (§05.5 "git insteadOf zeigt auf den Warden")."""
+    directly."""
     r = _compose_exec(
         live_stack,
         "git config --global --get-all url.http://gitlab-warden:8080/git/.insteadOf",

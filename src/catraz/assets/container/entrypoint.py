@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""
-Generic container entrypoint (§05.2) — and host-side credential sync tool.
-
-Split from the former single-agent entrypoint (§06-migration.md Schritt 7):
-everything in this file is agent-agnostic (UID drop, tmpfs-home lifecycle, `.catraz` shadow-mount
-contract, proxy env, git→Warden routing, process exec, signal handling via
-``os.execvp``). All agent-specific behaviour (credential layout, CLI command,
-remote-control support, instructions-file rendering) is delegated to the
-adapter this image was built for — a co-located ``agent_adapter.py`` (see
-``assets/agents/<name>/layer.Dockerfile``), through the contract defined in
-``agent_contract.py``.
-
-  python3 entrypoint.py          # inside container: configure + exec the agent
-  python3 entrypoint.py sync     # on host: import credentials into --agent-home
-"""
+"""Generic container entrypoint — and host-side credential sync tool.
+Agent-agnostic: UID drop, tmpfs-home lifecycle, shadow-mount contract,
+proxy env, git→Warden routing, process exec. Agent-specific behavior is
+delegated to the adapter this image was built for, via `agent_contract.py`."""
 
 import argparse
 import importlib.util
@@ -32,14 +21,12 @@ def _env_true(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-# Host-persistent target for the agent's own --debug-file-style output. catraz
-# bind-mounts a project log dir here (see docker-compose.yml) so debug logs
-# survive container exit — the live agent home is a tmpfs and loses them.
+# Host-persistent target for --debug-file output; bind-mounted so debug logs
+# survive container exit (the live agent home is tmpfs and loses them).
 AGENT_LOG_DIR = Path("/var/log/agent-debug")
 
-# Writable per-repo state (§05.6) — always mounted (harmless if unused); an
-# adapter whose manifest declares `credentials.mode = "persistent"` wires
-# selected files from here into the live home itself.
+# Writable per-repo state, always mounted (harmless if unused); an adapter
+# opts in via `credentials.mode = "persistent"` in its manifest.
 PERSISTENT_STATE_DIR = Path("/var/lib/agent-state")
 
 
@@ -54,8 +41,8 @@ def resolve_log_dir(home: Path) -> Path:
 
 def _load_adapter() -> AgentAdapter:
     """The one adapter this image was built for (co-located next to this
-    file, §05.2/§06.2 — no dynamic selection at runtime; the build already
-    committed to exactly one agent)."""
+    file) — no dynamic selection at runtime; the build already committed to
+    exactly one agent."""
     p = Path(__file__).resolve().parent / "agent_adapter.py"
     spec = importlib.util.spec_from_file_location("agent_adapter", p)
     assert spec is not None and spec.loader is not None
@@ -100,11 +87,10 @@ def drop_to_dev() -> None:
 
 
 def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None:
-    """Write the agent's rendered instructions file (§05.2 `render_instructions`
-    — target *and* content). Fails closed when REQUIRE_AGENT_INSTRUCTIONS is
-    set and rendering doesn't produce anything (packaging error), otherwise
-    starts without instructions (e.g. a bare `docker run` for local testing).
-    """
+    """Write the agent's rendered instructions file (target and content).
+    Fails closed when REQUIRE_AGENT_INSTRUCTIONS is set and rendering
+    doesn't produce anything (packaging error), otherwise starts without
+    instructions (e.g. a bare `docker run` for local testing)."""
     try:
         dest, content = adapter.render_instructions(ctx)
     except Exception as exc:  # noqa: BLE001 - deliberately broad, see the exit message
@@ -118,10 +104,10 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
 
 
 def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:
-    """Best-effort ``branch_prefixes`` (or the legacy scalar ``branch_prefix``)
-    read from the mounted warden.toml, for the rendered instructions' example
-    only. A missing/unreadable/malformed file degrades to the ``claude/``
-    default rather than crashing the entrypoint before the agent even
+    """Best-effort `branch_prefixes` (or the legacy scalar `branch_prefix`)
+    read from the mounted warden.toml, for the rendered instructions'
+    example only. A missing/unreadable/malformed file degrades to the
+    `claude/` default rather than crashing the entrypoint before the agent
     starts."""
     try:
         data: dict[str, Any] = tomllib.loads(warden_toml_path.read_text(encoding="utf-8"))
@@ -139,11 +125,8 @@ def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:
 def _instruction_context() -> InstructionContext:
     warden_toml_path = Path("/etc/catraz/warden.toml")
     return InstructionContext(
-        # A generic per-host RULE (§1.2), not one concrete URL: "<host>" is a
-        # literal placeholder the agent substitutes with whichever git host it
-        # is actually talking to — the same rule holds for every configured
-        # endpoint, so no host enumeration/rendering is needed here at all.
-        # The Warden's own container name never appears (§07 "Nicht tun").
+        # Generic per-host rule, not one concrete URL: "<host>" is a placeholder
+        # the agent substitutes with whichever git host it's talking to.
         forge_rest_base=os.environ.get("WARDEN_REST_URL", "http://<host>:8080/api/v4"),
         branch_prefixes=_read_branch_prefixes(warden_toml_path),
         warden_toml_path=warden_toml_path,
@@ -165,12 +148,9 @@ def _resolve_secrets(home: Path, *, remote: bool) -> Secrets:
 
 
 def _bootstrap(adapter: AgentAdapter, home: Path, *, remote: bool) -> None:
-    """Shared per-start setup for every container entry mode (start/run/exec).
-
-    Drops root → dev (chowning /workspace + re-execing via gosu), resolves
-    secrets and hands them to the adapter (credential files + extra env),
-    rebuilds the live home, and routes git through the warden.
-    """
+    """Shared per-start setup for every container entry mode (start/run/exec):
+    drops root to dev, resolves secrets and hands them to the adapter,
+    rebuilds the live home, and routes git through the warden."""
     drop_to_dev()
     secrets = _resolve_secrets(home, remote=remote)
     os.environ["AGENT_LOG_DIR"] = str(resolve_log_dir(home))
@@ -185,12 +165,10 @@ def _bootstrap(adapter: AgentAdapter, home: Path, *, remote: bool) -> None:
 
 
 def cmd_exec(adapter: AgentAdapter, home: Path, cmd: list[str]) -> None:
-    """Interactive shell / one-off command in the sandbox (`catraz run shell`).
-
-    Lands in the same configured state as a one-off/remote run: full
-    _bootstrap so the home and the git-warden insteadOf rewrite are in place.
-    remote=False — this is not the remote-control daemon.
-    """
+    """Interactive shell / one-off command in the sandbox (`catraz run shell`):
+    runs the full bootstrap so the home and git-warden rewrite are in place,
+    same as a one-off/remote run. remote=False — not the remote-control
+    daemon."""
     _bootstrap(adapter, home, remote=False)
     argv = cmd or ["bash"]
     os.execvp(argv[0], argv)

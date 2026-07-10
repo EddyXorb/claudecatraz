@@ -1,6 +1,6 @@
-"""Test that _run_sync honors CLAUDE_CREDENTIAL_SOURCE from the shell env —
-now passed straight to the adapter's `sync_from_host(source, home)` in-process
-(§05.2/§05.3), no subprocess indirection."""
+"""Test that _run_sync honors CLAUDE_CREDENTIAL_SOURCE from the shell env,
+passed straight to the adapter's `sync_from_host(source, home)` in-process,
+no subprocess indirection."""
 
 from pathlib import Path
 from typing import Any

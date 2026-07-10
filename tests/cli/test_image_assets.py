@@ -2,8 +2,7 @@ from catraz.paths import asset_root
 
 
 def test_layer_dockerfiles_present() -> None:
-    """§05.3: the claude layer now lives under assets/agents/claude/ (moved
-    from assets/claude-layer/ in §06-migration.md Schritt 7)."""
+    """The claude layer lives under assets/agents/claude/."""
     ar = asset_root() / "assets"
     cl = (ar / "agents/claude/layer.Dockerfile").read_text()
     assert "ARG BASE_IMAGE" in cl and "FROM ${BASE_IMAGE}" in cl
@@ -28,7 +27,7 @@ def test_claude_layer_has_build_deps() -> None:
 
 
 def test_claude_agent_manifest_present() -> None:
-    """§05.3: agent.toml carries the fields the CLI reads instead of constants."""
+    """agent.toml carries the fields the CLI reads instead of constants."""
     ar = asset_root() / "assets"
     manifest = (ar / "agents/claude/agent.toml").read_text()
     for field in (

@@ -61,8 +61,7 @@ def cmd_logs(root: Path, args: argparse.Namespace, out: Out) -> int:
     if args.audit:
         return _tail_audit(root, args, out)
     # The agent runs as an ephemeral `run --rm` one-off, not a daemon, so
-    # `docker compose logs` never captures it — tail its file transcripts in
-    # .catraz/logs/agent instead (written by non-interactive runs, see run.py).
+    # `docker compose logs` never captures it — tail its file transcripts instead.
     if args.service and resolve_service(args.service) == compose.SERVICES["agent"]:
         return _tail_files(root / ".catraz/logs/agent", "*.log", "agent logs", args, out)
     log_args = ["logs"]

@@ -62,11 +62,8 @@ def _wait_healthy(
 
 
 def cmd_down(root: Path, args: argparse.Namespace, out: Out) -> int:
-    # `--profile remote` brings the agent service (profiles: ["remote"]) into scope so a
-    # plain `down` actually tears it down. Without it the agent container survives, pinned
-    # to the now-deleted agent-net → "network <id> not found" on the next `up --remote`.
-    # (--remove-orphans alone is unreliable here: a profile-disabled service is not always
-    # treated as an orphan.) --remove-orphans additionally clears any truly-stale leftovers.
+    # `--profile remote` brings the agent service into scope so `down` actually tears
+    # it down (otherwise it survives, pinned to the now-deleted network).
     down_args = ["--profile", "remote", "down", "--remove-orphans"]
     if args.volumes:
         down_args.append("--volumes")

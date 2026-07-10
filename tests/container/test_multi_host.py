@@ -43,7 +43,7 @@ _WARDEN_TOML = f"""\
 # Top-level (global) project allowlist: the request-path project gate for BOTH
 # guards is `cfg.project_allowed` (guards/git/policy.py, core/guard.py) which
 # reads this global list — the per-[[git.endpoint]] `allowed_projects` below is
-# the §3 config surface but is not (yet) what the git/REST project gate checks.
+# a config surface but is not (yet) what the git/REST project gate checks.
 # Both must name the project for a request to clear the project gate and reach
 # the upstream.
 allowed_projects = ["{PROJECT}"]

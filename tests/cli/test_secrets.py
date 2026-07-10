@@ -69,12 +69,10 @@ def test_cmd_init_creates_secret_files_even_blank(
 
 
 def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """cmd_init (interactive) writes the token value to the secret file at 0600.
-
-    The interactive wizard uses out.secret() (in ui.py) which calls getpass internally,
-    so we patch catraz.ui.getpass.getpass rather than catraz.commands.setup.getpass.
-    Empty input() returns defaults for choice/ask prompts.
-    """
+    """cmd_init (interactive) writes the token value to the secret file at
+    0600. The wizard uses out.secret() (in ui.py), which calls getpass
+    internally, so we patch catraz.ui.getpass.getpass rather than
+    catraz.commands.setup.getpass. Empty input() returns wizard defaults."""
     root = _make_root(tmp_path)
 
     secrets = iter(["glpat-readtoken", "glpat-writetoken"])
@@ -108,12 +106,10 @@ def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
-    """_doctor_fix on a project where .catraz/ does not exist yet must not crash.
-
-    Regression: the 0700 secrets dirs are created with mode= (not parents=), so
-    .catraz/ itself has to be created first — otherwise the first mkdir raises
-    FileNotFoundError on a fresh init.
-    """
+    """_doctor_fix on a project where .catraz/ does not exist yet must not
+    crash. The 0700 secrets dirs are created with mode= (not parents=), so
+    .catraz/ itself must be created first, or the first mkdir raises
+    FileNotFoundError."""
     root = tmp_path / "fresh"
     root.mkdir()
     assert not (root / ".catraz").exists()
@@ -129,9 +125,9 @@ def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
 
 
 def test_doctor_warns_endpoint_closed_on_empty_grouped_files(tmp_path: Path) -> None:
-    """§08-multi-target Step 06: an [[git.endpoint]] with no token in the grouped
-    read_tokens/write_tokens files warns "closed" — never a failing (bad) exit;
-    the Warden, not doctor, is the side that enforces fail-closed."""
+    """An `[[git.endpoint]]` with no token in the grouped read_tokens/write_tokens
+    files warns "closed" — never a failing (bad) exit; the Warden, not doctor,
+    is the side that enforces fail-closed."""
     root = _make_root(tmp_path)
     (root / ".catraz" / "config" / "warden.toml").write_text(
         '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
@@ -247,12 +243,10 @@ def test_doctor_fix_does_not_overwrite_existing_token(tmp_path: Path) -> None:
 
 
 def test_doctor_fix_secrets_and_claude_are_0700(tmp_path: Path) -> None:
-    """secrets/ and secrets/claude/ must both be 0700 after _doctor_fix (C regression guard).
-
-    Ensures the dir-creation order does not cause the umask default (0755) to win
-    over the explicit 0700 mode — which would happen if mkdir(parents=True) created
-    secrets/ implicitly in the 0755 generic loop before the explicit 0700 call.
-    """
+    """secrets/ and secrets/claude/ must both be 0700 after _doctor_fix.
+    Ensures dir-creation order doesn't let the umask default (0755) win
+    over the explicit 0700 mode, which would happen if mkdir(parents=True)
+    created secrets/ implicitly before the explicit 0700 call."""
     root = _make_root(tmp_path)
     env = load_env(root / ".catraz" / ".env")
     _doctor_fix(root, env)

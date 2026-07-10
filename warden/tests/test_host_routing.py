@@ -109,9 +109,8 @@ def test_router_for_host_matches_effective_hosts(cfg):
 
 
 def test_host_gate_denies_everything_when_no_endpoint_configured(cfg):
-    """Real default-deny (step 03): an empty endpoint list is not "feature
-    off" — every host, including one that would otherwise look fine, is
-    denied."""
+    """Real default-deny: an empty endpoint list is not "feature off" — every
+    host, including one that would otherwise look fine, is denied."""
     empty = replace(cfg, git_endpoints=(), git_credentials={})
     decision = host_gate("literally.anything", empty)
     assert decision == Decision(
