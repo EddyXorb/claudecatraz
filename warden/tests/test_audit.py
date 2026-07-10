@@ -83,7 +83,7 @@ async def test_log_to_dash_goes_to_stderr_not_a_file(capsys):
 
 
 async def test_write_failure_is_swallowed_not_fatal(tmp_path, capsys, monkeypatch):
-    # Fail-safe (§6.8): a write error must not kill the drain task or block policy.
+    # Fail-safe: a write error must not kill the drain task or block policy.
     al = AuditLog(str(tmp_path / "a.jsonl"))
 
     def boom(_line: str) -> None:
@@ -96,7 +96,7 @@ async def test_write_failure_is_swallowed_not_fatal(tmp_path, capsys, monkeypatc
     assert "audit write failed" in capsys.readouterr().err
 
 
-# --- build_event (F6): one record shape, shared by api_proxy and git_proxy ----
+# --- build_event: one record shape, shared by api_proxy and git_proxy ----
 
 
 def test_build_event_api_guard_has_exactly_the_expected_fields():

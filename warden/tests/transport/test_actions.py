@@ -1,4 +1,4 @@
-"""The transport guard's ``SUPPORTED`` ceiling: the repo-scoped git actions."""
+"""The transport guard's SUPPORTED ceiling: the repo-scoped git actions."""
 
 from __future__ import annotations
 

@@ -153,10 +153,9 @@ def _git(cwd, *args, check=True):
 
 
 def _run_e2e(tmp_path, *, actions=None):
-    """Build a real upstream `git http-backend` plus a real Warden in front of
-    it, on the git-namespace action vocabulary. ``actions`` overrides the
-    endpoint's effective actions (default: inherit the built-in default).
-    """
+    """Build a real upstream git http-backend plus a real Warden in front of
+    it. actions overrides the endpoint's effective actions (default:
+    inherit the built-in default)."""
     import uvicorn
 
     # 1. throwaway bare upstream repo
@@ -221,9 +220,8 @@ def e2e(tmp_path):
 
 @pytest.fixture
 def e2e_no_branch_push(tmp_path):
-    # repo.branch.create stays on (so the first, branch-creating push
-    # succeeds) but repo.branch.push is off — an update to that same branch
-    # must then be denied, naming that specific action.
+    # repo.branch.create stays on so the first push succeeds; repo.branch.push
+    # is off, so an update to that branch is denied, naming the action.
     yield from _run_e2e(tmp_path, actions=("repo.read", "repo.branch.create"))
 
 
@@ -262,9 +260,8 @@ def test_push_forbidden_branch_is_rejected(e2e):
 
 
 def test_push_update_denied_when_branch_push_disabled_names_the_action(e2e_no_branch_push):
-    # New ids, full pipeline: the create succeeds (repo.branch.create is on),
-    # the follow-up update to the same branch is denied per-ref, naming the
-    # specific disabled action rather than a blunt reject.
+    # The create succeeds (repo.branch.create is on); the follow-up update to
+    # the same branch is denied per-ref, naming the specific disabled action.
     tmp_path, remote = e2e_no_branch_push
     work, _ = _seed_clone(tmp_path, remote, "claude/feature")
 

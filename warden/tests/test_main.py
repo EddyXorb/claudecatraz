@@ -1,10 +1,8 @@
 """__main__.py: fail-closed startup — a config or schema error exits 2, not a
 traceback.
 
-The uvicorn serve loop itself is orchestration and not unit-tested; what matters
-for the container is that an invalid configuration or an unrecognised state DB
-schema version aborts cleanly with code 2 (A9).
-"""
+The uvicorn serve loop is orchestration and not unit-tested; what matters
+is that invalid config aborts cleanly with code 2."""
 
 from __future__ import annotations
 

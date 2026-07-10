@@ -1,19 +1,8 @@
 """JSON-serialisable summary of every guard's recognizer catalog, per host.
 
-Served by the admin /policy route so the CLI can learn a configured
-host's effective actions and catalog state without a runtime Python import.
-One section per host; within a host, one sub-list per guard composing that
-host's endpoint type (guards.git.endpoints.ENDPOINT_TYPES) — a plain
-host shows only the transport guard's rows, a gitlab host shows both.
-
-Every row is a recognizer from that guard's own recognizer table: its id,
-the actions it can possibly recognize (with criticality, default membership,
-whether currently active for this host, and its quota kind where one
-applies). A row's action(s) at Criticality.IRREVERSIBLE are always
-inactive by construction (the kernel's criticality gate denies them
-regardless of config) — denials collects those ids per host so a never
-class action is named explicitly instead of hidden inside a row.
-"""
+Served by the /policy route. One section per host, one sub-list per guard
+composing that host's endpoint type. Actions at Criticality.IRREVERSIBLE
+are always inactive by construction; denials lists those ids explicitly."""
 
 from __future__ import annotations
 
@@ -29,9 +18,7 @@ from .transport.guard import GitGuard
 
 _DEFAULT_IDS: frozenset[str] = frozenset(a.id for a in git_actions.DEFAULT)
 
-# Endpoint-type guard-composition name -> the concrete guard class serving
-# it. Fixed and small (one row per shipped guard) — a future namespace adds
-# its own report module rather than growing this map indefinitely.
+# Endpoint-type guard-composition name -> the concrete guard class serving it.
 _GUARD_CLASS_BY_COMPOSITION_NAME: Mapping[str, type[Guard[Any]]] = {
     "transport": GitGuard,
     "gitlab": ApiGuard,
@@ -50,9 +37,8 @@ def _guards_by_composition_name(guards: list[Guard[Any]]) -> Mapping[str, Guard[
 def endpoint_table_report(cfg: Config, guards: list[Guard[Any]]) -> dict[str, Any]:
     """Build the /policy response body: one section per configured host.
 
-    guards is the running AppContext's guard instances — the report
-    walks the actual objects handling requests, never a fresh set built for
-    reporting only.
+    guards is the running AppContext's guard instances, never a fresh
+    set built only for reporting.
     """
     by_name = _guards_by_composition_name(guards)
     return {"hosts": {host: _host_report(cfg, host, by_name) for host in cfg.effective_hosts}}

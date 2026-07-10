@@ -1,12 +1,7 @@
-"""Host→Upstream resolution + the ``host_gate`` kernel wiring (step 03:
-routing cut over to the ``[[git.endpoint]]`` model, §07 Punkt 8 follow-up).
+"""Host→Upstream resolution and the host_gate kernel wiring.
 
-Per-host state-keying tests live in ``test_git_state.py``/``test_api_state.py``
-(the ``BranchState``/``MrState`` tables) and this file's
-``test_reconcile_branches_runs_per_host_with_same_project_path`` (the
-reconcile loop that populates them). Config-schema-level parsing/cascade tests
-live in ``test_config.py``.
-"""
+Per-host state-keying tests live in test_git_state.py/test_api_state.py.
+Config-schema-level parsing tests live in test_config.py."""
 
 from __future__ import annotations
 
@@ -29,10 +24,10 @@ PROJ = "group%2Fproj"
 
 
 def _multi_cfg(cfg: Config) -> Config:
-    """The shared single-host ``cfg`` fixture (conftest.py), widened to two
+    """The shared single-host cfg fixture (conftest.py), widened to two
     open endpoints: the fixture's own host, plus a second host with its own
-    credentials — exactly the shape ``config_load`` produces from two
-    ``[[git.endpoint]]`` entries."""
+    credentials — exactly the shape config_load produces from two
+    [[git.endpoint]] entries."""
     return replace(
         cfg,
         git_endpoints=(
@@ -187,9 +182,8 @@ async def test_end_to_end_request_routes_by_host_header_and_denies_unknown_host(
 
 
 async def test_reconcile_branches_runs_per_host_with_same_project_path():
-    # gitlab.com and my-gitlab.de both happen to list "acme/infra" — the
-    # regression this guards is a single reconcile run silently combining
-    # (or overwriting) their branch counts.
+    # gitlab.com and my-gitlab.de both list "acme/infra" — this guards against a
+    # single reconcile run silently combining or overwriting their branch counts.
     base = Config(
         allowed_projects=("acme/infra",),
         state_db_path=":memory:",
@@ -224,14 +218,7 @@ async def test_reconcile_branches_runs_per_host_with_same_project_path():
 
 
 # --- regression: a closed endpoint must never crash/lock the whole reconcile ---
-# `cfg.git_endpoints` is what reconcile iterates now (step 04 trims it to open
-# endpoints before ever calling `UpstreamRouter.for_host` — see
-# `guards.git.reconcile.reconcile_branches`/`test_git_reconcile.py`'s own
-# closed-endpoint test for the unit-level coverage of that pre-filter). This
-# is the end-to-end reproduction of the originally reported bug: before the
-# fix, a closed host's `KeyError` out of the host×project loop meant
-# `mark_reconciled` was never called, so the *whole* guard (including the open
-# host) stayed fail-safe-locked forever.
+# A closed host's KeyError must never prevent mark_reconciled for the rest. ---
 
 
 async def test_reconcile_completes_and_unlocks_when_one_of_two_endpoints_is_closed():

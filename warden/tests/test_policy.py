@@ -1,10 +1,7 @@
 """Unit tests for the pure policy cores: every check, default-deny.
 
-The kernel gates (``warden.core.guard.kernel_gates``) run first, then each
-guard's own pure ``decide``; each guard's ``full_decide`` composes exactly
-that sequence. The ``decide`` helper below dispatches on the intent type
-to call the right guard's ``full_decide``.
-"""
+Kernel gates run first, then each guard's own pure decide; full_decide
+composes exactly that sequence."""
 
 from __future__ import annotations
 
@@ -22,9 +19,8 @@ from warden.guards.git.transport.pktline import RefCommand
 ZERO = "0" * 40
 SHA = "a" * 40
 
-# Every intent below carries this Host (`host_gate` is a real kernel gate, so
-# a pure-policy test needs an actually-open endpoint, not just an empty/no-op
-# allowlist) — one constant so fixtures and intents agree.
+# Every intent below carries this Host — host_gate is a real kernel gate, so
+# tests need an actually-open endpoint, not just an empty allowlist.
 HOST = "gitlab.example"
 _OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
 _OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
@@ -153,9 +149,7 @@ def test_project_not_in_allowlist_denied(cfg):
 
 def test_project_boundary_applies_even_with_no_entry_specific_checks(cfg):
     # issue.create has no branch-namespace scope of its own — this pins down
-    # that the project boundary (a kernel gate run before any entry-specific
-    # check) still applies to an entry that checks nothing of its own beyond
-    # quota.
+    # that the project boundary still applies to an entry checking only quota.
     effective = frozenset({"project.issue.create"})
     req = ApiIntent(
         _project="other/secret",
@@ -208,7 +202,7 @@ def test_pipeline_ref_prefix(cfg):
 
 # --- branch namespace is a list of prefixes -------------------------------------
 def test_create_mr_with_second_prefix_allowed(multi_prefix_cfg):
-    """A source_branch under the *second* configured prefix (``bot/``) is allowed."""
+    """A source_branch under the *second* configured prefix (bot/) is allowed."""
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="bot/x"),
         StateView(),
@@ -241,9 +235,7 @@ def test_state_event_merge_alias_denied(cfg):
 
 def test_mr_update_requires_mr_source_in_namespace(cfg):
     # mr.update's branch-namespace scope, iid-lookup variant: editing an MR
-    # whose source_branch can't be verified as namespace is denied — same
-    # scope as mr.note/mr.discussion, but exercised on the update endpoint
-    # itself, not just the note endpoint.
+    # whose source_branch can't be verified as namespace is denied.
     req = _api("PUT", "/projects/group%2Fproj/merge_requests/7", title="x")
     req.mr_source_ok = False
     d = decide(req, StateView(), cfg)
@@ -314,7 +306,7 @@ def test_git_push_wrong_prefix_denied(cfg):
 
 
 def test_git_push_second_prefix_allowed(multi_prefix_cfg):
-    """Push to a branch under the *second* configured prefix (``bot/``) is allowed."""
+    """Push to a branch under the *second* configured prefix (bot/) is allowed."""
     d = decide(_git((ZERO, SHA, "refs/heads/bot/feature")), StateView(), multi_prefix_cfg)
     assert d.allow and d.token == TokenKind.WRITE
 
@@ -384,10 +376,8 @@ def test_git_tag_push_rejected_with_tag_message(cfg):
 
 
 def test_git_tag_and_branch_delete_denied_by_criticality_even_with_every_action_enabled():
-    # IRREVERSIBLE actions are compiled-in denies: even a (misconfigured) host
-    # whose endpoint explicitly lists every action id, tag/delete included,
-    # is still denied as irreversible — the criticality check runs before the
-    # membership check.
+    # IRREVERSIBLE actions are compiled-in denies: even a host explicitly
+    # listing every action id is still denied, criticality before membership.
     cfg = Config(
         allowed_projects=("group/proj",),
         git_endpoints=(
@@ -430,9 +420,8 @@ def test_mr_update_without_merge_intent_allowed(cfg):
     assert d.allow and d.token == TokenKind.WRITE
 
 
-# NOTE: there is no Channel enum, so an "unknown channel" cannot be expressed —
-# every request is parsed by exactly one guard into that guard's own Intent
-# type, and an unrouted path never reaches any decide at all.
+# There is no Channel enum: every request is parsed by exactly one guard
+# into that guard's own Intent type; an unrouted path never reaches decide.
 
 
 # --- per-host access mode --------------------------------------------------------

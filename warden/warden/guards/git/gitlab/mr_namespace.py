@@ -16,14 +16,9 @@ from ....core.transport import UpstreamRouter, project_id
 
 class MrNamespace:
     """Credential-backed source_branch lookup, with a short-TTL cache
-    (performance only, never security — a cache hit still reflects a lookup
-    made within the last 30 seconds).
-
-    Resolves the upstream per call from the raw Host header — the MR
-    being checked lives on whichever host the current request targeted,
-    never a fixed one from construction time. The cache key includes the
-    canonical host so two hosts sharing a project path/iid never share a
-    cache entry.
+    (performance only, never security). Resolves the upstream per call from
+    the raw Host header; the cache key includes the canonical host so two
+    hosts sharing a project path/iid never share an entry.
     """
 
     def __init__(
@@ -38,15 +33,9 @@ class MrNamespace:
     async def source_in_namespace(self, host: str, project: str, iid: int) -> Optional[bool]:
         """True iff the MR's source_branch lies in the allowed branch namespace.
 
-        Author-independent by design: blast-radius containment is the branch
-        namespace, not who opened the MR — a namespace branch is the agent's
-        exclusive push area regardless of author.
-
-        host is the raw Host header (as carried on Intent.host) —
-        resolved here to both the canonical cache-key host and the request's
-        Upstream. Returns None when the host is unresolvable or the
-        lookup fails (→ policy denies, default-deny holds).
-        """
+        Author-independent by design: the branch namespace is the agent's
+        exclusive push area, not who opened the MR. Returns None
+        (default-deny) when the host is unresolvable or the lookup fails."""
         upstream = self._router.resolve(host)
         canonical = self._cfg.resolve_target_host(host)
         if upstream is None or canonical is None:

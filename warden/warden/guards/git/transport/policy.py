@@ -1,20 +1,8 @@
 """git guard policy: pure, per-ref rules for a receive-pack push.
 
-Branch namespace and quotas are the only checks left here — irreversible
-verbs (tag push, branch/tag delete) are denied by the recognized action's
-criticality, before any of this runs. The write-credential gate and the
-project resource allowlist are the kernel's job.
-
-Checks enforced here:
-  git write limits    push only to branches under allowed <branch_prefix>.
-  Irreversible verb    a recognized IRREVERSIBLE action is never enabled.
-  Quota & rate         max open branches, max writes/hour, max push size;
-                       locked state denies (fail-safe).
-  Action allowlist     the recognized action must be in the host's
-                       effective actions — the same boundary the kernel's
-                       project allowlist enforces, both instances of
-                       "resource/action outside the configured boundary."
-"""
+Irreversible verbs are denied by the recognized action's criticality
+before any of this runs. What's left: branch namespace, action
+allowlist, and quota/rate — locked state always denies (fail-safe)."""
 
 from __future__ import annotations
 
@@ -57,19 +45,8 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
     """Deny a git-transport operation whose recognized action(s) are missing
     from the host's effective actions, or are irreversible.
 
-    Runs for all three operations — crucially advertise — so a
-    repo.read-disabled host is denied already at push/fetch discovery,
-    before the client ever sends a pack. For receive-pack, every
-    ref-command is checked; the first denial rejects the whole batch,
-    matching decide's per-ref quota atomicity.
-
-    Relies on the kernel's host gate having already run and passed for
-    intent.host: a host with no [[git.endpoint]] entry is denied
-    there first. This matters because effective_actions cannot itself
-    distinguish "no endpoint" from "endpoint inheriting the domain/built-in
-    default" — both return the same non-empty default — so this gate must
-    never be the first thing to see an unconfigured host.
-    """
+    Runs for all three operations, so a disabled host is denied already at
+    discovery. For receive-pack, one denied ref-command rejects the batch."""
     if intent.operation != "receive-pack":
         return _action_decision(recognizers.recognize(intent), intent.host, cfg)
     for cmd in intent.ref_commands:
@@ -83,17 +60,10 @@ def check_ref(
     cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
 ) -> Decision:
     """Branch-namespace and quota checks for one ref-command already cleared
-    by action_gate — a tag or a delete never reaches here, both denied
-    earlier as irreversible.
+    by action_gate — a tag or delete never reaches here.
 
-    max_open_branches/max_writes_per_hour are the endpoint's own
-    resolved ceilings (Config.effective_rules(intent.host)) —
-    stateful quotas are per-endpoint, never a global Config field, so the
-    caller resolves the cascade once per request and passes the concrete
-    ints through (GitRules' fields are Optional — sentinels for the
-    cascade merge itself — so the caller, not this function, is where the
-    None-after-cascade invariant is asserted).
-    """
+    max_open_branches/max_writes_per_hour are the endpoint's own resolved
+    ceilings; stateful quotas are per-endpoint, never a global Config field."""
     ref = cmd.ref.removeprefix("refs/heads/")
     if not cfg.in_branch_namespace(ref):  # branch namespace
         return Decision(False, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}")

@@ -1,8 +1,6 @@
-"""REST-API guard reconcile: rebuild the MR-quota counter and the numeric-id
-project aliases from GitLab truth.
-
-Implementation detail of the API guard, not a shared class — uses only the
-forge-neutral transport module.
+"""REST-API guard reconcile: rebuild the MR-quota counter and numeric-id
+project aliases from GitLab truth. Uses only the forge-neutral transport
+module, not a shared class.
 """
 
 from __future__ import annotations
@@ -42,18 +40,8 @@ async def reconcile_mrs(
     """Rebuild agent_mrs and the numeric-id alias set for every allowed
     project, on every currently open configured endpoint.
 
-    Iterates cfg.open_hosts (not cfg.effective_hosts) — see
-    guards.git.reconcile.reconcile_branches's docstring for the full
-    rationale, identical here. The numeric-id alias set is a plain union
-    across hosts (project-id widening does not need to know which host an id
-    came from — ApiGuard.project_allowed only asks "is this id known",
-    never "on which host"). Returns (ok, resolved_ids). The host x
-    project loop and its fail-safe handling live in
-    core.transport.for_each_host_project (shared with the git guard's
-    reconcile_branches), which trusts that the hosts it is given are
-    already open; this function supplies only the
-    id-resolution/MR-listing/replace domain logic.
-    """
+    Iterates cfg.open_hosts, not cfg.effective_hosts. The alias set is a
+    plain union across hosts. Returns (ok, resolved_ids)."""
     resolved_ids: set[str] = set()
 
     async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:

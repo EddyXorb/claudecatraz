@@ -1,10 +1,8 @@
 """git Smart-HTTP guard: all three operations — advertise, upload-pack,
 receive-pack — dispatched via GitGuard hooks per-operation.
 
-Forge-agnostic in logic (no GitLab vocabulary). Credential injection and
-response streaming come from the forge-neutral warden.core.transport —
-this guard never imports guards.gitlab.upstream.
-"""
+Forge-agnostic: credential injection and response streaming come from
+warden.core.transport; this guard never imports the gitlab guard."""
 
 from __future__ import annotations
 
@@ -88,15 +86,10 @@ class GitGuard(Guard[GitIntent]):
         ]
 
     def state_view(self, host: str) -> StateView:
-        """This guard's own per-guard lock + its own branch counter, scoped to
-        host. Locked until *this* guard reconciled — a broken REST-API
-        upstream never locks git, and vice versa.
-
-        host is normalised but not resolved/validated here: this runs
-        *before* the kernel's host_gate, so an unrecognised host must
-        not raise — it simply queries a key nothing was ever recorded under,
-        yielding harmless zero counts; host_gate denies the request right
-        after regardless of what this view reports.
+        """This guard's own per-guard lock + branch counter, scoped to host.
+        Locked until this guard reconciled; a broken REST-API upstream never
+        locks git. Runs before host_gate, so an unrecognised host yields
+        harmless zero counts rather than raising.
         """
         if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
@@ -110,17 +103,8 @@ class GitGuard(Guard[GitIntent]):
     async def reconcile(self) -> bool:
         """Rebuild the branch-quota counter from upstream truth.
 
-        Own reconcile, independent of the REST-API guard's MR reconcile: rebuilds
-        only this guard's own branch counter and, on success, unlocks only its own
-        per-guard lock (State.mark_reconciled). A failure here leaves *this*
-        guard fail-safe-locked but never touches the REST-API guard's lock —
-        one guard's permanently unreachable upstream can never block the other.
-
-        No endpoints configured makes no upstream call either:
-        for_each_host_project simply iterates zero hosts and returns
-        True, so this guard still unlocks and the warden serves (and then
-        denies) instead of staying fail-safe-locked.
-        """
+        On success, unlocks only this guard's own lock; on failure, only
+        this guard stays fail-safe-locked. No endpoints still succeeds."""
         ok = await reconcile_branches(self.cfg, self.router, self.branch_state)
         if ok:
             self.state.mark_reconciled(self.name)
@@ -243,12 +227,8 @@ class GitGuard(Guard[GitIntent]):
     def deny_response(self, intent: GitIntent, decision: Decision, state: StateView) -> Response:
         """Per-ref rejection for receive-pack: client sees which ref failed and why.
 
-        Each ref reports its own action-gate/namespace/quota decision; a ref
-        that individually clears both but was denied at the whole-push level
-        (e.g. project allowlist, or push size) reports the overall decision,
-        never a misleading "ok". advertise/upload-pack denials get a plain
-        JSON body instead — there is no per-ref shape for a read.
-        """
+        A ref that clears its own checks but was denied at the whole-push
+        level reports the overall decision, never a misleading "ok"."""
         if intent.operation != "receive-pack":
             return deny_json(decision)
         refs = [c.ref for c in intent.ref_commands]

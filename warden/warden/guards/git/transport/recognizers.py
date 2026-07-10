@@ -1,11 +1,8 @@
 """Map a git Smart-HTTP intent to the actions it performs.
 
-advertise (either service) and upload-pack never write a ref, so both
-recognize to repo.read — push discovery carries the write token but only
-reads refs; the actual write is receive-pack's pack payload. receive-pack
-recognizes each ref-command independently and unions the result over the
-batch, so one push can require several actions at once.
-"""
+advertise and upload-pack never write a ref, so both recognize to
+repo.read. receive-pack recognizes each ref-command independently and
+unions the result, so one push can require several actions at once."""
 
 from __future__ import annotations
 
@@ -22,11 +19,9 @@ from .pktline import RefCommand
 def ref_command_action(cmd: RefCommand) -> frozenset[Action]:
     """Classify one receive-pack ref-command.
 
-    Delete is checked before create so a degenerate all-zero-to-all-zero
-    command (never sent by real git, but not excluded by the wire format)
-    recognizes as a delete rather than a create. A ref outside
-    refs/heads/ / refs/tags/ recognizes to nothing — fail-closed.
-    """
+    Delete is checked before create so an all-zero-to-all-zero command
+    recognizes as a delete. A ref outside refs/heads/ or refs/tags/
+    recognizes to nothing — fail-closed."""
     if cmd.ref.startswith("refs/heads/"):
         if cmd.is_delete:
             return frozenset({git_actions.REPO_BRANCH_DELETE})

@@ -1,11 +1,8 @@
 """The git guard's Intent: forge-agnostic, covers all three git Smart-HTTP
-operations (advertise, upload-pack, receive-pack) dispatched on operation.
+operations, dispatched on operation.
 
-needs_write is False except for receive-pack push and push discovery
-(advertise with ?service=git-receive-pack), both of which must carry the
-write token — push discovery reads refs but still needs it, which is exactly
-why the flag is about the credential, not about changing state.
-"""
+needs_write is False except for receive-pack and push discovery — it's
+about the credential, not about changing state."""
 
 from __future__ import annotations
 
@@ -24,14 +21,11 @@ class GitIntent(Intent):
     # Audit-facing verb, not always an HTTP method: advertise→"GET",
     # upload-pack→"POST", receive-pack→"push" (kept for JSONL compatibility).
     _method: str
-    # Raw `Host` header, read by the guard's parse(). `core.guard.host_gate`
-    # checks this against `Config.host_allowed`; the guard itself resolves
-    # the canonical host (for `UpstreamRouter`/state keys) via
-    # `Config.resolve_target_host(_host)`.
+    # Raw Host header, read by the guard's parse(); host_gate checks it
+    # against Config.host_allowed. The guard resolves the canonical host.
     _host: str = ""
-    # Set by the guard's parse(), never derived here: True for receive-pack
-    # and for push discovery (advertise with ?service=git-receive-pack) — the
-    # write token it needs must never reach upstream on a read-only host.
+    # Set by the guard's parse(): True for receive-pack and push discovery —
+    # the write token it needs must never reach upstream on a read-only host.
     _needs_write: bool = False
     service: str = "git-upload-pack"  # advertise only
     ref_commands: list[RefCommand] = field(default_factory=list)  # receive-pack only
@@ -42,10 +36,8 @@ class GitIntent(Intent):
     content_type: str = "application/x-git-receive-pack-request"
     extra_headers: dict[str, str] = field(default_factory=dict)
     sideband: bool = False
-    # receive-pack only: the request's Content-Length, when the client sent one
-    # (git normally does). None when absent (e.g. chunked transfer) — the size
-    # gate then has nothing cheap to check against and lets the push
-    # through; it is a cap on the common case, not packfile parsing.
+    # receive-pack only: Content-Length when sent; None when absent (e.g.
+    # chunked) — the size gate then has nothing to check and lets the push through.
     push_bytes: Optional[int] = None
 
     @property

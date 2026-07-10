@@ -1,16 +1,8 @@
 """GitLab REST guard I/O hooks: parse -> enrich -> forward/deny-response.
 
-Reads stream through with the read token; writes are matched against
-the recognizer catalog, source-branch-namespace checked, quota-checked, then
-forwarded with the write token — or denied with a 403 that never leaks a
-GitLab response. /api/graphql* shares this same pipeline and is always
-denied (intent.is_graphql) — an unmodelled channel, never a separate guard.
-
-Self-contained GitLab domain logic: the MR source-branch-namespace lookup
-(.mr_namespace), MR/project-id reconcile (.reconcile) and the MR-quota
-table (.state) are this guard's own implementation details, reachable by no
-other guard.
-"""
+Writes are matched against the recognizer catalog, source-branch-namespace
+checked, quota-checked, then forwarded with the write token or denied.
+/api/graphql* shares this pipeline and is always denied."""
 
 from __future__ import annotations
 
@@ -82,12 +74,10 @@ class ApiGuard(Guard[ApiIntent]):
         self.mr_state = MrState(state.store)
         self.mr_namespace = MrNamespace(router, cfg)
         # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
-        # Guard state, not Config — Config stays immutable; only this guard's
-        # view of "which ids currently alias an allowlisted project" is refreshed.
+        # Guard state, not Config, since Config stays immutable.
         self.project_id_aliases: set[str] = set()
-        # Built once at construction, never rebuilt — no runtime rebuild, no drift.
-        # One set per configured host — an action allowed on one host can be
-        # denied on another, per that host's own effective actions.
+        # Built once at construction, never rebuilt. One set per configured
+        # host — an action allowed on one host can be denied on another.
         self._effective_by_host: Mapping[str, frozenset[str]] = {
             cfg.normalize_host(ep.host): frozenset(cfg.effective_actions(ep.host))
             for ep in cfg.git_endpoints
@@ -100,10 +90,8 @@ class ApiGuard(Guard[ApiIntent]):
                 self.handle,
                 methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
             ),
-            # GraphQL can express every write the REST filter blocks (create a
-            # tag, merge an MR) in a single mutation — routed through this same
-            # guard so it goes through the same pipeline, always denied
-            # (intent.is_graphql), never proxied upstream.
+            # GraphQL can express writes the REST filter blocks in one mutation —
+            # routed through this same guard, always denied, never proxied.
             Route(
                 "/api/graphql",
                 self.handle,
@@ -119,9 +107,7 @@ class ApiGuard(Guard[ApiIntent]):
     def _effective_for(self, host: str) -> frozenset[str]:
         """This host's effective action ids, or an empty set if none is
         configured — every action then default-denies rather than crashing.
-        A host with no [[git.endpoint]] entry can only reach here before
-        the kernel's host_gate has run: parse runs ahead of it, same
-        as state_view (see its docstring).
+        Reachable before the kernel's host_gate has run, same as state_view.
         """
         return self._effective_by_host.get(self.cfg.normalize_host(host), frozenset())
 
@@ -133,14 +119,9 @@ class ApiGuard(Guard[ApiIntent]):
         )
 
     def state_view(self, host: str) -> StateView:
-        """This guard's own snapshot: its per-guard fail-safe lock + writes
-        counter plus this domain's MR count — never branches (the git guard
-        tracks those) — all scoped to host (per-endpoint).
-        Locked until *this* guard reconciled; a broken git upstream never
-        locks the REST-API guard, and vice versa.
-
-        See GitGuard.state_view for why host is normalised but not
-        resolved/validated here (this runs before host_gate).
+        """This guard's own snapshot: its per-guard fail-safe lock, writes
+        counter, and MR count, scoped to host. Locked until this guard
+        reconciled; a broken git upstream never locks the REST-API guard.
         """
         if not self.state.is_reconciled(self.name):
             return StateView(locked=True)
@@ -154,17 +135,8 @@ class ApiGuard(Guard[ApiIntent]):
     async def reconcile(self) -> bool:
         """Rebuild the MR counter + numeric-id aliases from GitLab truth.
 
-        Rebuilds only this guard's own MR counter/aliases and, on success,
-        unlocks only its own per-guard lock (State.mark_reconciled). A
-        failure leaves *this* guard fail-safe-locked but never touches the
-        git guard's lock — one guard's permanently unreachable upstream can
-        never block the other.
-
-        No endpoints configured makes no upstream call either:
-        for_each_host_project simply iterates zero hosts and returns
-        True, so the guard still unlocks itself and the warden serves
-        (then denies) requests without ever contacting GitLab.
-        """
+        On success, unlocks only this guard's own lock; on failure, only
+        this guard stays fail-safe-locked. No endpoints still succeeds."""
         ok, resolved_ids = await reconcile_mrs(self.cfg, self.router, self.mr_state)
         self.project_id_aliases = resolved_ids
         if ok:
@@ -192,9 +164,8 @@ class ApiGuard(Guard[ApiIntent]):
             body=body,
             raw_query=query,
         )
-        # Match once against the catalog to know which fields this specific
-        # recognizer declares; the same match is recomputed (pure, cheap) by
-        # the kernel and by policy.decide — see recognizers.match_request.
+        # Match once against the catalog to know which fields this recognizer
+        # declares; recomputed (pure, cheap) elsewhere too.
         match = match_request(intent)
         intent.fields = extract_fields(request, body, match)
         return intent

@@ -1,13 +1,8 @@
 """The GitLab REST recognizer catalog: method + path template -> action set.
 
-CATALOG is matched first-match-wins, most specific row first — the last
-row (read.project) is the project-bound catch-all everything else falls
-through to. Every row's action set is computed by its own action_fn: a
-static set for most rows, a field-conditional lookup for the handful whose
-meaning depends on a request field (state_event, search scope) — an
-unrecognised field value yields an empty set, which is always a deny
-(the fail-closed contract every Recognizer call obeys).
-"""
+Matched first-match-wins, most specific row first; read.project is the
+catch-all last row. An unrecognised field value yields an empty action
+set, which is always a deny."""
 
 from __future__ import annotations
 
@@ -26,12 +21,9 @@ from .intent import ApiIntent
 class ScopeKind(str, Enum):
     """The two write-scope checks policy.decide_scope performs.
 
-    BRANCH_NAMESPACE: a branch name — literal (namespace_field) or
-    resolved via an iid -> MR upstream lookup when namespace_field is
-    None — must lie in the agent's configured namespace.
-    QUOTA_BY_KIND: no branch concept; only the project boundary (kernel)
-    and the writes-per-hour quota apply.
-    """
+    BRANCH_NAMESPACE: a branch name (literal or resolved via upstream
+    lookup) must lie in the agent's configured namespace. QUOTA_BY_KIND:
+    no branch concept, only project boundary and writes-per-hour quota."""
 
     BRANCH_NAMESPACE = "branch-namespace"
     QUOTA_BY_KIND = "quota-by-kind"
@@ -48,10 +40,8 @@ class Location(str, Enum):
 class FieldSpec:
     """One field a recognizer's action depends on, and where to read it.
 
-    The guard extracts only the fields a recognizer declares here, each from
-    its declared location — never a blind merge of body and query. A field
-    declared BODY that only shows up in the query string is simply absent
-    from the decision, exactly as if the caller never sent it.
+    Only fields declared here are extracted, each from its declared
+    location — never a blind merge of body and query.
     """
 
     name: str
@@ -120,11 +110,8 @@ def _search_scope(intent: ApiIntent) -> frozenset[Action]:
 def _compile(template: str) -> re.Pattern[str]:
     """Compile a REST path template into a fullmatch-ready regex.
 
-    {name} is one URL-encoded path segment. A template ending in the
-    literal token {rest} requires one or more further characters after
-    that slash (multi-segment, e.g. repository content paths); a template
-    ending in {/rest} makes that same tail optional (the bare path alone
-    also matches).
+    {name} is one path segment. {rest} requires further characters after
+    that slash; {/rest} makes that same tail optional.
     """
     optional_tail = template.endswith("{/rest}")
     if optional_tail:
@@ -152,21 +139,9 @@ def _methods(*methods: str) -> frozenset[str]:
 class RestRecognizer(Recognizer[ApiIntent]):
     """One catalog row: method(s) + path template -> action set.
 
-    scope_kind/namespace_field are the scope-policy payload
-    policy.decide_scope consumes — meaningful only for write rows; a read
-    row leaves them at their defaults. A BRANCH_NAMESPACE row with
-    namespace_field=None resolves its branch via the iid -> MR upstream
-    lookup (intent.mr_source_ok) instead of a literal field. Quota kind is
-    not declared here — it is carried on the recognized action itself
-    (Action.quota_kind), not on the recognizer.
-
-    possible_actions (the policy report's static view of this row,
-    required by Recognizer) is derived automatically from action_fn
-    when it is a _static set — there is nothing to declare twice. A
-    field-conditional row must pass possible_actions_override instead
-    (the full range of its lookup table), enforced in __post_init__ so a
-    new field-conditional row can't silently ship without one.
-    """
+    scope_kind/namespace_field are policy.decide_scope's payload, meaningful
+    only for write rows. possible_actions is derived from a static action_fn;
+    a field-conditional row must pass possible_actions_override instead."""
 
     id: str
     methods: frozenset[str]
@@ -264,10 +239,8 @@ CATALOG: tuple[RestRecognizer, ...] = (
         methods=_PUT,
         template="/projects/{id}/merge_requests/{iid}/merge",
         action_fn=_static(git_actions.PROJECT_MR_MERGE),
-        # QUOTA_BY_KIND, not BRANCH_NAMESPACE: the criticality gate always
-        # denies this row before decide_scope is ever reached, so an iid ->
-        # MR upstream lookup here would only be a wasted (unmocked-in-tests,
-        # credential-backed) call for a request that can never be allowed.
+        # QUOTA_BY_KIND, not BRANCH_NAMESPACE: the criticality gate always denies
+        # this row, so an MR upstream lookup here would be wasted.
         scope_kind=ScopeKind.QUOTA_BY_KIND,
     ),
     RestRecognizer(

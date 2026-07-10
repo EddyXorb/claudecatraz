@@ -1,8 +1,6 @@
-"""The git namespace: action vocabulary, endpoint types, and the transport
-guard that serves every git-namespace endpoint.
+"""The git namespace: action vocabulary and endpoint types.
 
-actions.py and endpoints.py live here; the git Smart-HTTP guard
-itself lives in the transport subpackage.
+The git Smart-HTTP guard itself lives in the transport subpackage.
 """
 
 from __future__ import annotations

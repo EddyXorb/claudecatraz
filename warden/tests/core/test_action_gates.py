@@ -1,10 +1,6 @@
-"""The kernel's action gates: criticality, enablement, and the
-per-type action-id derivation they depend on.
-
-Every guard's own recognizer/policy tests already pin down *which* action a
-given request recognizes; these tests pin down the kernel behavior every
-guard shares once an action is recognized, plus proof that a denied action
-never reaches an unpure ``enrich`` lookup.
+"""The kernel's action gates: criticality, enablement, and per-type
+action-id derivation. Pins down behavior shared across guards once an
+action is recognized, plus proof a denied action never reaches enrich.
 """
 
 from __future__ import annotations
@@ -164,12 +160,9 @@ def test_empty_recognized_write_denies_in_the_kernel_for_git_transport():
 
 
 async def test_disabled_write_action_performs_no_upstream_lookup(respx_router):
-    """A host whose ``project.mr.comment`` is disabled must be denied by the
-    kernel's action gate before ``enrich`` ever runs, so the MR
-    source-branch-namespace lookup (a credential-backed upstream GET) is
-    never made. ``respx_router`` intercepts every upstream call and raises on
-    one that was never mocked, so a real call here fails the test outright
-    instead of silently passing.
+    """A host whose project.mr.comment is disabled must be denied by the
+    kernel's action gate before enrich ever runs, so the MR namespace
+    lookup is never made. respx_router raises on any unmocked upstream call.
     """
     enabled = tuple(a.id for a in git_actions.DEFAULT if a.id != "project.mr.comment")
     cfg = _cfg(actions=enabled)

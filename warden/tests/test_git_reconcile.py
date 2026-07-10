@@ -24,9 +24,8 @@ def _git_guard(cfg, state) -> GitGuard:
 
 
 async def test_reconcile_branches_follows_every_page(cfg, state, respx_router):
-    # Page 1 advertises a next page via X-Next-Page; the branch that lives ONLY
-    # on page 2 must still be returned. A revert to a single per_page=100 request
-    # would drop it and fail here.
+    # Page 1 advertises a next page via X-Next-Page; the branch that lives only
+    # on page 2 must still be returned.
     page1 = httpx.Response(
         200,
         json=[{"name": "claude/a"}, {"name": "main"}],
@@ -139,7 +138,7 @@ async def test_reconcile_branches_skips_a_closed_endpoint():
 
 
 async def test_reconcile_ignores_a_host_with_no_push_action(respx_router):
-    """A host with only ``repo.read`` must still reconcile like any other open
+    """A host with only repo.read must still reconcile like any other open
     endpoint — reconcile only does GETs and is never gated by the action gate."""
     cfg = Config(
         branch_prefixes=("claude/",),

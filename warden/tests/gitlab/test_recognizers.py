@@ -1,10 +1,8 @@
 """Table-driven tests for the GitLab REST recognizer catalog.
 
-Every row is exercised at least once (match + recognized action set); the
-field-conditional rows (``mr.update``, ``issue.update``, the two search rows)
-get their own matrix; the content line, GraphQL, and the merge
-criticality-deny are each pinned down explicitly.
-"""
+Every row is exercised at least once; field-conditional rows (mr.update,
+issue.update, the two search rows) get their own matrix. Content line,
+GraphQL, and the merge criticality-deny are each pinned down explicitly."""
 
 from __future__ import annotations
 

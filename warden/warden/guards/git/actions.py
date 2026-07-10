@@ -1,8 +1,7 @@
 """The git-namespace action vocabulary: repo/project/instance scopes.
 
-Twenty ids, closed set — no wildcards, no inheritance, config lists
-replace completely. Every IRREVERSIBLE action is excluded from DEFAULT
-by construction, never by a separate list that could drift.
+Closed set, config lists replace completely. Every IRREVERSIBLE action
+is excluded from DEFAULT by construction, never by a separate list.
 """
 
 from __future__ import annotations

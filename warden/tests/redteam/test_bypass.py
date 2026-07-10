@@ -1,14 +1,7 @@
-"""Red-team bypass attempts (W14, §8.2) at the HTTP boundary — the cheap, no-docker
-subset: merge aliases, prefix tricks, cross-project reads, API branch creation.
-
-The full hostile-agent docker-compose suite (§8.2: printenv has no token, no direct
-connect, flooding, exfil) is environment-level and lives outside this unit suite.
-
-Later sections extend this file for the actions-rework fail-closed edges: field-
-conditional smuggling (state_event, search scope), the repo/project content line,
-push-batch atomicity/quota, config-time rejection of retired action ids, GraphQL
-across every method, and unmodelled endpoints.
-"""
+"""Red-team bypass attempts at the HTTP boundary — the cheap, no-docker
+subset: merge aliases, prefix tricks, cross-project reads, branch
+creation, field-conditional smuggling, push-batch atomicity, and
+GraphQL/unmodelled-endpoint denial."""
 
 from __future__ import annotations
 
@@ -36,8 +29,8 @@ async def test_merge_alias_when_pipeline_succeeds_blocked(client, respx_router):
 
 
 async def test_merge_via_state_event_blocked(client, respx_router):
-    # Foreign author but namespace source_branch — §07 Punkt 4 allows touching the MR,
-    # but the merge block is independent and must still apply.
+    # Foreign author but namespace source_branch allows touching the MR, but
+    # the merge block is independent and must still apply.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
@@ -48,9 +41,8 @@ async def test_merge_via_state_event_blocked(client, respx_router):
 
 
 async def test_mr_note_on_non_namespace_branch_still_denied(client, respx_router):
-    # The security boundary that matters (§07 Punkt 4): dropping the author check
-    # must NOT also drop the namespace check. A MR whose source_branch is outside
-    # the allowed prefixes stays blocked no matter who authored it.
+    # Dropping the author check must NOT also drop the namespace check: a MR
+    # whose source_branch is outside the allowed prefixes stays blocked.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
@@ -65,12 +57,11 @@ async def test_cross_project_read_blocked(client, respx_router):
     assert resp.status_code == 403 and "not in allowlist" in resp.json()["reason"]
 
 
-# --- B1: "content, not visibility" — projectless content-capable reads must
-# stay blocked no matter how they're dressed up, even though the token can
-# technically see every project. ---
+# --- "content, not visibility" — projectless content-capable reads must stay
+# blocked even though the token can technically see every project. ---
 async def test_global_blob_search_cannot_harvest_code_across_projects(client, respx_router):
-    # The whole point of B1: global search with scope=blobs returns code content
-    # from *every* project visible to the token, bypassing allowed_projects.
+    # Global search with scope=blobs returns code content from every project
+    # visible to the token, bypassing allowed_projects.
     resp = await client.get("/api/v4/search?scope=blobs&search=password")
     assert resp.status_code == 403 and "not in allowlist" in resp.json()["reason"]
 
@@ -86,8 +77,7 @@ async def test_snippets_cannot_be_read_projectless(client, respx_router):
 
 
 async def test_group_discovery_still_works_despite_b1(client, respx_router):
-    # B1 must not regress the AGENT.md-documented discovery flow: names/metadata
-    # stay readable, only content is scoped.
+    # Discovery (names/metadata) must stay readable; only content is scoped.
     respx_router.route(method="GET", url__regex=r".*/groups/.*/projects$").mock(
         return_value=httpx.Response(200, json=[{"name": "proj"}])
     )
@@ -95,11 +85,10 @@ async def test_group_discovery_still_works_despite_b1(client, respx_router):
     assert resp.status_code == 200
 
 
-# --- B5: GraphQL must never become a policy bypass -----------------------------
+# --- GraphQL must never become a policy bypass -----------------------------
 async def test_graphql_mutation_cannot_bypass_merge_block(client, respx_router):
     # A GraphQL mutation could merge an MR in one call, bypassing the merge
-    # block entirely — the warden must refuse before any upstream contact,
-    # not rely on GitLab.
+    # block — the warden must refuse before any upstream contact.
     resp = await client.post(
         "/api/graphql",
         json={"query": "mutation { mergeRequestAccept(input: {}) { errors } }"},
@@ -113,9 +102,8 @@ async def test_graphql_read_query_also_denied(client, respx_router):
 
 
 async def test_api_branch_creation_outside_namespace_denied(client, respx_router):
-    # repo.branch.create is default-on (one knob covers both the git-push and
-    # REST wires) — the namespace boundary is what must still hold for a
-    # branch name outside the allowed prefixes.
+    # repo.branch.create is default-on for both git-push and REST — the
+    # namespace boundary must still hold for a branch outside allowed prefixes.
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/repository/branches",
         json={"branch": "main", "ref": "main"},
@@ -166,9 +154,8 @@ async def test_state_event_unknown_value_denied(client, respx_router):
 
 @pytest.mark.parametrize("value", ["Merge", "MERGE", "Close", "REOPEN"])
 async def test_state_event_casing_variant_denied(client, respx_router, value):
-    # The lookup is a plain dict keyed on the lowercase GitLab values — a
-    # differently-cased known value is therefore case-sensitively rejected,
-    # not silently folded to its lowercase counterpart.
+    # The lookup is a plain dict keyed on lowercase GitLab values — a
+    # differently-cased value is case-sensitively rejected, not folded.
     resp = await client.put(
         f"/api/v4/projects/{PROJ}/merge_requests/7", json={"state_event": value}
     )
@@ -177,9 +164,7 @@ async def test_state_event_casing_variant_denied(client, respx_router, value):
 
 async def test_state_event_in_query_string_is_not_read_declared_location_wins(client, respx_router):
     # decision_fields declares state_event as BODY-only; a query-string value
-    # must be invisible to the recognizer. If it leaked in, this would be a
-    # merge attempt (irreversible, compiled-in deny); instead it falls through
-    # as a plain edit (no state_event at all) and is forwarded.
+    # must be invisible, so this falls through as a plain edit and is forwarded.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x"})
     )
@@ -208,12 +193,8 @@ async def test_search_wiki_blobs_scope_cannot_harvest_content(client, respx_rout
     assert resp.status_code == 403 and "not in allowlist" in resp.json()["reason"]
 
 
-# --- the repo/project content line: repo.read off, project.read on ----------
-# blobs/commits/wiki_blobs above prove the *scope* boundary; these prove the
-# content-line boundary is a second, independent axis: with repo.read
-# disabled, every content-capable project-bound read is denied even though
-# project.read (attributes/MRs/issues) stays enabled — except the deliberate
-# MR-diff carve-out, which still passes under project.read alone.
+# --- content line: repo.read off, project.read on — denies content reads
+# even with project.read enabled, except the MR-diff carve-out. ---
 
 _CL_HOST = "gitlab.example"
 
@@ -263,11 +244,8 @@ def test_content_line_mr_diff_still_passes_when_repo_read_off():
 
 
 async def test_push_batch_tag_create_poisons_an_otherwise_fine_batch(client, respx_router):
-    # claude/good is an ordinary, in-namespace branch create (fine on its own);
-    # claude/v1 is a tag create (IRREVERSIBLE, compiled-in deny). The kernel's
-    # criticality gate sees the *union* of the batch's recognized actions, so
-    # the tag poisons the whole push — the good ref is rejected too, not just
-    # the bad one.
+    # claude/good is a fine in-namespace branch create; claude/v1 is a tag
+    # create (IRREVERSIBLE) — the union poisons the whole push, rejecting both.
     body = (
         pkt_line(f"{ZERO} {SHA1} refs/heads/claude/good\x00report-status\n".encode())
         + pkt_line(f"{ZERO} {SHA1} refs/tags/claude/v1\n".encode())
@@ -282,9 +260,8 @@ async def test_push_batch_tag_create_poisons_an_otherwise_fine_batch(client, res
 async def test_push_batch_n_creates_against_quota_of_n_minus_1_rejected(
     client, cfg, state, respx_router
 ):
-    # Quota, not the action gate: repo.branch.create is enabled for
-    # every ref here — the batch is rejected purely because it would push the
-    # open-branch count past max_open_branches.
+    # Quota, not the action gate: repo.branch.create is enabled for every ref;
+    # the batch is rejected only because it would exceed max_open_branches.
     host = cfg.git_endpoints[0].host
     bs = BranchState(state.store)
     for i in range(cfg.max_open_branches - 1):

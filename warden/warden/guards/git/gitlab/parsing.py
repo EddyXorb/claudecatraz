@@ -20,15 +20,9 @@ _API_PREFIX = "/api/v4"
 def raw_rest_path(request: Request) -> str:
     """REST path after /api/v4, keeping percent-encoding (e.g. %2F in project ids).
 
-    ASGI servers decode scope["path"] — which would turn group%2Fproj into
-    a two-segment group/proj and break id extraction and forwarding. We read
-    raw_path to preserve the encoding all the way to gitlab.com. A
-    /api/graphql* path has no /api/v4 prefix to strip, so it passes
-    through unchanged — which is exactly what marks it as GraphQL downstream.
-
-    Deliberately query-less: path matching/decision operate on the path alone.
-    The query string is extracted separately and reattached only when forwarding.
-    """
+    ASGI decodes scope["path"], which would break id extraction, so this
+    reads raw_path instead. A /api/graphql* path has no prefix to strip,
+    which marks it as GraphQL downstream. Deliberately query-less."""
     raw = request.scope.get("raw_path")
     full = raw.decode("latin-1") if raw else request.url.path
     full = full.split("?", 1)[0]
@@ -40,10 +34,8 @@ def raw_rest_path(request: Request) -> str:
 def raw_query(request: Request) -> str:
     """Raw query string (percent-encoding intact), for the upstream URL only.
 
-    The *decision* reads decoded fields via request.query_params (folded
-    into intent.fields by extract_fields); this preserves
-    the exact wire bytes GitLab must see — without it, a query-dependent decision
-    could pass on a value the upstream request never actually carries.
+    Decisions read decoded fields via extract_fields instead; this preserves
+    the exact wire bytes GitLab must see.
     """
     raw: bytes = request.scope.get("query_string", b"")
     return raw.decode("latin-1")
@@ -84,14 +76,9 @@ def extract_fields(
 ) -> dict[str, Any]:
     """Pull the decision fields for this request.
 
-    An unmatched request needs none — nothing recognizes it either way.
-
-    For a matched recognizer: only the fields it *declares*
-    (RestRecognizer.decision_fields) are read, each strictly from its
-    declared location (body or query) — never a blind merge of both. A
-    body-declared field that only appears in the query string (or vice versa)
-    is simply absent from the decision, exactly as if the caller never sent it.
-    """
+    For a matched recognizer, only the fields it declares are read, each
+    strictly from its declared location — never a blind merge of body
+    and query. A field in the wrong location is simply absent."""
     if match is None:
         return {}
     query_fields = dict(request.query_params)

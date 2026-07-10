@@ -1,22 +1,8 @@
 """GitLab REST guard policy: pure decide over the recognizer catalog.
 
-Every matched request is a set of recognized actions (recognizers.CATALOG).
-The kernel's criticality/action gates deny an irreversible action, or one the
-host's config doesn't enable, before decide ever runs; decide handles
-what is left: read pass-through, or a write's branch-namespace/quota check.
-
-Checks enforced here:
-  Read pass-through   a matched read action is allowed with the READ token.
-  Branch namespace    a literal branch field (source_branch/ref/branch)
-      must lie in the agent's configured namespace.
-  API write filter    an unmatched/unrecognized write, or an
-      unverifiable iid -> MR namespace lookup, is denied.
-  Irreversible verbs  any recognized action at IRREVERSIBLE criticality —
-      never permitted, regardless of config (kernel gate).
-  Quota & rate        max open MRs, max writes/hour; locked state denies.
-  Project boundary    unmatched/not-enabled projectless reads; GraphQL;
-      a recognized action not enabled for the host (kernel gate).
-"""
+The kernel denies criticality/enablement violations before decide runs;
+decide handles what remains — read pass-through, or a write's
+branch-namespace and quota checks (state.locked always denies)."""
 
 from __future__ import annotations
 
@@ -34,9 +20,8 @@ from .recognizers import RestRecognizer, ScopeKind, match_request
 def _recognize(intent: ApiIntent) -> tuple[Optional[RestRecognizer], frozenset[Action]]:
     """Match intent against the catalog and recognize its action set.
 
-    Returns (None, frozenset()) for no match, and (match, frozenset())
-    for a match whose fields carry no known meaning (fail-closed) — both
-    outcomes deny, distinguished only for a clearer denial reason.
+    Returns (None, frozenset()) for no match, and (match, frozenset()) for a
+    match with no recognized meaning (fail-closed) — both outcomes deny.
     """
     match = match_request(intent)
     if match is None:
@@ -75,12 +60,9 @@ def decide_scope(
     cfg: Config,
 ) -> Decision:
     """The one generic decision every matched write recognizer feeds through —
-    dispatches purely on match.scope_kind.
-
-    BRANCH_NAMESPACE: a namespace check (literal field or, for iid-lookup
-    rows, the tristate intent.mr_source_ok populated by enrich()) must
-    pass before quota is considered. QUOTA_BY_KIND: no namespace check —
-    falls straight through to quota.
+    dispatches purely on match.scope_kind. BRANCH_NAMESPACE checks the
+    namespace (literal field or intent.mr_source_ok) before quota;
+    QUOTA_BY_KIND skips straight to quota.
     """
     if match.scope_kind is ScopeKind.BRANCH_NAMESPACE:
         denied = _branch_namespace_check(intent, match, cfg)
@@ -103,13 +85,9 @@ def _branch_namespace_check(
 ) -> Optional[Decision]:
     """Branch-namespace check for a BRANCH_NAMESPACE recognizer.
 
-    namespace_field set: the branch is literally in the request (body or
-    query, per decision_fields) — a mismatch is denied here (the caller's own
-    request is the witness). namespace_field is None: the branch was
-    resolved via the iid -> MR upstream lookup, in intent.mr_source_ok
-    (True/False/unverifiable None) — a mismatch or unverifiable
-    lookup is also denied.
-    """
+    namespace_field set: the branch is literal in the request, checked
+    directly. namespace_field None: resolved via intent.mr_source_ok;
+    a mismatch or unverifiable lookup is denied."""
     if match.namespace_field is not None:
         value = intent.fields.get(match.namespace_field, "")
         if cfg.in_branch_namespace(value):
@@ -130,10 +108,8 @@ def _quota_check(
     recognized: frozenset[Action], state: StateView, max_open_mrs: int, max_writes_per_hour: int
 ) -> Optional[Decision]:
     """max_open_mrs/max_writes_per_hour are the endpoint's own resolved
-    ceilings (Config.effective_rules(intent.host)). The open-MR ceiling
-    applies to whichever action carries the MR quota kind — read off the
-    recognized action itself, since a write recognizes to exactly one action
-    by the time this runs.
+    ceilings. The open-MR ceiling applies to whichever action carries the
+    MR quota kind, read off the recognized action itself.
     """
     if state.locked:  # Fail-safe: never "empty = free"
         return Decision(False, "state locked (fail-safe) — reconcile pending")
@@ -154,9 +130,8 @@ def full_decide(
 ) -> Decision:
     """Compose kernel gates with guard-specific decide for callers outside Guard.handle.
 
-    Used by tests exercising the whole effective decision, not just this
-    module's slice. effective_actions/project_allowed default to the
-    real values for free.
+    Used by tests exercising the whole effective decision. effective_actions
+    and project_allowed default to the real values.
     """
     if effective_actions is None:
         effective_actions = frozenset(cfg.effective_actions(intent.host))

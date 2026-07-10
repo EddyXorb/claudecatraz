@@ -1,9 +1,7 @@
-"""``endpoint_table_report``: the ``/policy`` admin-route JSON shape, per host.
+"""endpoint_table_report: the /policy admin-route JSON shape, per host.
 
-Walks the actual running guards (``AppContext.guards``), not a report-only
-recomputation — so these tests build a real ``AppContext`` via
-``build_context`` rather than calling the report function against a bare
-catalog import.
+Walks the actual running guards (AppContext.guards), not a report-only
+recomputation, so these tests build a real AppContext via build_context.
 """
 
 from __future__ import annotations
@@ -111,9 +109,8 @@ def test_git_receive_pack_row_names_branch_delete_and_tag_denials():
 
 
 def test_denied_action_is_inactive_even_if_explicitly_configured():
-    # A misconfigured host that lists every action id (delete/tag included)
-    # still reports those as inactive: the criticality gate always denies
-    # them, regardless of membership in `actions`.
+    # A misconfigured host listing every action id still reports those as
+    # inactive: the criticality gate always denies them, regardless of config.
     cfg = _cfg(
         git_endpoints=(
             GitEndpoint(
@@ -148,8 +145,7 @@ def test_quota_kind_present_on_gitlab_actions_absent_on_transport_actions():
 
 def test_quota_kind_differs_by_action_within_a_multi_action_row():
     # mr.update's single row recognizes to edit/close/merge depending on
-    # state_event — quota kind is a function of which action ends up
-    # recognized, not a single value for the whole row.
+    # state_event — quota kind depends on which action is recognized.
     host_report = _report(_cfg(git_endpoints=(GitEndpoint(host=_HOST, type="gitlab"),)))["hosts"][
         _HOST
     ]

@@ -96,9 +96,8 @@ def capabilities(head: bytes) -> set[str]:
 def _find_command_end(buf: bytes | bytearray) -> Optional[int]:
     """Index just past the flush-pkt that ends the command section, or None.
 
-    Walks pkt-lines on the *raw* bytes. Returns None when more bytes are needed
-    or when the head is not plain pkt-line framing (e.g. gzip) — the caller then
-    buffers the whole body.
+    Returns None when more bytes are needed, or when the head isn't plain
+    pkt-line framing (e.g. gzip) — the caller then buffers the whole body.
     """
     i, n = 0, len(buf)
     while True:
@@ -122,9 +121,8 @@ async def read_until_flush(
 ) -> tuple[bytes, AsyncIterator[bytes]]:
     """Buffer request body only up to the command-section flush.
 
-    Returns (head, rest) where head covers the pkt-line command section (KB-sized)
-    and rest re-yields the buffered remainder and untouched PACK stream — body
-    is forwarded byte-for-byte without buffering the packfile.
+    Returns (head, rest); rest re-yields the buffered remainder plus the
+    untouched PACK stream, forwarded byte-for-byte without buffering it.
     """
     buf = bytearray()
     boundary: Optional[int] = None

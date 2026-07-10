@@ -33,9 +33,8 @@ def test_add_branch_records_a_single_push_created_branch():
 
 
 def test_two_hosts_with_the_same_project_path_get_separate_counters():
-    # gitlab.com/acme/infra and my-gitlab.de/acme/infra are different repos
-    # that happen to share a project path — without the host in the key a
-    # push on one would silently share/overwrite the other's row.
+    # Different repos can share a project path across hosts — without the host
+    # in the key, a push on one would overwrite the other's row.
     bs = _branch_state()
     bs.add_branch("gitlab.com", "acme/infra", "claude/a")
     bs.add_branch("my-gitlab.de", "acme/infra", "claude/a")

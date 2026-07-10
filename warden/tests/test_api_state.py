@@ -37,9 +37,8 @@ def test_replace_mrs_sets_open_count():
 
 
 def test_two_hosts_with_the_same_project_path_and_iid_get_separate_counters():
-    # gitlab.com/acme/infra!5 and my-gitlab.de/acme/infra!5 are different MRs
-    # that happen to share both project path and iid — without the host in
-    # the key the second upsert would overwrite the first's row.
+    # Different MRs can share project path and iid across hosts — without the
+    # host in the key, the second upsert would overwrite the first's row.
     ms = _mr_state()
     ms.upsert_mr("gitlab.com", "acme/infra", 5, "opened")
     ms.upsert_mr("my-gitlab.de", "acme/infra", 5, "opened")

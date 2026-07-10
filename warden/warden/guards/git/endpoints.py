@@ -1,14 +1,8 @@
 """Endpoint types for the git namespace: guard composition + valid action ids.
 
-"github" stays a reserved, not-yet-implemented type — it is rejected in
-warden.core.config_load, never listed here.
-
-A type's valid action ids are the union of its composing guards' own
-SUPPORTED sets (transport.actions.SUPPORTED/gitlab.actions.SUPPORTED
-— each guard's own vocabulary module, qualified access, never a guard class:
-this module and core stay guard-class-free, config validation needs these
-ids before any guard is ever instantiated).
-"""
+"github" is reserved and rejected elsewhere, never listed here. A type's
+valid action ids are the union of its composing guards' own SUPPORTED sets,
+accessed qualified — this module and core stay guard-class-free."""
 
 from __future__ import annotations
 

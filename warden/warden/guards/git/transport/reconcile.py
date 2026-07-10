@@ -1,8 +1,7 @@
 """git guard reconcile: rebuild the branch-quota counter from upstream truth.
 
-Uses only the forge-neutral warden.core.transport — no
-guards.git.gitlab import, so the git guard's reconcile never depends on
-the REST-API guard's own reconcile.
+Uses only the forge-neutral warden.core.transport, so this never depends
+on the REST-API guard's own reconcile.
 """
 
 from __future__ import annotations
@@ -26,19 +25,11 @@ async def _list_agent_branches(upstream: Upstream, cfg: Config, pid: str) -> lis
 async def reconcile_branches(
     cfg: Config, router: UpstreamRouter, branch_state: BranchState
 ) -> bool:
-    """Rebuild agent_branches for every allowed project, on every *open*
+    """Rebuild agent_branches for every allowed project, on every open
     configured endpoint. Returns True on full success.
 
-    Iterates cfg.open_hosts (not cfg.effective_hosts) — every
-    configured endpoint whose access_mode is not "closed". A closed
-    endpoint has no usable read credential, is unreachable via host_gate
-    anyway, and never needed reconciling. A single-endpoint deployment
-    iterates that one host. The host×project loop and its fail-safe handling
-    live in for_each_host_project (shared with the REST-API guard's
-    reconcile_mrs), which trusts that the hosts it is given are
-    already open; this function supplies only the branch-listing/replace
-    domain logic.
-    """
+    Iterates cfg.open_hosts, not cfg.effective_hosts — a closed endpoint
+    has no usable read credential and never needs reconciling."""
 
     async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
         pid = project_id(project)

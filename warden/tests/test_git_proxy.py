@@ -83,10 +83,8 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     git_guard = next(g for g in ctx.guards if g.name == "git")
     assert git_guard.branch_state.open_branches("gitlab.example") == 1
     assert ctx.state.writes_last_hour("gitlab.example") == 1
-    # Regression: the project key is normalised (no ``.git`` suffix) so it matches
-    # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
-    # reconcile row (``proj``) coexist → the branch is counted twice and the push
-    # row is never pruned (``max_open_branches`` quota drift).
+    # Regression: the project key is normalised (no .git suffix); otherwise the
+    # push and reconcile rows would coexist, double-counting the branch.
     keys = [r["project"] for r in ctx.state.store.execute("SELECT project FROM agent_branches")]
     assert keys == ["group/proj"]
 
@@ -130,7 +128,7 @@ async def test_push_forwards_content_encoding(client, respx_router):
 
 
 def _client_with(cfg: Config) -> httpx.AsyncClient:
-    """Build an ASGI test client for a warden with a specific ``cfg`` (max_push_bytes here)."""
+    """Build an ASGI test client for a warden with a specific cfg (max_push_bytes here)."""
     state = State(":memory:")
     state.mark_reconciled("git")
     state.mark_reconciled("api")
@@ -171,10 +169,9 @@ UPSTREAM = "https://gitlab.example"
 
 
 def _access_client(access: str) -> httpx.AsyncClient:
-    """Build an ASGI test client for a warden whose one `[[git.endpoint]]`
-    resolves to the given access mode (``closed``/``read-only``/``read-write``,
-    :meth:`~warden.core.config.Config.access_mode`) — derived from which of
-    its tokens are present; there is no declared mode."""
+    """Build an ASGI test client for a warden whose one [[git.endpoint]]
+    resolves to the given access mode (closed/read-only/read-write),
+    derived from which of its tokens are present; there is no declared mode."""
     if access == "closed":
         creds: dict[str, HostCredentials] = {}
     elif access == "read-only":
@@ -236,10 +233,8 @@ async def test_read_only_push_discovery_denied_for_unallowed_project_too():
 
 
 async def _read_audit_lines(ctx, tmp_path, make_request):
-    # Redirect the *existing* AuditLog in place (rather than replacing
-    # ctx.audit with a new instance): the guards were assembled once, at
-    # build_context() time, and each holds its own reference to this exact
-    # object — reassigning ctx.audit itself would not reach them.
+    # Redirect the existing AuditLog in place: guards hold their own reference
+    # from build_context() time, so reassigning ctx.audit wouldn't reach them.
     logf = tmp_path / "audit.jsonl"
     ctx.audit._path = str(logf)
     ctx.audit.start()
@@ -296,13 +291,8 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
     assert "READ-TOKEN" in base64.b64decode(auth.split(" ", 1)[1]).decode()
 
 
-# --- action gate: per-ref-command recognized actions, per host -----------------
-# The kernel's action gate recognizes via the guard's catalog. advertise/
-# upload-pack always recognize `{repo.read}` — push discovery reads refs, it
-# never writes — so a disabled `repo.branch.*` action no longer denies at
-# discovery; the denial moves to `receive-pack`, per ref-command (via
-# `deny_response`'s own `policy.ref_action_gate` recomputation), naming the
-# specific action.
+# --- action gate: per-ref-command recognized actions, per host ---
+# A disabled repo.branch.* action denies at receive-pack, per ref-command.
 
 
 def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
@@ -319,9 +309,8 @@ def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
 
 
 async def test_push_discovery_passes_with_every_repo_branch_action_disabled(respx_router):
-    # Push discovery recognizes {repo.read}, not a repo.branch.* action, so it
-    # passes even when every write action is disabled — the denial moves to
-    # receive-pack (below).
+    # Push discovery recognizes repo.read, not repo.branch.*, so it passes even
+    # when every write action is disabled; the denial moves to receive-pack.
     respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
         return_value=httpx.Response(200, content=b"001e# service=git-receive-pack\n")
     )
@@ -371,10 +360,8 @@ async def test_action_gate_allows_fetch_advertise_and_upload_pack_when_only_git_
 
 
 async def test_action_gate_full_default_allows_fetch_and_push(respx_router):
-    # Host with both actions enabled: fetch *and* push discovery both pass
-    # the action gate (they still go through the usual write-credential/
-    # branch-namespace/etc. checks afterwards — this only asserts the action
-    # gate itself doesn't deny).
+    # Host with both actions enabled: fetch and push discovery both pass the
+    # action gate (later checks still apply; this only asserts the gate itself).
     respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
         return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
     )
