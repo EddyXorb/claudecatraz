@@ -1,8 +1,6 @@
-"""audit.py (W11, §6.8): redaction-by-allowlist and the single-writer drain.
-
-The crown-jewel invariant: secrets (tokens, Authorization) are dropped *by
-construction* — the log is an allowlist of fields, never a blocklist. If that
-ever regresses, a credential could land on disk.
+"""audit.py: redaction-by-allowlist and the single-writer drain. Secrets are
+dropped *by construction* — the log is an allowlist of fields, never a
+blocklist.
 """
 
 from __future__ import annotations
@@ -14,11 +12,9 @@ from warden.core.model import Decision, StateView
 
 
 def test_schema_v3_event_carries_guard_not_channel():
-    """§06-migration.md Schritt 6 (F11): the JSONL field is ``guard`` now, the
-    line is stamped the current schema version, and ``channel`` is gone —
-    from the event *and* from the redaction allowlist (an allowlist keeps
-    only what is named)."""
-    assert AUDIT_SCHEMA_VERSION == 4  # pinned: v4 = rule field removed (audit.py docstring)
+    """The JSONL field is `guard`, and `channel` is gone from the event and
+    from the redaction allowlist."""
+    assert AUDIT_SCHEMA_VERSION == 4  # pinned: v4 = rule field removed
     event = build_event(
         guard="git",
         correlation_id="cid",

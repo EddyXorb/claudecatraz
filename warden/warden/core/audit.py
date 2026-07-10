@@ -1,16 +1,9 @@
 """JSONL audit log: typed events, one writer, O_APPEND, redaction-by-allowlist.
 
-AuditEvent is the one typed constructor — core.guard.Guard.handle
-builds exactly one on every pipeline exit from shared envelope fields plus guard-specific extras.
-
-**JSONL schema version history** (independent of state DB's own counter):
-
-* **1** — no schema field.
-* **2** — introduces schema field; tag-push/branch-delete reclassified from an
-  ordinary write to an irreversible, never-permitted action.
-* **3** — channel field renamed to guard (values unchanged: "git"/"api").
-* **4** — rule field removed; the recognized action id(s) in "actions" are
-  the audit key now.
+AuditEvent is the one typed constructor: Guard.handle builds exactly one
+on every pipeline exit from shared envelope fields plus guard-specific
+extras. A reader must keep accepting older schema versions (see
+AUDIT_SCHEMA_VERSION).
 """
 
 from __future__ import annotations
@@ -26,9 +19,8 @@ from typing import Any, Final, Mapping, Optional
 
 from .model import Decision, StateView
 
-# Audit-JSONL schema version — see module docstring for version history.
-# A reader (viewer, catraz observe) must keep accepting all of them:
-# missing schema field means version 1, channel without guard means version <3.
+# A reader must keep accepting every past version: missing schema field
+# means version 1, channel without guard means version <3.
 AUDIT_SCHEMA_VERSION: Final[int] = 4
 
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
@@ -50,9 +42,7 @@ _ALLOWED_FIELDS = {
     "open_mrs",
     "open_branches",
     "writes_last_hour",
-    # The recognized action id(s) a REST request matched. Additive and
-    # optional; no AUDIT_SCHEMA_VERSION bump needed (field-allowlist
-    # redaction was designed to admit extensions without version bump).
+    # The recognized action id(s) a REST request matched. Additive, optional.
     "actions",
     # Which of those action ids reach beyond the shipped DEFAULT set — a
     # deployment's config had to explicitly enable them.
@@ -66,13 +56,10 @@ def redact(entry: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class AuditEvent:
-    """One decision, fully typed. The envelope every guard shares is a typed
-    attribute; extra carries whatever additional fields a specific guard
-    supplies (REST: path/kind/enabled_via; git: refs) — see
-    the module docstring for why this stays a passthrough mapping rather than
-    a fixed set of optional attributes: "present with value None" and
-    "absent" must both stay expressible, exactly as the old
-    **guard_fields kwargs allow.
+    """One decision, fully typed. extra carries whatever additional fields
+    a specific guard supplies (REST: path/kind/enabled_via; git: refs) as
+    a passthrough mapping, so "present with value None" and "absent" both
+    stay expressible.
     """
 
     guard: str
@@ -153,9 +140,8 @@ class AuditLog:
     def log(self, entry: AuditEvent | dict[str, Any]) -> None:
         """Enqueue a decision. Non-blocking; safe to call from any handler.
 
-        Accepts a typed AuditEvent (the kernel's own calls) or a
-        plain dict (older/direct callers, e.g. tests exercising redaction in
-        isolation) — both end up through the same redact-and-stamp path.
+        Accepts a typed AuditEvent or a plain dict — both end up through
+        the same redact-and-stamp path.
         """
         raw = entry.to_dict() if isinstance(entry, AuditEvent) else entry
         record = redact({"ts": time.time(), **raw})

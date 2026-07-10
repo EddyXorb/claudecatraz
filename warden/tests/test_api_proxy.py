@@ -1,6 +1,4 @@
-"""API reverse-proxy integration (W14, §8.1): passthrough, merge→403,
-MR source-branch namespace, no token leak.
-"""
+"""API reverse-proxy integration: passthrough, merge→403, MR source-branch namespace, no token leak."""
 
 from __future__ import annotations
 
@@ -74,7 +72,7 @@ async def test_create_mr_with_prefix_forwarded_with_write_token(client, respx_ro
 
 async def test_note_on_non_namespace_branch_denied(client, respx_router):
     # MR lookup says the MR's source_branch is outside the allowed namespace —
-    # denied regardless of author (§07 Punkt 4).
+    # denied regardless of author.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "feature/x", "author": {"id": 42}})
     )
@@ -85,7 +83,7 @@ async def test_note_on_non_namespace_branch_denied(client, respx_router):
 
 async def test_note_on_namespace_mr_allowed_even_with_foreign_author(client, respx_router):
     # A colleague opened this MR from a claude/ branch and delegates the
-    # iteration to the agent — allowed, author-independent (§07 Punkt 4).
+    # iteration to the agent — allowed, author-independent.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
@@ -99,7 +97,7 @@ async def test_note_on_namespace_mr_allowed_even_with_foreign_author(client, res
 
 async def test_inline_discussion_on_namespace_mr_allowed(client, respx_router):
     # Inline diff comment (line-level review) on a namespace-branch MR — forwarded
-    # regardless of author (§07 Punkt 4).
+    # regardless of author.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
@@ -136,7 +134,7 @@ async def test_discussion_reply_on_namespace_mr_allowed_even_with_foreign_author
     client, respx_router
 ):
     # Reply under an existing discussion thread on a namespace-branch MR opened
-    # by someone else — allowed, author-independent (§07 Punkt 4).
+    # by someone else — allowed, author-independent.
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})
     )
@@ -204,7 +202,7 @@ async def test_malformed_json_body_is_denied_not_crashed(client, respx_router):
     assert "outside allowed prefixes" in resp.json()["reason"]
 
 
-# --- B1: projectless read scoping ("content, not visibility") -----------------
+# --- projectless read scoping ("content, not visibility") ---------------------
 @pytest.mark.parametrize(
     "path", ["/projects", "/groups/1/projects", "/user", "/version", "/groups/1"]
 )
@@ -262,7 +260,7 @@ async def test_unknown_projectless_endpoint_denied(client, respx_router):
     assert "not in allowlist" in resp.json()["reason"]
 
 
-# --- F12: the query string reaches the upstream request, not just the decision -
+# --- the query string reaches the upstream request, not just the decision -----
 async def test_query_string_is_forwarded_upstream(client, respx_router):
     route = respx_router.route(method="GET", url__regex=r".*/merge_requests.*").mock(
         return_value=httpx.Response(200, json=[])
@@ -275,8 +273,8 @@ async def test_query_string_is_forwarded_upstream(client, respx_router):
 
 
 async def test_search_scope_query_is_forwarded_when_allowed(client, respx_router):
-    # F12 also matters for the allow path: the scope that made the decision
-    # pass must be the same scope GitLab receives.
+    # The scope that made the decision pass must be the same scope GitLab
+    # receives.
     route = respx_router.route(method="GET", url__regex=r".*/search.*").mock(
         return_value=httpx.Response(200, json=[])
     )
@@ -287,7 +285,7 @@ async def test_search_scope_query_is_forwarded_when_allowed(client, respx_router
     assert sent_url.params["search"] == "foo"
 
 
-# --- B5: GraphQL is a designed dead end, never proxied -------------------------
+# --- GraphQL is a designed dead end, never proxied -----------------------------
 async def test_graphql_post_denied_no_upstream_call(client, respx_router):
     resp = await client.post("/api/graphql", json={"query": "{ currentUser { id } }"})
     assert resp.status_code == 403
@@ -308,10 +306,8 @@ async def test_graphql_subpath_denied(client, respx_router):
 
 # --- audit coverage: every new deny lands in the log ---------------------------
 async def _read_audit_lines(ctx, tmp_path, make_request):
-    # Redirect the *existing* AuditLog in place (rather than replacing
-    # ctx.audit with a new instance): the guards were assembled once, at
-    # build_context() time, and each holds its own reference to this exact
-    # object (§03.5/03.6) — reassigning ctx.audit itself would not reach them.
+    # Redirect the *existing* AuditLog in place: the guards were assembled
+    # once and each holds its own reference to this exact object.
     logf = tmp_path / "audit.jsonl"
     ctx.audit._path = str(logf)
     ctx.audit.start()
@@ -347,7 +343,7 @@ async def test_graphql_deny_is_audited(client, ctx, tmp_path):
     assert "graphql" in records[0]["path"]
 
 
-# --- F2: needs-based source-lookup resolution, not function-identity -----------
+# --- needs-based source-lookup resolution, not function-identity ---------------
 
 
 def test_needs_source_lookup_true_for_note_endpoint():
@@ -365,16 +361,12 @@ def test_needs_source_lookup_false_for_entry_with_no_namespace_scope():
     assert not _needs_source_lookup(ep)
 
 
-# --- F12: decision fields are read only from their declared location -----------
+# --- decision fields are read only from their declared location ----------------
 
 
 async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client, respx_router):
-    # source_branch is a BODY-declared decision field for mr.create (§04.2).
-    # Sending it only as a query parameter must not satisfy the branch-namespace
-    # check (§07 Punkt 7) —
-    # the field must be treated as simply absent, not silently read from the
-    # wrong location (F12's actual footgun: a scoping check "passing" on a
-    # value the checked location never carried).
+    # source_branch is a body-declared decision field; sending it only as a
+    # query parameter must not satisfy the branch-namespace check.
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests?source_branch=claude/x",
         json={"target_branch": "main"},
@@ -383,15 +375,11 @@ async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client
     assert "outside allowed prefixes" in resp.json()["reason"]
 
 
-# --- §04.3: audit marks non-default-activated catalog entries ------------------
+# --- audit marks non-default-activated catalog entries -------------------------
 
 
 def _activated_client_ctx(cfg, respx_router):
-    """Build a fresh app/ctx/client with project.issue.create activated beyond
-    the default set — the shared ``client``/``ctx`` fixtures use the plain
-    default activation (which does not include the opt-in issue.* family), so
-    this scenario needs its own wiring.
-    """
+    """Build a fresh app/ctx/client with project.issue.create activated beyond the default set."""
     from warden.app import create_app
     from warden.context import build_context
     from warden.core.audit import AuditLog
@@ -482,11 +470,7 @@ async def test_branch_create_wrong_prefix_still_denied(client, respx_router):
 
 async def test_two_hosts_with_different_actions_behave_differently_on_the_same_guard():
     # Host A keeps the built-in default (mr.create active); host B's own
-    # `actions` override is review-only (mr.comment only, no mr.create). Same
-    # ApiGuard instance, same running app — only `intent.host` differs.
-    # Two distinct upstream hosts, so this test opens its own respx mock
-    # (unscoped by base_url) rather than the shared single-host `respx_router`
-    # fixture (conftest.py, base_url pinned to the `cfg` fixture's one host).
+    # `actions` override is review-only — same ApiGuard, only `intent.host` differs.
     import respx
 
     from warden.app import create_app

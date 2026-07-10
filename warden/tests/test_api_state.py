@@ -1,15 +1,5 @@
-"""MrState: the REST-API guard's own MR-quota table (``agent_mrs``), built on
-the same :class:`~warden.core.state.StateStore` core state uses. Branch
-tracking (``agent_branches``) lives in the git guard's own
-:class:`~warden.guards.git.state.BranchState` — see :mod:`test_git_state`.
-
-This counter is what the REST-API guard's quota check reads via
-:meth:`~warden.guards.git.gitlab.guard.ApiGuard.state_view`, so an off-by-one
+"""MrState: the REST-API guard's per-endpoint MR-quota table. An off-by-one
 here would directly mis-gate writes.
-
-:meth:`~warden.guards.git.gitlab.state.MrState.open_mrs` is per-endpoint: it
-always takes a ``host`` and only counts that endpoint's rows — see the
-two-hosts tests below.
 """
 
 from __future__ import annotations
@@ -43,7 +33,7 @@ def test_replace_mrs_sets_open_count():
     assert ms.open_mrs("h") == 2
 
 
-# --- (host, project) state-keying (§07 Punkt 8 follow-up, design spike section 4) --
+# --- (host, project) state-keying ----------------------------------------------
 
 
 def test_two_hosts_with_the_same_project_path_and_iid_get_separate_counters():
@@ -58,8 +48,8 @@ def test_two_hosts_with_the_same_project_path_and_iid_get_separate_counters():
 
 
 def test_open_mrs_counts_only_the_given_endpoint():
-    # step 04: open_mrs(host) is the per-endpoint quota counter — a third,
-    # untouched host must never leak into another host's count.
+    # open_mrs(host) is the per-endpoint quota counter — a third, untouched
+    # host must never leak into another host's count.
     ms = _mr_state()
     ms.upsert_mr("gitlab.com", "acme/infra", 1, "opened")
     ms.upsert_mr("gitlab.com", "acme/infra", 2, "opened")

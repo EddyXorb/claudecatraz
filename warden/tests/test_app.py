@@ -1,4 +1,4 @@
-"""app.py (W3, §6.8): health endpoint and the admin-only read-only audit tail."""
+"""app.py: health endpoint and the admin-only read-only audit tail."""
 
 from __future__ import annotations
 
@@ -90,8 +90,7 @@ async def test_policy_route_reflects_activation_config(cfg):
 
 
 async def test_viewer_serves_the_static_html_page(cfg):
-    # F7: _VIEWER_HTML now loads from warden/static/viewer.html (a package asset,
-    # not an inline string in routing code) — the endpoint must still serve it.
+    # _VIEWER_HTML loads from a package asset, not an inline string.
     ctx = build_context(cfg, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/")

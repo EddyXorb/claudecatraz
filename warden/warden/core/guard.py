@@ -1,29 +1,7 @@
 """Kernel pipeline: template method for the deny-short-circuit /
-record-before-forward / audit sequence.
-
-Guard is the ABC (abstract base class, from Python's abc module) every guard
-subclasses: it declares the hooks a guard must implement but leaves them
-unimplemented, so a subclass cannot be instantiated until it fills them all
-in. Guard.handle is the one place the sequence is built — a guard supplies
-the parts (abstract hooks),
-the kernel owns the order, and a guard cannot reorder or skip a step because
-it never sees the sequence, only its own hooks.
-
-Sequence Guard.handle guarantees, in this order:
-
-1. guard.parse — transport → an Intent. No credential yet.
-2. Recognize: the first matching row in guard.recognizers yields the
-   recognized action set for this intent — empty when nothing matches.
-3. kernel_gates — guard-agnostic deny gates, all before enrich:
-   host allowlist, write-credential gate, project allowlist, an
-   unmatched/empty write, the criticality gate (any recognized action at or above
-   Criticality.IRREVERSIBLE denies), the action gate (every recognized
-   action must be enabled for the host).
-4. guard.enrich — unpure lookups a check declared it needs.
-5. guard.decide — pure, guard-specific, default-deny.
-6. Audit — logged on *every* exit (allow or deny).
-7. guard.record before guard.forward — write durably counted before upstream call.
-8. guard.forward only reachable once decision.allow — deny calls guard.deny_response.
+record-before-forward / audit sequence. Guard.handle order: parse,
+recognize, kernel_gates, enrich, decide, audit every exit, record
+before forward.
 """
 
 from __future__ import annotations
@@ -46,18 +24,10 @@ from .state import State
 
 
 def write_credential_gate(host: str, cfg: Config) -> Optional[Decision]:
-    """Deny a request that needs the write token to a host that has no usable
-    write credential.
-
-    This is the credential axis, orthogonal to the action taxonomy: git push
-    discovery recognizes to repo.read (a read action, always enabled) yet
-    still needs the write token upstream, so no action-level gate can catch
-    it — this one does. Without it a push-discovery request to a read-only
-    host would be forwarded with an absent write token instead of denied.
-
-    Per-host: a closed host is already denied earlier by host_gate, so by
-    the time this runs the only two possibilities left are read-only (deny)
-    and read-write (allow).
+    """Deny a request needing the write token on a host with no write
+    credential. Catches git push discovery, which recognizes as repo.read
+    (always enabled) yet still needs the write token upstream — no
+    action-level gate would otherwise catch it.
     """
     access = cfg.access_mode(host)
     if access != "read-write":
@@ -68,17 +38,11 @@ def write_credential_gate(host: str, cfg: Config) -> Optional[Decision]:
 
 
 def host_gate(host: str, cfg: Config) -> Optional[Decision]:
-    """Default-deny for a Host header outside the configured
-    [[git.endpoint]] list (§2, §07 Punkt 8 follow-up).
+    """Default-deny for a Host header outside the configured endpoint list.
 
-    Real default-deny (step 03): an empty endpoint list denies every host, not
-    "allow everything" — an operator lists every routable host explicitly.
-    Config.host_allowed also denies a *known* host whose endpoint is
-    currently closed (no usable read credential), so a host that
-    UpstreamRouter.resolve would return None for is always denied here
-    first, never reaching a "kernel_gates already denied" assertion downstream.
-    Guard-agnostic and kernel-owned like every other gate in
-    kernel_gates, since every guard's request carries a host.
+    An empty endpoint list denies every host, not "allow everything".
+    Also denies a known host whose endpoint is currently closed (no
+    usable read credential).
     """
     if not cfg.host_allowed(host):
         return Decision(False, f"host {host!r} not in the multi-target allowlist")
@@ -89,11 +53,8 @@ def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Option
     """Resource allowlist — the single source of truth, shared by every guard.
 
     An empty project passes; projectless requests are gated by the guard's
-    own decide (see guards.git.gitlab.recognizers).
-
-    project_allowed is a callable, not raw Config, so a guard
-    whose forge resolves numeric-id aliases can widen the check beyond
-    cfg.project_allowed's path-only match.
+    own decide. project_allowed is a callable, not raw Config, so a guard
+    can widen the check beyond a path-only match.
     """
     if project and not project_allowed(project):
         return Decision(False, f"project {project!r} not in allowlist")
@@ -115,10 +76,8 @@ def action_gate(
 ) -> Optional[Decision]:
     """Every recognized action id must be enabled for host.
 
-    effective is the host's effective action ids, passed in rather than
-    derived here, so a caller (production: Config.effective_actions;
-    tests: an arbitrary override) controls what "enabled" means without
-    threading Config/host resolution through this function too.
+    effective is passed in rather than derived here, so callers (production
+    vs. tests) control what "enabled" means without threading Config through.
     """
     missing = sorted(a.id for a in recognized if a.id not in effective)
     if not missing:
@@ -133,18 +92,11 @@ def kernel_gates(
     recognized: frozenset[Action],
     effective_actions: Optional[frozenset[str]] = None,
 ) -> Optional[Decision]:
-    """The guard-agnostic deny gates, in kernel order (module docstring).
+    """The guard-agnostic deny gates, in kernel order.
 
-    One definition: Guard.handle runs this on every pipeline request, and
-    each guard's full_decide composes it with the guard's pure decide
-    so unit tests exercise exactly the effective order — never a re-derived
-    copy of it.
-
-    recognized is this intent's whole action set (the guard's recognizers
-    matched via first_recognized, already computed by the caller since the
-    list is guard-specific). An unmatched or empty-recognized *write*
-    denies right here — a read falls through unchanged, since the
-    project-bound read pass-through is the guard's own decide's job.
+    recognized is this intent's whole action set. An unmatched or
+    empty-recognized write denies right here; a read falls through
+    unchanged to the guard's own decide.
     """
     denied = host_gate(intent.host, cfg)
     if denied is None and intent.needs_write:
@@ -171,13 +123,10 @@ IntentT = TypeVar("IntentT", bound=Intent)
 class Guard(ABC, Generic[IntentT]):
     """The parts a guard supplies to handle.
 
-    name is the audit guard value (bare strings: "git"/"api").
-    recognizers/supported_actions are the guard's recognizer table and the
-    action set it declares itself capable of gating — the kernel recognizes
-    and gates generically from these, so a guard hook does I/O
-    (parse/enrich/record/forward/deny_response) or is pure default-deny logic
-    (decide) only; the criticality/enablement checks are no longer a
-    per-guard hook.
+    name is the audit guard value (bare strings: "git"/"api"). A guard hook
+    does I/O (parse/enrich/record/forward/deny_response) or is pure
+    default-deny logic (decide) only — criticality/enablement checks
+    are kernel-owned, not per-guard hooks.
     """
 
     def __init__(self, cfg: Config, state: State, audit: AuditLog) -> None:
@@ -248,13 +197,8 @@ class Guard(ABC, Generic[IntentT]):
 
     def state_view(self, host: str) -> StateView:
         """Quota snapshot hook. Default: this guard's own core-only view (no
-        domain state), locked until this guard reconciled. A guard backed by a
-        domain (e.g. the git/REST-API branch/MR counters) overrides this to
-        return the combined snapshot instead.
-
-        host is the request's raw Host header (step 04, state-keying):
-        the stateful quotas are per-endpoint now, so the snapshot must be
-        scoped to the endpoint the request is actually addressed to.
+        domain state), locked until this guard reconciled. A guard backed by
+        a domain overrides this to return the combined snapshot instead.
         """
         return self.state.view(self.name, host)
 

@@ -1,12 +1,7 @@
 """Minimal HTTP GET over the warden admin Unix socket.
 
-Zero third-party dependencies by design (catraz.pyproject declares none) —
-this is a thin wrapper around ``http.client`` pointed at a Unix socket
-instead of TCP. Used by ``catraz doctor``'s endpoint-catalog section to query
-the running warden's read-only ``/policy`` route (warden/warden/app.py)
-instead of guessing at catalog contents client-side: catraz never imports
-or executes warden's Python — it only ships it as a container asset (see
-``[tool.hatch.build.targets.wheel.force-include]`` in pyproject.toml).
+Zero third-party dependencies; wraps http.client over a Unix socket instead
+of TCP. Catraz never imports or executes warden's Python itself.
 """
 
 from __future__ import annotations
@@ -19,8 +14,7 @@ from typing import Any
 
 
 class AdminUnreachable(RuntimeError):
-    """The admin socket is missing, unresponsive, or answered with something
-    that isn't a 200 + valid JSON body. Callers degrade to an offline mode."""
+    """Admin socket missing, unresponsive, or answered without a 200 + JSON body."""
 
 
 class _UdsHTTPConnection(http.client.HTTPConnection):
@@ -40,10 +34,7 @@ def admin_socket_path(root: Path) -> Path:
 
 
 def get_json(root: Path, path: str, timeout: float = 3.0) -> Any:
-    """GET ``path`` from the warden admin app over its Unix socket, parsed
-    as JSON. Raises :class:`AdminUnreachable` on anything short of a clean
-    200 + JSON response — the socket missing (stack down) is the common case.
-    """
+    """GET path from the warden admin app over its Unix socket, parsed as JSON."""
     sock_path = admin_socket_path(root)
     if not sock_path.exists():
         raise AdminUnreachable(f"admin socket not found at {sock_path} — is the stack running?")

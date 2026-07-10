@@ -9,14 +9,15 @@ Every request maps, via recognizers, to a set of actions; it proceeds iff
 every action is below IRREVERSIBLE in criticality and enabled for the target
 host; everything else is denied.
 
-## Docstrings
+## Docstrings & comments
 
-- Never reference `docs/design/` paths — code explains itself.
-- No history ("formerly", "was called X", design-doc section numbers, commits).
+- Never reference markdown docs outside the sources (`docs/design/` paths,
+  design-doc filenames, `§` section numbers) — code explains itself.
+- No history ("formerly", "was called X", commits).
 - Never state the obvious.
-- As short as possible; only the surprising, load-bearing facts.
-- No Sphinx roles (`:class:`, `:func:`, …), no heavy markup — plain prose
-  that reads well without an IDE.
+- Hard limits: docstrings at most 5 lines, comments at most 2 lines.
+- Only the surprising, load-bearing facts; plain prose, no Sphinx roles
+  (`:class:`, `:func:`, …) or heavy markup.
 
 ## Commits & MRs
 

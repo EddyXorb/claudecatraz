@@ -2,7 +2,6 @@
 
 A template like /projects/{id}/merge_requests/{iid} compiles to a regex
 matching exactly one non-slash, URL-encoded path segment per {...} token.
-Kernel-owned since multiple guards' endpoint tables need the same compiler.
 """
 
 from __future__ import annotations

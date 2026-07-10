@@ -1,6 +1,6 @@
-"""configure_git_warden (§07 multi-host cutover): every configured
-[[git.endpoint]] host gets its own schema-rewrite (https -> http://<host>:8080/),
-hostname preserved — no path-prefix trick, no warden container name.
+"""configure_git_warden: every configured [[git.endpoint]] host gets its own
+schema-rewrite (https -> http://<host>:8080/), hostname preserved — no
+path-prefix trick, no warden container name.
 
 These run against a real temp HOME so `git config --global` actually writes the
 multivar insteadOf entries; we then read them back with `git config --get-all`.
@@ -74,9 +74,8 @@ def test_single_host_all_three_remote_forms_routed(
 def test_schema_rewrite_keeps_canonical_hostname_no_path_trick(
     ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§1.1: target is exactly http://<host>:8080/ — same hostname, only
-    scheme+port change, no /git/ (or any other) path prefix, no rewrite to a
-    different (warden) hostname."""
+    """Target is exactly http://<host>:8080/ — same hostname, only
+    scheme+port change, no path prefix, no rewrite to a different hostname."""
     _run(ep, tmp_path, monkeypatch, ["my-gitlab.de"])
     r = subprocess.run(
         ["git", "config", "--global", "--get-regexp", r"^url\..*\.insteadof$"],
@@ -128,8 +127,8 @@ def test_idempotent_on_rerun(ep: Any, tmp_path: Path, monkeypatch: pytest.Monkey
 def test_no_endpoints_writes_nothing(
     ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Replaces the old GITLAB_MODE=off special case (§07 point 2): an empty
-    [[git.endpoint]] list already routes nothing, no separate off-switch."""
+    """An empty [[git.endpoint]] list already routes nothing, no separate
+    off-switch needed."""
     values = _run(ep, tmp_path, monkeypatch, [])
     assert _insteadof_values(tmp_path, "gitlab.com") == []
     assert ep.os.environ["GIT_TERMINAL_PROMPT"] == "0"

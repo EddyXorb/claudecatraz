@@ -1,7 +1,6 @@
 """claude adapter: `remote_command()` (remote-control argv) and `environ()`
-(api_key resolution) — the former (entrypoint-embedded) CLAUDE_RC_*/API-key
-logic, now behind the AgentAdapter contract (§05.2). Uses the `claude_adapter`
-fixture (tests/container/conftest.py), the real adapter staged by path."""
+(api_key resolution), behind the AgentAdapter contract. Uses the real
+adapter staged by path via the `claude_adapter` fixture."""
 
 from pathlib import Path
 from typing import Any

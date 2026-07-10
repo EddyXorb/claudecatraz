@@ -1,9 +1,7 @@
-"""§05.2 `render_instructions`/`install_instructions`: the former (Claude-only,
-static-file) `install_claude_md` is now two layers — a generic
-`entrypoint.install_instructions` that fails closed on
-REQUIRE_AGENT_INSTRUCTIONS, and the claude adapter's `render_instructions`
-that renders this project's actual namespace prefix + Warden REST base into
-the packaged template (not merely placing a static file)."""
+"""`render_instructions`/`install_instructions`: a generic
+`entrypoint.install_instructions` fails closed on REQUIRE_AGENT_INSTRUCTIONS,
+and the claude adapter's `render_instructions` renders this project's actual
+namespace prefix and Warden REST base into the packaged template."""
 
 from pathlib import Path
 from typing import Any
@@ -12,9 +10,7 @@ import pytest
 
 def _ctx(ep: Any, **overrides: Any) -> Any:
     base = dict(
-        # A generic per-host rule (§1.2/§07), not one concrete URL — "<host>" is
-        # a literal placeholder, same as the real default in
-        # entrypoint._instruction_context(). Never names the Warden container.
+        # A generic per-host rule, not one concrete URL; never names the Warden container.
         forge_rest_base="http://<host>:8080/api/v4",
         branch_prefixes=("claude/",),
         warden_toml_path=Path("/etc/catraz/warden.toml"),

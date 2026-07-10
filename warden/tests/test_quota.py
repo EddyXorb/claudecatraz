@@ -1,4 +1,4 @@
-"""Quota / sliding-window tests (W14): N ok, N+1 blocks, injected clock (no sleep)."""
+"""Quota / sliding-window tests: N ok, N+1 blocks, injected clock (no sleep)."""
 
 from __future__ import annotations
 
@@ -36,8 +36,7 @@ def _mr(cfg) -> ApiIntent:
 def test_n_writes_ok_then_block():
     cfg = Config(
         allowed_projects=("group/proj",),
-        # step 04: the stateful ceiling is per-endpoint (Config.effective_rules),
-        # never this legacy global field — set it via git_rules to actually bite.
+        # The stateful ceiling is per-endpoint; set it via git_rules to bite.
         git_rules=GitRules(max_writes_per_hour=3),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
@@ -88,8 +87,8 @@ def test_locked_until_reconciled():
     assert decide(_mr(cfg), st.view("api", HOST), cfg).allow
 
 
-# --- per-endpoint quota ceiling (step 04, §3.3): the override wins, not the
-# built-in default, and it is scoped to that one endpoint only -----------------
+# --- per-endpoint quota ceiling: the override wins, not the built-in default,
+# and it is scoped to that one endpoint only ------------------------------------
 
 
 def test_endpoint_override_raises_the_ceiling_above_the_default():

@@ -115,16 +115,12 @@ def _assert_no_nested(root: Path) -> None:
 
 
 def claude_home(root: Path) -> Path:
-    """Default subscription-sync credential dir (§05.6 `credentials.mode =
-    "sync"`). "claude" here is the default agent profile's own default-value
-    residue (§06-migration.md Schritt 6 precedent) — see `agent_state_dir`
-    for the profile-generic persistent-state counterpart."""
+    """Default subscription-sync credential dir; see agent_state_dir for the
+    profile-generic persistent-state counterpart."""
     return root / ".catraz" / "secrets" / "claude"
 
 
 def agent_state_dir(root: Path, profile: str) -> Path:
-    """Writable per-repo state dir for `credentials.mode = "persistent"`
-    (§05.6): `.catraz/state/<profile>/`, mode 0700, mounted read-write into
-    every dev container of this repo. For the default profile this is
-    exactly the `.catraz/state/claude/` path named in §05.6."""
+    """Writable per-repo state dir for credentials.mode = "persistent"; mode 0700,
+    mounted read-write into every dev container of this repo."""
     return root / ".catraz" / "state" / profile

@@ -23,11 +23,8 @@ class Criticality(IntEnum):
 class Action:
     """One named effect a request can have, with its criticality.
 
-    The id is an opaque string to every consumer in core: never parsed, no
-    grammar enforced. quota_kind is the same — an opaque tag a namespace
-    attaches so its guard knows which quota bucket this action spends (None
-    for reads and for the never-permitted irreversible actions); core stores
-    it and never interprets it. Frozen and hashable so actions can live in sets.
+    id and quota_kind are opaque strings to core: never parsed or
+    interpreted, just stored. quota_kind is None for reads and denies.
     """
 
     id: str

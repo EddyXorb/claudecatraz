@@ -2,7 +2,6 @@
 
 SUPPORTED is the static ceiling — what this guard is capable of gating,
 never what an operator has enabled (that is Config.effective_actions).
-Always access it qualified (transport.actions.SUPPORTED).
 """
 
 from __future__ import annotations

@@ -1,17 +1,9 @@
 """Durable, fail-safe quota state: generic writes counter, reconcile lock, StateStore.
 
-SQLite with WAL + synchronous=FULL: every write-record commits *before* the upstream call.
-State view is **locked** until a reconcile succeeds (never "empty = all free").
-
-Kernel-owned: counters and fail-safe locking are resource-agnostic, keyed by
-guard/kind strings. Module has no forge vocabulary — each guard owns its
-own domain table on the shared connection: branches in
-warden.guards.git.state.BranchState, MRs in
-warden.guards.git.gitlab.state.MrState.
-
-Schema versioning via SQLite's PRAGMA user_version — fail-closed (A9), not
-migrated: see StateStore._check_and_stamp_schema_version for why a
-mismatched version aborts rather than alters the existing shape.
+SQLite with WAL + synchronous=FULL: every write-record commits before the
+upstream call. State view is locked until a reconcile succeeds (never
+"empty = all free"). Kernel-owned and forge-agnostic; each guard owns its
+own domain table on the shared connection.
 """
 
 from __future__ import annotations
@@ -32,15 +24,8 @@ __all__ = [
 ]
 
 CURRENT_SCHEMA_VERSION: Final[int] = 3
-# v1 → v2 (§07 Punkt 8 follow-up): agent_branches/agent_mrs gained a host
-# column (part of the primary key) for multi-target state-keying.
-# v2 → v3 (step 04, state-keying): writes gained a host column so the
-# rate-limit counter (writes_last_hour) can be scoped per-endpoint like
-# agent_branches/agent_mrs already are — a global writes-counter would let one
-# busy endpoint exhaust the rate limit for every other endpoint. No migration
-# runs for either bump: an existing older-versioned DB is rejected instead
-# (see _check_and_stamp_schema_version). A fresh DB is built at the current
-# version directly.
+# Both past bumps added a host column so counters can be scoped per-endpoint;
+# no migration runs — an older-versioned DB is rejected instead.
 
 
 class SchemaError(RuntimeError):
@@ -68,14 +53,8 @@ WINDOW_SECONDS = 3600
 
 class StateStore:
     """The connection owner: one SQLite connection (WAL + synchronous=FULL),
-    shared by core state and every guard's own domain state (the git guard's
-    warden.guards.git.state.BranchState, the REST-API guard's
-    warden.guards.git.gitlab.state.MrState) so they stay one writer on
-    one file, never a second connection.
-
-    Checks and stamps the schema version at connect time, before any table
-    (core's or a domain's) is created — see
-    _check_and_stamp_schema_version for the fail-closed rationale.
+    shared by core state and every guard's own domain state so they stay
+    one writer on one file, never a second connection.
     """
 
     def __init__(self, db_path: str, *, clock: Callable[[], float] = time.time) -> None:
@@ -89,21 +68,11 @@ class StateStore:
         self._check_and_stamp_schema_version()  # before any CREATE TABLE — see class docstring
 
     def _check_and_stamp_schema_version(self) -> None:
-        """Fail-closed schema-version gate (A9), run before any CREATE TABLE.
+        """Fail-closed schema-version gate, run before any CREATE TABLE.
 
-        Pre-1.0: no migration machinery — a DB is stamped at
-        CURRENT_SCHEMA_VERSION on first use (CREATE TABLE IF NOT
-        EXISTS builds the current shape directly). A DB stamped at *any*
-        other version — newer **or** older — raises SchemaError
-        rather than run against a shape this build did not create.
-        Older-not-just-newer matters because CREATE TABLE IF NOT EXISTS
-        only *creates* a table — it does not alter one that already exists
-        under the old shape (§07 Punkt 8 follow-up: adding a column to an
-        existing table, e.g. agent_branches' host column, is exactly
-        this case). A mismatched existing DB must therefore be rebuilt from
-        scratch (delete the file) — consistent with "pre-1.0, state is
-        disposable". A brand-new file (user_version == 0) is exempt:
-        that is the ordinary bootstrap case, not a mismatch.
+        Pre-1.0: no migration machinery. A DB stamped at any version other
+        than 0 (fresh) or CURRENT_SCHEMA_VERSION raises SchemaError rather
+        than run against a shape this build did not create or alter.
         """
         user_version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
         if user_version not in (0, CURRENT_SCHEMA_VERSION):
@@ -170,11 +139,7 @@ class State:
     def record_write(
         self, guard: str, host: str, kind: str, ref_or_iid: Optional[str] = None
     ) -> None:
-        """Persist a write-record and fsync *before* the upstream call.
-
-        host scopes the rate-limit counter per-endpoint (step 04) — see
-        writes_last_hour.
-        """
+        """Persist a write-record and fsync before the upstream call."""
         self._store.execute(
             "INSERT INTO writes (ts, guard, host, kind, ref_or_iid) VALUES (?, ?, ?, ?, ?)",
             (self._clock(), guard, host, kind, ref_or_iid),
@@ -183,11 +148,8 @@ class State:
 
     # --- views -----------------------------------------------------------------
     def writes_last_hour(self, host: str) -> int:
-        """Rolling write-rate counter, scoped to host (step 04): the
-        overridable max_writes_per_hour quota (warden.core.config.Config.effective_rules)
-        is per-endpoint, so the counter it is checked against must be too — a
-        global count would let one busy endpoint exhaust every other
-        endpoint's rate limit."""
+        """Rolling write-rate counter, scoped to host: a global count would
+        let one busy endpoint exhaust every other endpoint's rate limit."""
         cutoff = self._clock() - WINDOW_SECONDS
         row = self._store.execute(
             "SELECT count(*) AS c FROM writes WHERE host=? AND ts > ?", (host, cutoff)
@@ -197,11 +159,8 @@ class State:
     def is_reconciled(self, guard: str) -> bool:
         """Has guard reconciled its own domain at least once?
 
-        The reconcile lock is **per guard**, not global: each guard talks to
-        its own upstream, so one guard whose remote is permanently unreachable
-        must fail-safe-lock only *its own* view — never the whole warden. A
-        working guard keeps serving off its own fresh counts while a broken one
-        denies. Keyed in meta as reconciled:<guard>.
+        Per guard, not global: one guard whose remote is unreachable
+        fail-safe-locks only its own view, never the whole warden.
         """
         row = self._store.execute(
             "SELECT value FROM meta WHERE key = ?", (f"reconciled:{guard}",)
@@ -211,12 +170,7 @@ class State:
     def view(self, guard: str, host: str) -> StateView:
         """Core-only snapshot for the policy. Locked until guard first
         reconciles successfully; open_mrs/open_branches default to 0 — each
-        guard fills its own domain count via its own state_view override (the
-        git guard's warden.guards.git.guard.GitGuard.state_view, the
-        REST-API guard's warden.guards.git.gitlab.guard.ApiGuard.state_view).
-
-        host scopes writes_last_hour to that endpoint (step 04) —
-        the caller passes the request's own host (see core.guard.Guard.handle).
+        guard fills its own domain count via its own state_view override.
         """
         if not self.is_reconciled(guard):
             return StateView(locked=True)

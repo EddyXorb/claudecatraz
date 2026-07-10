@@ -1,11 +1,6 @@
 """reconcile.py: the REST-API guard's MR reconcile pagination, fail-safe
-locking, and numeric-id project-alias resolution. See
-``test_api_mr_namespace.py`` for the MR source-branch-namespace-lookup side
-and ``test_git_reconcile.py`` for the git guard's own (branch) reconcile.
-
-The pagination test is the regression guard for the quota-undercount bug:
-listing stopped at the first 100 results, so a busy project counted too low
-and the policy could wrongly ``allow`` further writes.
+locking, and numeric-id project-alias resolution. The pagination test guards
+against a busy project counting too low and wrongly allowing further writes.
 """
 
 from __future__ import annotations
@@ -24,9 +19,8 @@ HOST = "gitlab.example"
 
 
 def _api_guard(cfg) -> ApiGuard:
-    """A guard on its own fresh (never-reconciled) state — unlike the shared
-    ``api_guard`` fixture (built on the pre-reconciled ``state`` fixture), so
-    the lock/reconcile tests below see the real starting condition."""
+    """A guard on its own fresh (never-reconciled) state, so the lock/reconcile
+    tests below see the real starting condition."""
     return ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
 
 
@@ -51,7 +45,7 @@ async def test_reconcile_mrs_paginates_and_filters_by_namespace_author_independe
         200,
         json=[
             {"iid": 2, "state": "opened", "source_branch": "feature/y"},  # no prefix
-            # foreign author, but namespace source_branch — still counted (§07 Punkt 4)
+            # foreign author, but namespace source_branch — still counted
             {
                 "iid": 3,
                 "state": "opened",
@@ -74,11 +68,10 @@ async def test_reconcile_mrs_paginates_and_filters_by_namespace_author_independe
     assert guard.mr_state.open_mrs(HOST) == 2  # both pages, namespace-filtered only
 
 
-# --- reconcile (W8.2 / §6.11) --------------------------------------------------
+# --- reconcile -------------------------------------------------------------
 async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_router):
-    # A guard's own reconcile rebuilds its MR counter/aliases and unlocks its OWN
-    # per-guard view — independent of the git guard (see test_reconcile_all.py for
-    # the cross-guard isolation the per-guard lock guarantees).
+    # A guard's own reconcile rebuilds its MR counter/aliases and unlocks its
+    # OWN per-guard view — independent of the git guard.
     guard = _api_guard(cfg)
     assert guard.state_view(HOST).locked is True  # locked until this guard's first success
 
@@ -97,14 +90,14 @@ async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_rout
     view = guard.state_view(HOST)
     assert view.locked is False
     assert view.open_mrs == 1
-    # The numeric-id alias was resolved and added to the guard's alias set
-    # (the resource allowlist, by id form) — Config itself is never mutated (D2).
+    # The numeric-id alias was resolved and added to the guard's alias set —
+    # Config itself is never mutated.
     assert guard.project_id_aliases == {"12345"}
     assert guard.project_allowed("12345")
 
 
 async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
-    # Fail-safe (§6.11): a failed reconcile must NOT unlock this guard's quota —
+    # Fail-safe: a failed reconcile must NOT unlock this guard's quota —
     # "empty = all free" is exactly the failure we refuse.
     guard = _api_guard(cfg)
     respx_router.route(method="GET", url__regex=r".*/projects/[^/?]+$").mock(
@@ -120,13 +113,12 @@ async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
     assert guard.state_view(HOST).locked is True
 
 
-# --- no endpoints configured (the former GITLAB_MODE gates, step 6/7) ---------
+# --- no endpoints configured ----------------------------------------------------
 
 
 async def test_reconcile_no_upstream_call_with_no_endpoints_configured(respx_router):
-    """reconcile() must make NO upstream call when no [[git.endpoint]] is configured
-    (the former GITLAB_MODE=off) — the shared host×project loop is simply a no-op
-    over an empty ``effective_hosts`` — and it must still unlock its own view."""
+    """reconcile() makes no upstream call with no endpoints configured, and
+    still unlocks its own view."""
     cfg_off = Config()
     guard = _api_guard(cfg_off)
     assert guard.state_view(HOST).locked is True  # starts locked
@@ -138,13 +130,12 @@ async def test_reconcile_no_upstream_call_with_no_endpoints_configured(respx_rou
     assert guard.state_view(HOST).locked is False  # unlocked so the warden can serve (and deny)
 
 
-# --- per-endpoint reconcile skips closed endpoints (step 04) -------------------
+# --- per-endpoint reconcile skips closed endpoints ------------------------------
 
 
 async def test_reconcile_mrs_skips_a_closed_endpoint():
-    """reconcile_mrs iterates cfg.git_endpoints directly and must never even
-    attempt an upstream call for a closed one (no usable read credential) —
-    only the open endpoint's MRs are listed/counted."""
+    """Must never attempt an upstream call for a closed endpoint (no usable
+    read credential) — only the open endpoint's MRs are listed/counted."""
     open_host, closed_host = "open.example", "closed.example"
     cfg = Config(
         allowed_projects=("group/proj",),
@@ -158,11 +149,8 @@ async def test_reconcile_mrs_skips_a_closed_endpoint():
     router = UpstreamRouter(cfg)
     mr_state = _api_guard(cfg).mr_state
 
-    # Two distinct hosts, neither the shared `respx_router` fixture's pinned
-    # base_url — a bare respx mock, exactly like test_host_routing.py's own
-    # multi-host tests. No mock for closed.example — any call to it would
-    # raise respx.MockTransportError, failing this test loudly if reconcile
-    # ever attempted to reach it.
+    # No mock for closed.example — any call to it would raise
+    # respx.MockTransportError, failing this test loudly.
     with respx.mock(assert_all_called=False) as router_mock:
         router_mock.route(
             method="GET", url__regex=r"https://open\.example/api/v4/projects/[^/?]+$"

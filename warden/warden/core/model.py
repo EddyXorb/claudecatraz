@@ -1,8 +1,7 @@
 """Core policy data types: pure values shared by kernel and every guard.
 
-Kept guard-agnostic on purpose: no forge vocabulary (MR, iid, ref) lives here,
-only what the kernel pipeline and audit/state layers need from *any* intent.
-Guard-specific intent shapes live with their guard and satisfy Intent structurally.
+Kept guard-agnostic: no forge vocabulary (MR, iid, ref) lives here, only
+what the kernel pipeline and audit/state layers need from any intent.
 """
 
 from __future__ import annotations
@@ -38,22 +37,9 @@ class StateView:
 class Intent(Protocol):
     """What every guard's parsed request must expose to the kernel.
 
-    Deliberately minimal (read-only properties):
-
-    * needs_write — whether this request needs the upstream write token,
-      derived by the guard's parser, never from a Decision. Note this is the
-      credential axis, not "changes state": git push discovery reads refs but
-      still needs the write token, so needs_write is True for it. Lets the
-      write-credential gate run *before* enrich, keeping credentials
-      unreachable for a request that will be denied.
-    * project — what the resource-allowlist gate needs.
-    * method — the audit envelope's verb (HTTP method for REST, "push" for git).
-    * host — the raw Host header the guard's parser read off the request
-      (§07 Punkt 8 follow-up). What core.guard.host_gate checks against
-      Config.host_allowed; a guard resolves the *canonical* host (for
-      UpstreamRouter/state keys) via Config.resolve_target_host(host).
-
-    Guard-specific fields live on the concrete Intent dataclass in that guard's package.
+    needs_write is the credential axis, not "changes state": git push
+    discovery reads refs but still needs the write token, so needs_write is
+    True for it — this lets the write-credential gate run before enrich.
     """
 
     @property

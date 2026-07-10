@@ -1,17 +1,8 @@
-"""§05.3 — the static Agent-Profile registry + manifest reader.
+"""The static Agent-Profile registry + manifest reader.
 
-The host-side counterpart of the adapter contract (`agent_contract.py`,
-shipped as a container asset). This module is real, installed package code
-(not an asset) — it never loads adapter *logic*, only the declarative
-`agent.toml` manifest, so `init`/`doctor`/tests can show a profile's command,
-credential mode, and egress-domain suggestion without ever executing
-adapter code on the host.
-
-§06.2 anti-goal A2 ("kein dynamisches Plugin-Laden"): `AGENT_REGISTRY` is the
-one static name -> asset-subdirectory mapping. `.catraz/.env`'s
-`AGENT_PROFILE` selects a *name* from this fixed set; an unknown name is a
-hard, fail-closed `CliError` — config never causes code to run that wasn't
-already shipped.
+Host-side counterpart of the adapter contract; never loads adapter logic,
+only the declarative agent.toml manifest. AGENT_REGISTRY is a fixed
+name -> asset-subdirectory mapping; an unknown profile is a fail-closed CliError.
 """
 
 from __future__ import annotations
@@ -28,8 +19,7 @@ from catraz.errors import CliError, EXIT_CONFIG
 from catraz.paths import asset_root
 
 # name -> asset subdirectory under assets/agents/. Adding a profile is a code
-# change (a new `assets/agents/<name>/` + this one extra entry), never a
-# config-driven addition.
+# change, never a config-driven addition.
 AGENT_REGISTRY: dict[str, str] = {
     "claude": "claude",
 }
@@ -39,7 +29,7 @@ DEFAULT_AGENT_PROFILE = "claude"
 
 @dataclass(frozen=True)
 class AgentManifest:
-    """Host-side typed view of an `agent.toml` (§05.3)."""
+    """Host-side typed view of an agent.toml manifest."""
 
     name: str
     command: str
@@ -72,17 +62,9 @@ def agent_dir(profile: str) -> Path:
 
 
 def _load_agent_contract() -> ModuleType:
-    """Load `agent_contract.py` by path (it's a container asset, not an
-    installed module — same by-path convention as `entrypoint.py`, see
-    `tests/container/conftest.py`) and cache it in `sys.modules["agent_contract"]`.
-
-    That cache entry matters beyond memoizing this one load: every adapter's
-    `from agent_contract import ...` statement resolves via the module cache
-    first, so once this has run, `load_adapter_module` can load an adapter
-    straight from its real `assets/agents/<profile>/` location — no need to
-    physically co-locate the files the way `layer.Dockerfile` does inside a
-    built image (that flattening is a Docker-build concern, not a host one).
-    """
+    """Load agent_contract.py by path (a container asset, not an installed module)
+    and cache it in sys.modules so every adapter's `from agent_contract import ...`
+    resolves without needing the files physically co-located."""
     cached = sys.modules.get("agent_contract")
     if cached is not None:
         return cached
@@ -90,9 +72,8 @@ def _load_agent_contract() -> ModuleType:
     spec = importlib.util.spec_from_file_location("agent_contract", contract)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    # Register before exec: agent_contract.py's dataclasses (under `from
-    # __future__ import annotations`) resolve their string annotations via
-    # `sys.modules[cls.__module__]` at class-definition time.
+    # Register before exec: agent_contract.py's dataclasses resolve their string
+    # annotations via sys.modules[cls.__module__] at class-definition time.
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
@@ -107,11 +88,9 @@ def _read_toml(path: Path) -> dict[str, Any]:
 
 
 def load_adapter_module(profile: str) -> ModuleType:
-    """Load *profile*'s `adapter.py` by path, for host-side callers that need
-    to run actual adapter logic (currently only `catraz sync`'s
-    `sync_from_host`, §05.6 `credentials.mode = "sync"`). Never reads
-    adapter code from `.catraz/` — only from the shipped `assets/agents/`
-    tree, keyed by the static `AGENT_REGISTRY` (§06.2/A2)."""
+    """Load profile's adapter.py by path, for host-side callers that need to run
+    actual adapter logic (currently only `catraz sync`). Never reads adapter code
+    from `.catraz/` — only from the shipped assets/agents/ tree."""
     _load_agent_contract()  # ensures `from agent_contract import ...` resolves
     path = agent_dir(profile) / "adapter.py"
     if not path.exists():

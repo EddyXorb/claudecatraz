@@ -1,16 +1,8 @@
 """Generic TOML-shaped dict → dataclass decoder.
 
-decode recursively builds a dataclass instance from a plain
-Mapping (the shape tomllib.load returns): a TOML table maps 1:1
-onto a dataclass, so the dataclass *is* the schema and its docstring the
-documentation — no separate hand-written parser per config section. Supports
-primitives (str/int/bool/float), tuple[X, ...] (from a
-TOML array), Optional[X], and nested dataclasses (from a TOML sub-table).
-
-Fail-closed: an unknown key, a missing required field, or a type mismatch
-(including bool where int is declared — isinstance(True, int) is
-True in Python, so that mismatch needs an explicit check) all raise
-warden.core.config.ConfigError with a path-prefixed message.
+decode recursively builds a dataclass instance from a plain Mapping: a
+TOML table maps 1:1 onto a dataclass. Fail-closed: an unknown key, a
+missing required field, or a type mismatch all raise ConfigError.
 """
 
 from __future__ import annotations

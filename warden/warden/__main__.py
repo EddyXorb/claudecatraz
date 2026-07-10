@@ -73,9 +73,7 @@ async def _serve() -> None:
     audit.start()
     ctx = build_context(cfg, state, audit)
 
-    # Reconcile BEFORE opening the agent port: GitLab truth dominates. This is a
-    # global lifecycle guarantee (port-open timing), so it lives in the runtime
-    # and stays out of any individual guard (won't-do: see §07 Punkt 5).
+    # Reconcile BEFORE opening the agent port: GitLab truth dominates.
     for g in ctx.guards:
         await g.startup()
     if not await ctx.reconcile_all():
@@ -88,9 +86,7 @@ def main() -> None:
     try:
         asyncio.run(_serve())
     except (ConfigError, SchemaError) as exc:
-        # Both are fail-closed startup aborts: bad config, or a state DB this
-        # build cannot understand. Neither should ever surface as a
-        # traceback — a clean message and a non-zero exit is the contract.
+        # Fail-closed startup abort: never surface as a traceback.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

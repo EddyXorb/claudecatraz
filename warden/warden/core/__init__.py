@@ -1,10 +1,7 @@
 """The kernel: pipeline template, policy types, audit, quota state, config.
 
-Everything a guard needs from the trust boundary that is *not itself* GitLab/git-specific:
-the pipeline template method (core.guard.Guard.handle), shared policy value types
-(core.model), typed audit event, durable quota state.
-
-No GitLab/git vocabulary lives here (core.config.Config is the one documented exception).
+Everything a guard needs from the trust boundary that is not GitLab/git-specific.
+No GitLab/git vocabulary lives here (Config is the one exception).
 """
 
 from __future__ import annotations

@@ -1,16 +1,5 @@
-"""BranchState (§E, W8, §6.11, §07 Punkt 6 step 4, §07 Punkt 8 follow-up): the
-git guard's own branch quota table (``agent_branches``), built on the same
-:class:`~warden.core.state.StateStore` core state uses — split out of
-:mod:`test_forge_state` when branch tracking moved from the shared forge to
-the git guard itself.
-
-This counter is what the git guard's quota check reads via
-:meth:`~warden.guards.git.guard.GitGuard.state_view`, so an off-by-one here
-would directly mis-gate pushes.
-
-:meth:`~warden.guards.git.state.BranchState.open_branches` is per-endpoint
-since step 04 (state-keying): it always takes a ``host`` and only counts that
-endpoint's rows — see the two-hosts tests below.
+"""BranchState: the git guard's per-endpoint branch quota table. An off-by-one
+here would directly mis-gate pushes.
 """
 
 from __future__ import annotations
@@ -40,7 +29,7 @@ def test_add_branch_records_a_single_push_created_branch():
     assert bs.open_branches("h") == 1
 
 
-# --- (host, project) state-keying (§07 Punkt 8 follow-up, design spike section 4) --
+# --- (host, project) state-keying ----------------------------------------------
 
 
 def test_two_hosts_with_the_same_project_path_get_separate_counters():
@@ -56,8 +45,8 @@ def test_two_hosts_with_the_same_project_path_get_separate_counters():
 
 
 def test_open_branches_counts_only_the_given_endpoint():
-    # step 04: open_branches(host) is the per-endpoint quota counter — a
-    # third, untouched host must never leak into another host's count.
+    # open_branches(host) is the per-endpoint quota counter — a third,
+    # untouched host must never leak into another host's count.
     bs = _branch_state()
     bs.add_branch("gitlab.com", "acme/infra", "claude/a")
     bs.add_branch("gitlab.com", "acme/infra", "claude/b")

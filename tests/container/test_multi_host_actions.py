@@ -1,18 +1,8 @@
-"""Container-level integration test for endpoint actions: a multi-endpoint
-deployment with three hosts — full default `actions`, review-only override,
-and a `plain`-type host inheriting the default's type-cut — is actually
-treated differently by a *real* Warden container, on both the git axis and
-the REST axis.
+"""Container test: three hosts (full default, review-only override, plain
+type-cut) get different action gates from a real Warden container, on both
+the git and REST axes.
 
-Same blueprint as ``tests/container/test_multi_host.py``: a real
-``gitlab-warden`` service (via `catraz.compose`), driven with `docker compose
-exec` + a stdlib `http.client` call carrying an explicit `Host` header — no
-unit-level mock, no real forge behind these hostnames (see that module's
-docstring for the full rationale, not repeated here).
-
-Run (needs Docker):
-    uv run --with pytest python -m pytest tests/container/test_multi_host_actions.py -q
-"""
+Run: uv run --with pytest python -m pytest tests/container/test_multi_host_actions.py -q"""
 
 from __future__ import annotations
 
@@ -157,16 +147,10 @@ def _probe(
     method: str = "GET",
     body: Optional[dict[str, object]] = None,
 ) -> tuple[int, str]:
-    """One request straight to the Warden's agent port (8080) from *inside*
-    its own running container, with an explicit `Host` header — exercising
-    exactly the `request.headers["host"]` lookup
-    `core.guard.host_gate`/`core.transport.UpstreamRouter` perform in
-    production (see `test_multi_host.py`'s module docstring for why this
-    replaces a DNS-alias hop through a live agent container here).
-
-    ``method``/``body`` extend `test_multi_host.py`'s GET-only probe: a JSON
-    body is needed to drive `mr.create`/`mr.comment` REST writes.
-    """
+    """One request to the Warden's agent port (8080) from inside its own
+    container, with an explicit Host header exercising the same host-routing
+    lookup production uses. method/body drive REST writes like mr.create
+    and mr.comment."""
     body_json = json.dumps(body) if body is not None else None
     script = (
         "import http.client, json\n"
@@ -217,15 +201,9 @@ def _rest_mr_merge_path(project: str, iid: int) -> str:
 
 
 def _assert_routed(status: int, body: str, host: str, label: str) -> None:
-    """The request cleared every gate (host + project + action) and reached
-    out to its upstream (`forward()`, or — for a REST comment, whose
-    namespace check needs an iid -> MR upstream lookup in `enrich()` — that
-    lookup) — proof the action *was* enabled for this host. With no real
-    forge behind these mock hostnames, that outbound call then fails to
-    connect, which surfaces as a deterministic 500 (verified live, same
-    mechanism as `test_multi_host.py`'s `_assert_routed`). A plain "not 403"
-    would be too weak (a 5xx from some other bug would also pass); the 500
-    pins "routed, upstream just absent"."""
+    """Cleared every gate (host + project + action) and reached its (absent)
+    mock upstream -> deterministic 500. A plain "not 403" would be too weak;
+    500 specifically proves "routed", not merely "not denied"."""
     assert status == 500, (
         f"{label}: host {host!r} expected to route to its (absent) upstream -> 500, "
         f"got {status}: {body}"
@@ -240,28 +218,11 @@ def _assert_denied(status: int, body: str, *, reason_contains: list[str]) -> Non
 
 
 def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: str) -> None:
-    """A matched write recognizer (e.g. `mr.create`) whose *action* is enabled
-    for `host` still cannot reach `forward()` in this test's environment: the
-    REST-API guard's own MR-quota reconcile (`guards.git.gitlab.reconcile`)
-    calls out to the (deliberately absent, per "Nicht tun" — no real forge)
-    upstream at boot for every allowed project on every configured host, and
-    `core.transport.for_each_host_project` leaves the guard's state
-    fail-closed-**locked** forever if even one of those calls ever raises
-    (verified live: it always does here, since none of the three hosts have a
-    real upstream) — a structural side effect of the no-real-forge
-    constraint, orthogonal to the actions mechanism this test is about.
-
-    That lock is checked in `policy._quota_check`, reached only *after* a
-    write has already matched a recognizer in the host's effective table
-    (`policy.decide` -> `decide_scope`) — a write whose action is *not*
-    enabled for the host never gets that far; it default-denies with a "not
-    enabled for host" deny first (see
-    `test_review_only_endpoint_narrows_selectively`'s `mr.create` assertion).
-    So the "state locked" deny here is itself the proof the action gate
-    passed for `mr.create` on this host: the *only* other way to reach a deny
-    for this request shape is that action-gate "not enabled" outcome, which is
-    entirely different.
-    """
+    """A write whose action is enabled still 403s here: with no real forge,
+    MR-quota reconcile never finishes, so state stays fail-closed-locked and
+    the request dies on that check before forward(). That "state locked"
+    deny is itself proof the action gate passed — a disabled action denies
+    "not enabled for host" first, before quota state is checked."""
     assert status == 403, f"host {host!r}: expected state-locked deny, got {status}: {body}"
     payload = json.loads(body)
     assert "state locked" in payload["reason"], (
@@ -271,20 +232,10 @@ def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: s
 
 @pytest.mark.slow
 def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
-    """Full default: a `gitlab` endpoint with no `actions` override inherits
-    the domain default, which includes both `repo.branch.push` and
-    `project.mr.create` — both clear the action gate.
-
-    Advertise (either service) always recognizes to `repo.read` — it never
-    touches quota state, so it reaches `forward()` and gets this test's usual
-    "routed" 500 (absent upstream). `mr.create` does consult quota state
-    first — and in this environment (deliberately no real forge behind any
-    of the three hosts) that state can never finish reconciling, so it
-    denies "state locked" instead of reaching `forward()`; see
-    `_assert_action_gate_cleared_but_state_locked` for why that is still the
-    correct, specific proof that the action gate passed (as opposed to
-    `review-only`'s "not enabled" deny for the same request shape).
-    """
+    """Full default: no `actions` override inherits both `repo.branch.push`
+    and `project.mr.create` from the domain default. Advertise routes (500);
+    mr.create hits the state-locked deny instead
+    (see `_assert_action_gate_cleared_but_state_locked`)."""
     status, body = _probe(live_stack, host=HOST_FULL, path=_git_advertise_path(PROJECT, push=True))
     _assert_routed(status, body, HOST_FULL, "push discovery (advertise-receive)")
 
@@ -300,43 +251,10 @@ def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
-    """Review-only override: `actions = ["repo.read", "project.read",
-    "project.mr.comment"]` narrows this host relative to the full default —
-    but selectively, not blanket:
-
-    - Fetch discovery stays allowed (routed) — `repo.read` is enabled.
-    - Push discovery (advertise-receive) *also* routes: advertise always
-      recognizes to `repo.read` regardless of service, by design (main
-      document §6) — a disabled push denies at `receive-pack`, per ref, not
-      at discovery. This test only probes discovery, so it cannot observe
-      that denial directly; it is covered at the unit level in
-      `warden/tests/transport/test_recognizers.py` and `test_policy.py`, and
-      through a real `git push` in `warden/tests/test_git_e2e.py`.
-    - MR diffs route (`project.read` is enabled; the diff endpoint falls
-      through the same catch-all read recognizer as any other project read —
-      a deliberate carve-out: MR diffs are visible under `project.read` alone,
-      with no `repo.read` needed).
-    - `project.mr.create` is denied (not in this host's effective actions) —
-      same "not enabled for host" 403 as
-      ``test_two_hosts_with_different_actions_behave_differently_on_the_same_guard``
-      in ``warden/tests/test_api_proxy.py``.
-    - `project.mr.comment` (a `mr.note` recognizer) stays allowed (routed) —
-      proving the narrowing is selective: two REST writes on the very same
-      host, one denied and one allowed, per the configured `actions` list
-      alone.
-    - Merge is denied regardless of config (the criticality gate) — a config
-      that could never enable it in the first place, unlike the action gate.
-
-    A real, in-container push denial and an "API-with-repo.read-off" probe
-    (repo.read disabled while project.read stays on) are deliberately not
-    repeated here: both are already proven end-to-end by `full_decide`-based
-    unit tests (`warden/tests/redteam/test_bypass.py`, `warden/tests/gitlab/
-    test_recognizers.py`) that exercise the identical real parse -> recognize
-    -> kernel_gates -> decide pipeline this container also runs — adding a
-    fourth docker endpoint (or raw pkt-line-over-`docker compose exec`
-    plumbing) here would only re-prove wiring already covered by the git
-    advertise/REST probes above, not anything genuinely uncovered.
-    """
+    """Review-only override (`repo.read`, `project.read`,
+    `project.mr.comment`) narrows selectively: discovery and MR diffs stay
+    routed, `mr.create` is denied (not enabled for host), `mr.comment` still
+    routes, and merge is denied regardless of config (criticality gate)."""
     status, body = _probe(
         live_stack, host=HOST_REVIEW, path=_git_advertise_path(PROJECT, push=False)
     )
@@ -380,13 +298,8 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_plain_endpoint_fetch_and_push_routed(live_stack: Stack) -> None:
-    """Plain, inherited type-cut: a `plain`-type endpoint with no `actions`
-    override inherits the domain default intersected with its type's
-    vocabulary (`repo.read`/`repo.branch.create`/`repo.branch.push` — no
-    forge/REST actions at all). Spot-check only: both git transport
-    operations still clear the action gate and are routed; there is no
-    meaningful REST `mr.*` path on a `plain` host to probe (`type = "plain"`
-    has no REST base at all, `core.transport.base_urls`)."""
+    """Plain type-cut: no `actions` override still lets both git transport
+    ops route; a `plain` host has no REST base to probe."""
     status, body = _probe(
         live_stack, host=HOST_PLAIN, path=_git_advertise_path(PROJECT, push=False)
     )

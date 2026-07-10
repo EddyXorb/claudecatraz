@@ -1,4 +1,4 @@
-"""pkt-line parser tests (W14, §8): good/bad prefix, delete=null-oid, multi-ref, gzip head."""
+"""pkt-line parser tests: good/bad prefix, delete=null-oid, multi-ref, gzip head."""
 
 from __future__ import annotations
 

@@ -1,16 +1,8 @@
 """The typed, frozen Config value the policy consumes.
 
-Only the *model* half of the config layer lives here — building a
-Config from env + warden.toml (secret files, precedence, hard
-fail-closed validation) is warden.core.config_load's job. Split kept so
-neither half outgrows a readable file and the many Config importers
-(guards, catalog, tests) depend on the small value type, not on the loading
-machinery.
-
-There is no global "mode": access is derived per host from which of that
-host's tokens are present (Config.access_mode) — a deployment with
-no configured/open endpoints denies everything by simple absence, not by a
-declared off.
+Only the model half of the config layer lives here; building one from
+env + warden.toml is config_load's job. There is no global "mode": access
+is derived per host from which of that host's tokens are present.
 """
 
 from __future__ import annotations
@@ -43,10 +35,9 @@ AccessMode = Literal["closed", "read-only", "read-write"]
 def normalize_project(project: str) -> str:
     """Canonical project path: drop the git .git suffix and surrounding slashes.
 
-    The git Smart-HTTP path carries group/proj.git; the allowlist and REST
-    forms use the bare group/proj. Normalising in one place keeps allowlist
-    checks, REST project-ids, upstream URLs and state keys consistent (one
-    definition), so a pushed branch is not counted twice in agent_branches."""
+    Normalising in one place keeps allowlist checks, REST project-ids,
+    upstream URLs, and state keys consistent.
+    """
     return project.removesuffix(".git").strip("/")
 
 
@@ -81,16 +72,12 @@ class GitRules:
 
 @dataclass(frozen=True)
 class GitEndpoint:
-    """One git host: its identity/scope (host, type, allowed_projects)
-    plus optional rule/action overrides. allowed_projects is always
-    per-endpoint — a project path is only unambiguous relative to the host it
-    lives on.
+    """One git host: its identity/scope plus optional rule/action overrides.
 
-    actions follows the same cascade contract as rules:
-    None means "no override, the domain default (Config.git_actions)
-    or built-in default applies"; an explicit () means "this endpoint may
-    do nothing" — a deliberately narrow value, never to be normalised into
-    None (the two must stay distinguishable)."""
+    actions follows the rules cascade: None means "inherit the domain or
+    built-in default"; explicit () means "this endpoint may do nothing" —
+    the two must stay distinguishable.
+    """
 
     host: str
     type: str
@@ -110,9 +97,7 @@ class Config:
     max_open_mrs: int = 5
     max_open_branches: int = 10
     max_writes_per_hour: int = 60
-    # Cheap, no packfile-parsing push-size cap: checked against the
-    # receive-pack request's Content-Length before the body is streamed
-    # upstream. Generous default so a normal push is never affected.
+    # Cheap push-size cap checked against Content-Length before streaming.
     max_push_bytes: int = 50 * 1024 * 1024
     allowed_projects: tuple[str, ...] = ()
     reconcile_interval_s: int = 300
@@ -122,33 +107,21 @@ class Config:
     agent_port: int = 8080
     admin_port: int = 9090
     admin_host: str = "0.0.0.0"
-    # [git.rules] domain defaults and [[git.endpoint]] entries (one host each) —
-    # every routable host is an explicit GitEndpoint, wired into
-    # UpstreamRouter/host_gate (core.transport, core.guard). Empty
-    # git_endpoints ⇒ no endpoints configured ⇒ every host is denied (real
-    # default-deny, not "feature off").
+    # Every routable host is an explicit GitEndpoint; empty git_endpoints
+    # means every host is denied (real default-deny, not "feature off").
     git_rules: GitRules = field(default_factory=GitRules)
-    # [git].actions domain default. None ⇒ the key is absent from
-    # warden.toml, meaning the built-in default (guards.git.actions.DEFAULT)
-    # applies — same "absent != empty" contract as git_rules' individual
-    # fields, kept at the whole-list granularity since actions replace
-    # completely rather than merging per-key.
+    # None means the key is absent from warden.toml; the built-in default
+    # applies. Whole-list granularity: actions replace, never merge per-key.
     git_actions: Optional[tuple[str, ...]] = None
     git_endpoints: tuple[GitEndpoint, ...] = ()
-    # Per-endpoint tokens resolved from the grouped read_tokens/write_tokens
-    # files, keyed by normalised host. Backs access_mode() and
-    # UpstreamRouter's per-endpoint credentials.
+    # Per-endpoint tokens resolved from secret files, keyed by normalised host.
     git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
 
     def project_allowed(self, project: str) -> bool:
         """Default-deny match against ALLOWED_PROJECTS, path form only.
 
-        No prefix/subpath match — the allowlist names concrete projects, never
-        group prefixes. GitLab also accepts a project's
-        numeric id interchangeably with its path; matching that form is a
-        REST-API-guard concept (the id is only known after reconcile talks to
-        GitLab) — see guards.git.gitlab.guard.ApiGuard.project_allowed,
-        not this method.
+        No prefix/subpath match. GitLab's numeric project ids are matched
+        separately by the REST-API guard's own project_allowed, not here.
         """
         project = normalize_project(project)
         return any(project == allowed.strip("/") for allowed in self.allowed_projects)
@@ -165,21 +138,15 @@ class Config:
     def normalize_host(host: str) -> str:
         """Case/port/trailing-dot-insensitive host normalisation.
 
-        The single definition shared by host_allowed,
-        warden.core.transport.UpstreamRouter's header lookup and
-        every (host, project) state key — so the same raw Host header
-        always maps to the same normalised key everywhere it is used.
+        The single definition shared everywhere a raw Host header must map
+        to a normalised key: host_allowed, UpstreamRouter, state keys.
         """
         return host.split(":", 1)[0].strip().lower().rstrip(".")
 
     def host_allowed(self, host: str) -> bool:
-        """Host-header gate, wired into the kernel path via
-        core.guard.host_gate. Real default-deny: a host passes
-        only if it has a configured [[git.endpoint]] entry *and* that
-        endpoint currently resolves to a usable read credential
-        (access_mode is not "closed"). An empty endpoint list
-        (or an entirely unlisted host, or a listed-but-tokenless one) is
-        denied — there is no "empty allowlist ⇒ allow everything" fallback.
+        """Host-header gate. Real default-deny: a host passes only if it has
+        a configured endpoint and that endpoint has a usable read credential
+        (access_mode is not "closed"). No "empty allowlist means allow" fallback.
         """
         normalized = self.normalize_host(host)
         return (
@@ -189,14 +156,10 @@ class Config:
         )
 
     def resolve_target_host(self, header: str) -> Optional[str]:
-        """The canonical host key for state/reconcile/Upstream lookup, given
-        a raw incoming Host header.
+        """The canonical host key for state/reconcile/Upstream lookup.
 
-        The normalised header if it names a configured endpoint, else
-        None (unknown host — the caller must deny, never fabricate a key
-        for it; core.guard.host_gate already denies this case earlier in
-        the pipeline, so callers past that point should never actually
-        observe None).
+        The normalised header if it names a configured endpoint, else None
+        (unknown host — the caller must deny, never fabricate a key).
         """
         normalized = self.normalize_host(header)
         return normalized if normalized in self.git_allowed_hosts else None
@@ -225,14 +188,10 @@ class Config:
 
     @property
     def open_hosts(self) -> tuple[str, ...]:
-        """effective_hosts, trimmed to endpoints that currently have a
-        usable read credential. The single definition shared by
-        warden.guards.git.reconcile.reconcile_branches
-        and warden.guards.git.gitlab.reconcile.reconcile_mrs — a
-        closed endpoint is unreachable via host_gate anyway and
-        never needs reconciling (see warden.core.transport.for_each_host_project's
-        docstring for why passing a closed host through would be a bug, not a
-        tolerated case)."""
+        """effective_hosts, trimmed to endpoints with a usable read
+        credential. A closed endpoint is unreachable via host_gate anyway
+        and never needs reconciling.
+        """
         return tuple(
             self.normalize_host(e.host)
             for e in self.git_endpoints
@@ -267,25 +226,13 @@ class Config:
         )
 
     def effective_actions(self, host: str) -> tuple[str, ...]:
-        """Per-host action cascade, same _cascade mechanic as
-        effective_rules: the endpoint's own actions if set, else
-        git_actions (the domain default), else the built-in default
-        (warden.guards.git.actions.DEFAULT). The list **replaces**
-        completely — never merged, just like branch_prefixes.
+        """Per-host action cascade: endpoint override, else domain default,
+        else built-in default. Replaces completely, never merged.
 
-        The type-cut applies only to an *inherited* value: a
-        plain endpoint that falls through to git_actions/the built-in
-        default is silently intersected with its type's valid action ids
-        (warden.guards.git.endpoints.ENDPOINT_TYPES) — no error,
-        since every mixed deployment would otherwise be forced to override
-        every plain endpoint explicitly. An *explicit* endpoint override
-        is returned as-is, unfiltered here: a type-impossible id in it is a
-        ConfigError raised by the loader at config-build time
-        (core.config_load), never silently dropped.
-
-        Deferred import (matching config_load._parse_actions): the
-        vocabulary is guard-owned, Config only threads the plain
-        tuple[str, ...] values through.
+        The type-cut applies only to an inherited value: it is silently
+        intersected with the endpoint type's valid action ids. An explicit
+        override is returned as-is — a type-impossible id in it is a
+        ConfigError at config-build time, never silently dropped.
         """
         from ..guards.git.actions import DEFAULT
         from ..guards.git.endpoints import ENDPOINT_TYPES
