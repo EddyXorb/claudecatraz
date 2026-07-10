@@ -6,6 +6,8 @@ GraphQL, and the merge criticality-deny are each pinned down explicitly."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from warden.core.config import Config, GitEndpoint, HostCredentials
@@ -33,91 +35,103 @@ def _cfg() -> Config:
 
 # --- every catalog row: match + recognized action set -----------------------
 
-CATALOG_CASES: list[tuple[str, str, str, dict[str, object], tuple[str, ...]]] = [
-    (
+
+@dataclass(frozen=True)
+class Case:
+    expected_id: str
+    method: str
+    path: str
+    fields: dict[str, object]
+    expected_actions: tuple[str, ...]
+
+
+CATALOG_CASES: list[Case] = [
+    Case(
         "mr.create",
         "POST",
         "/projects/1/merge_requests",
         {"source_branch": "claude/x"},
         ("project.mr.create",),
     ),
-    ("mr.note", "POST", "/projects/1/merge_requests/7/notes", {}, ("project.mr.comment",)),
-    (
+    Case("mr.note", "POST", "/projects/1/merge_requests/7/notes", {}, ("project.mr.comment",)),
+    Case(
         "mr.discussion",
         "POST",
         "/projects/1/merge_requests/7/discussions",
         {},
         ("project.mr.comment",),
     ),
-    (
+    Case(
         "mr.discussion_reply",
         "POST",
         "/projects/1/merge_requests/7/discussions/99/notes",
         {},
         ("project.mr.comment",),
     ),
-    ("mr.update", "PUT", "/projects/1/merge_requests/7", {}, ("project.mr.edit",)),
-    ("mr.merge", "PUT", "/projects/1/merge_requests/7/merge", {}, ("project.mr.merge",)),
-    (
+    Case("mr.update", "PUT", "/projects/1/merge_requests/7", {}, ("project.mr.edit",)),
+    Case("mr.merge", "PUT", "/projects/1/merge_requests/7/merge", {}, ("project.mr.merge",)),
+    Case(
         "pipeline.trigger",
         "POST",
         "/projects/1/pipeline",
         {"ref": "claude/x"},
         ("project.ci.trigger",),
     ),
-    (
+    Case(
         "mr.pipeline.trigger",
         "POST",
         "/projects/1/merge_requests/7/pipelines",
         {},
         ("project.ci.trigger",),
     ),
-    ("pipeline.retry", "POST", "/projects/1/pipelines/9/retry", {}, ("project.ci.trigger",)),
-    ("pipeline.cancel", "POST", "/projects/1/pipelines/9/cancel", {}, ("project.ci.trigger",)),
-    ("job.retry", "POST", "/projects/1/jobs/9/retry", {}, ("project.ci.trigger",)),
-    ("job.cancel", "POST", "/projects/1/jobs/9/cancel", {}, ("project.ci.trigger",)),
-    ("job.play", "POST", "/projects/1/jobs/9/play", {}, ("project.ci.trigger",)),
-    (
+    Case("pipeline.retry", "POST", "/projects/1/pipelines/9/retry", {}, ("project.ci.trigger",)),
+    Case("pipeline.cancel", "POST", "/projects/1/pipelines/9/cancel", {}, ("project.ci.trigger",)),
+    Case("job.retry", "POST", "/projects/1/jobs/9/retry", {}, ("project.ci.trigger",)),
+    Case("job.cancel", "POST", "/projects/1/jobs/9/cancel", {}, ("project.ci.trigger",)),
+    Case("job.play", "POST", "/projects/1/jobs/9/play", {}, ("project.ci.trigger",)),
+    Case(
         "branch.create",
         "POST",
         "/projects/1/repository/branches",
         {"branch": "claude/x"},
         ("repo.branch.create",),
     ),
-    ("issue.create", "POST", "/projects/1/issues", {}, ("project.issue.create",)),
-    ("issue.update", "PUT", "/projects/1/issues/7", {}, ("project.issue.edit",)),
-    ("issue.note", "POST", "/projects/1/issues/7/notes", {}, ("project.issue.comment",)),
-    ("read.repository", "GET", "/projects/1/repository/tree", {}, ("repo.read",)),
-    ("read.artifacts", "GET", "/projects/1/jobs/9/artifacts", {}, ("repo.read",)),
-    ("read.snippets", "GET", "/projects/1/snippets", {}, ("repo.read",)),
-    ("read.search", "GET", "/search", {"scope": "projects"}, ("instance.projects.read",)),
-    ("read.group_search", "GET", "/groups/1/search", {"scope": "users"}, ("instance.users.read",)),
-    ("read.projects", "GET", "/projects", {}, ("instance.projects.read",)),
-    ("read.groups", "GET", "/groups/1", {}, ("instance.projects.read",)),
-    ("read.merge_requests", "GET", "/merge_requests", {}, ("instance.projects.read",)),
-    ("read.issues", "GET", "/issues", {}, ("instance.projects.read",)),
-    ("read.users", "GET", "/users/7", {}, ("instance.users.read",)),
-    ("read.user", "GET", "/user", {}, ("instance.users.read",)),
-    ("read.events", "GET", "/events", {}, ("instance.users.read",)),
-    ("read.version", "GET", "/version", {}, ("instance.meta.read",)),
-    ("read.metadata", "GET", "/metadata", {}, ("instance.meta.read",)),
-    ("read.broadcast_messages", "GET", "/broadcast_messages", {}, ("instance.meta.read",)),
-    ("read.project", "GET", "/projects/1/merge_requests/7/diffs", {}, ("project.read",)),
+    Case("issue.create", "POST", "/projects/1/issues", {}, ("project.issue.create",)),
+    Case("issue.update", "PUT", "/projects/1/issues/7", {}, ("project.issue.edit",)),
+    Case("issue.note", "POST", "/projects/1/issues/7/notes", {}, ("project.issue.comment",)),
+    Case("read.repository", "GET", "/projects/1/repository/tree", {}, ("repo.read",)),
+    Case("read.artifacts", "GET", "/projects/1/jobs/9/artifacts", {}, ("repo.read",)),
+    Case("read.snippets", "GET", "/projects/1/snippets", {}, ("repo.read",)),
+    Case("read.search", "GET", "/search", {"scope": "projects"}, ("instance.projects.read",)),
+    Case(
+        "read.group_search", "GET", "/groups/1/search", {"scope": "users"}, ("instance.users.read",)
+    ),
+    Case("read.projects", "GET", "/projects", {}, ("instance.projects.read",)),
+    Case("read.groups", "GET", "/groups/1", {}, ("instance.projects.read",)),
+    Case("read.merge_requests", "GET", "/merge_requests", {}, ("instance.projects.read",)),
+    Case("read.issues", "GET", "/issues", {}, ("instance.projects.read",)),
+    Case("read.users", "GET", "/users/7", {}, ("instance.users.read",)),
+    Case("read.user", "GET", "/user", {}, ("instance.users.read",)),
+    Case("read.events", "GET", "/events", {}, ("instance.users.read",)),
+    Case("read.version", "GET", "/version", {}, ("instance.meta.read",)),
+    Case("read.metadata", "GET", "/metadata", {}, ("instance.meta.read",)),
+    Case("read.broadcast_messages", "GET", "/broadcast_messages", {}, ("instance.meta.read",)),
+    Case("read.project", "GET", "/projects/1/merge_requests/7/diffs", {}, ("project.read",)),
 ]
 
 
-@pytest.mark.parametrize("expected_id,method,path,fields,expected_actions", CATALOG_CASES)
-def test_catalog_row_matches_and_recognizes(expected_id, method, path, fields, expected_actions):
-    intent = _intent(method, path, **fields)
+@pytest.mark.parametrize("case", CATALOG_CASES, ids=lambda c: c.expected_id)
+def test_catalog_row_matches_and_recognizes(case: Case):
+    intent = _intent(case.method, case.path, **case.fields)
     match = match_request(intent)
-    assert match is not None, f"no recognizer matched {method} {path}"
-    assert match.id == expected_id
+    assert match is not None, f"no recognizer matched {case.method} {case.path}"
+    assert match.id == case.expected_id
     recognized = match(intent)
-    assert {a.id for a in recognized} == set(expected_actions)
+    assert {a.id for a in recognized} == set(case.expected_actions)
 
 
 def test_every_catalog_row_is_exercised_by_the_table():
-    tested_ids = {case[0] for case in CATALOG_CASES}
+    tested_ids = {case.expected_id for case in CATALOG_CASES}
     all_ids = {row.id for row in CATALOG}
     assert tested_ids == all_ids
 
