@@ -90,10 +90,12 @@ ALL: frozenset[Action] = frozenset(
 #: Reads always flow through, and only ever with the least-privilege read
 #: credential — an agent can look at anything visible to that credential but
 #: cannot use a read to reach a write-scoped upstream token. Writes are
-#: confined to two independent boundaries: the branch namespace the agent
-#: owns (it can create and push its own branches, never touch anyone else's),
-#: and, where the shape of the action allows it, objects the agent itself
-#: authored. Actions that cannot be undone or that hand the agent more power
+#: confined to the agent's own branch namespace: it may create and push
+#: branches under the configured prefixes, and may act on a merge request
+#: only when that request's source branch lies in the same namespace —
+#: never on anyone else's branch or merge request. Ownership of the object
+#: is not what is checked; the branch namespace is. Actions that cannot be
+#: undone or that hand the agent more power
 #: than it started with — merging, pushing a tag, deleting a branch — are
 #: compiled out of this set entirely; no configuration cascade can turn them
 #: on for a host that only reaches DEFAULT. Quotas and rate limits are part
