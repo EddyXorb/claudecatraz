@@ -1,379 +1,201 @@
 # Claudecatraz
 
-**An autonomous Claude Code agent that may work on GitLab — under hard, non-bypassable rules.**
+**An autonomous Claude Code agent that works on GitLab — under hard, non-bypassable rules.**
 
 *No agent escapes the Warden.*
 
 [![cli CI](https://github.com/EddyXorb/claudecatraz/actions/workflows/cli-ci.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/cli-ci.yml)
 [![warden CI](https://github.com/EddyXorb/claudecatraz/actions/workflows/warden-ci.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/warden-ci.yml)
-[![squid CI](https://github.com/EddyXorb/claudecatraz/actions/workflows/squid-ci.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/squid-ci.yml)
 [![redteam CI](https://github.com/EddyXorb/claudecatraz/actions/workflows/redteam-ci.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/redteam-ci.yml)
-[![compose validate](https://github.com/EddyXorb/claudecatraz/actions/workflows/compose-validate.yml/badge.svg)](https://github.com/EddyXorb/claudecatraz/actions/workflows/compose-validate.yml)
 
 ---
 
-## What it does
+## What it is
 
-A dockerized, hardened environment in which an **autonomous Claude Code agent** (with a toolchain of your choice, as long as it can be dockered) can work on GitLab projects — interactively (`catraz run`) or driven over Remote Control from claude.ai (`catraz run claude-remote`).
+Let an autonomous Claude Code agent loose on your GitLab projects — without trusting it.
 
-The point is the security model: the agent is treated as **potentially malicious**. It therefore holds **no GitLab credential whatsoever** and has **no internet route of its own**. Two purpose-built proxies sit in front of it instead:
+Claudecatraz runs the agent in a Docker sandbox that treats it as **potentially
+malicious**: it holds **no GitLab token** and has **no internet route of its own**. Every
+git push, every API call, and every outbound connection goes through a proxy that enforces
+policy and audits the decision. Even a fully compromised agent stays in bounds — it cannot
+touch foreign branches, cannot merge, and can only reach destinations you allow.
 
-- **Warden** — the sole holder of the GitLab tokens. It enforces rules R0–R6 on *every* git push and API call (only your own prefixed branches, no merge, quotas, …) and audits everything.
-- **Forward proxy (Squid)** — the only way to the internet, filtered against a domain allowlist (npm, PyPI, crates, docs …). Default-deny, no TLS interception.
+You get the upside of an autonomous agent working on real repositories, without handing it
+your credentials or your network.
 
-Even a fully compromised agent stays within policy: it cannot write to foreign branches, cannot merge anything, and can only talk to allowlisted destinations.
+## Why use it
 
-## Security model (R0–R6)
+- **Run an agent you don't fully trust.** A compromised or misguided agent still can't leak
+  your token, write to protected branches, merge, or phone home off-allowlist.
+- **Grant exactly the actions you want.** Enable or disable individual actions per
+  endpoint — allow opening merge requests and pushing branches on one host while denying
+  comments or CI triggers on another. The agent's capability set is precisely what you
+  grant, nothing more.
+- **Bring your own environment.** The agent image is a thin Claude layer built `FROM` a
+  swappable base — point it at a ready-made image or your own Dockerfile and you get a
+  reproducible, sandboxed dev environment with exactly the toolchain (compilers, runtimes,
+  CLIs) you need.
+- **Full audit trail.** Every GitLab decision is logged; watch them live in the browser.
+- **Works like `git`.** Point it at any project directory and go.
+- **Drive it from claude.ai** over Remote Control, or run one-off from the terminal.
 
-The agent is treated as **potentially malicious**. Six non-bypassable rules (R0–R6) are enforced
-by the Warden on every git push and API call:
+> **Defense in depth — bring least-privilege credentials.** The sandbox is one layer, not a
+> licence to hand it powerful tokens. Feed it credentials that are already scoped as tightly
+> as they can be: a read token limited to `read_api`/`read_repository`, a write token on a
+> dedicated service account with only the permissions it needs. The Warden then narrows that
+> further. If a layer ever fails, the blast radius is still only what the token itself could
+> ever do.
 
-| #  | Rule | Enforced by |
-| -- | ---- | ----------- |
-| R0 | Mode gate — `GITLAB_MODE=off` denies all GitLab ops; `read-only` denies all writes | Warden checks the mode before any other rule and never sends a token upstream when the op is disabled |
-| R1 | Read anything in the work scope | Read token in the Warden, GET pass-through |
-| R2 | Push only to branches under a configured `branch_prefixes` entry (default `claude/`) | Warden parses the git ref commands + GitLab push rules |
-| R3 | MR/comment/CI only for your own branches | Warden API filter (ownership) + Developer role |
-| R4 | **Never merge** | Warden blocks merge endpoints (403) + protected branches |
-| R5 | Quotas (open MRs/branches, writes/h) | Warden state (SQLite, durable, fail-safe) |
-| R6 | No token in the agent, network isolation | `agent-net internal` + Warden as the sole trust boundary |
+## Quick start
 
-> **The push prefix is configurable — and can be a list.** `claude/` is only the default. Set
-> `branch_prefixes` in `.catraz/config/warden.toml` to one or more prefixes; R2 then enforces
-> the *union* of them. The legacy single-value form
-> `branch_prefix = "..."` still works (treated as a one-element list). The list must be
-> non-empty and no entry may be empty, so pushes are always confined to a namespace you choose,
-> never to arbitrary or protected branches.
-
-Two layers: the **Warden** (primary, code) and **GitLab-native** restrictions (backstop,
-zero-code). If the Warden goes down, the agent structurally has **no** route to gitlab.com
-(fail-closed). Details: [threat model & design](docs/design/agentic-workflow/README.md).
-
-### Allowed write endpoints
-
-REST **reads** (GET) pass through with the read token. REST **writes** are an explicit
-allowlist — anything not listed is default-denied (`warden/warden/api_endpoints.py`):
-
-| Method & path | What it does | Guard |
-| ------------- | ------------ | ----- |
-| `POST …/merge_requests` | open a merge request | source branch under `branch_prefixes` (R2/R3) |
-| `POST …/merge_requests/{iid}/notes` | post a top-level MR comment | MR authored by the service account (R3) |
-| `POST …/merge_requests/{iid}/discussions` | start a discussion thread — incl. an **inline diff comment** on a file/line (pass a `position`) | MR authored by the service account (R3) |
-| `POST …/merge_requests/{iid}/discussions/{discussion_id}/notes` | **reply** to an existing discussion thread | MR authored by the service account (R3) |
-| `PUT …/merge_requests/{iid}` | edit the MR (title/description/labels, or close) | own MR (R3); `state_event=merge` blocked (R4) |
-| `POST …/pipeline` | trigger a CI pipeline | ref under `branch_prefixes` (R3) |
-| `PUT …/merge_requests/{iid}/merge` | merge — **always 403** | never permitted (R4) |
-
-> Inline review comments (`discussions`) need the MR's `position` (`base_sha`/`head_sha`/
-> `start_sha` from the MR's `diff_refs`, plus `new_path` + `new_line`). The Warden only
-> checks ownership and forwards the body untouched.
-
-### Read scoping
-
-The security line on reads is **content, not visibility** (`warden/warden/read_endpoints.py`).
-A path with a project id (`/projects/{id}/…`) is gated by `allowed_projects` exactly like a
-write — repository content (files, diffs, wiki, commits) of a project outside the allowlist is
-already 403 today. A *projectless* path has no project id to gate, so it goes through a small,
-data-driven table instead: project/group **metadata** (names, descriptions — e.g.
-`/projects`, `/groups/<id>/projects`, `/users`, `/version`) is always readable, but anything that
-can return **repository content across every visible project** — global/group search with
-`scope=blobs|commits|wiki_blobs|notes`, and `/snippets` — is denied, as is any projectless path
-the table doesn't recognise (fail-closed default-deny). GitLab's **GraphQL** API (`/api/graphql`)
-is never proxied at all — it answers `403` unconditionally, because a single mutation there could
-express everything the REST write filter blocks (merge an MR, create a tag).
-
-## Architecture
-
-```text
-   🧑‍💻 Host — VSCode / browser ───────────────┐  (read-only · admin unix socket)
-        │                                       ▼
-        │ Remote Control · claude.ai       🔍 Audit viewer · catraz audit --web
-        │                                        │  (read-only)
- ┌──────┼────────────────────────────────────────┼──────────────────────┐
- │ agent-net · internal — NO egress              │                      │
- │      ▼                                         ▼                     │
- │  ┌──────────────────────┐   git + REST   ┌──────────────────────┐    │
- │  │ claude-dev-env       │   (no token)   │ gitlab-warden        │    │ ══▶ gitlab.com
- │  │ Claude Code          │ ─────────────▶ │ enforces R0–R6       │    │     (egress)
- │  │ no GitLab token (R6) │                │ holds all tokens     │    │
- │  │ [untrusted]          │                │ [trust boundary]     │    │
- │  └──────────────────────┘                └──────────────────────┘    │
- │      │                                                               │
- │      │ http / https proxy             ┌───────────────────────┐      │
- │      └───────────────────────────────▶│ forward-proxy         │      │ ══▶ npm · pypi ·
- │                                       │ Squid domain allowlist│      │     crates · docs
- │                                       └───────────────────────┘      │     (egress)
- └──────────────────────────────────────────────────────────────────────┘
-```
-
-Trust boundary: **gitlab-warden** is the sole holder of the tokens; the **claude-dev-env** agent
-is untrusted and has no egress of its own — git/REST goes through the Warden, everything else
-through the Squid forward proxy. The audit viewer reaches the Warden read-only over the admin
-unix socket (host only).
-
-Full design, threat model and rule set: **[`docs/design/agentic-workflow/`](docs/design/agentic-workflow/README.md)**.
-
-## Install
-
-`catraz` is a self-contained CLI (Python standard library only — Docker is the only real
-dependency). Install it once and run it from **any** project directory afterwards:
+`catraz` is a self-contained CLI (Python stdlib only; Docker is the one real dependency).
 
 ```bash
 git clone https://github.com/EddyXorb/claudecatraz
 cd claudecatraz
-uv tool install .          # installs the `catraz` command on your PATH
+uv tool install .          # installs `catraz` on your PATH (pipx works too)
 ```
 
-> Don't have [`uv`](https://docs.astral.sh/uv/)? `pipx install .` works too. Or skip the
-> install entirely and run the repo-local shim `./catraz …` straight from the clone.
-
-The packaged assets (compose file, Dockerfiles, default config) ship inside the tool and are
-extracted to a per-version cache (`~/.cache/catraz/`) on first use — you never need the clone
-again once installed.
-
-**Prerequisites:** Docker Engine ≥ 24 + Compose ≥ 2.20, a **dedicated** Claude sandbox account
-(not your primary one), and for GitLab a service account with two tokens (see
-[GitLab-native setup](docs/design/agentic-workflow/01-gitlab-native.md)).
-
-## Quick start
-
-`catraz` sandboxes the **current** folder — like `git`, it works on the directory you run it
-in. One interactive session sets everything up; a preflight (`doctor`) catches the silent traps
-before they bite.
+Then, in any project:
 
 ```bash
 cd ~/code/my-project
-catraz init           # wizard: create .catraz/, 3 secrets, allowed projects, credential sync
-catraz run -p "hi"    # lazy-starts infra (Warden + Squid) and runs Claude one-off
+catraz init           # wizard: create .catraz/, secrets, allowed projects, credential sync
+catraz run -p "hi"    # lazy-starts the sandbox and runs Claude one-off
+catraz audit --web    # watch every GitLab decision live, read-only
 ```
 
-> The always-on Remote-Control **daemon** is started with `catraz run claude-remote`
-> (see *Interactive mode* below).
+`catraz init` creates one **`.catraz/`** directory holding all config, secrets and state —
+nothing else touches your repo, and it's auto-added to `.gitignore`. The agent sees your
+project at `/workspace` but never `.catraz/` itself.
 
-`catraz init` creates a single **`.catraz/`** directory in your project that holds all settings
-and runtime files (config, credentials, logs, state) — nothing else is added to your repo, and
-`.catraz/` is auto-added to `.gitignore`. The agent sees your project at `/workspace` but
-**not** `.catraz/` itself (a tmpfs shadow hides it).
+**Prerequisites:** Docker Engine ≥ 24 + Compose ≥ 2.20, a **dedicated** Claude sandbox
+account (not your primary), and a GitLab service account with a read and a write token.
 
-The agent is then reachable over Remote Control on claude.ai. Watch every GitLab decision live
-with `catraz audit --web`.
+> ### ⚠️ What the sandbox protects — and what it does not
+> It protects your **network and git egress**: the Warden holds the tokens and enforces
+> policy, and Squid restricts the agent to a domain allowlist. It does **not** protect your
+> **files** — `/workspace` is bind-mounted read-write, so the agent can change any file in
+> the project. Run it on code you're willing to let the agent edit.
 
-## Basic commands
+## How it works
+
+Three containers on an internal network with **no egress of its own**:
+
+```text
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │  agent-net · internal — the agent has NO direct route out            │
+ │                                                                       │
+ │   ┌──────────────────┐   git + REST    ┌──────────────────┐          │
+ │   │ agent            │   (no token)     │ Warden           │ ──▶ gitlab.com
+ │   │ Claude Code      │ ───────────────▶ │ holds all tokens │          │
+ │   │ no token         │                  │ enforces policy  │          │
+ │   │ [untrusted]      │                  │ audits every op  │          │
+ │   └──────────────────┘                  └──────────────────┘          │
+ │        │                                                              │
+ │        │ http/https              ┌──────────────────────┐            │
+ │        └────────────────────────▶│ forward proxy (Squid)│ ──▶ npm · pypi ·
+ │                                   │ domain allowlist     │     crates · docs
+ │                                   └──────────────────────┘            │
+ └─────────────────────────────────────────────────────────────────────┘
+```
+
+- **Agent** — **Claude Code for now** (the sandbox is agent-agnostic by design; support for
+  other agents will follow), running the toolchain of your choice. Untrusted. No credentials,
+  no direct network.
+- **Warden** — the sole holder of the GitLab tokens and the trust boundary. Reads pass
+  through with a least-privilege token; writes are confined to the agent's own branch
+  namespace — it may push its own prefixed branches and act on a merge request only when
+  that request's source branch is in that namespace; merges, tag pushes and branch deletes
+  are never allowed; quotas fail safe; everything is bounded by a per-endpoint action and
+  project allowlist. Every decision is audited.
+- **Forward proxy (Squid)** — the agent's only way to the internet, filtered against a
+  domain allowlist. Default-deny.
+
+If the Warden goes down, the agent structurally has **no** route to GitLab (fail-closed).
+
+**Extensible by design.** The Warden gates raw **git** and the **GitLab** REST API today;
+the guard layer takes new endpoints — **GitHub next**, and in principle any service (other
+forges, databases, …) — without touching the sandbox or the security kernel.
+
+## Common commands
 
 | Command | What it does |
 | ------- | ------------ |
-| `catraz init` | Wizard: create `.catraz/`, collect secrets + allowed projects (offers detected GitLab remotes), sync credentials |
-| `catraz run …` | Run Claude Code **one-off** inside the sandbox (drop-in `claude`); lazy-starts infra |
-| `catraz doctor` | Re-run the preflight; `--fix` repairs dirs/ownership |
-| `catraz status` | Health per service, URLs, quota snapshot |
-| `catraz ps` | List active agent containers for this repo |
-| `catraz reload` | Rebuild + restart Warden/Squid whose `.catraz` config changed; `--force` rebuilds all infra even if unchanged or stopped |
-| `catraz logs` | Tail logs (`agent`\|`warden`\|`proxy`, or `--audit`) |
-| `catraz audit --web` | Open the read-only GitLab decision viewer (ephemeral loopback port) |
+| `catraz init` | Wizard: create `.catraz/`, collect secrets + allowed projects, sync credentials |
+| `catraz run …` | Run Claude Code one-off in the sandbox (drop-in `claude`); lazy-starts infra |
+| `catraz run claude-remote` | Start the always-on Remote-Control daemon (reachable on claude.ai) |
+| `catraz run shell` | Open a shell in a one-off sandbox container |
+| `catraz audit --web` | Open the read-only GitLab decision viewer |
+| `catraz status` / `ps` | Health, URLs, quota snapshot / list active agent containers |
+| `catraz reload` | Rebuild + restart infra whose `.catraz` config changed (`--force` for all) |
+| `catraz allow <path>…` | Append GitLab project(s) to the Warden allowlist |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
-| `catraz allow <path>…` | Append GitLab project(s) to the warden allowlist |
-| `catraz stop` | Stop the stack (alias: `catraz down`) |
+| `catraz stop` | Stop the stack |
 
-Run `catraz <command> --help` for the details of any command. Full CLI design:
-[`docs/design/agentic-workflow/04-cli.md`](docs/design/agentic-workflow/04-cli.md).
-
-## Interactive mode (`catraz run`)
-
-Besides the Remote Control daemon you can run Claude Code **interactively** inside the same
-sandbox — a drop-in replacement for the `claude` binary:
-
-```bash
-alias claude='catraz run'
-catraz run -p "fix the failing test"        # one-shot; exit code is passed through
-```
-
-`catraz run` starts a fresh **one-off** container (`docker compose run --rm`) with the project
-mounted at `/workspace`; Warden + Squid stay up as daemons, so the second call is fast. Each
-invocation owns its own container and lifecycle — independent of any `catraz run claude-remote`
-daemon, so nothing you run here can be killed by another session tearing its stack down.
-Everything after `run` (or after the mode) is handed **verbatim** to `claude`, so its own flags
-need **no `--` separator** — `catraz run -p "…"` and `catraz run --dangerously-skip-permissions`
-just work. Outside a `.catraz` project it fails closed — it never falls back to a host `claude`.
-
-`run` takes an optional **mode** as its first token — `run [claude|claude-remote|shell] [args …]`
-(default `claude`):
-
-- `catraz run` / `catraz run claude …` — the ephemeral interactive agent (above).
-- `catraz run claude-remote` — start the always-on **Remote-Control daemon** (`--profile remote
-  up -d`), wait for health, and print the URLs; reachable on claude.ai.
-- `catraz run shell` — open a shell in a one-off sandbox container (`catraz run shell ls`
-  runs a command). This replaces the old `catraz shell` subcommand.
-
-Because the bare first token is the mode, the only time you still need `--` is to pass a literal
-arg that collides with a mode name (`catraz run -- shell`) or a flag meant for `claude` rather
-than `catraz` (`catraz run -- --help`).
-
-A **non-interactive** `catraz run` (e.g. `-p "…"` or piped — anything without a TTY) tees its
-output to a durable per-run transcript at `.catraz/logs/agent/<timestamp>.log` (the newest 50
-are kept; older ones are pruned). Because the one-off always runs with `--build` and stderr is
-merged into stdout, the file also contains `docker compose` build/orchestration noise — it is a
-raw session record, not a clean agent-only log. Interactive TTY runs get no transcript.
-
-Separately, Claude's own structured debug logs (`--debug-file`) are bind-mounted to the host at
-`.catraz/logs/claude/` — `rc-debug.log` from the remote-control daemon (`catraz run claude-remote`)
-and `run-debug.log` from `catraz run`. Unlike the transcript above these cover interactive runs
-too, since Claude writes them inside the container regardless of TTY. (Pass your own `--debug`/
-`--debug-file` to `catraz run` to override the default.)
-
-> ### ⚠️ What the sandbox protects — and what it does **not**
->
-> The sandbox protects your **network and git egress**: the Warden is the sole holder of the
-> GitLab tokens and enforces R0–R6, and Squid restricts the agent to an allowlist. It does
-> **NOT** protect your **files** — `/workspace` is bind-mounted **read-write**, so the agent
-> can read and modify any file in the project. Only `.catraz/` is hidden (a tmpfs shadow).
-> Run it on code you're willing to let the agent change.
-
-## Auth / Subscription
-
-Two mutually exclusive modes, selected by `AUTH_MODE` in `.catraz/.env`:
-
-- **`subscription`** (default) — the host `~/.claude/.credentials.json` is imported **read-only**
-  into the container via `catraz sync`. The host credential is **never overwritten by the
-  agent**: it runs in an untrusted context and must not be able to modify the host's long-lived
-  token. (Source path configurable via `CLAUDE_CREDENTIAL_SOURCE`.)
-- **`api_key`** — set `ANTHROPIC_API_KEY` instead; no credential file is mounted.
-
-> **Token-refresh persistence:** Claude may refresh the OAuth access token during a long
-> session. Because the in-container Claude home is a tmpfs, refreshed tokens are **not written
-> back** to the host. If auth breaks after a long pause (Anthropic rotated the refresh token),
-> re-run `catraz sync` to re-import the current credential from your host `~/.claude`.
-
-## Custom base image
-
-The agent image is a thin **Claude layer** built `FROM` a swappable **base**. By default it
-builds the bundled C++/Rust/Python toolchain, but you can point it anywhere via `.catraz/.env`:
-
-```dotenv
-# BASE_IMAGE=ghcr.io/you/base:tag           # ready-made image (no build)
-# BASE_DOCKERFILE=./docker/Dockerfile.base  # your own Dockerfile (relative to the project)
-# BASE_CONTEXT=.                             # build context (default: the Dockerfile's dir)
-```
-
-The Claude layer (Node.js + `@anthropic-ai/claude-code` + the entrypoint) is always applied on
-top, so you keep the security contract regardless of the base.
+Run `catraz <command> --help` for details.
 
 ## Configuration
 
-Everything lives under **`.catraz/`** in your project, with one source of truth per setting —
-no value lives in both at once:
+Everything lives under **`.catraz/`**, one source of truth per setting:
 
-| Where | Holds | Visibility |
-| ----- | ----- | ---------- |
-| **`.catraz/secrets/`** (gitignored, 0600) | **Secrets** — one file each: `gitlab_read_token`, `gitlab_write_token`, (`anthropic_api_key`) — mounted as compose secrets | host only, per-service |
-| **`.catraz/.env`** (gitignored) | **Non-secret wiring** — `AUTH_MODE`, `GITLAB_URL`, `GITLAB_MODE`, base image, `DEV_UID`, `WARDEN_*` overrides | host only |
-| **`.catraz/config/warden.toml`** | **Non-secret policy** — branch prefixes, R5 limits, allowed projects | mounted read-only into the Warden |
-
-```text
-# .catraz/secrets/ — one secret per file (mode 0600), never in .env
-gitlab_read_token       # scopes: read_api, read_repository  — only the Warden (R6)
-gitlab_write_token      # scope: api (service account / Developer) + read its own user
-# anthropic_api_key     # only for AUTH_MODE=api_key
-```
-
-```dotenv
-# .catraz/.env — non-secret wiring (NO tokens here)
-AUTH_MODE=subscription             # subscription (host login) | api_key
-GITLAB_URL=https://gitlab.com      # GitLab endpoint (self-hosted: change it)
-GITLAB_MODE=read-write             # off | read-only | read-write
-DEV_UID=1000                       # `id -u` on the host so bind mounts get the right ownership
-```
-
-> ### ⚠️ Write token must be able to read its own user
->
-> The Warden resolves **which user the write token is** via `GET /user` and uses that
-> identity to enforce **R3** (you may only comment on / edit / close MRs the service
-> account authored). A classic personal access token with the **`api`** scope already
-> covers this. A **fine-grained** PAT does **not** — by default it lacks the
-> **`User: Read`** permission, so `GET /user` returns `403`, the Warden never learns its
-> service account, and **every comment and MR edit is denied R3** — even though MR
-> *creation* and `git push` still work (they only check the configured `branch_prefixes`).
->
-> So for the write token, use **either**:
-> - a **classic** PAT with the `api` scope, **or**
-> - a **fine-grained** PAT with the repo/MR permissions **plus `User: Read`** (`read_user`).
->
-> `catraz doctor` probes this and fails loudly (`WRITE token cannot read its own user
-> (GET /user → 403)`) so you catch it before the agent runs into silent R3 denials.
+| Where | Holds |
+| ----- | ----- |
+| `.catraz/secrets/` (0600) | GitLab tokens (`gitlab_read_token`, `gitlab_write_token`), optional API key |
+| `.catraz/.env` | Non-secret wiring — `AUTH_MODE`, `GITLAB_URL`, `GITLAB_MODE`, base image, `DEV_UID` |
+| `.catraz/config/warden.toml` | Non-secret policy — branch prefixes, quotas, allowed projects |
 
 ```toml
-# .catraz/config/warden.toml — non-secret policy (the source of truth)
-branch_prefixes     = ["claude/"]  # R2: only branches under one of these prefixes are pushable
-# Legacy single-value form still works: branch_prefix = "claude/"
-max_open_mrs        = 5            # R5
-max_open_branches   = 10           # R5
-max_writes_per_hour = 60           # R5
+# .catraz/config/warden.toml
+branch_prefixes     = ["claude/"]   # pushes are confined to these prefixes
+max_open_mrs        = 5
+max_open_branches   = 10
+max_writes_per_hour = 60
 allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 ```
 
-> **One setting, one source.** Edit `warden.toml` directly for every setting above (or use
-> `catraz allow` for `allowed_projects`). Secrets (GitLab tokens) and infra plumbing live in
-> `.env`/`.catraz/secrets/`.
+The Warden and Squid read their config once at startup; run `catraz reload` after an edit.
+`allowed_projects` entries are full, concrete project paths — no wildcards, no group
+prefixes (an explicit, enumerable allowlist keeps the read surface small).
 
-> **Applying changes.** The Warden and Squid read their config once at startup, so an edit
-> to `warden.toml`, `squid.conf`, `allowlist.txt`, or `.env` is inert until the container is
-> recreated. Run `catraz reload` — it detects which infra service's config changed and
-> rebuilds + recreates only that one. Use `catraz reload --force` to rebuild **all** infra
-> regardless of staleness (and even when the stack is stopped) — the escape hatch when the
-> image is stale but no config file changed, e.g. after a Warden source fix.
+## Custom base image
 
-> ### ⚠️ `allowed_projects` — no wildcards
->
-> Each entry must be the **full path of a concrete project** (from the namespace
-> root). **Not supported:**
->
-> - ❌ **Wildcards / globs / regex** — `group/*`, `group/**`, `*-ci` match nothing.
-> - ❌ **Partial / leaf names** — `opt-ci` alone does not match `group/sub/opt-ci` (left-anchored).
-> - ❌ **Group prefixes** — `group/sub` would even block Warden startup
->   (reconcile treats every entry as a concrete project → fail-closed).
->
-> This is deliberate: an explicit, enumerable allowlist is auditable and keeps the
-> read/exfiltration surface small (least privilege, design §6.10).
+The agent image is a thin Claude layer on a swappable base. Point it anywhere via
+`.catraz/.env`:
 
-## Audit log
-
-The Warden records **every** GitLab decision (allow/deny with rule R0–R6, R4/R5 highlighted).
-View it in the browser with a single command — no fixed IP or published port; it forwards an
-**ephemeral host-only loopback port** to the Warden's admin **unix socket** in `.catraz/`, so
-parallel sandboxes never collide and the agent has no route to it:
-
-```bash
-catraz audit --web        # opens the read-only viewer (host only)
+```dotenv
+# BASE_IMAGE=ghcr.io/you/base:tag           # ready-made image (no build)
+# BASE_DOCKERFILE=./docker/Dockerfile.base  # your own Dockerfile
 ```
 
-On the command line:
+The Claude layer (Node.js + `@anthropic-ai/claude-code` + entrypoint) is always applied on
+top, so the security contract holds regardless of the base.
 
-```bash
-catraz audit -f                                # follow GitLab decisions (JSONL)
-catraz logs --audit                            # same, via the logs command
-tail -f .catraz/logs/squid/access.log          # egress destinations
-sqlite3 .catraz/state/warden/state.db          # quota state
-```
+## Auth
+
+Two modes, selected by `AUTH_MODE` in `.catraz/.env`:
+
+- **`subscription`** (default) — the host `~/.claude/.credentials.json` is imported
+  read-only via `catraz sync`; the agent can never overwrite the host credential. Re-run
+  `catraz sync` if auth breaks after a long pause.
+- **`api_key`** — set `ANTHROPIC_API_KEY` instead; no credential file is mounted.
 
 ## Project layout
 
 | Path | Purpose |
 | ---- | ------- |
-| `catraz` · `src/catraz/` | The CLI (front door) — `cli`, `compose`, `paths`, `auth`, `image`, `doctor`, … |
-| `src/catraz/assets/` | All Docker build inputs: `compose/`, `claude-layer/`, `bases/`, `config/`, `container/entrypoint.py`, `AGENT.md` |
+| `catraz` · `src/catraz/` | The CLI (front door) |
+| `src/catraz/assets/` | Docker build inputs: compose, Claude layer, bases, config, entrypoint |
 | `warden/` | Policy proxy (Python/Starlette) — the trust boundary, holds all tokens |
-| `forward-proxy/` | Squid image with SNI-peek allowlist egress |
-| `tests/cli/` · `tests/container/` | CLI + entrypoint unit tests (no Docker) |
-| `tests/redteam/` | End-to-end bypass attempts (red team, Docker) |
-| `docs/design/agentic-workflow/` | Design, threat model, implementation plans |
-
-A sandboxed project, by contrast, only ever gets a single `.catraz/` directory.
+| `forward-proxy/` | Squid image with domain-allowlist egress |
+| `tests/` · `warden/tests/` | CLI, container, red-team and Warden tests |
+| `docs/design/` | Design, threat model, implementation plans |
 
 ## Tests
 
 ```bash
-uv run --with pytest python -m pytest tests/ -q     # CLI + container unit tests
-cd warden && uv run pytest                          # Warden unit/integration tests
+uv run --with pytest python -m pytest tests/ -q   # CLI + container unit tests
+cd warden && uv run pytest                         # Warden unit/integration tests
 ```
 
-CI (see badges above) checks the CLI, the Warden, Squid, compose validity, the Dockerfiles and
-the red-team trust-boundary primitives on every push.
+Full design and threat model: **[`docs/design/`](docs/design/)**.
