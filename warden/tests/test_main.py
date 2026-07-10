@@ -1,10 +1,8 @@
 """__main__.py: fail-closed startup — a config or schema error exits 2, not a
 traceback.
 
-The uvicorn serve loop itself is orchestration and not unit-tested; what matters
-for the container is that an invalid configuration or an unrecognised state DB
-schema version aborts cleanly with code 2 (A9).
-"""
+The uvicorn serve loop is orchestration and not unit-tested; what matters
+is that invalid config aborts cleanly with code 2."""
 
 from __future__ import annotations
 
@@ -13,7 +11,7 @@ import logging
 import pytest
 
 import warden.__main__ as main_mod
-from warden.core.config import Config, ConfigError, GitEndpoint
+from warden.core.config import ConfigError
 from warden.core.logging_setup import configure_logging
 from warden.core.state import SchemaError
 
@@ -33,34 +31,6 @@ def test_main_exits_2_on_schema_error(monkeypatch):
         raise SchemaError("state DB schema version 99 is newer than this warden build supports")
 
     monkeypatch.setattr(main_mod, "from_env", _raise)
-    with pytest.raises(SystemExit) as exc:
-        main_mod.main()
-    assert exc.value.code == 2
-
-
-def test_main_exits_2_on_catalog_config_error(monkeypatch, tmp_path):
-    # build_context() (called at the __main__ composition root) constructs
-    # ApiGuard, whose __init__ calls build_effective_table (once per configured
-    # host) and raises CatalogConfigError fail-closed on an unknown action id —
-    # this must abort exactly like any other fail-closed startup error, not
-    # surface as a raw traceback. A hand-built Config bypasses the loader's own
-    # ALL_ACTIONS validation (core.config_load._parse_actions), same as a
-    # malformed [[git.endpoint]] actions override would if that check were ever
-    # skipped. state_db_path/audit_log_path are set to in-memory/stdout,
-    # log_path to a tmp file, so this exercises the real construction path
-    # without touching disk outside the test's tmp dir.
-    monkeypatch.setattr(
-        main_mod,
-        "from_env",
-        lambda: Config(
-            git_endpoints=(
-                GitEndpoint(host="gitlab.example", type="gitlab", actions=("no.such.entry",)),
-            ),
-            state_db_path=":memory:",
-            audit_log_path="-",
-            log_path=str(tmp_path / "warden.log"),
-        ),
-    )
     with pytest.raises(SystemExit) as exc:
         main_mod.main()
     assert exc.value.code == 2

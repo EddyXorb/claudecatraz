@@ -1,22 +1,8 @@
-"""Adapter-Conformance-Harness, unit level (§05.5).
-
-Runs the §05.2 security contract against *every* adapter in the static
-registry (`catraz.agents.AGENT_REGISTRY`) — not just claude — so a future
-second adapter automatically inherits this coverage. This is the "rot/grün-
-Signal statt eines Versprechens" the design doc asks for: A11 ("der Agent ist
-untrusted Nutzlast") becomes something CI actually checks, not something the
-adapter author merely promises.
-
-Checked here (no Docker required):
-  - no Forge credential and no foreign-model credential in `environ()`'s
-    output or anything `prepare_home()` writes,
-  - `modes.remote = false` makes `remote_command()` deny fail-closed,
-  - `render_instructions()` points the agent at the generic per-host Warden
-    REST rule, not a direct Forge URL, and never names the Warden container.
-
-The container-level extension (docker-compose based, following the existing
-`tests/redteam/` pattern) lives in `tests/redteam/test_agent_adapter.py`.
-"""
+"""Adapter conformance harness (no Docker required): runs the security
+contract against every adapter in `catraz.agents.AGENT_REGISTRY`, checking
+no Forge/foreign-model credential leaks via `environ()`/`prepare_home()`,
+`remote_command()` denies fail-closed when `modes.remote = false`, and
+`render_instructions()` never names the Warden container directly."""
 
 import importlib.util
 import shutil
@@ -141,9 +127,8 @@ def test_prepare_home_writes_no_forge_credential(
 def test_remote_false_denies_fail_closed(
     profile: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    """§05.5: `modes.remote = false` must make `remote_command()` return None
-    (the generic entrypoint then refuses to start remote-control), never a
-    half-built daemon command."""
+    """`modes.remote = false` must make `remote_command()` return None, never
+    a half-built daemon command."""
     staged = tmp_path_factory.mktemp(f"conformance-remote-off-{profile}")
     adapter_path = _stage(profile, staged)
     manifest_path = staged / "agent.toml"
@@ -157,9 +142,8 @@ def test_remote_false_denies_fail_closed(
 def test_render_instructions_points_at_warden_not_direct_forge(
     adapter: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§07 — the rendered REST base is a generic per-host *rule*
-    (`http://<host>:8080/api/v4`, "<host>" a literal placeholder), never a
-    direct Forge URL and never the Warden's own container name."""
+    """The rendered REST base is a generic per-host rule, never a direct
+    Forge URL and never the Warden's own container name."""
     monkeypatch.setattr(adapter.Path, "home", staticmethod(lambda: tmp_path))
     ctx = adapter.InstructionContext(
         forge_rest_base="http://<host>:8080/api/v4",

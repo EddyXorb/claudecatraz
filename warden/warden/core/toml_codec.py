@@ -1,16 +1,8 @@
 """Generic TOML-shaped dict → dataclass decoder.
 
-:func:`decode` recursively builds a dataclass instance from a plain
-``Mapping`` (the shape :func:`tomllib.load` returns): a TOML table maps 1:1
-onto a dataclass, so the dataclass *is* the schema and its docstring the
-documentation — no separate hand-written parser per config section. Supports
-primitives (``str``/``int``/``bool``/``float``), ``tuple[X, ...]`` (from a
-TOML array), ``Optional[X]``, and nested dataclasses (from a TOML sub-table).
-
-Fail-closed: an unknown key, a missing required field, or a type mismatch
-(including ``bool`` where ``int`` is declared — ``isinstance(True, int)`` is
-``True`` in Python, so that mismatch needs an explicit check) all raise
-:class:`~warden.core.config.ConfigError` with a ``path``-prefixed message.
+decode recursively builds a dataclass instance from a plain Mapping: a
+TOML table maps 1:1 onto a dataclass. Fail-closed: an unknown key, a
+missing required field, or a type mismatch all raise ConfigError.
 """
 
 from __future__ import annotations
@@ -28,10 +20,10 @@ def _field_path(path: str, name: str) -> str:
 
 
 def decode(cls: type[T], mapping: Mapping[str, object], *, path: str = "") -> T:
-    """Build a ``cls`` instance from *mapping*, a plain dict shaped like a
-    TOML table. Raises :class:`ConfigError` on any unknown key, missing
+    """Build a cls instance from *mapping*, a plain dict shaped like a
+    TOML table. Raises ConfigError on any unknown key, missing
     required field, or type mismatch, with *path* prefixing every message
-    (empty at the top level, ``"outer.inner"`` for a nested dataclass field).
+    (empty at the top level, "outer.inner" for a nested dataclass field).
     """
     if not isinstance(mapping, Mapping):
         raise ConfigError(f"{path or cls.__name__}: expected a table, got {mapping!r}")

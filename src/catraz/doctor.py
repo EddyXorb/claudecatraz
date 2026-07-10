@@ -16,13 +16,8 @@ from catraz.errors import CliError
 from catraz import paths
 from catraz import image
 
-# Secrets the wizard collects (filename, human prompt, description). Order matters.
-# Secrets live in .catraz/secrets/<filename> (mode 0600), mounted into the warden
-# via compose secrets: at /run/secrets/<filename>. Never stored in .env.
-#
-# Single-target pair, distinct from the grouped read_tokens/write_tokens files
-# used by check_tokens below: `assets/compose/docker-compose.yml` mounts these
-# two as compose secrets for the single-target Warden.
+# Secrets the wizard collects (filename, human prompt, description); mode 0600,
+# mounted into the warden via compose secrets, never stored in .env.
 SECRETS = [
     (
         "gitlab_read_token",
@@ -38,33 +33,62 @@ SECRETS = [
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
-# --- Action vocabulary — a small, doctor-only mirror of the Warden's action
-# catalog + cascade (warden/warden/guards/gitlab_api/actions.py,
-# warden/warden/core/config.py Config.effective_actions). catraz never imports
-# warden's Python, it only ships it as a container asset, so this is
-# reimplemented here rather than shared. Doctor only needs the vocabulary, the
-# write-set, and the built-in default to reproduce the same per-host
-# effective-actions cascade for its cross-checks — not the full
-# recognizer-level mapping the Warden owns.
-GIT_FETCH = "git.fetch"
-GIT_PUSH = "git.push"
-FORGE_ACTIONS: frozenset[str] = frozenset(
-    {"mr.create", "mr.comment", "mr.update", "pipeline.trigger", "branch.create", "issue.create"}
+# Doctor-only mirror of the Warden's action vocabulary + cascade (reimplemented
+# since catraz never imports warden's Python). Four ids are compiled-in denials.
+READ_ACTIONS: frozenset[str] = frozenset(
+    {
+        "repo.read",
+        "project.read",
+        "instance.projects.read",
+        "instance.users.read",
+        "instance.meta.read",
+    }
 )
-# The full closed vocabulary: git transport verbs + forge (REST) actions.
-ALL_ACTIONS: frozenset[str] = FORGE_ACTIONS | {GIT_FETCH, GIT_PUSH}
-# Built-in default — same six ids as the Warden's guards.gitlab_api.actions.DEFAULT_ACTIONS.
+IRREVERSIBLE_ACTIONS: frozenset[str] = frozenset(
+    {"repo.branch.delete", "repo.tag.create", "repo.tag.delete", "project.mr.merge"}
+)
+ALL_ACTIONS: frozenset[str] = (
+    READ_ACTIONS
+    | IRREVERSIBLE_ACTIONS
+    | {
+        "repo.branch.create",
+        "repo.branch.push",
+        "project.mr.create",
+        "project.mr.edit",
+        "project.mr.close",
+        "project.mr.comment",
+        "project.ci.trigger",
+        "project.issue.create",
+        "project.issue.edit",
+        "project.issue.close",
+        "project.issue.comment",
+    }
+)
+# Built-in default — the twelve ✔ rows: same ids as the Warden's
+# guards.git.actions.DEFAULT.
 DEFAULT_ACTIONS: tuple[str, ...] = (
-    GIT_FETCH,
-    GIT_PUSH,
-    "mr.create",
-    "mr.comment",
-    "mr.update",
-    "pipeline.trigger",
+    "repo.read",
+    "repo.branch.create",
+    "repo.branch.push",
+    "project.read",
+    "project.mr.create",
+    "project.mr.edit",
+    "project.mr.close",
+    "project.mr.comment",
+    "project.ci.trigger",
+    "instance.projects.read",
+    "instance.users.read",
+    "instance.meta.read",
 )
-# Every action except git.fetch is a write — git.fetch is the only read.
-WRITE_ACTIONS: frozenset[str] = ALL_ACTIONS - {GIT_FETCH}
-_PLAIN_ACTIONS: frozenset[str] = frozenset({GIT_FETCH, GIT_PUSH})
+# Every non-read action is a write — includes the never-class ids (a
+# misconfigured explicit list containing one is the Warden's ConfigError to raise).
+WRITE_ACTIONS: frozenset[str] = ALL_ACTIONS - READ_ACTIONS
+# repo.* ids only — the git transport guard's SUPPORTED set, what a "plain"
+# endpoint (no REST guard) can enforce.
+_PLAIN_ACTIONS: frozenset[str] = frozenset(a for a in ALL_ACTIONS if a.startswith("repo."))
+# A branch push or create — either lets a source branch reach the remote, which
+# the mr.create/pipeline.trigger coherence checks below need.
+_BRANCH_WRITE_ACTIONS: frozenset[str] = frozenset({"repo.branch.create", "repo.branch.push"})
 
 DOCTOR_SECTIONS = [
     "docker",
@@ -235,13 +259,11 @@ def check_gitlab(env: dict[str, str], f: Findings) -> None:
 
 
 def _parse_grouped_tokens(text: str) -> dict[str, str]:
-    """Parse a grouped ``read_tokens``/``write_tokens`` file into ``host -> token``.
+    """Parse a grouped read_tokens/write_tokens file into host -> token.
 
-    Same splitting rule as the Warden's ``_parse_token_file``
-    (``warden/warden/core/config_load.py``): split on the first run of
-    whitespace, ``#``-comments and blank lines are skipped. Unlike the Warden,
-    a malformed line is skipped rather than raising — doctor warns, it never aborts.
-    """
+    Same splitting rule as the Warden's _parse_token_file: split on the first
+    run of whitespace; #-comments and blank lines are skipped. A malformed line
+    is skipped rather than raising."""
     tokens: dict[str, str] = {}
     for line in text.splitlines():
         stripped = line.strip()
@@ -255,8 +277,7 @@ def _parse_grouped_tokens(text: str) -> dict[str, str]:
 
 
 def _read_grouped_token_file(root: Path, filename: str) -> dict[str, str]:
-    """``host -> token`` map from ``.catraz/secrets/<filename>`` (``read_tokens``
-    or ``write_tokens``), or ``{}`` if the file is missing/unreadable."""
+    """host -> token map from .catraz/secrets/<filename>, or {} if missing/unreadable."""
     p = root / ".catraz" / "secrets" / filename
     try:
         text = p.read_text(encoding="utf-8") if p.exists() else ""
@@ -266,14 +287,9 @@ def _read_grouped_token_file(root: Path, filename: str) -> dict[str, str]:
 
 
 def _load_git_table(root: Path) -> dict[str, Any] | None:
-    """Parse ``.catraz/config/warden.toml`` and return its raw ``[git]`` table
-    (as ``tomllib`` decoded it), or ``None`` if the file is absent/unreadable,
-    the TOML is invalid, or ``[git]`` itself is missing/not a table.
-
-    Shared, best-effort loader behind :func:`_read_git_endpoints` and
-    :func:`_read_git_actions_default` — doctor only warns, it never raises on
-    a malformed config (the Warden is the fail-closed side for that).
-    """
+    """Parse .catraz/config/warden.toml and return its raw [git] table, or None
+    if absent/unreadable/invalid. Best-effort: doctor only warns, never raises —
+    the Warden is the fail-closed side for malformed config."""
     toml_path = root / ".catraz" / "config" / "warden.toml"
     try:
         text = toml_path.read_text(encoding="utf-8")
@@ -290,21 +306,18 @@ def _load_git_table(root: Path) -> dict[str, Any] | None:
 
 
 def _parse_actions_list(raw: object) -> tuple[str, ...] | None:
-    """Best-effort parse of an ``actions = [...]`` TOML value into a tuple of
-    strings, or ``None`` if the key is absent or malformed (not a list of
-    strings) — doctor degrades quietly here, the Warden's loader is the
-    fail-closed side that raises ``ConfigError`` on a genuinely bad value.
-    """
+    """Best-effort parse of an actions = [...] TOML value into a tuple of strings,
+    or None if absent/malformed. The Warden's loader is the fail-closed side
+    that raises ConfigError on a genuinely bad value."""
     if not isinstance(raw, list) or not all(isinstance(a, str) for a in raw):
         return None
     return tuple(raw)
 
 
 def _read_git_actions_default(root: Path) -> tuple[str, ...] | None:
-    """``[git].actions`` (the domain default), or ``None`` if absent —
-    the caller falls back to :data:`DEFAULT_ACTIONS` in that case, same
-    "missing key != empty list" contract as the Warden's ``Config.git_actions``.
-    """
+    """[git].actions (the domain default), or None if absent — caller falls back
+    to DEFAULT_ACTIONS, same "missing key != empty list" contract as the
+    Warden's Config.git_actions."""
     git = _load_git_table(root)
     if git is None:
         return None
@@ -312,15 +325,9 @@ def _read_git_actions_default(root: Path) -> tuple[str, ...] | None:
 
 
 def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
-    """``[[git.endpoint]]`` entries from ``.catraz/config/warden.toml``, as
-    ``{"host": ..., "type": ..., "actions": tuple[str, ...] | None}`` dicts.
-
-    Host-side and best-effort only: an absent file, unreadable file, invalid
-    TOML, or a missing/malformed ``[git.endpoint]`` array all yield ``[]``
-    (nothing to cross-check against) rather than raising — the Warden is the
-    fail-closed side that aborts startup on a genuinely malformed config;
-    doctor only warns.
-    """
+    """[[git.endpoint]] entries from .catraz/config/warden.toml as {"host",
+    "type", "actions"} dicts. Best-effort: malformed/missing input yields []
+    rather than raising — the Warden is the fail-closed side, doctor only warns."""
     git = _load_git_table(root)
     if git is None:
         return []
@@ -346,13 +353,9 @@ def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
 
 
 def _actions_valid_for_type(endpoint_type: str) -> frozenset[str]:
-    """Mirrors the Warden's ``actions_valid_for_type``: a ``plain``
-    endpoint only has the two transport verbs; everything else (``gitlab``,
-    or an unrecognized/blank type) gets the full vocabulary. Doctor is
-    advisory — an unrecognized ``type`` here is not doctor's to re-police
-    (the Warden's loader already fail-closes on it at config-parse time), so
-    it just falls back to the permissive case instead of raising.
-    """
+    """Mirrors the Warden's per-type derivation: a "plain" endpoint only has the
+    repo.* ids; everything else gets the full vocabulary. Doctor is advisory,
+    so an unrecognized type falls back to the permissive case rather than raising."""
     if endpoint_type == "plain":
         return _PLAIN_ACTIONS
     return ALL_ACTIONS
@@ -361,13 +364,10 @@ def _actions_valid_for_type(endpoint_type: str) -> frozenset[str]:
 def _effective_actions_for_host(
     domain_actions: tuple[str, ...] | None, endpoint: dict[str, Any]
 ) -> tuple[str, ...]:
-    """Same cascade as the Warden's ``Config.effective_actions``:
-    the endpoint's own ``actions`` if set — returned as-is, unfiltered (an
-    explicit type-impossible id is the Warden loader's ``ConfigError`` to
-    raise, not doctor's to re-check) — else the domain default, else the
-    built-in default, with the *inherited* (non-override) value cut down to
-    what the endpoint's ``type`` supports.
-    """
+    """Same cascade as the Warden's Config.effective_actions: the endpoint's own
+    actions if set (returned as-is, unfiltered), else the domain default, else
+    the built-in default — with only the inherited value cut down to the
+    endpoint's type."""
     override = endpoint.get("actions")
     if override is not None:
         return cast(tuple[str, ...], override)
@@ -377,16 +377,10 @@ def _effective_actions_for_host(
 
 
 def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Cross-check the grouped ``read_tokens``/``write_tokens`` files against
-    the ``[[git.endpoint]]`` hosts configured in ``warden.toml``.
-
-    This is the host-side, friendly/explaining mirror of the Warden's
-    ``Config.access_mode(host)`` (``warden/warden/core/config.py``):
-    same reasoning, same threshold, so the two sides don't drift — but doctor
-    only ever **warns**; the Warden is the side that actually enforces
-    (fail-closed, per-endpoint-degrade) an inconsistency. `doctor` never fails
-    the run because of a token/endpoint mismatch.
-    """
+    """Cross-check the grouped read_tokens/write_tokens files against the
+    [[git.endpoint]] hosts in warden.toml. Mirrors the Warden's
+    Config.access_mode reasoning, but doctor only ever warns — the Warden is
+    the side that enforces."""
     read_tokens = _read_grouped_token_file(root, "read_tokens")
     write_tokens = _read_grouped_token_file(root, "write_tokens")
     endpoints = _read_git_endpoints(root)
@@ -412,10 +406,8 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
             f.warn("tokens", f"endpoint {host!r} has no token — it will run closed")
             continue
         if has_write and not has_read:
-            # Least-privilege rationale — identical wording/reasoning to the Warden's
-            # Step 02 warning (config_load._warn_closed_endpoints): a write token is
-            # never used as a read fallback, so this endpoint is closed until a
-            # read-scoped token exists.
+            # Least-privilege: a write token is never used as a read fallback, so
+            # this endpoint stays closed until a read-scoped token exists.
             f.warn(
                 "tokens",
                 f"endpoint {host!r} has a write token but no read token — it will "
@@ -444,15 +436,10 @@ def _probe_gitlab_tokens(
     write_tokens: dict[str, str],
     f: Findings,
 ) -> None:
-    """Best-effort online probe, per configured endpoint token: catch
-    expired/swapped/wrong-scope tokens, one host at a time. Degrades silently
-    to "not probed" when a host can't be reached — never a hard failure.
-
-    Only ``type = "gitlab"`` endpoints have a defined REST surface to probe
-    (``personal_access_tokens/self``, ``/user``); ``plain`` endpoints are
-    git-smart-HTTP-only and are not probed online — the token-presence checks
-    in :func:`check_tokens` already cover them.
-    """
+    """Best-effort online probe per configured endpoint token: catches
+    expired/swapped/wrong-scope tokens, degrading silently to "not probed" when
+    unreachable. Only type = "gitlab" endpoints have a REST surface to probe;
+    "plain" endpoints are covered by check_tokens's presence checks instead."""
     for endpoint in endpoints:
         if endpoint.get("type") != "gitlab":
             continue
@@ -515,13 +502,10 @@ def _probe_gitlab_tokens(
 
 
 def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> None:
-    """The warden resolves its service-account id via `GET /user` with the WRITE
-    token, and needs that id to enforce MR ownership (R3: comment / edit / close
-    only your own MRs). Fine-grained PATs omit the **User: Read** permission by
-    default, so `GET /user` 403s, the warden's service_account_id stays null, and
-    every ownership-gated write is denied R3 — while MR *creation* still works
-    (it only checks the branch prefix). That asymmetry is a silent runtime trap;
-    probe it explicitly so it surfaces at setup. Degrades quietly when offline."""
+    """The warden resolves its service-account id via GET /user with the WRITE
+    token, needed to enforce MR ownership (R3). Fine-grained PATs often omit
+    "User: Read", so GET /user 403s and every ownership-gated write is silently
+    denied while MR creation still works — probe it explicitly so it surfaces at setup."""
     try:
         me = _gitlab_get(base, "/api/v4/user", token)
     except urllib.error.HTTPError as e:
@@ -600,20 +584,10 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
 
 
 def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Effective endpoint-catalog table, per host: default set + activations
-    for each configured ``[[git.endpoint]]``.
-
-    A thin section — the actual report is fetched from the running warden's
-    read-only ``/policy`` admin route (one section per host) and formatted by
-    ``catraz.endpoints``; doctor.py only wires it into the Findings list, so
-    this module doesn't grow with the catalog (see
-    :func:`catraz.endpoints.fetch_policy_report`).
-
-    The action cross-checks (write_token / ``git.push`` coherence) live in
-    :func:`check_action_coherence` below — they're a static, host-side parse
-    of ``warden.toml`` (like :func:`check_tokens`), not a live-report read, so
-    unlike this function they don't need the stack to be up.
-    """
+    """Effective endpoint-catalog table, per host: default set + activations for
+    each configured [[git.endpoint]]. Fetched from the running warden's /policy
+    admin route, so this section needs the stack up (unlike
+    check_action_coherence, which does a static, host-side parse of warden.toml)."""
     from catraz.admin_client import AdminUnreachable
     from catraz.endpoints import fetch_policy_report
 
@@ -635,44 +609,38 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
         f.ok("endpoints", "no hosts configured yet")
         return
     for host, host_report in hosts.items():
-        rows = host_report["catalog"]
-        active = [r for r in rows if r["active"]]
-        inactive = [r for r in rows if not r["active"]]
+        active_ids: list[str] = host_report["actions"]
+        denials: list[str] = host_report.get("denials", [])
+        default_by_id: dict[str, bool] = {}
+        all_ids: set[str] = set()
+        for row in host_report["catalog"]:
+            for a in row["actions"]:
+                all_ids.add(a["id"])
+                default_by_id.setdefault(a["id"], a["default"])
         active_desc = ", ".join(
-            f"{r['id']}[{r['enabled_via']}]" if r["enabled_via"] != "default" else r["id"]
-            for r in active
+            aid if default_by_id.get(aid, True) else f"{aid}[config]" for aid in active_ids
         )
-        f.ok("endpoints", f"{host}: {len(active)} active: {active_desc or '(none)'}")
+        f.ok("endpoints", f"{host}: {len(active_ids)} active: {active_desc or '(none)'}")
+        inactive = sorted(all_ids - set(active_ids) - set(denials))
         if inactive:
             f.ok(
                 "endpoints",
-                f"{host}: {len(inactive)} in catalog but not enabled: "
-                f"{', '.join(r['id'] for r in inactive)}",
+                f"{host}: {len(inactive)} in catalog but not enabled: {', '.join(inactive)}",
+            )
+        if denials:
+            f.ok(
+                "endpoints",
+                f"{host}: {len(denials)} compiled-in denial(s), never configurable: "
+                f"{', '.join(sorted(denials))}",
             )
 
 
 def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Cross-checks between a host's effective ``actions`` and its tokens/
-    other actions — always ``WARN``, never ``BAD``: these are coherence traps
-    (a configured action that can never fire), not security problems, so the
-    Warden never fails startup over them either.
-
-    Static and host-side, like :func:`check_tokens`: parses ``warden.toml``
-    and the grouped token files itself (doctor never imports the Warden's
-    Python), computing each host's effective actions with the same cascade
-    the Warden uses (:func:`_effective_actions_for_host`) so the two sides
-    can't drift, then warning on:
-
-    - a write action configured with no ``write_token`` for that host — the
-      endpoint is effectively read-only.
-    - ``mr.create`` without ``git.push`` — the MR's source branch can never
-      be created.
-    - ``pipeline.trigger`` without ``git.push`` — same reasoning, no branch
-      to trigger a pipeline for.
-
-    Deliberately silent on dead quotas (``max_open_mrs`` set without
-    ``mr.create``, etc.) — harmless, the counter is simply never reached.
-    """
+    """Cross-checks between a host's effective actions and its tokens/other
+    actions — always WARN, never BAD (coherence traps, not security problems).
+    Parses warden.toml/token files with the same cascade as the Warden so the
+    two never drift; flags write actions with no write_token, and
+    mr.create/ci.trigger configured without a branch-write action to source from."""
     mode = _gitlab_mode(env)
     if mode == "off":
         return
@@ -696,32 +664,32 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
                 "or drop the write action(s) from its `actions`",
             )
 
-        if "mr.create" in actions and GIT_PUSH not in actions:
+        if "project.mr.create" in actions and not (actions & _BRANCH_WRITE_ACTIONS):
             f.warn(
                 "endpoints",
-                f"{host}: `mr.create` is configured without `git.push` — the MR's source "
-                "branch can never be created",
-                "add `git.push` to this host's `actions` (or drop `mr.create`)",
+                f"{host}: `project.mr.create` is configured without `repo.branch.create`/"
+                "`repo.branch.push` — the MR's source branch can never reach the remote",
+                "add `repo.branch.create` or `repo.branch.push` to this host's `actions` "
+                "(or drop `project.mr.create`)",
             )
 
-        if "pipeline.trigger" in actions and GIT_PUSH not in actions:
+        if "project.ci.trigger" in actions and not (actions & _BRANCH_WRITE_ACTIONS):
             f.warn(
                 "endpoints",
-                f"{host}: `pipeline.trigger` is configured without `git.push` — there is "
-                "no branch to trigger a pipeline for",
-                "add `git.push` to this host's `actions` (or drop `pipeline.trigger`)",
+                f"{host}: `project.ci.trigger` is configured without `repo.branch.create`/"
+                "`repo.branch.push` — there is no branch to trigger a pipeline for",
+                "add `repo.branch.create` or `repo.branch.push` to this host's `actions` "
+                "(or drop `project.ci.trigger`)",
             )
 
 
 def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
     """Active agent profile + credential-mode consistency check.
 
-    `credentials.mode = "sync"` checks that the sandbox seed is present and
-    not root-owned — Docker auto-creates a bind target as root when the
-    source file is missing, which `entrypoint.py` doesn't handle.
-    `credentials.mode = "persistent"` (claude's default) instead checks the
-    per-repo state dir itself: present, mode 0700.
-    """
+    credentials.mode = "sync" checks the sandbox seed is present and not
+    root-owned (Docker auto-creates root-owned bind targets when the source
+    is missing). credentials.mode = "persistent" instead checks the state dir:
+    present, mode 0700."""
     from catraz.agents import load_manifest, resolve_agent_profile
     from catraz.errors import CliError as _CliError
     from catraz.paths import agent_state_dir, claude_home
@@ -859,10 +827,8 @@ def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
     )
     extra = [ln for ln in setuid.stdout.split() if ln]
     if extra:
-        # These are distro-shipped setuid/setgid binaries (passwd, su, mount, …). They are
-        # rendered inert by the agent's `no-new-privileges` security_opt, which is enforced
-        # non-bypassably by compose.assert_invariants on every up/run — so this is informational,
-        # not a warning. If that invariant were dropped, up/run would fail loudly, not here.
+        # Distro-shipped setuid/setgid binaries, rendered inert by the agent's
+        # no-new-privileges security_opt (enforced by compose.assert_invariants).
         f.ok(
             "base",
             f"{len(extra)} setuid/setgid binaries in base — neutralized by no-new-privileges",
@@ -908,18 +874,16 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     # .catraz/ itself first — on a fresh init it does not exist yet, and the 0700 secrets
     # dirs below use mode= (not parents=) so they cannot create it implicitly.
     cat.mkdir(parents=True, exist_ok=True)
-    # secrets/ and secrets/claude must be created at 0700 BEFORE the generic loop, because
-    # mkdir(parents=True) in the loop would create secrets/ at the umask default (0755) and
-    # a later chmod on an already-existing dir is a no-op for mode.
+    # secrets/ and secrets/claude must be created at 0700 before the generic loop,
+    # else mkdir(parents=True) there would create secrets/ at umask default (0755).
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
     secrets_dir.chmod(0o700)
     claude_secrets = cat / "secrets" / "claude"
     claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
     claude_secrets.chmod(0o700)
-    # The active agent profile's persistent-state + debug-log dirs.
-    # Best-effort default ("claude") if AGENT_PROFILE is unset/unresolvable —
-    # `check_agent` is the authoritative validator, this is just dir plumbing.
+    # The active agent profile's persistent-state + debug-log dirs; best-effort
+    # default ("claude") if AGENT_PROFILE is unresolvable — check_agent validates.
     profile = (env.get("AGENT_PROFILE") or "claude").strip() or "claude"
     agent_state = cat / "state" / profile
     agent_state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -934,10 +898,8 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     ]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
-    # `read_tokens`/`write_tokens`: the grouped, multi-endpoint token files
-    # `doctor`/the Warden read `host -> token` from. Scaffolded unconditionally
-    # (like the per-token SECRETS below) so `catraz init` always leaves a
-    # parseable, empty pair behind, mode 0600, ready for `<host> <token>` lines.
+    # read_tokens/write_tokens: grouped, multi-endpoint token files doctor/Warden
+    # read host -> token from. Scaffolded so init always leaves a parseable, empty pair.
     secret_files = ["read_tokens", "write_tokens"] + [f for f, _, _ in SECRETS]
     if mode == "api_key":
         secret_files.append("anthropic_api_key")

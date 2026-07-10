@@ -25,9 +25,8 @@ def test_sync_generic_entrypoint_fails_closed_without_adapter_support(
     tmp_path: Path,
     fake_adapter_cls: Any,
 ) -> None:
-    """§05.6: an adapter with no `sync_from_host` (persistent-only) makes the
-    generic entrypoint's `cmd_sync` fail closed with a clear message, rather
-    than silently doing nothing or crashing with AttributeError."""
+    """An adapter with no `sync_from_host` makes `cmd_sync` fail closed with
+    a clear message, rather than silently doing nothing or crashing."""
     adapter = fake_adapter_cls()
     with pytest.raises(SystemExit) as ei:
         ep.cmd_sync(adapter, tmp_path / "dst")

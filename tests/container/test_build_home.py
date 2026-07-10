@@ -1,6 +1,5 @@
-"""adapter.prepare_home() (§05.2) — the former (Claude-only) build_claude_home,
-now behind the AgentAdapter contract. Exercised via the real claude adapter,
-staged by the `ep`/`claude_adapter` fixtures (tests/container/conftest.py)."""
+"""adapter.prepare_home() behind the AgentAdapter contract, exercised via the
+real claude adapter staged by the `ep`/`claude_adapter` fixtures."""
 
 import json
 from pathlib import Path
@@ -56,10 +55,9 @@ def test_prepare_home_persistent_wires_selective_symlinks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """§05.6: credentials.mode=persistent (the shipped claude default) wires
-    ONLY the credential file + session/project state into the tmpfs home via
-    symlinks to the writable per-repo state dir — settings.json stays freshly
-    built (A11), never symlinked."""
+    """credentials.mode=persistent wires only the credential file and
+    session/project state into the tmpfs home via symlinks; settings.json
+    stays freshly built, never symlinked."""
     home = tmp_path / ".claude"
     home.mkdir()
     state_dir = tmp_path / "state"

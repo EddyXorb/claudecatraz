@@ -45,28 +45,66 @@ allowed_projects    = []
 # --- actions: what an agent is allowed to DO — layered UNDER the token
 # deck: a write action with no write_token for a host still runs closed,
 # `catraz doctor` warns about that mismatch rather than the Warden failing.
-# Vocabulary (one row = one action, closed set, no wildcards):
+# Three scopes, each with its own enforcement boundary:
+#   repo     — the version-controlled content itself, independent of wire
+#              (git transport and REST reach the same bytes).
+#   project  — the forge objects around it (MRs, CI, issues) in an
+#              allowlisted project.
+#   instance — projectless, forge-wide metadata.
+# Vocabulary (twenty ids, closed set, no wildcards, no read/write split
+# beyond what's listed — "never" rows are compiled-in denies, never
+# configurable regardless of what you put below):
 #
-#   action              | covers                                    | default?
-#   --------------------|--------------------------------------------|--------
-#   git.fetch           | git transport read (clone/fetch)            |   yes
-#   git.push            | git transport write (push)                  |   yes
-#   mr.create           | create a merge/pull request                 |   yes
-#   mr.comment          | comment/discuss on an existing MR            |   yes
-#   mr.update           | edit/close an existing MR                   |   yes
-#   pipeline.trigger    | trigger a CI pipeline                       |   yes
-#   branch.create       | create a branch via the REST API            |   no
-#   issue.create        | create an issue                             |   no
+#   action                   | criticality | covers                                          | default?
+#   -------------------------|-------------|--------------------------------------------------|--------
+#   repo.read                | READ        | clone/fetch + push discovery; repository files/  |   yes
+#                            |             | trees/commits/archive/compare; CI artifact        |
+#                            |             | downloads; project snippets                       |
+#   repo.branch.create       | WRITE       | new branch — git push or REST                     |   yes
+#   repo.branch.push         | WRITE       | move tip of existing branch                       |   yes
+#   repo.branch.delete       | never       | —                                                  |   never
+#   repo.tag.create          | never       | —                                                  |   never
+#   repo.tag.delete          | never       | —                                                  |   never
+#   project.read             | READ        | all forge-object reads in an allowlisted project: |   yes
+#                            |             | attributes, MRs incl. diffs, issues, pipelines/    |
+#                            |             | jobs incl. logs, labels, milestones, releases      |
+#   project.mr.create        | WRITE       | open MR                                           |   yes
+#   project.mr.edit          | WRITE       | title/description/labels (no state_event)         |   yes
+#   project.mr.close         | WRITE       | state_event = close/reopen                        |   yes
+#   project.mr.comment       | WRITE       | notes, discussions, replies                       |   yes
+#   project.mr.merge         | never       | /merge endpoint + state_event=merge alias         |   never
+#   project.ci.trigger       | WRITE       | branch and MR pipelines; retry, play, cancel      |   yes
+#   project.issue.create     | WRITE       | —                                                  |   opt-in
+#   project.issue.edit       | WRITE       | title/description/labels                          |   opt-in
+#   project.issue.close      | WRITE       | state_event = close/reopen                        |   opt-in
+#   project.issue.comment    | WRITE       | issue notes                                       |   opt-in
+#   instance.projects.read   | READ        | /projects, /groups*, global MR/issue listings,    |   yes
+#                            |             | search scopes {projects, merge_requests, issues,  |
+#                            |             | milestones}                                        |
+#   instance.users.read      | READ        | /users, /user*, /events, search scope users        |   yes
+#   instance.meta.read       | READ        | /version, /metadata, /broadcast_messages           |   yes
 #
-# The built-in default below (the six "yes" rows) ALSO lives in code
-# (warden/warden/guards/gitlab_api/actions.py DEFAULT_ACTIONS) — this key is
-# documentation/a starting point, NOT the sole source of truth: deleting it
-# does not mean "no actions", it falls back to the same code default
-# (missing key != empty list). Each [[git.endpoint]] below can override this
-# domain default per host with its own `actions = [...]` — the list REPLACES
-# completely (no actions_add/actions_remove).
+# The repo/project content line is enforced mechanically by path, never by
+# response inspection: MR diff views (…/merge_requests/{iid}/diffs|changes|
+# versions) are `project.read` — reviewing a diff never needs `repo.read` —
+# while CI artifact downloads are `repo.read` (artifacts are files, often the
+# built code); job *logs* stay `project.read` (babysitting a pipeline without
+# repo access is a real review-only workflow).
+#
+# The built-in default below (the twelve "yes" rows) ALSO lives in code
+# (warden/warden/guards/git/actions.py DEFAULT) — this key is documentation/a
+# starting point, NOT the sole source of truth: deleting it does not mean "no
+# actions", it falls back to the same code default (missing key != empty
+# list). Each [[git.endpoint]] below can override this domain default per
+# host with its own `actions = [...]` — the list REPLACES completely (no
+# actions_add/actions_remove).
 [git]
-actions = ["git.fetch", "git.push", "mr.create", "mr.comment", "mr.update", "pipeline.trigger"]
+actions = [
+  "repo.read", "repo.branch.create", "repo.branch.push",
+  "project.read", "project.mr.create", "project.mr.edit", "project.mr.close",
+  "project.mr.comment", "project.ci.trigger",
+  "instance.projects.read", "instance.users.read", "instance.meta.read",
+]
 
 [git.rules]
 # branch_prefixes = ["claude/"]
@@ -87,15 +125,15 @@ actions = ["git.fetch", "git.push", "mr.create", "mr.comment", "mr.update", "pip
 # rules            = { max_open_mrs = 20 }
 #
 # Review-only endpoint: overrides the domain `actions` default above to just
-# read + comment (no mr.create/mr.update/pipeline.trigger/git.push) — this
-# host can never write. Per-endpoint `rules` overrides are ALWAYS an inline
-# `{ ... }` table like this, NEVER a `[git.endpoint.rules]` header: a header
-# binds to the positionally-last [[git.endpoint]] array element, so
-# reordering endpoint blocks and forgetting to move the header silently
-# attaches the rules to the wrong host.
+# read + comment (no project.mr.create/repo.branch.push/project.ci.trigger)
+# — this host can never write anything but a comment. Per-endpoint `rules`
+# overrides are ALWAYS an inline `{ ... }` table like this, NEVER a
+# `[git.endpoint.rules]` header: a header binds to the positionally-last
+# [[git.endpoint]] array element, so reordering endpoint blocks and
+# forgetting to move the header silently attaches the rules to the wrong host.
 # [[git.endpoint]]
 # host             = "review-only.example.com"
 # type             = "gitlab"
 # allowed_projects = []
-# actions          = ["git.fetch", "mr.comment"]
+# actions          = ["repo.read", "project.read", "project.mr.comment"]
 # rules            = { max_writes_per_hour = 30 }

@@ -1,14 +1,8 @@
 """
 catraz — the front door for the claudecatraz stack.
 
-One binary over the 4-step setup ritual (dirs + chown, credential sync, .env,
-docker compose). The two stars are `init` (interactive setup session) and
-`doctor` (preflight that turns silent failures loud).
-
-Design: docs/design/agentic-workflow/04-cli.md
-Pure Python standard library — no install step needed (Docker is the only real
-dependency). The CLI is a thin layer over `docker compose`; it never holds
-secrets and only ever *writes* `.env` (never config/, never TOML).
+Pure stdlib, no install step (Docker is the only dependency); a thin layer
+over `docker compose` that never holds secrets and only ever writes `.env`.
 """
 
 from __future__ import annotations
@@ -30,10 +24,8 @@ from catraz.commands import setup, stack, observe
 from catraz.commands import run as run_cmd
 from catraz.commands import reload as reload_cmd
 
-# ── re-exports (keep these importable from catraz.cli for test back-compat) ─────
-# Pure imports keep working: from catraz.cli import X. The redundant `X as X` form
-# marks these as explicit re-exports so mypy --strict (no_implicit_reexport) allows
-# tests to access them via cli.*.
+# ── re-exports (importable from catraz.cli for test back-compat) ─────
+# `X as X` marks these as explicit re-exports so mypy --strict allows cli.* access.
 from catraz.errors import CliError as CliError  # noqa: F811 (already imported above, explicit re-export)
 from catraz.commands.setup import (
     _ensure_gitignore as _ensure_gitignore,
@@ -234,15 +226,9 @@ HANDLERS = {
 
 
 def _split_run(raw: list[str]) -> tuple[list[str], list[str] | None]:
-    """Split argv at the `run` command so its tail is opaque to argparse.
-
-    Returns (head, tail): `head` is everything up to and including `run` (argparse
-    parses it for globals + the command), `tail` is the verbatim rest handed to the
-    sandbox — so claude's own flags (`-p`, `-lh`, …) reach it without a `--`. For any
-    other command (or none) returns (raw, None).
-
-    The only value-taking global is -C/--dir, whose value is skipped so a directory
-    literally named `run` is never mistaken for the command."""
+    """Split argv at the `run` command so its tail bypasses argparse (claude's own
+    flags reach it unmangled). Skips -C/--dir's value so a dir named "run" isn't
+    mistaken for the command; tail is None for any other command."""
     skip = False
     for i, tok in enumerate(raw):
         if skip:

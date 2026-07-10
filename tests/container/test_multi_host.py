@@ -1,45 +1,9 @@
-"""Container-level integration test for Doc 08 (multi-target) §8 / step 08
-(docs/design/architecture-generalization/08-multi-target/08-container-test.md):
-one `.catraz` serves TWO listed hosts through the same Warden and rejects a
-THIRD, unlisted host (R6 default-deny) — plus the optional closed-endpoint
-case (§4.2 fail-closed-degrade).
+"""Container test: one `.catraz` serves TWO listed hosts through the same
+Warden and rejects a THIRD, unlisted host (default-deny), plus the optional
+closed-endpoint case. Drives a real Warden container via `docker compose
+exec` + a stdlib `http.client` call carrying an explicit Host header.
 
-This is the compose-wired complement to the unit tests of steps 01-07: it
-runs a *real* Warden container (not a python-level mock) and exercises the
-actual `request.headers["host"]` routing code path
-(`core.guard.host_gate`/`core.transport.UpstreamRouter`) over the network.
-
-Deliberately does NOT reuse `tests/redteam/test_shadow_mount.py`'s /
-`test_agent_adapter.py`'s `live_stack` fixture (`catraz run claude-remote`
-against `GITLAB_READ_TOKEN`/`GITLAB_WRITE_TOKEN`/`WARDEN_ALLOWED_PROJECTS`):
-that config shape was removed by steps 02/05 of this plan, and two more
-things about that fixture don't hold up under an actual run (confirmed by
-running it in this sandbox while building this test):
-
-  1. ``[sys.executable, "-m", "catraz"]`` fails — the ``catraz`` package has
-     no ``__main__.py``; only ``catraz.cli:main``, wired as the ``catraz``
-     console-script (``pyproject.toml``'s ``[project.scripts]``). This test
-     uses ``python -m catraz.cli`` instead, which does work.
-  2. ``run claude-remote`` starts Remote Control, which requires a *real*
-     claude.ai subscription login; with a dummy API key the agent container
-     exits 1 immediately ("You must be logged in to use Remote Control"), so
-     that fixture cannot stay up here regardless of Docker availability.
-
-Host routing is entirely a Warden concern (§1-§2 of the main doc), so this
-test starts only the `gitlab-warden` service directly via `catraz.compose`
-(the same module the CLI itself uses to run docker compose) and drives
-requests via `docker compose exec` into that container — a stdlib
-`http.client` call with an explicit `Host` header — instead of needing a live
-agent container at all. This is the exact `request.headers["host"]` the
-production DNS-alias path (compose-wired per-host aliases, step 07) feeds in
-a real deployment; sending it directly here proves the Warden's own
-host-routing/deny behaviour without depending on that (here unusable) agent
-image, matching this task's guidance that the assertions are about warden
-routing/deny behavior, not real forge auth.
-
-Run (needs Docker):
-    uv run --with pytest python -m pytest tests/container/test_multi_host.py -q
-"""
+Run: uv run --with pytest python -m pytest tests/container/test_multi_host.py -q"""
 
 from __future__ import annotations
 
@@ -71,7 +35,7 @@ pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
 
 HOST_A = "mock-forge-a.test"  # listed, read+write tokens -> open
 HOST_B = "mock-forge-b.test"  # listed, read+write tokens -> open
-HOST_CLOSED = "mock-forge-closed.test"  # listed, NO token at all -> closed (§4.2)
+HOST_CLOSED = "mock-forge-closed.test"  # listed, NO token at all -> closed
 HOST_UNLISTED = "unlisted-forge.test"  # never in warden.toml at all
 PROJECT = "acme/demo"
 
@@ -79,7 +43,7 @@ _WARDEN_TOML = f"""\
 # Top-level (global) project allowlist: the request-path project gate for BOTH
 # guards is `cfg.project_allowed` (guards/git/policy.py, core/guard.py) which
 # reads this global list — the per-[[git.endpoint]] `allowed_projects` below is
-# the §3 config surface but is not (yet) what the git/REST project gate checks.
+# a config surface but is not (yet) what the git/REST project gate checks.
 # Both must name the project for a request to clear the project gate and reach
 # the upstream.
 allowed_projects = ["{PROJECT}"]
@@ -131,9 +95,8 @@ def _wait_healthy(root: Path, prefix: list[str], *, timeout: float = 60) -> None
 @pytest.fixture(scope="module")
 def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     """Scaffold a project via `catraz init`, overwrite it with a 3-endpoint
-    `warden.toml` + grouped `read_tokens`/`write_tokens` (§3, §4.1), then
-    bring up *only* `gitlab-warden` (no forward-proxy, no agent) via
-    `catraz.compose` — see module docstring for why."""
+    `warden.toml` + grouped `read_tokens`/`write_tokens`, then bring up
+    *only* `gitlab-warden` (no forward-proxy, no agent) via `catraz.compose`."""
     root = tmp_path_factory.mktemp("catraz-multihost")
     env = dict(os.environ, HOME=str(root))
     catraz_cli = [sys.executable, "-m", "catraz.cli"]
@@ -160,12 +123,9 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
 
 
 def _probe(stack: Stack, *, host: str, path: str) -> tuple[int, str]:
-    """One GET request straight to the Warden's agent port (8080) from
-    *inside* its own running container, with an explicit `Host` header —
-    exercising exactly the `request.headers["host"]` lookup
-    `core.guard.host_gate`/`core.transport.UpstreamRouter` perform in
-    production (see module docstring for why this replaces a DNS-alias hop
-    through a live agent container here)."""
+    """One GET request to the Warden's agent port (8080) from inside its
+    own container, with an explicit Host header exercising the same
+    host-routing lookup production uses."""
     script = (
         "import http.client, json\n"
         "c = http.client.HTTPConnection('127.0.0.1', 8080, timeout=15)\n"
@@ -198,33 +158,26 @@ def _rest_path(project: str) -> str:
 
 
 def _assert_routed(status: int, body: str, host: str) -> None:
-    """The request cleared *every* gate (host + project + decide) and reached
-    `forward()` — proof the host was routed to its upstream. With no real forge
-    behind these mock hostnames (§"Nicht tun": no real instances) `forward()`
-    then fails to connect, which surfaces as a deterministic 500 (verified
-    live). Any 403 here would mean a gate denied it (host OR project — both use
-    rule R6), so a plain "not 403" is too weak; the 500 pins "routed, upstream
-    just absent"."""
+    """Cleared every gate (host + project + decide) and reached its (absent)
+    mock upstream -> deterministic 500. A plain "not 403" would be too weak;
+    500 specifically proves "routed", not merely "not denied"."""
     assert status == 500, (
         f"host {host!r} expected to route to its (absent) upstream -> 500, got {status}: {body}"
     )
 
 
 def _assert_host_denied(status: int, body: str, host: str) -> None:
-    assert status == 403, f"expected R6 default-deny for {host!r}, got {status}: {body}"
+    assert status == 403, f"expected default-deny for {host!r}, got {status}: {body}"
     payload = json.loads(body)
-    assert payload["rule"] == "R6"
     assert "multi-target allowlist" in payload["reason"]
     assert host in payload["reason"]
 
 
 @pytest.mark.slow
 def test_two_listed_hosts_reachable_git_and_rest(live_stack: Stack) -> None:
-    """§8 Umsetzung point 2: both configured hosts are routed by the same
-    Warden — a git-path *and* a REST-path request each clear `host_gate` for
-    *both* hosts independently (per-endpoint separation, step 04,
-    spot-checked here by hostA's outcome never depending on hostB's, and
-    vice versa — a single shared Warden process, no per-host guard copy)."""
+    """Both configured hosts are routed by the same Warden — git and REST
+    requests each clear `host_gate` for both hosts independently, with
+    hostA's outcome never depending on hostB's (per-endpoint separation)."""
     for host in (HOST_A, HOST_B):
         status, body = _probe(live_stack, host=host, path=_git_path(PROJECT))
         _assert_routed(status, body, host)
@@ -235,8 +188,8 @@ def test_two_listed_hosts_reachable_git_and_rest(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_third_unlisted_host_default_denied(live_stack: Stack) -> None:
-    """§8 Umsetzung point 3: a Host header naming an endpoint nowhere in
-    warden.toml is R6 default-denied, for both git and REST paths."""
+    """A Host header naming an endpoint nowhere in warden.toml is
+    default-denied, for both git and REST paths."""
     status, body = _probe(live_stack, host=HOST_UNLISTED, path=_git_path(PROJECT))
     _assert_host_denied(status, body, HOST_UNLISTED)
 
@@ -246,12 +199,9 @@ def test_third_unlisted_host_default_denied(live_stack: Stack) -> None:
 
 @pytest.mark.slow
 def test_closed_endpoint_denied_without_disturbing_other_endpoints(live_stack: Stack) -> None:
-    """§8 Umsetzung point 4 (optional) + §4.2 fail-closed-degrade: a listed
-    endpoint with no token at all starts `closed` — denied exactly like an
-    unlisted host (the deny response deliberately does not distinguish
-    "known but closed" from "never heard of", so it never leaks which hosts
-    are configured) — *without* taking the Warden or the other, healthy
-    endpoints down with it."""
+    """A listed endpoint with no token at all starts `closed` — denied
+    exactly like an unlisted host, without disturbing the Warden or its
+    other, healthy endpoints."""
     status, body = _probe(live_stack, host=HOST_CLOSED, path=_git_path(PROJECT))
     _assert_host_denied(status, body, HOST_CLOSED)
 

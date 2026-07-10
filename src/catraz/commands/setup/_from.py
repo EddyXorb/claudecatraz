@@ -29,15 +29,9 @@ _CONFIG_FILES = (
 
 
 def load_inherited(src_root: Path) -> dict[str, Any]:
-    """Validate and load inheritable state from *src_root*.
-
-    Returns a dict with keys:
-      "env"     → dict[str, str]  — curated .env keys from the source
-      "config"  → dict[str, Path] — config file name → absolute source path
-      "secrets" → dict[str, Path] — secrets file/dir name → absolute source path
-
-    Raises CliError if src_root/.catraz does not exist.
-    """
+    """Validate and load inheritable state from *src_root*: curated .env
+    keys, config/ file paths, and secrets/ file paths, keyed by name.
+    Raises CliError if src_root/.catraz does not exist."""
     src_cat = Path(src_root).resolve() / ".catraz"
     if not src_cat.is_dir():
         raise CliError(
@@ -66,9 +60,8 @@ def load_inherited(src_root: Path) -> dict[str, Any]:
             if child.is_dir():
                 inherited_secrets[child.name] = child
             elif child.is_file():
-                # Skip empty / whitespace-only files — they are placeholder stubs,
-                # not real secrets.  Inheriting them would make the wizard show
-                # "inherited (hidden)" for a token that was never set.
+                # Skip empty/whitespace-only files (placeholder stubs) — inheriting
+                # them would make the wizard show "inherited (hidden)" for an unset token.
                 try:
                     content = child.read_text(encoding="utf-8", errors="replace").strip()
                 except OSError:

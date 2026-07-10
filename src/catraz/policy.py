@@ -23,7 +23,7 @@ def validate_project(p: str) -> str | None:
 
 
 def _resolve_allowed_projects(root: Path) -> tuple[list[str], str]:
-    """Resolve allowed_projects — the single source is warden.toml (§3.5)."""
+    """Resolve allowed_projects; the single source is warden.toml."""
     toml = root / ".catraz" / "config" / "warden.toml"
     if not toml.exists():
         return [], "no warden.toml"
@@ -52,13 +52,9 @@ def _host_of(s: str) -> str:
 
 
 def _project_from_remote_url(url: str, gitlab_url: str = "https://gitlab.com") -> str | None:
-    """Derive a GitLab project path (group/sub/project) from a git remote URL,
-    iff its host matches *gitlab_url*'s host. Else (or on an invalid path) None.
-
-    Handles both the HTTPS form (``https://host/group/proj(.git)``) and the
-    scp-like SSH form (``git@host:group/proj(.git)``). The SSH form has no ``//``,
-    so feeding it to urllib.parse mangles it — special-case it by splitting on the
-    first ``@`` then ``:``."""
+    """Derive a GitLab project path (group/sub/project) from a git remote URL
+    matching gitlab_url's host, else None. Handles both HTTPS and the scp-like
+    SSH form (no double slash, so urllib.parse alone can't parse it)."""
     url = (url or "").strip()
     if not url:
         return None
@@ -86,9 +82,8 @@ def _project_from_remote_url(url: str, gitlab_url: str = "https://gitlab.com") -
 
 
 def merge_allowed(existing: list[str], additions: list[str]) -> list[str]:
-    """Drop falsy entries from *existing*, append *additions*, dedupe preserving
-    first-seen order. (The shipped default is ``[]``; the empty-string drop is
-    defensive against an older ``[""]`` placeholder.)"""
+    """Drop falsy entries from existing, append additions, dedupe preserving
+    first-seen order (guards against an older [""] placeholder default)."""
     merged = []
     for item in [*(e for e in existing if e), *additions]:
         if item not in merged:
@@ -133,13 +128,8 @@ def _discover_gitlab_projects(root: Path, gitlab_url: str) -> list[str]:
 
 
 def set_toml_scalar(path: Path, key: str, value: str) -> None:
-    """Set a scalar string value for *key* in a TOML file.
-
-    Uses a targeted regex replace that preserves the line's leading
-    whitespace/alignment and trailing inline comment.  If the key is absent
-    the new assignment is appended.  Quote strings with json.dumps so
-    escaping is always valid TOML.
-    """
+    """Set a scalar string value for key in a TOML file, preserving formatting and
+    inline comments; appends the assignment if key is absent."""
     import json as _json
 
     text = path.read_text(encoding="utf-8")
@@ -156,13 +146,8 @@ def set_toml_scalar(path: Path, key: str, value: str) -> None:
 
 
 def set_toml_list(path: Path, key: str, values: list[str]) -> None:
-    """Set a list of strings for *key* in a TOML file.
-
-    Same comment-preserving strategy as set_toml_scalar.  The shipped
-    allowed_projects line is ``allowed_projects = [""]`` (one empty string,
-    not an empty list), so the regex ``\\[[^\\]]*\\]`` matches it.  If the
-    key is absent the new assignment is appended.
-    """
+    """Set a list of strings for key in a TOML file; same comment-preserving
+    strategy as set_toml_scalar. Matches the shipped allowed_projects = [""] line too."""
     import json as _json
 
     text = path.read_text(encoding="utf-8")
@@ -179,13 +164,8 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
 
 
 def remove_toml_key(path: Path, key: str) -> None:
-    """Delete a whole ``key = ...`` assignment line from a TOML file, if present.
-
-    Used to retire a superseded key when a wizard writes its replacement — e.g.
-    the legacy ``branch_prefix`` scalar once ``branch_prefixes`` is written —
-    so the two can never coexist and trip the Warden's "one source of truth"
-    ConfigError on next start. A no-op if the key is absent.
-    """
+    """Delete a whole key = ... assignment line from a TOML file, if present. Used to
+    retire a superseded key so old and new can't coexist and trip a ConfigError."""
     text = path.read_text(encoding="utf-8")
     pat = re.compile(
         rf'^\s*{re.escape(key)}\s*=\s*("[^"]*"|\[[^\]]*\])\s*(#.*)?\n?',

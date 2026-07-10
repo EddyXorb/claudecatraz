@@ -1,12 +1,7 @@
-"""state.py (W8, §6.11): quota counting, the rolling write-window, and the
-fail-safe lock that holds until the first reconcile — the core-only state.
-Branch counter tests live in :mod:`test_git_state` (they exercise
-:class:`~warden.guards.git.state.BranchState`); MR counter tests live in
-:mod:`test_api_state` (:class:`~warden.guards.gitlab_api.state.MrState`) —
-neither is core.
-
-These counters are what the policy's R5 quotas read, so an off-by-one or a
-missed time-window here would directly mis-gate writes.
+"""core.state: quota counting, the rolling write-window, and the fail-safe
+lock that holds until the first reconcile. Branch counter tests live in
+test_git_state; MR counter tests live in test_api_state — neither is core.
+An off-by-one or missed time-window here directly mis-gates writes.
 """
 
 from __future__ import annotations
@@ -21,8 +16,8 @@ from warden.core.state import (
     SchemaError,
     State,
 )
-from warden.guards.git.state import BranchState
-from warden.guards.gitlab_api.state import MrState
+from warden.guards.git.gitlab.state import MrState
+from warden.guards.git.transport.state import BranchState
 
 
 def _clocked(start=1000.0):
@@ -49,8 +44,8 @@ def test_writes_last_hour_drops_records_past_the_window():
 
 
 def test_writes_last_hour_is_scoped_per_host():
-    # step 04: max_writes_per_hour is a per-endpoint quota, so the counter it
-    # is checked against must not let one host's writes count against another's.
+    # max_writes_per_hour is a per-endpoint quota, so the counter it is checked
+    # against must not let one host's writes count against another's.
     st, _ = _clocked()
     st.mark_reconciled("api")
     st.record_write("api", "gitlab.com", "mr", "1")
@@ -99,9 +94,9 @@ def test_fresh_db_is_created_at_current_schema_version():
 
 def test_fresh_db_has_target_tables():
     """A brand-new DB gets the current shape directly — no legacy names, no
-    lift needed: ``agent_branches`` (the git guard's own :class:`BranchState`),
-    ``agent_mrs`` (the REST-API guard's own :class:`MrState`, both sharing the
-    same connection) and ``writes.guard``."""
+    lift needed: agent_branches (the git guard's own BranchState),
+    agent_mrs (the REST-API guard's own MrState, both sharing the same
+    connection) and writes.guard."""
     st = State(":memory:")
     bs = BranchState(st.store)
     ms = MrState(st.store)
@@ -114,7 +109,7 @@ def test_fresh_db_has_target_tables():
 
 
 def test_future_schema_version_fails_closed(tmp_path):
-    """An unrecognised (too new) schema version must abort, never run anyway (A9)."""
+    """An unrecognised (too new) schema version must abort, never run anyway."""
     path = tmp_path / "future.db"
     raw = sqlite3.connect(str(path))
     raw.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION + 1}")
@@ -126,12 +121,9 @@ def test_future_schema_version_fails_closed(tmp_path):
 
 
 def test_older_schema_version_also_fails_closed(tmp_path):
-    """§07 Punkt 8 follow-up: a non-fresh DB stamped at an *older* version than
-    this build (e.g. v1, pre-``host``-column) must also abort, not be silently
-    re-stamped and reused — ``CREATE TABLE IF NOT EXISTS`` cannot retrofit the
-    new column onto the old-shaped ``agent_branches``/``agent_mrs`` tables.
-    Only a brand-new file (``user_version == 0``) is exempt (the bootstrap
-    case, not a mismatch)."""
+    """A non-fresh DB stamped at an older schema version than this build must
+    abort, not be silently re-stamped and reused. Only a brand-new file
+    (user_version == 0) is exempt as the bootstrap case."""
     assert CURRENT_SCHEMA_VERSION > 1, "test assumes an older stamped version exists"
     path = tmp_path / "stale.db"
     raw = sqlite3.connect(str(path))

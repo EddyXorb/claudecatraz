@@ -1,17 +1,12 @@
-"""mr_namespace.py (W6.2, §07 Punkt 4/6, §07 Punkt 8 follow-up): the REST-API guard's MR
-source-branch-namespace rule + its cache.
-
-Folded here from the now-dissolved ``guards.gitlab.forge.GitForge`` (§07
-Punkt 6 step 5) — see ``test_api_reconcile.py`` for the reconcile/pagination
-side.
-"""
+"""mr_namespace.py: the REST-API guard's MR source-branch-namespace rule + its
+cache. See test_api_reconcile.py for the reconcile/pagination side."""
 
 from __future__ import annotations
 
 import httpx
 
 from warden.core.transport import UpstreamRouter
-from warden.guards.gitlab_api.mr_namespace import MrNamespace
+from warden.guards.git.gitlab.mr_namespace import MrNamespace
 
 HOST = "gitlab.example"  # matches the `cfg` fixture's `[[git.endpoint]]` host (conftest.py)
 
@@ -23,7 +18,7 @@ def _mr_namespace(cfg, *, clock=None) -> MrNamespace:
 
 async def test_source_in_namespace_true_when_prefixed_regardless_of_author(cfg, respx_router):
     # A namespace source_branch is enough — the author (a foreign colleague here)
-    # no longer matters (§07 Punkt 4: blast-radius is the branch namespace).
+    # doesn't matter: blast-radius is the branch namespace.
     mr_namespace = _mr_namespace(cfg)
     respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
         return_value=httpx.Response(200, json={"source_branch": "claude/x", "author": {"id": 999}})

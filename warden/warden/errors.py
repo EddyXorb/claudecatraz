@@ -9,6 +9,6 @@ from .core.model import Decision
 
 def deny_json(decision: Decision, status: int = 403) -> JSONResponse:
     return JSONResponse(
-        {"error": "forbidden", "rule": decision.rule, "reason": decision.reason},
+        {"error": "forbidden", "reason": decision.reason},
         status_code=status,
     )

@@ -1,4 +1,4 @@
-"""app.py (W3, §6.8): health endpoint and the admin-only read-only audit tail."""
+"""app.py: health endpoint and the admin-only read-only audit tail."""
 
 from __future__ import annotations
 
@@ -61,12 +61,15 @@ async def test_policy_route_reports_the_effective_table(cfg):
     body = resp.json()
     host_report = body["hosts"]["gitlab.example"]
     ids = {row["id"] for row in host_report["catalog"]}
-    assert "mr.create" in ids and "branch.create" in ids
-    mr_create = next(row for row in host_report["catalog"] if row["id"] == "mr.create")
-    assert mr_create["default"] is True and mr_create["active"] is True
-    branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
-    assert branch_create["default"] is False and branch_create["active"] is False
-    assert body["builtin_deny"] == ["mr.merge"]
+    assert "mr.create" in ids and "branch.create" in ids and "mr.merge" in ids
+    # git transport rows: previously the report only walked the REST catalog
+    # and these appeared as names without rows.
+    assert "git.read" in ids and "git.receive_pack" in ids
+    assert "project.mr.create" in host_report["actions"]
+    # repo.branch.create is default-on in the new vocabulary.
+    assert "repo.branch.create" in host_report["actions"]
+    # merge is a named denial, not a hardcoded builtin_deny string.
+    assert "project.mr.merge" in host_report["denials"]
     await ctx.router.aclose()
 
 
@@ -75,24 +78,19 @@ async def test_policy_route_reflects_activation_config(cfg):
     endpoint = cfg.git_endpoints[0]
     activated = replace(
         cfg,
-        git_endpoints=(replace(endpoint, actions=("mr.create", "branch.create")),),
+        git_endpoints=(replace(endpoint, actions=("project.mr.create", "project.issue.create")),),
     )
     ctx = build_context(activated, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/policy")
     body = resp.json()
     host_report = body["hosts"]["gitlab.example"]
-    branch_create = next(row for row in host_report["catalog"] if row["id"] == "branch.create")
-    assert branch_create["active"] is True
-    assert branch_create["enabled_via"] == "config:branch.create"
-    mr_note = next(row for row in host_report["catalog"] if row["id"] == "mr.note")
-    assert mr_note["active"] is False  # not in this endpoint's actions override
+    assert set(host_report["actions"]) == {"project.mr.create", "project.issue.create"}
     await ctx.router.aclose()
 
 
 async def test_viewer_serves_the_static_html_page(cfg):
-    # F7: _VIEWER_HTML now loads from warden/static/viewer.html (a package asset,
-    # not an inline string in routing code) — the endpoint must still serve it.
+    # _VIEWER_HTML loads from a package asset, not an inline string.
     ctx = build_context(cfg, State(":memory:"), AuditLog("-"))
     async with await _admin_client(ctx) as c:
         resp = await c.get("/")

@@ -266,13 +266,8 @@ def _interactive_args(init_from: str | None = None) -> argparse.Namespace:
 def test_interactive_clone_inherits_config_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Interactive `init --from` must inherit config/ files (Dockerfile, allowlist,
-    squid.conf), not silently keep the freshly-seeded defaults.
-
-    Regression: _init_config_templates seeded the defaults first, so stage_inherited's
-    `not dst.exists()` guard skipped the inherited copies in interactive mode (where its
-    `yes` override is off). The fix stages inherited files before seeding defaults.
-    """
+    """Interactive `init --from` must inherit config/ files (Dockerfile,
+    allowlist, squid.conf), not silently keep the freshly-seeded defaults."""
     src = _make_source(tmp_path, gitlab_mode="off")  # off → wizard needs no tokens
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)

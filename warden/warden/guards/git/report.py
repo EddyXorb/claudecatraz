@@ -1,0 +1,89 @@
+"""JSON-serialisable summary of every guard's recognizer catalog, per host.
+
+Served by the /policy route. One section per host, one sub-list per guard
+composing that host's endpoint type. Actions at Criticality.IRREVERSIBLE
+are always inactive by construction; denials lists those ids explicitly."""
+
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from ...core.actions import Criticality
+from ...core.config import Config
+from ...core.guard import Guard
+from . import actions as git_actions
+from .endpoints import ENDPOINT_TYPES
+from .gitlab.guard import ApiGuard
+from .transport.guard import GitGuard
+
+_DEFAULT_IDS: frozenset[str] = frozenset(a.id for a in git_actions.DEFAULT)
+
+# Endpoint-type guard-composition name -> the concrete guard class serving it.
+_GUARD_CLASS_BY_COMPOSITION_NAME: Mapping[str, type[Guard[Any]]] = {
+    "transport": GitGuard,
+    "gitlab": ApiGuard,
+}
+
+
+def _guards_by_composition_name(guards: list[Guard[Any]]) -> Mapping[str, Guard[Any]]:
+    by_class = {type(g): g for g in guards}
+    return {
+        name: by_class[cls]
+        for name, cls in _GUARD_CLASS_BY_COMPOSITION_NAME.items()
+        if cls in by_class
+    }
+
+
+def endpoint_table_report(cfg: Config, guards: list[Guard[Any]]) -> dict[str, Any]:
+    """Build the /policy response body: one section per configured host.
+
+    guards is the running AppContext's guard instances, never a fresh
+    set built only for reporting.
+    """
+    by_name = _guards_by_composition_name(guards)
+    return {"hosts": {host: _host_report(cfg, host, by_name) for host in cfg.effective_hosts}}
+
+
+def _host_report(cfg: Config, host: str, by_name: Mapping[str, Guard[Any]]) -> dict[str, Any]:
+    effective = frozenset(cfg.effective_actions(host))
+    endpoint = cfg.endpoint_for(host)
+    assert endpoint is not None, "host comes from cfg.effective_hosts, so its endpoint exists"
+    composition = ENDPOINT_TYPES[endpoint.type].type.guards
+
+    rows: list[dict[str, Any]] = []
+    denials: set[str] = set()
+    for guard_name in composition:
+        guard = by_name.get(guard_name)
+        if guard is None:
+            continue
+        for recognizer in guard.recognizers:
+            row_report, row_denials = _row_report(recognizer, effective)
+            rows.append({"guard": guard_name, **row_report})
+            denials |= row_denials
+
+    # The "catalog" key is the /policy contract the CLI (catraz doctor) parses;
+    # the local list is named rows to match the guard-level "recognizers".
+    return {
+        "actions": sorted(effective),
+        "catalog": rows,
+        "denials": sorted(denials),
+    }
+
+
+def _row_report(row: Any, effective: frozenset[str]) -> tuple[dict[str, Any], set[str]]:
+    actions = []
+    denials: set[str] = set()
+    for action in sorted(row.possible_actions, key=lambda a: a.id):
+        never = action.criticality is Criticality.IRREVERSIBLE
+        if never:
+            denials.add(action.id)
+        actions.append(
+            {
+                "id": action.id,
+                "criticality": action.criticality.name,
+                "default": action.id in _DEFAULT_IDS,
+                "active": action.id in effective and not never,
+                "quota_kind": action.quota_kind,
+            }
+        )
+    return ({"id": row.id, "actions": actions}, denials)

@@ -28,12 +28,8 @@ MODES = ("claude", "claude-remote", "shell")
 
 
 def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list[str]:
-    # --build rebuilds the agent image when its build context changed (e.g. a new
-    # entrypoint subcommand like `exec`). Docker's layer cache makes this a near-instant
-    # no-op when nothing changed, so every one-off self-heals against CLI/image skew —
-    # otherwise a stale image's entrypoint rejects subcommands the CLI now emits.
-    # --quiet-build hides the (usually cached, no-op) build progress dump on every run;
-    # the infra "Container … Running" lines still print, so catraz visibly works.
+    # --build self-heals CLI/image skew (near-instant no-op via layer cache when
+    # unchanged); --quiet-build hides its progress dump but keeps infra status lines.
     args = ["run", "--rm", "--no-deps", "--build", "--quiet-build"]
     if not tty:
         args.append("-T")
@@ -107,10 +103,8 @@ def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
     tty = sys.stdin.isatty()
     run_args = _oneoff_args(relpath, tty, sub, raw)
     if sub == "run" and not tty:
-        # Non-TTY claude one-off: stdout is lost when the --rm container is removed, so
-        # tee the combined output to a durable per-run transcript (item 03). %f
-        # microseconds so two runs in the same second don't clobber each other. TTY runs
-        # allocate a real pty (teeing would fight it) and shell is interactive → no tee.
+        # Non-TTY one-off: stdout is lost when the --rm container is removed, so tee
+        # output to a durable per-run transcript; %f microseconds avoid same-second clobber.
         log_dir = root / ".catraz/logs/agent"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / (datetime.datetime.now().strftime("%Y%m%dT%H%M%S_%f") + ".log")
@@ -122,11 +116,10 @@ def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
 
 
 def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
-    """Start the Remote-Control agent daemon (ports item 05's removed `up --remote`).
+    """Start the Remote-Control agent daemon.
 
-    Unlike the ephemeral `claude`/`shell` one-offs (`run --rm`), this is a long-lived
-    daemon (`--profile remote up -d`, restart unless-stopped) — the mode name encodes
-    the lifecycle difference the old `run` vs `up --remote` split hid."""
+    Unlike the ephemeral `claude`/`shell` one-offs (`run --rm`), this is a
+    long-lived daemon (`--profile remote up -d`, restart unless-stopped)."""
     assert_real_dirs(root)
     (root / ".catraz").mkdir(exist_ok=True)
     out.head("— preflight (security checks always run) —")

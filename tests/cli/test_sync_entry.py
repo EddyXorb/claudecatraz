@@ -1,7 +1,7 @@
-"""`_run_sync` calls the resolved profile's adapter in-process (§05.2/§05.3) —
-no subprocess/entrypoint.py indirection (host-side sync never needs a
+"""`_run_sync` calls the resolved profile's adapter in-process — no
+subprocess/entrypoint.py indirection (host-side sync never needs a
 container). See tests/container/test_sync.py for the adapter-level
-`sync_from_host` behaviour itself."""
+`sync_from_host` behavior."""
 
 from pathlib import Path
 from typing import Any

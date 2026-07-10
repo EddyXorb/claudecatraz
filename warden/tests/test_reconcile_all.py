@@ -1,12 +1,6 @@
-"""Per-guard reconcile isolation (§07 Punkt 6 follow-up): each guard's fail-safe
-lock is its OWN — a guard whose upstream is permanently unreachable stays
-locked and denies, while every other guard keeps serving off its own fresh
-counts. AppContext.reconcile_all runs them all; a guard only ever unlocks its
-own view.
-
-Regression guard for the fail-safe design: git-branch and REST-API-MR counts
-live behind separate per-guard locks, so a failed MR reconcile can neither serve
-a stale MR count (safety) nor block the working git guard (availability).
+"""Per-guard reconcile isolation: each guard's fail-safe lock is its own — a
+guard whose upstream is permanently unreachable stays locked and denies, while
+every other guard keeps serving off its own fresh counts.
 """
 
 from __future__ import annotations
@@ -29,9 +23,7 @@ def _git(ctx):
 
 
 def _api(ctx):
-    # ApiGuard and GraphqlGuard both name themselves "api"; the reconciling one
-    # is the ApiGuard, distinguished by its own MR state.
-    return next(g for g in ctx.guards if g.name == "api" and hasattr(g, "mr_state"))
+    return next(g for g in ctx.guards if g.name == "api")
 
 
 def _mock_branches_ok(router):
@@ -66,10 +58,8 @@ async def test_reconcile_all_unlocks_every_guard_on_full_success(cfg, respx_rout
 
 
 async def test_one_guards_permanent_failure_does_not_block_the_others(cfg, respx_router):
-    # THE isolation guarantee: the REST-API MR reconcile fails (its upstream is
-    # down), but the git branch reconcile succeeds — the git guard must serve off
-    # its own fresh counts, while ONLY the API guard stays fail-safe-locked and
-    # denies. A single unreachable upstream never blocks the whole warden.
+    # The isolation guarantee: the API guard's upstream is down but the git
+    # guard's succeeds — only the API guard stays fail-safe-locked and denies.
     ctx = _fresh_ctx(cfg)
 
     _mock_branches_ok(respx_router)
@@ -87,10 +77,8 @@ async def test_one_guards_permanent_failure_does_not_block_the_others(cfg, respx
 
 
 async def test_reconcile_all_unlocks_with_no_endpoints_configured(respx_router):
-    # No [[git.endpoint]] configured (the former "off" mode) makes no upstream
-    # call — the shared host×project loop is a no-op over an empty
-    # `effective_hosts` — so every guard unlocks itself, and the warden opens
-    # the port and then denies ops.
+    # No endpoints configured makes no upstream call, so every guard unlocks
+    # itself, and the warden opens the port and then denies ops.
     ctx = _fresh_ctx(Config())
 
     # No mock registered — any upstream call would raise respx.MockTransportError.
@@ -103,9 +91,8 @@ async def test_reconcile_all_unlocks_with_no_endpoints_configured(respx_router):
 
 
 async def test_a_later_transient_failure_does_not_re_lock_a_reconciled_guard(cfg, respx_router):
-    # Each per-guard lock is a one-way latch: once the API guard reconciled, a
-    # later transient failure on a periodic cycle does NOT re-lock it — it keeps
-    # serving its last known-good MR count instead of flapping locked on a blip.
+    # Each per-guard lock is a one-way latch: a later transient failure does
+    # NOT re-lock it — it keeps serving its last known-good MR count.
     ctx = _fresh_ctx(cfg)
     _mock_branches_ok(respx_router)
     _mock_projects_ok(respx_router)

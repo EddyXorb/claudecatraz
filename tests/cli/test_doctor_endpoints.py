@@ -11,16 +11,51 @@ import pytest
 from catraz import doctor
 from catraz.admin_client import AdminUnreachable
 
+
+def _action(id_: str, criticality: str, default: bool, active: bool) -> dict[str, object]:
+    return {"id": id_, "criticality": criticality, "default": default, "active": active}
+
+
 _CATALOG = [
-    {"id": "mr.create", "active": True, "enabled_via": "default"},
-    {"id": "mr.note", "active": True, "enabled_via": "default"},
-    {"id": "branch.create", "active": True, "enabled_via": "config:branch.create"},
-    {"id": "issue.create", "active": False, "enabled_via": None},
+    {
+        "guard": "gitlab",
+        "id": "mr.create",
+        "actions": [_action("project.mr.create", "WRITE", True, True)],
+        "quota_kind": "mr",
+    },
+    {
+        "guard": "gitlab",
+        "id": "mr.note",
+        "actions": [_action("project.mr.comment", "WRITE", True, True)],
+        "quota_kind": "mr_note",
+    },
+    {
+        "guard": "gitlab",
+        "id": "branch.create",
+        "actions": [_action("repo.branch.create", "WRITE", True, True)],
+        "quota_kind": "branch_create",
+    },
+    {
+        "guard": "gitlab",
+        "id": "issue.create",
+        "actions": [_action("project.issue.create", "WRITE", False, False)],
+        "quota_kind": "issue_create",
+    },
+    {
+        "guard": "gitlab",
+        "id": "mr.merge",
+        "actions": [_action("project.mr.merge", "IRREVERSIBLE", False, False)],
+        "quota_kind": "mr_merge",
+    },
 ]
 
 _REPORT = {
     "hosts": {
-        "gitlab.example": {"actions": ["git.fetch", "git.push", "mr.create"], "catalog": _CATALOG},
+        "gitlab.example": {
+            "actions": ["repo.read", "repo.branch.create", "project.mr.create"],
+            "catalog": _CATALOG,
+            "denials": ["project.mr.merge"],
+        },
     },
 }
 
@@ -61,9 +96,9 @@ def test_reachable_reports_active_and_inactive_entries(
     f = doctor.Findings()
     doctor.check_endpoints(tmp_path, {}, f)
     msgs = [i[2] for i in f.items]
-    assert any("gitlab.example" in m and "mr.create" in m and "3 active" in m for m in msgs)
-    assert any("branch.create[config:branch.create]" in m for m in msgs)
-    assert any("issue.create" in m and "not enabled" in m for m in msgs)
+    assert any("gitlab.example" in m and "project.mr.create" in m and "3 active" in m for m in msgs)
+    assert any("project.issue.create" in m and "not enabled" in m for m in msgs)
+    assert any("project.mr.merge" in m and "compiled-in denial" in m for m in msgs)
     assert not any(i[0] == doctor.BAD for i in f.items)
 
 
@@ -72,13 +107,24 @@ def test_two_hosts_get_independent_findings(
 ) -> None:
     two_hosts_report = {
         "hosts": {
-            "full.example": {"actions": [], "catalog": _CATALOG},
+            "full.example": {"actions": [], "catalog": _CATALOG, "denials": ["project.mr.merge"]},
             "review-only.example": {
-                "actions": [],
+                "actions": ["project.mr.comment"],
                 "catalog": [
-                    {"id": "mr.create", "active": False, "enabled_via": None},
-                    {"id": "mr.note", "active": True, "enabled_via": "default"},
+                    {
+                        "guard": "gitlab",
+                        "id": "mr.create",
+                        "actions": [_action("project.mr.create", "WRITE", True, False)],
+                        "quota_kind": "mr",
+                    },
+                    {
+                        "guard": "gitlab",
+                        "id": "mr.note",
+                        "actions": [_action("project.mr.comment", "WRITE", True, True)],
+                        "quota_kind": "mr_note",
+                    },
                 ],
+                "denials": [],
             },
         },
     }

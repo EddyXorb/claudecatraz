@@ -1,8 +1,6 @@
-"""End-to-end git test (W14, §8): a real `git push` through the Warden against a
-throwaway upstream `git http-backend`. Verifies accept/reject and SHA-equality
-(the host clone and the server stay coherent — the §6 design driver).
-
-Skipped when `git` is unavailable.
+"""End-to-end git test: a real `git push` through the Warden against a throwaway
+upstream `git http-backend`, verifying accept/reject and SHA-equality. Skipped
+when `git` is unavailable.
 """
 
 from __future__ import annotations
@@ -31,10 +29,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def _make_self_signed_cert(tmp_path) -> tuple[str, str]:
-    """Ephemeral self-signed cert+key (openssl CLI, no extra test dependency):
-    the fake upstream below must terminate real TLS (step 03: `base_urls`
-    always derives ``https://`` — the Warden never speaks a raw, unencrypted
-    scheme to an upstream, even a test double standing in for one)."""
+    """Ephemeral self-signed cert+key: the fake upstream must terminate real
+    TLS, since the Warden never speaks a raw, unencrypted scheme upstream."""
     cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
     subprocess.run(
         [
@@ -156,8 +152,10 @@ def _git(cwd, *args, check=True):
     )
 
 
-@pytest.fixture
-def e2e(tmp_path):
+def _run_e2e(tmp_path, *, actions=None):
+    """Build a real upstream git http-backend plus a real Warden in front of
+    it. actions overrides the endpoint's effective actions (default:
+    inherit the built-in default)."""
     import uvicorn
 
     # 1. throwaway bare upstream repo
@@ -170,28 +168,22 @@ def e2e(tmp_path):
 
     backend_port = _free_port()
     backend = ThreadingHTTPServer(("127.0.0.1", backend_port), _make_backend_handler(str(root)))
-    # The backend must terminate real TLS (step 03: `base_urls` always derives
-    # `https://` for an endpoint, plain or gitlab) — wrap its listening socket
-    # with a throwaway self-signed cert before it starts accepting.
+    # The backend must terminate real TLS — wrap its listening socket with a
+    # throwaway self-signed cert before it starts accepting.
     cert, key = _make_self_signed_cert(tmp_path)
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(certfile=cert, keyfile=key)
     backend.socket = tls.wrap_socket(backend.socket, server_side=True)
     threading.Thread(target=backend.serve_forever, daemon=True).start()
 
-    # 2. warden in front, pointing at the upstream: a `[[git.endpoint]]` whose
-    # host is the backend's own address (`127.0.0.1:<port>`, port and all —
-    # base_urls builds the outbound URL straight from this host string, while
-    # Config.normalize_host strips the port only for *matching* an incoming
-    # Host header, so the warden's own `127.0.0.1:<warden_port>` header still
-    # resolves to this endpoint even though the ports differ). `type="plain"`
-    # since `git http-backend` has no GitLab REST surface at all.
+    # 2. warden in front, pointing at the upstream, `type="plain"` since
+    # `git http-backend` has no GitLab REST surface at all.
     backend_host = f"127.0.0.1:{backend_port}"
     cfg = Config(
         branch_prefixes=("claude/",),
         allowed_projects=("repo",),
         state_db_path=str(tmp_path / "state.db"),
-        git_endpoints=(GitEndpoint(host=backend_host, type="plain"),),
+        git_endpoints=(GitEndpoint(host=backend_host, type="plain", actions=actions),),
         git_credentials={
             Config.normalize_host(backend_host): HostCredentials(read_token="r", write_token="w")
         },
@@ -199,9 +191,8 @@ def e2e(tmp_path):
     state = State(cfg.state_db_path)
     state.mark_reconciled("git")
     state.mark_reconciled("api")
-    # The backend's cert is self-signed (a throwaway test double, not a real
-    # forge) — verify=False here only, never a default on the production
-    # Upstream/UpstreamRouter path.
+    # The backend's cert is self-signed (a throwaway test double) —
+    # verify=False here only, never a default in production.
     upstream_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0), verify=False)
     ctx = build_context(cfg, state, AuditLog("-"), client=upstream_client)
     warden_port = _free_port()
@@ -220,6 +211,18 @@ def e2e(tmp_path):
         server.should_exit = True
         thread.join(timeout=5)
         backend.shutdown()
+
+
+@pytest.fixture
+def e2e(tmp_path):
+    yield from _run_e2e(tmp_path)
+
+
+@pytest.fixture
+def e2e_no_branch_push(tmp_path):
+    # repo.branch.create stays on so the first push succeeds; repo.branch.push
+    # is off, so an update to that branch is denied, naming the action.
+    yield from _run_e2e(tmp_path, actions=("repo.read", "repo.branch.create"))
 
 
 def _seed_clone(tmp_path, remote, branch):
@@ -253,4 +256,21 @@ def test_push_forbidden_branch_is_rejected(e2e):
 
     res = _git(work, "push", "origin", "main", check=False)
     assert res.returncode != 0
-    assert "warden: R2" in (res.stderr + res.stdout)
+    assert "outside allowed prefixes" in (res.stderr + res.stdout)
+
+
+def test_push_update_denied_when_branch_push_disabled_names_the_action(e2e_no_branch_push):
+    # The create succeeds (repo.branch.create is on); the follow-up update to
+    # the same branch is denied per-ref, naming the specific disabled action.
+    tmp_path, remote = e2e_no_branch_push
+    work, _ = _seed_clone(tmp_path, remote, "claude/feature")
+
+    created = _git(work, "push", "-q", "origin", "claude/feature", check=False)
+    assert created.returncode == 0, created.stderr
+
+    (work / "file.txt").write_text("updated")
+    _git(work, "add", ".")
+    _git(work, "commit", "-q", "-m", "second")
+    updated = _git(work, "push", "origin", "claude/feature", check=False)
+    assert updated.returncode != 0
+    assert "action repo.branch.push not enabled" in (updated.stderr + updated.stdout)

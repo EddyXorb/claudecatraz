@@ -7,10 +7,8 @@ import pytest
 from catraz import doctor
 
 
-# ---------------------------------------------------------------------------
-# check_gitlab / _gitlab_mode — GITLAB_URL/.env informational checks. Untouched
-# by the multi-endpoint cutover (§05-env-cleanup.md is a separate, later step).
-# ---------------------------------------------------------------------------
+# check_gitlab / _gitlab_mode — GITLAB_URL/.env informational checks,
+# untouched by the multi-endpoint cutover.
 
 
 def test_check_gitlab_url_set() -> None:
@@ -97,11 +95,8 @@ class TestGitLabModeHelper:
         assert doctor._gitlab_mode({"GITLAB_MODE": "  off  "}) == "off"
 
 
-# ---------------------------------------------------------------------------
-# Multi-endpoint token model (§4, §6): grouped read_tokens/write_tokens files
-# cross-checked against [[git.endpoint]] in warden.toml. Same rules/wording as
-# the Warden's Step 02 access_mode() derivation (warden/warden/core/config.py).
-# ---------------------------------------------------------------------------
+# Multi-endpoint token model: grouped read_tokens/write_tokens files
+# cross-checked against [[git.endpoint]] in warden.toml.
 
 
 def _write_grouped(root: Path, filename: str, tokens: dict[str, str]) -> None:
@@ -209,10 +204,8 @@ class TestCheckTokensCrossCheck:
         _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
         _write_grouped(tmp_path, "read_tokens", {"gitlab.com": "glpat-r"})
         _write_grouped(tmp_path, "write_tokens", {"gitlab.com": "glpat-w"})
-        # Offline: probing degrades to a warn (unreachable), not a bad — but we
-        # don't want the *probe's* offline-degrade warning to be mistaken for a
-        # cross-check inconsistency, so keep this test focused on the
-        # cross-check by skipping the probe outright.
+        # Offline probing degrades to a warn, not a bad — skip the probe outright
+        # so this test stays focused on the cross-check, not the probe's own warning.
         monkeypatch.setattr(doctor, "_probe_gitlab_tokens", lambda *a, **kw: None)
         f = doctor.Findings()
         doctor.check_tokens(tmp_path, {}, f)
@@ -242,8 +235,8 @@ class TestCheckTokensCrossCheck:
 
 
 class TestProbeGitlabTokens:
-    """Per-host probing (§6 point 3) — only `type = "gitlab"` endpoints are
-    probed online; `plain` endpoints are skipped."""
+    """Per-host probing — only `type = "gitlab"` endpoints are probed
+    online; `plain` endpoints are skipped."""
 
     def test_only_gitlab_type_is_probed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         probed_hosts: list[str] = []
@@ -285,11 +278,8 @@ class TestProbeGitlabTokens:
         assert any(i[0] == doctor.WARN and "identical" in i[2] for i in f.items)
 
 
-# ---------------------------------------------------------------------------
-# _probe_write_user_read — the warden needs GET /user (write token) for R3.
-# Lifted to be per-host: (host, base, token, f) instead of reading the old
-# fixed gitlab_write_token file itself.
-# ---------------------------------------------------------------------------
+# _probe_write_user_read — the warden needs GET /user (write token) for R3,
+# checked per-host: (host, base, token, f).
 
 
 class TestProbeWriteUserRead:
@@ -321,9 +311,7 @@ class TestProbeWriteUserRead:
         assert not any(i[0] == doctor.BAD for i in f.items)
 
 
-# ---------------------------------------------------------------------------
 # Private helpers
-# ---------------------------------------------------------------------------
 
 
 def _raise_url_error(*args: Any, **kwargs: Any) -> Any:

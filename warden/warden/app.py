@@ -1,10 +1,7 @@
 """Starlette app + routing: agent port vs. admin port.
 
-Generic assembly only: stays at the top of the package, free of guard internals.
-Each guard in ``ctx.guards`` supplies its own routes (:meth:`~warden.core.guard.Guard.routes`);
-this module never imports a concrete guard class, only :mod:`warden.context`'s guard-agnostic
-:class:`~warden.context.AppContext`. The pipeline every route runs through lives
-in :mod:`warden.core.guard`.
+Generic assembly only: each guard supplies its own routes (Guard.routes);
+this module never imports a concrete guard class.
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from .context import AppContext
-from .guards.gitlab_api.catalog import endpoint_table_report
+from .guards.git.report import endpoint_table_report
 
 # Static log-viewer page — a package asset, not routing code.
 _VIEWER_HTML_PATH = Path(__file__).parent / "static" / "viewer.html"
@@ -25,17 +22,9 @@ _VIEWER_HTML = _VIEWER_HTML_PATH.read_text(encoding="utf-8")
 
 
 def create_app(ctx: AppContext) -> Starlette:
-    """Agent-facing app on port 8080: API proxy + git Smart-HTTP.
-
-    Generic assembly: every guard supplies its own routes
-    (:meth:`~warden.core.guard.Guard.routes`); this module never lists
-    guard endpoints, staying free of guard-policy internals.
-    """
-    # The /git/ prefix is load-bearing: it separates git Smart-HTTP routes from
-    # /api/v4/… on the same port. Repos keep their canonical remote URL
-    # (https://gitlab.com/…); the entrypoint injects a global git insteadOf rewrite
-    # (https://gitlab.com/ → http://gitlab-warden:8080/git/) so the prefix is added
-    # transparently at transport time without touching .git/config.
+    """Agent-facing app on port 8080: API proxy + git Smart-HTTP."""
+    # The /git/ prefix separates git Smart-HTTP routes from /api/v4/… on the
+    # same port; a global git insteadOf rewrite adds it transparently.
     routes = [r for g in ctx.guards for r in g.routes()]
     routes.append(Route("/healthz", _healthz, methods=["GET"]))
     app = Starlette(routes=routes)
@@ -87,10 +76,10 @@ async def _policy(request: Request) -> JSONResponse:
     """Read-only summary of the effective endpoint catalog, per host (admin net only).
 
     Every entry: whether part of the default set, whether activated for that host.
-    ``catraz doctor`` uses this to show catalog ids and state.
+    catraz doctor uses this to show catalog ids and state.
     """
     ctx: AppContext = request.app.state.ctx
-    return JSONResponse(endpoint_table_report(ctx.cfg))
+    return JSONResponse(endpoint_table_report(ctx.cfg, ctx.guards))
 
 
 async def _viewer(request: Request) -> HTMLResponse:

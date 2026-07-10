@@ -1,12 +1,7 @@
-"""Host→Upstream resolution + the ``host_gate`` kernel wiring (step 03:
-routing cut over to the ``[[git.endpoint]]`` model, §07 Punkt 8 follow-up).
+"""Host→Upstream resolution and the host_gate kernel wiring.
 
-Per-host state-keying tests live in ``test_git_state.py``/``test_api_state.py``
-(the ``BranchState``/``MrState`` tables) and this file's
-``test_reconcile_branches_runs_per_host_with_same_project_path`` (the
-reconcile loop that populates them). Config-schema-level parsing/cascade tests
-live in ``test_config.py``.
-"""
+Per-host state-keying tests live in test_git_state.py/test_api_state.py.
+Config-schema-level parsing tests live in test_config.py."""
 
 from __future__ import annotations
 
@@ -21,19 +16,18 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.guard import host_gate
 from warden.core.model import Decision
-from warden.core.rules import R6
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter, base_urls
-from warden.guards.git.guard import GitGuard
+from warden.guards.git.transport.guard import GitGuard
 
 PROJ = "group%2Fproj"
 
 
 def _multi_cfg(cfg: Config) -> Config:
-    """The shared single-host ``cfg`` fixture (conftest.py), widened to two
+    """The shared single-host cfg fixture (conftest.py), widened to two
     open endpoints: the fixture's own host, plus a second host with its own
-    credentials — exactly the shape ``config_load`` produces from two
-    ``[[git.endpoint]]`` entries."""
+    credentials — exactly the shape config_load produces from two
+    [[git.endpoint]] entries."""
     return replace(
         cfg,
         git_endpoints=(
@@ -115,29 +109,28 @@ def test_router_for_host_matches_effective_hosts(cfg):
 
 
 def test_host_gate_denies_everything_when_no_endpoint_configured(cfg):
-    """Real default-deny (step 03): an empty endpoint list is not "feature
-    off" — every host, including one that would otherwise look fine, is
-    denied."""
+    """Real default-deny: an empty endpoint list is not "feature off" — every
+    host, including one that would otherwise look fine, is denied."""
     empty = replace(cfg, git_endpoints=(), git_credentials={})
     decision = host_gate("literally.anything", empty)
     assert decision == Decision(
-        False, R6, "host 'literally.anything' not in the multi-target allowlist"
+        False, "host 'literally.anything' not in the multi-target allowlist"
     )
 
 
-def test_host_gate_denies_unknown_host_with_r6(cfg):
+def test_host_gate_denies_unknown_host_not_in_allowlist(cfg):
     multi = _multi_cfg(cfg)
     decision = host_gate("evil.example", multi)
-    assert decision == Decision(False, R6, "host 'evil.example' not in the multi-target allowlist")
+    assert decision == Decision(False, "host 'evil.example' not in the multi-target allowlist")
 
 
-def test_host_gate_denies_a_closed_but_configured_host_with_r6():
+def test_host_gate_denies_a_closed_but_configured_host():
     """A host with a `[[git.endpoint]]` entry but no usable read token is
     denied here too — never reaches `UpstreamRouter.resolve` returning None
     past an "already denied" assertion downstream."""
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),))
     decision = host_gate("gitlab.example", cfg)
-    assert decision is not None and decision.rule == "R6"
+    assert decision is not None and "not in the multi-target allowlist" in decision.reason
 
 
 def test_host_gate_allows_a_listed_open_host(cfg):
@@ -178,7 +171,9 @@ async def test_end_to_end_request_routes_by_host_header_and_denies_unknown_host(
 
     assert resp1.status_code == 200 and resp1.json()[0]["name"] == "from-primary"
     assert resp2.status_code == 200 and resp2.json()[0]["name"] == "from-secondary"
-    assert resp3.status_code == 403 and resp3.json()["rule"] == "R6"
+    assert (
+        resp3.status_code == 403 and "not in the multi-target allowlist" in resp3.json()["reason"]
+    )
     await ctx.aclose()
 
 
@@ -186,9 +181,8 @@ async def test_end_to_end_request_routes_by_host_header_and_denies_unknown_host(
 
 
 async def test_reconcile_branches_runs_per_host_with_same_project_path():
-    # gitlab.com and my-gitlab.de both happen to list "acme/infra" — the
-    # regression this guards is a single reconcile run silently combining
-    # (or overwriting) their branch counts.
+    # gitlab.com and my-gitlab.de both list "acme/infra" — this guards against a
+    # single reconcile run silently combining or overwriting their branch counts.
     base = Config(
         allowed_projects=("acme/infra",),
         state_db_path=":memory:",
@@ -223,14 +217,7 @@ async def test_reconcile_branches_runs_per_host_with_same_project_path():
 
 
 # --- regression: a closed endpoint must never crash/lock the whole reconcile ---
-# `cfg.git_endpoints` is what reconcile iterates now (step 04 trims it to open
-# endpoints before ever calling `UpstreamRouter.for_host` — see
-# `guards.git.reconcile.reconcile_branches`/`test_git_reconcile.py`'s own
-# closed-endpoint test for the unit-level coverage of that pre-filter). This
-# is the end-to-end reproduction of the originally reported bug: before the
-# fix, a closed host's `KeyError` out of the host×project loop meant
-# `mark_reconciled` was never called, so the *whole* guard (including the open
-# host) stayed fail-safe-locked forever.
+# A closed host's KeyError must never prevent mark_reconciled for the rest. ---
 
 
 async def test_reconcile_completes_and_unlocks_when_one_of_two_endpoints_is_closed():

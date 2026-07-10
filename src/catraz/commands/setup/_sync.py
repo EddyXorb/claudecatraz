@@ -11,11 +11,10 @@ from catraz.ui import Out
 
 
 def _credentials_mode(root: Path) -> str:
-    """The active agent profile's `credentials.mode` (§05.6): "sync" or
-    "persistent". Falls back to "sync" (today's historical default) if the
-    profile/manifest can't be resolved — a doctor `agent` finding surfaces
-    that separately; sync-gating degrades to the old behaviour rather than
-    silently blocking a broken-but-otherwise-working setup."""
+    """The active agent profile's `credentials.mode`: "sync" or "persistent".
+    Falls back to "sync" if the profile/manifest can't be resolved — a
+    doctor `agent` finding surfaces that separately, so sync-gating doesn't
+    silently block an otherwise-working setup."""
     try:
         return load_manifest(resolve_agent_profile(root)).credentials_mode
     except CliError:
@@ -42,22 +41,13 @@ def _run_sync(
     quiet: bool = False,
 ) -> None:
     """Host-side credential import (`catraz sync`) — only meaningful for
-    `credentials.mode = "sync"` (§05.6). The default profile now defaults to
-    "persistent" (its own `claude login` inside the container instead), so
-    this refuses with a clear message rather than silently importing
-    credentials nothing will use — the least-surprising of the two options
-    §05.6 allows ("eine CLI-Option/klare Meldung unterbindet es").
-
-    Runs the resolved profile's `sync_from_host` in-process (§05.2/§05.3) —
-    no subprocess/entrypoint.py indirection: unlike the container-side entry
-    modes, host-side sync never needs to run inside a container, and the
-    adapter is ordinary Python the host can import directly (via
-    `catraz.agents.load_adapter_module`, which never reads code from
-    `.catraz/`, only the shipped `assets/agents/` tree, §06.2/A2).
-    """
+    `credentials.mode = "sync"`; persistent profiles log in from inside
+    the container instead, so this refuses rather than importing
+    credentials nothing will use. Runs the resolved profile's
+    `sync_from_host` in-process, no container needed."""
     if _credentials_mode(root) == "persistent":
         raise CliError(
-            "this agent profile uses credentials.mode=persistent (§05.6) — "
+            "this agent profile uses credentials.mode=persistent — "
             "`catraz sync` does not apply; run `claude login` inside the "
             "container instead (state persists in .catraz/state/<profile>/)",
             EXIT_GENERAL,
@@ -85,20 +75,15 @@ def _run_sync(
 
 
 def _auto_sync_if_needed(root: Path, out: Out) -> None:
-    """Subscription: keep the sandbox seed credential as fresh as the host (best-effort).
-
-    The host ~/.claude credential advances whenever Claude refreshes it there; the sandbox
-    seed is frozen at sync time (in-container home is tmpfs → refreshes never flow back). So
-    on every (cold) start we re-copy host→sandbox: a host that's used now and then keeps the
-    seed current with no manual `catraz sync`. Strictly one-way; the untrusted agent never
-    writes toward the host. Cannot help when BOTH host and seed are dead (needs an interactive
-    host `claude` login); does NOT reflect the agent's live tmpfs token — only keeps the seed
-    as fresh as the host.
-    """
+    """Subscription: keep the sandbox seed credential as fresh as the host,
+    on a best-effort basis. The in-container home is tmpfs so refreshes
+    never flow back; this re-copies host→sandbox on every cold start,
+    strictly one-way. Can't help if both host and seed are dead (needs an
+    interactive host `claude` login)."""
     if load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription") != "subscription":
         return
     if _credentials_mode(root) == "persistent":
-        return  # §05.6: persistent profiles have nothing to sync from the host
+        return  # persistent profiles have nothing to sync from the host
     had = (claude_home(root) / ".credentials.json").exists()
     if not had:
         out.info("• subscription credential missing — attempting sync…")

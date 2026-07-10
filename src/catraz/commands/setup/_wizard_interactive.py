@@ -20,11 +20,9 @@ from ._wizard_yes import _VALID_GITLAB_MODES
 def _read_branch_prefix(warden_toml: Path | None) -> str:
     """Current (first) branch prefix, shown as the wizard's default.
 
-    Reads warden.toml — either the new list form (``branch_prefixes =
-    [...]``) or the legacy scalar (``branch_prefix = "..."``); the wizard only
-    ever prompts for one, but must read whichever form is on disk so the
-    default reflects reality.
-    """
+    Reads warden.toml — either the new list form (`branch_prefixes =
+    [...]`) or the legacy scalar (`branch_prefix = "..."`); the wizard only
+    ever prompts for one, but reads whichever form is on disk."""
     if not warden_toml or not warden_toml.exists():
         return "claude/"
     text = warden_toml.read_text(encoding="utf-8")
@@ -244,12 +242,10 @@ def _wizard_interactive(
     out: Out,
     inherited: dict[str, Any] | None = None,
 ) -> None:
-    """Interactive wizard: each question offers a sensible default via one Enter.
-
-    When *inherited* is not None (--from mode), inherited values take precedence
-    over locally set values for defaults, and already-set values are re-prompted
-    (like --force).
-    """
+    """Interactive wizard: each question offers a sensible default via one
+    Enter. When *inherited* is not None (--from mode), inherited values take
+    precedence over local ones for defaults, and already-set values are
+    re-prompted (like --force)."""
     print()
 
     auth_mode = _prompt_auth_mode(env, args, out, inherited)

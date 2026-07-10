@@ -1,13 +1,8 @@
-"""pktline.py robustness (W7.2): the command section is untrusted agent input,
-so malformed / truncated framing must degrade gracefully — never crash the proxy.
-
-The happy-path parsing is covered in test_pktline.py; this file pins the edge
-branches (short buffers, missing flush, non-hex length, no capabilities).
-"""
+"""pktline.py robustness: malformed / truncated framing must degrade gracefully, never crash the proxy."""
 
 from __future__ import annotations
 
-from warden.guards.git.pktline import (
+from warden.guards.git.transport.pktline import (
     FLUSH,
     _find_command_end,
     capabilities,
@@ -94,7 +89,7 @@ async def test_read_until_flush_splits_head_from_pack():
 
 async def test_read_until_flush_buffers_whole_body_when_no_flush():
     # gzip / non-pkt-line framing has no discoverable flush → buffer it all and
-    # forward it byte-for-byte (W7.4 fallback), still SHA-preserving.
+    # forward it byte-for-byte, still SHA-preserving.
     blob = b"\x1f\x8b not real pkt-line framing"
     head, rest = await read_until_flush(_aiter(blob))
     assert head == blob

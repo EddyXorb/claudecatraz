@@ -1,9 +1,7 @@
-"""
-Tests for CLI flag-scoping rework (design doc: docs/design/agentic-workflow/05-packaging/08-cli-rework.md).
+"""Tests for CLI flag scoping.
 
-All assertions go through build_parser().parse_args() — NOT SimpleNamespace hand-builds —
-so that argparse scoping regressions are actually caught.
-"""
+All assertions go through build_parser().parse_args() — NOT SimpleNamespace
+hand-builds — so that argparse scoping regressions are actually caught."""
 
 import argparse
 import pytest

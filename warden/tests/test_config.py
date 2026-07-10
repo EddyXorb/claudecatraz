@@ -1,18 +1,8 @@
 """config.py: fail-closed env validation + allowlist matching.
 
-The point of the module is to refuse to start when misconfigured rather than
-run "open". These tests assert that refusal, plus the prefix-confusion guard
-in ``project_allowed``.
-
-There is no ``GITLAB_MODE``/declared operating mode and no startup-fatal
-token requirement. Policy tunables (``allowed_projects``, ``branch_prefixes``,
-the ``max_*`` quotas) come from ``warden.toml`` only — a matching env var has
-no effect. Access is derived per host from which of that host's tokens are
-present (``Config.access_mode``); a host with no usable read token is simply
-``closed`` (a logged warning, never a startup abort), and a deployment with no
-``[[git.endpoint]]`` at all boots and denies every git operation (real
-default-deny, not "feature off").
-"""
+Asserts refusal to start when misconfigured, plus the prefix-confusion
+guard in project_allowed. Policy tunables come from warden.toml only;
+access is derived per host from which tokens are present."""
 
 from __future__ import annotations
 
@@ -20,7 +10,7 @@ import pytest
 
 from warden.core.config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
 from warden.core.config_load import _parse_token_file, from_env
-from warden.guards.gitlab_api.actions import DEFAULT_ACTIONS
+from warden.guards.git.actions import DEFAULT as GIT_DEFAULT
 
 
 # --- project_allowed -----------------------------------------------------------
@@ -64,9 +54,8 @@ def test_from_env_non_strict_allows_partial_config():
     assert cfg.git_endpoints == ()
 
 
-# --- from_env: fail-closed validation ------------------------------------------
-# There is no token/allowlist requirement — only the always-applicable
-# quota/branch-namespace sanity checks can abort startup.
+# --- from_env: fail-closed validation — no token/allowlist requirement; only
+# quota/branch-namespace sanity checks can abort startup. ---
 
 
 def test_empty_config_boots_without_aborting():
@@ -108,7 +97,7 @@ def test_empty_branch_prefix_aborts_startup(tmp_path):
 
 
 def test_empty_branch_prefixes_list_aborts_startup(tmp_path):
-    """An empty ``branch_prefixes`` list is fail-closed: it must not mean "no filter"."""
+    """An empty branch_prefixes list is fail-closed: it must not mean "no filter"."""
     toml = tmp_path / "warden.toml"
     toml.write_text("branch_prefixes = []\n")
     with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
@@ -116,7 +105,7 @@ def test_empty_branch_prefixes_list_aborts_startup(tmp_path):
 
 
 def test_branch_prefixes_list_with_empty_element_aborts_startup(tmp_path):
-    """A blank element (e.g. ``["claude/", ""]``) would allow every branch — reject it."""
+    """A blank element (e.g. ["claude/", ""]) would allow every branch — reject it."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/", ""]\n')
     with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
@@ -134,7 +123,7 @@ def test_branch_prefixes_and_legacy_branch_prefix_both_set_aborts(tmp_path):
 
 
 def test_branch_prefixes_list_from_toml(tmp_path):
-    """A ``branch_prefixes`` list in warden.toml becomes the tuple as-is."""
+    """A branch_prefixes list in warden.toml becomes the tuple as-is."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/", "bot/"]\n')
     cfg = from_env({}, strict=True, toml_path=str(toml))
@@ -142,7 +131,7 @@ def test_branch_prefixes_list_from_toml(tmp_path):
 
 
 def test_legacy_branch_prefix_scalar_becomes_single_element_tuple(tmp_path):
-    """The legacy scalar ``branch_prefix = "..."`` form stays valid as a 1-element list."""
+    """The legacy scalar branch_prefix = "..." form stays valid as a 1-element list."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefix = "claude/"\n')
     cfg = from_env({}, strict=True, toml_path=str(toml))
@@ -179,8 +168,8 @@ def test_tunables_read_from_toml(tmp_path):
 
 def test_policy_env_vars_have_no_effect(tmp_path):
     """BRANCH_PREFIX/MAX_OPEN_MRS/ALLOWED_PROJECTS env vars have no effect —
-    warden.toml is the only source of truth for policy tunables (``GITLAB_URL``/
-    ``GITLAB_MODE``/``ALLOWED_PROJECTS`` env vars are likewise ignored)."""
+    warden.toml is the only source of truth for policy tunables (GITLAB_URL/
+    GITLAB_MODE/ALLOWED_PROJECTS env vars are likewise ignored)."""
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env(
@@ -211,10 +200,8 @@ def test_invalid_toml_type_aborts(tmp_path):
         from_env({}, strict=False, toml_path=str(toml))
 
 
-# --- grouped read_tokens/write_tokens files + per-endpoint access mode --------
-# Credential source for git_endpoints: the access mode is derived from token
-# presence, never a declared mode. The grouped read_tokens/write_tokens files
-# (and their *_FILE indirection) are the only credential mechanism.
+# --- read_tokens/write_tokens files + per-endpoint access mode: access mode
+# is derived from token presence, never a declared mode. ---
 
 
 def test_parse_token_file_splits_host_and_token(tmp_path):
@@ -325,9 +312,8 @@ def test_write_without_read_closes_endpoint_with_warning_no_abort(tmp_path, capl
     assert "gitlab.com" in caplog.text and "read-scoped token" in caplog.text
 
 
-# --- host_allowed: real default-deny from [[git.endpoint]] --------------------
-# Every routable host is an explicit `[[git.endpoint]]`; an empty endpoint
-# list denies every host.
+# --- host_allowed: real default-deny — every routable host is an explicit
+# [[git.endpoint]]; an empty list denies every host. ---
 
 
 def test_host_allowed_empty_endpoint_list_denies_everything():
@@ -356,9 +342,9 @@ def test_host_allowed_allows_a_configured_open_endpoint():
 
 
 def test_host_allowed_denies_a_configured_but_closed_endpoint():
-    """A host with a `[[git.endpoint]]` entry but no usable read token is
-    denied by the same R6 gate as an entirely unlisted host — never reaches
-    `UpstreamRouter.resolve` returning ``None`` past an "already denied"
+    """A host with a [[git.endpoint]] entry but no usable read token is
+    denied by the same host gate as an entirely unlisted host — never
+    reaches UpstreamRouter.resolve returning None past an "already denied"
     assertion."""
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),))
     assert cfg.access_mode("gitlab.com") == "closed"
@@ -388,9 +374,8 @@ def test_git_section_wrong_shape_aborts_startup(tmp_path):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-# --- [git.rules] + [[git.endpoint]] schema -------------------------------------
-# Endpoint taxonomy replacing [git.urls] hosts: parsing, the rules cascade, and
-# per-host lookups.
+# --- [git.rules] + [[git.endpoint]] schema: parsing, the rules cascade,
+# and per-host lookups. ---
 
 
 def test_git_endpoints_parsed_from_toml(tmp_path):
@@ -537,16 +522,15 @@ def test_git_endpoint_missing_host_aborts_startup(tmp_path):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-# --- [git].actions + per-endpoint actions: parsing, cascade, type-cut --------
-# A separate cascade next to `rules` (never inside it), same `_cascade`
-# mechanic as `effective_rules`, then cut with the endpoint `type`.
+# --- [git].actions + per-endpoint actions: parsing, cascade, type-cut ---
+# A separate cascade next to rules, same _cascade mechanic as effective_rules.
 
 
 def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
         "[git]\n"
-        'actions = ["git.fetch", "git.push", "mr.comment"]\n'
+        'actions = ["repo.read", "repo.branch.push", "project.mr.comment"]\n'
         "\n"
         "[[git.endpoint]]\n"
         'host = "gitlab.com"\n'
@@ -556,10 +540,10 @@ def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
         "[[git.endpoint]]\n"
         'host = "my-gitlab.de"\n'
         'type = "gitlab"\n'
-        'actions = ["git.fetch", "mr.comment"]\n'
+        'actions = ["repo.read", "project.mr.comment"]\n'
     )
     cfg = from_env({}, strict=True, toml_path=str(toml))
-    assert cfg.git_actions == ("git.fetch", "git.push", "mr.comment")
+    assert cfg.git_actions == ("repo.read", "repo.branch.push", "project.mr.comment")
 
     gitlab_com = cfg.endpoint_for("gitlab.com")
     assert gitlab_com is not None
@@ -567,54 +551,62 @@ def test_git_actions_and_endpoint_actions_parsed_from_toml(tmp_path):
 
     my_gitlab = cfg.endpoint_for("my-gitlab.de")
     assert my_gitlab is not None
-    assert my_gitlab.actions == ("git.fetch", "mr.comment")
+    assert my_gitlab.actions == ("repo.read", "project.mr.comment")
 
 
 def test_effective_actions_endpoint_override_replaces_completely():
     cfg = Config(
-        git_actions=("git.fetch", "git.push", "mr.create", "mr.comment"),
+        git_actions=("repo.read", "repo.branch.push", "project.mr.create", "project.mr.comment"),
         git_endpoints=(
             GitEndpoint(
                 host="my-gitlab.de",
                 type="gitlab",
-                actions=("git.fetch", "mr.comment"),
+                actions=("repo.read", "project.mr.comment"),
             ),
         ),
     )
-    assert cfg.effective_actions("my-gitlab.de") == ("git.fetch", "mr.comment")
+    assert cfg.effective_actions("my-gitlab.de") == ("repo.read", "project.mr.comment")
 
 
 def test_effective_actions_missing_endpoint_key_inherits_domain():
     cfg = Config(
-        git_actions=("git.fetch", "git.push", "mr.create"),
+        git_actions=("repo.read", "repo.branch.push", "project.mr.create"),
         git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),),
     )
-    assert cfg.effective_actions("gitlab.com") == ("git.fetch", "git.push", "mr.create")
+    assert cfg.effective_actions("gitlab.com") == (
+        "repo.read",
+        "repo.branch.push",
+        "project.mr.create",
+    )
 
 
 def test_effective_actions_missing_domain_falls_back_to_builtin_default():
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),))
-    assert cfg.effective_actions("gitlab.com") == DEFAULT_ACTIONS
+    assert cfg.effective_actions("gitlab.com") == tuple(sorted(action.id for action in GIT_DEFAULT))
 
 
-def test_effective_actions_plain_endpoint_inherits_domain_cut_to_transport():
-    """A `plain` endpoint that inherits `[git].actions` gets the forge ids
-    silently filtered out — no error, unlike an explicit override."""
+def test_effective_actions_plain_endpoint_inherits_domain_cut_to_repo_ids():
+    """A `plain` endpoint that inherits `[git].actions` gets every non-repo.*
+    id silently filtered out — no error, unlike an explicit override."""
     cfg = Config(
-        git_actions=("git.fetch", "git.push", "mr.create", "mr.comment"),
+        git_actions=("repo.read", "repo.branch.push", "project.mr.create", "project.mr.comment"),
         git_endpoints=(GitEndpoint(host="personal-gitserver.it", type="plain"),),
     )
-    assert cfg.effective_actions("personal-gitserver.it") == ("git.fetch", "git.push")
+    assert cfg.effective_actions("personal-gitserver.it") == ("repo.read", "repo.branch.push")
 
 
 def test_effective_actions_plain_endpoint_falls_back_to_builtin_default_cut():
     cfg = Config(git_endpoints=(GitEndpoint(host="personal-gitserver.it", type="plain"),))
-    assert cfg.effective_actions("personal-gitserver.it") == ("git.fetch", "git.push")
+    assert cfg.effective_actions("personal-gitserver.it") == (
+        "repo.branch.create",
+        "repo.branch.push",
+        "repo.read",
+    )
 
 
 def test_effective_actions_explicit_empty_list_is_distinguishable_from_absent():
     cfg = Config(
-        git_actions=("git.fetch", "git.push"),
+        git_actions=("repo.read", "repo.branch.push"),
         git_endpoints=(GitEndpoint(host="my-gitlab.de", type="gitlab", actions=()),),
     )
     assert cfg.effective_actions("my-gitlab.de") == ()
@@ -622,7 +614,7 @@ def test_effective_actions_explicit_empty_list_is_distinguishable_from_absent():
 
 def test_git_actions_unknown_id_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('[git]\nactions = ["git.fetch", "mr.creat"]\n')  # typo
+    toml.write_text('[git]\nactions = ["repo.read", "repo.reed"]\n')  # typo
     with pytest.raises(ConfigError, match="unknown action id"):
         from_env({}, strict=True, toml_path=str(toml))
 
@@ -631,17 +623,17 @@ def test_git_endpoint_actions_unknown_id_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
         '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-        'actions = ["git.fetch", "mr.creat"]\n'  # typo
+        'actions = ["repo.read", "repo.reed"]\n'  # typo
     )
     with pytest.raises(ConfigError, match="unknown action id"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_git_endpoint_explicit_forge_action_on_plain_type_aborts_startup(tmp_path):
+def test_git_endpoint_explicit_invalid_action_on_plain_type_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
         '[[git.endpoint]]\nhost = "personal-gitserver.it"\ntype = "plain"\n'
-        'actions = ["git.fetch", "mr.create"]\n'
+        'actions = ["repo.read", "project.mr.create"]\n'
     )
     with pytest.raises(ConfigError, match="not valid for type"):
         from_env({}, strict=True, toml_path=str(toml))
@@ -649,7 +641,7 @@ def test_git_endpoint_explicit_forge_action_on_plain_type_aborts_startup(tmp_pat
 
 def test_git_actions_non_list_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('[git]\nactions = "git.fetch"\n')
+    toml.write_text('[git]\nactions = "repo.read"\n')
     with pytest.raises(ConfigError, match="must be a list of strings"):
         from_env({}, strict=True, toml_path=str(toml))
 
@@ -657,7 +649,7 @@ def test_git_actions_non_list_aborts_startup(tmp_path):
 def test_git_endpoint_actions_non_list_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
-        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = "git.fetch"\n'
+        '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\nactions = "repo.read"\n'
     )
     with pytest.raises(ConfigError, match="must be a list of strings"):
         from_env({}, strict=True, toml_path=str(toml))

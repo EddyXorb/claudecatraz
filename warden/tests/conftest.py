@@ -12,7 +12,7 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
-from warden.guards.gitlab_api.guard import ApiGuard
+from warden.guards.git.gitlab.guard import ApiGuard
 
 UPSTREAM = "https://gitlab.example"
 HOST = "gitlab.example"
@@ -62,9 +62,8 @@ def respx_router():
 async def client(ctx) -> AsyncIterator[httpx.AsyncClient]:
     app = create_app(ctx)
     transport = httpx.ASGITransport(app=app)
-    # base_url's host becomes the default `Host` header on every request — it
-    # must be the `cfg` fixture's own configured endpoint host (step 03: host
-    # routing is real default-deny now, so an arbitrary/no-op host is denied).
+    # base_url's host becomes the default Host header on every request — it
+    # must match the cfg fixture's configured endpoint host (default-deny).
     async with httpx.AsyncClient(transport=transport, base_url=f"http://{HOST}") as c:
         yield c
     await ctx.router.aclose()

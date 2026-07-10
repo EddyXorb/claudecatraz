@@ -37,12 +37,11 @@ def _make_seed_cred(tmp_path: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def _sync_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """§05.6: the claude profile's default is credentials.mode=persistent,
-    which makes `_auto_sync_if_needed`/`_run_sync` a no-op / a refusal. These
-    tests exercise the `credentials.mode=sync` behaviour (the historical
-    host->sandbox seed refresh), so pin the mode explicitly rather than
-    relying on the shipped default — persistent-mode behaviour has its own
-    tests below (`TestPersistentModeSkipsSync`)."""
+    """The claude profile's default is credentials.mode=persistent, which
+    makes `_auto_sync_if_needed`/`_run_sync` a no-op or a refusal. These
+    tests exercise `credentials.mode=sync` behavior, so pin the mode
+    explicitly rather than relying on the shipped default (persistent-mode
+    has its own tests below in `TestPersistentModeSkipsSync`)."""
     monkeypatch.setattr(setup_sync, "_credentials_mode", lambda root: "sync")
 
 
@@ -124,13 +123,13 @@ def test_run_sync_quiet_suppresses_adapter_stdout(
     assert "Credentials synced" in capsys.readouterr().out
 
 
-# ── §05.6: credentials.mode=persistent skips/refuses sync ──────────────────────
+# ── credentials.mode=persistent skips/refuses sync ──────────────────────
 
 
 class TestPersistentModeSkipsSync:
     """The claude profile's *shipped* default is credentials.mode=persistent
-    (§05.6, Maintainer-Entscheid 2026-07) — these run against the real
-    manifest, so they must NOT inherit the module's autouse `_sync_mode` pin."""
+    — these tests run against the real manifest, so they must NOT inherit
+    the module's autouse `_sync_mode` pin."""
 
     @pytest.fixture(autouse=True)
     def _sync_mode(self) -> None:

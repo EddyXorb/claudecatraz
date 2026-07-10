@@ -1,11 +1,6 @@
-"""GITLAB_MODE-aware init wizard tests.
-
-Covers:
-- --yes mode: GITLAB_MODE inference + policy written to warden.toml
-- Interactive mode: choosing off / read-only / read-write; correct secret writes
-- TOML setters round-trip (inline comments survive; _read_toml_allowed_projects reads back)
-- unset_env_keys unit test
-"""
+"""GITLAB_MODE-aware init wizard tests: --yes mode inference + policy
+writes, interactive off/read-only/read-write selection with correct
+secret writes, TOML setter round-trips, and unset_env_keys."""
 
 import argparse
 import re
@@ -26,9 +21,7 @@ from catraz.policy import (
 from catraz.ui import Out
 
 
-# ---------------------------------------------------------------------------
 # Fixtures / helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_root(tmp_path: Path) -> Path:
@@ -86,9 +79,7 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
 
-# ---------------------------------------------------------------------------
 # --yes mode: GITLAB_MODE inference
-# ---------------------------------------------------------------------------
 
 
 class TestYesGitLabModeInference:
@@ -210,23 +201,41 @@ class TestMultiEndpointScaffold:
         text = toml_path.read_text(encoding="utf-8")
         data = tomllib.loads(text)
         assert data["git"]["actions"] == [
-            "git.fetch",
-            "git.push",
-            "mr.create",
-            "mr.comment",
-            "mr.update",
-            "pipeline.trigger",
+            "repo.read",
+            "repo.branch.create",
+            "repo.branch.push",
+            "project.read",
+            "project.mr.create",
+            "project.mr.edit",
+            "project.mr.close",
+            "project.mr.comment",
+            "project.ci.trigger",
+            "instance.projects.read",
+            "instance.users.read",
+            "instance.meta.read",
         ]
-        # Vocabulary comment documents both default and non-default actions.
+        # Vocabulary comment documents both default and opt-in/never actions.
         for action in (
-            "git.fetch",
-            "git.push",
-            "mr.create",
-            "mr.comment",
-            "mr.update",
-            "pipeline.trigger",
-            "branch.create",
-            "issue.create",
+            "repo.read",
+            "repo.branch.create",
+            "repo.branch.push",
+            "repo.branch.delete",
+            "repo.tag.create",
+            "repo.tag.delete",
+            "project.read",
+            "project.mr.create",
+            "project.mr.edit",
+            "project.mr.close",
+            "project.mr.comment",
+            "project.mr.merge",
+            "project.ci.trigger",
+            "project.issue.create",
+            "project.issue.edit",
+            "project.issue.close",
+            "project.issue.comment",
+            "instance.projects.read",
+            "instance.users.read",
+            "instance.meta.read",
         ):
             assert action in text
         assert "[api.endpoints]" not in text
@@ -318,9 +327,7 @@ class TestYesMigration:
         assert "WARDEN_BRANCH_PREFIX" not in env
 
 
-# ---------------------------------------------------------------------------
 # Interactive mode
-# ---------------------------------------------------------------------------
 
 
 class TestInteractiveModeOff:
@@ -379,13 +386,8 @@ class TestInteractiveModeReadOnly:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
 
-        # With force=True the auth_mode choice is always shown (even when AUTH_MODE
-        # is already in .env).  Input sequence (one call per out.ask / out.choice):
-        #   1) auth_mode choice: "" → default subscription
-        #   2) gitlab_mode choice: "2" → read-only
-        #   3) out.ask("GitLab base URL") → "" → https://gitlab.com (default)
-        #   4) out.ask("projects...") → "group/my-proj"
-        #   5) out.ask("Branch prefix") → "" → "claude/" (default)
+        # With force=True the auth_mode choice always shows; inputs below are one
+        # per prompt: mode default, gitlab read-only, URL default, project, prefix default.
         inputs = iter(["", "2", "", "group/my-proj", ""])
 
         def _input(prompt: object) -> str:
@@ -513,9 +515,7 @@ class TestInteractiveAuthMode:
         assert env.get("AUTH_MODE") == "subscription"
 
 
-# ---------------------------------------------------------------------------
 # TOML setters — must round-trip against the real shipped template
-# ---------------------------------------------------------------------------
 
 
 class TestTomlSetters:
@@ -594,9 +594,7 @@ class TestTomlSetters:
         assert _read_toml_allowed_projects(toml) == projects
 
 
-# ---------------------------------------------------------------------------
 # unset_env_keys
-# ---------------------------------------------------------------------------
 
 
 class TestUnsetEnvKeys:
@@ -638,18 +636,14 @@ class TestUnsetEnvKeys:
         assert env.get("B") == "2"
 
 
-# ---------------------------------------------------------------------------
 # Base image wizard
-# ---------------------------------------------------------------------------
 
 
 class TestBaseImageWizard:
     """Tests for base image configuration in both interactive and --yes modes.
-
     The base Dockerfile is seeded to .catraz/config/image/Dockerfile by
     cmd_init; there is no interactive base-image prompt. BASE_* remain as
-    .env power-user overrides handled by _wizard_yes.
-    """
+    .env power-user overrides handled by _wizard_yes."""
 
     def _run_interactive(
         self,
@@ -673,9 +667,7 @@ class TestBaseImageWizard:
         setup.cmd_init(root, _interactive_args(force=force), Out(color=False))
         return load_env(root / ".catraz" / ".env")
 
-    # ------------------------------------------------------------------
     # Interactive: no base-image prompt; Dockerfile seeded to config/image/
-    # ------------------------------------------------------------------
 
     def test_no_base_image_prompt_in_interactive(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -711,9 +703,7 @@ class TestBaseImageWizard:
         env = self._run_interactive(root, monkeypatch, ["3"], force=False)
         assert env.get("BASE_IMAGE") == "python:3.11"
 
-    # ------------------------------------------------------------------
     # --yes mode tests (BASE_* env override still supported)
-    # ------------------------------------------------------------------
 
     def test_yes_base_image_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--yes with BASE_IMAGE env var writes BASE_IMAGE to .env."""

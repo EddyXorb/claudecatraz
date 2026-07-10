@@ -17,7 +17,6 @@ from .core.config import ConfigError
 from .core.config_load import from_env
 from .core.logging_setup import configure_logging
 from .core.state import SchemaError, State
-from .guards.gitlab_api.catalog import CatalogConfigError
 
 log = logging.getLogger("warden")
 
@@ -74,9 +73,7 @@ async def _serve() -> None:
     audit.start()
     ctx = build_context(cfg, state, audit)
 
-    # Reconcile BEFORE opening the agent port: GitLab truth dominates. This is a
-    # global lifecycle guarantee (port-open timing), so it lives in the runtime
-    # and stays out of any individual guard (won't-do: see §07 Punkt 5).
+    # Reconcile BEFORE opening the agent port: GitLab truth dominates.
     for g in ctx.guards:
         await g.startup()
     if not await ctx.reconcile_all():
@@ -88,11 +85,8 @@ async def _serve() -> None:
 def main() -> None:
     try:
         asyncio.run(_serve())
-    except (ConfigError, CatalogConfigError, SchemaError) as exc:
-        # All three are fail-closed startup aborts: bad config (shape or
-        # catalog-activation), or a state DB this build cannot understand.
-        # None should ever surface as a traceback — a clean message and a
-        # non-zero exit is the contract.
+    except (ConfigError, SchemaError) as exc:
+        # Fail-closed startup abort: never surface as a traceback.
         print(f"warden: {exc}", file=sys.stderr)
         sys.exit(2)
 

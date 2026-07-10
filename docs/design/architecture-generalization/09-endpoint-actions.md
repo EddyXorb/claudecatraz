@@ -1,5 +1,14 @@
 # 09 — Endpoint-Actions: per-Endpoint erlaubte Agent-Aktionen
 
+> **Superseded:** [`10-actions-rework.md`](10-actions-rework.md) replaces this
+> whole document's model. The invariant REST read table (§4, point 4: "Die
+> REST-Read-Tabelle bleibt invariant") is gone — projectless reads are
+> ordinary configurable actions now; the `git.fetch`/`git.push` transport
+> verbs and the eight-action vocabulary (`git.fetch`, `git.push`, `mr.create`,
+> `mr.comment`, `mr.update`, `pipeline.trigger`, `branch.create`,
+> `issue.create`) are replaced by the twenty-id git-namespace vocabulary. This
+> document stays as history of the doctrine that led there.
+
 Bisher ist per-Endpoint nur konfigurierbar, *wo* der Agent arbeiten darf
 (`allowed_projects`) und *wie streng* die Limits sind (`rules`); *was* er tun darf,
 ist global: die REST-Write-Aktivierung (`[api.endpoints].enable`) gilt für alle

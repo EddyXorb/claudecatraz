@@ -1,8 +1,4 @@
-"""Shared CLI error type + exit codes (see 04-cli.md §4).
-
-Extracted from cli.py so paths.py/compose.py/doctor.py can import these
-without an import cycle through cli.py.
-"""
+"""Shared CLI error type + exit codes, extracted to avoid an import cycle through cli.py."""
 
 EXIT_OK = 0
 EXIT_GENERAL = 1

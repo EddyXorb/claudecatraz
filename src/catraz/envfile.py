@@ -44,12 +44,7 @@ def set_env_values(path: Path, updates: dict[str, str]) -> None:
 
 
 def unset_env_keys(path: Path, keys: list[str]) -> None:
-    """Remove active KEY=value lines for the given keys from a .env file.
-
-    Lines that are already commented out (``# KEY=…``) are left untouched.
-    A no-op when the file does not exist or none of the keys are present as
-    active assignments.
-    """
+    """Remove active KEY=value lines for the given keys; commented-out lines are left untouched."""
     if not path.exists():
         return
     keys_set = set(keys)

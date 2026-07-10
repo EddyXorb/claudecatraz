@@ -13,14 +13,11 @@ _CLAUDE_AGENT = _REPO / "src/catraz/assets/agents/claude"
 
 
 def _stage_image_layout(dst: Path) -> None:
-    """Recreate the flattened, built-image layout (§05.2's `layer.Dockerfile`)
-    in a plain directory: entrypoint.py + agent_contract.py + git_routing.py
-    (generic) next to agent_adapter.py/agent.toml/AGENT.md.tmpl (the one
-    profile the image was "built" for — claude, here). Entrypoint's own
-    ``sys.path.insert(0, __file__.parent)`` then makes `import agent_contract`
-    / a fixed-path load of `agent_adapter.py` resolve exactly as it would
-    inside a real container — no assets/ package tricks needed in tests.
-    """
+    """Recreate the flattened, built-image layout in a plain directory:
+    entrypoint.py + agent_contract.py + git_routing.py next to
+    agent_adapter.py/agent.toml/AGENT.md.tmpl for the claude profile, so
+    entrypoint's own path-based imports resolve as they would in a real
+    container."""
     shutil.copy2(_CONTAINER / "entrypoint.py", dst / "entrypoint.py")
     shutil.copy2(_CONTAINER / "agent_contract.py", dst / "agent_contract.py")
     shutil.copy2(_CONTAINER / "git_routing.py", dst / "git_routing.py")
@@ -40,18 +37,16 @@ def ep(tmp_path_factory: pytest.TempPathFactory) -> Any:
     spec = importlib.util.spec_from_loader("entrypoint", loader)
     assert spec is not None
     mod = importlib.util.module_from_spec(spec)
-    # `from __future__ import annotations` dataclasses in agent_contract.py
-    # resolve string annotations via sys.modules[cls.__module__] — register
-    # before exec (the same reason `_load_adapter`/`catraz.agents` do it).
+    # Register in sys.modules before exec so string annotations resolve.
     sys.modules[spec.name] = mod
     loader.exec_module(mod)
     return mod
 
 
 class FakeAdapter:
-    """A minimal stand-in satisfying the AgentAdapter contract (§05.2), for
-    tests that exercise the *generic* entrypoint orchestration (cmd_exec/
-    cmd_start/cmd_run/_bootstrap) without any claude-specific behaviour."""
+    """A minimal stand-in satisfying the AgentAdapter contract, for tests
+    that exercise the generic entrypoint orchestration without any
+    claude-specific behaviour."""
 
     def __init__(
         self,

@@ -1,13 +1,8 @@
-"""Claude Code adapter (§05.2/§05.3) — the one place that knows Claude's
-credential layout, CLI flags, and remote-control support.
-
-Implements the ``AgentAdapter`` contract from ``agent_contract.py`` (co-located
-in the built image, see ``layer.Dockerfile``) as plain module-level functions.
-Never imported from ``.catraz/`` (§06.2/A2) — it is a mitgeliefertes asset,
-selected via the static registry in ``catraz.agents`` and baked into exactly
-one image per build (``layer.Dockerfile`` COPYs *this* file, nothing chooses
-between adapters at container runtime).
-"""
+"""Claude Code adapter: the one place that knows Claude's credential layout,
+CLI flags, and remote-control support. Implements the `AgentAdapter` contract
+from `agent_contract.py` as plain module-level functions, selected via the
+static registry in `catraz.agents` and baked into exactly one image per
+build."""
 
 from __future__ import annotations
 
@@ -26,7 +21,7 @@ _TEMPLATE_PATH = Path(__file__).resolve().parent / "AGENT.md.tmpl"
 
 
 class _Manifest:
-    """Typed view of this adapter's own ``agent.toml`` (§05.3)."""
+    """Typed view of this adapter's own `agent.toml`."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         creds = data.get("credentials", {})
@@ -48,9 +43,9 @@ def _read_json(p: Path) -> dict[str, Any]:
 
 
 def _log_dir() -> Path:
-    """Where to place ``--debug-file`` output — the generic entrypoint resolves
-    a durable-if-possible directory and hands it down via ``AGENT_LOG_DIR``
-    (see ``entrypoint.resolve_log_dir``); fall back to the live home."""
+    """Where to place `--debug-file` output — the entrypoint resolves a
+    durable-if-possible directory via `AGENT_LOG_DIR`; fall back to the live
+    home."""
     d = os.environ.get("AGENT_LOG_DIR")
     return Path(d) if d else Path.home() / ".claude"
 
@@ -79,18 +74,11 @@ def _seed_from_ro(home: Path, ro_dir: Path | None) -> dict[str, Any]:
 
 
 def _wire_persistent(home: Path, state_dir: Path) -> None:
-    """`credentials.mode = "persistent"` (§05.6): symlink *only* the
-    credential file and the session/project state directory into the writable
-    per-repo state dir (`.catraz/state/claude/`, mounted read-write at
-    `state_dir`) — settings/hooks/slash-commands stay freshly built into the
-    tmpfs home every start (A11: a fully-persistent ~/.claude would be a
-    self-reinfection surface — a compromised session could write a hook that
-    infects every future session across restarts).
-
-    A first-ever login has nothing to symlink to yet: the target may not
-    exist — that's fine, `claude login` creates it through the (dangling
-    until then) symlink on first write.
-    """
+    """`credentials.mode = "persistent"`: symlinks only the credential file
+    and session/project state into the writable per-repo state dir; settings
+    and hooks are rebuilt fresh every start so a compromised session can't
+    persist. A first-ever login has nothing to symlink to yet — `claude
+    login` creates the target through the dangling symlink on first write."""
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     state_dir.chmod(0o700)
     cred_link = home / ".credentials.json"
@@ -109,8 +97,8 @@ def _wire_persistent(home: Path, state_dir: Path) -> None:
 
 
 def prepare_home(home: Path, secrets: Secrets) -> None:
-    """§05.2 contract: write credential files + settings layout into the live
-    (tmpfs) home. Never touches Forge or foreign-model credentials."""
+    """Write credential files and settings layout into the live (tmpfs)
+    home. Never touches Forge or foreign-model credentials."""
     home.mkdir(parents=True, exist_ok=True)
     manifest = _manifest()
     seed: dict[str, Any] = {}
@@ -124,10 +112,8 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
         "hasCompletedOnboarding": True,
         "lastOnboardingVersion": "1.0",
     }
-    # NOTE (Claude Code ≥2.1.x): bypassPermissionsModeAccepted migrated out of
-    # .claude.json into settings.json's skipDangerousModePermissionPrompt and the
-    # old key gets deleted — set both so older *and* newer CLI versions suppress
-    # the one-time bypass-permissions dialog.
+    # bypassPermissionsModeAccepted moved into settings.json's
+    # skipDangerousModePermissionPrompt on newer CLI versions; set both keys.
     data["bypassPermissionsModeAccepted"] = True
     if secrets.remote:
         data["remoteDialogSeen"] = True
@@ -149,7 +135,7 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
 
 
 def command(argv: list[str]) -> list[str]:
-    """§05.2 contract: argv for a one-off run."""
+    """Argv for a one-off run."""
     m = _manifest()
     base = [m.command, "--dangerously-skip-permissions"]
     if not any(a == "-d" or a.startswith("--debug") for a in argv):
@@ -158,8 +144,8 @@ def command(argv: list[str]) -> list[str]:
 
 
 def environ(secrets: Secrets) -> dict[str, str]:
-    """§05.2 contract: extra env vars the agent process needs. Raises on a
-    missing api_key so the generic entrypoint can fail closed and loud."""
+    """Extra env vars the agent process needs; raises on a missing api_key
+    so the entrypoint fails closed."""
     if secrets.auth_mode != "api_key":
         return {}
     key = ""
@@ -175,8 +161,8 @@ def environ(secrets: Secrets) -> dict[str, str]:
 
 
 def remote_command() -> list[str] | None:
-    """§05.2 contract: argv for the remote-control daemon, or None if this
-    profile disables it (`modes.remote = false`) — callers must fail closed."""
+    """Argv for the remote-control daemon, or None if this profile disables
+    it (`modes.remote = false`); callers must fail closed."""
     m = _manifest()
     if not m.remote_allowed:
         return None
@@ -200,9 +186,9 @@ def remote_command() -> list[str] | None:
 
 
 def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
-    """§05.2 contract: render this project's actual namespace prefix and
-    Warden REST base into the packaged template — target *and* content,
-    not merely a static file placed unchanged."""
+    """Render this project's namespace prefix and Warden REST base into the
+    packaged template — both target and content, not a static file placed
+    unchanged."""
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     prefix_example = ctx.branch_prefixes[0] if ctx.branch_prefixes else "claude/"
     content = (
@@ -219,9 +205,7 @@ def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
 def sync_from_host(source: Path | None, home: Path) -> None:
     """Copy `.credentials.json` (+ `.claude.json`) from the host `~/.claude`
     into `home` — the `catraz sync` path for `credentials.mode = "sync"`.
-    Not part of the mandated §05.2 contract (entrypoint checks for it via
-    ``getattr``); adapters that only support `persistent` mode may omit it.
-    """
+    Optional: adapters that only support `persistent` mode may omit it."""
     src_dir = (
         source or Path(os.environ.get("CLAUDE_CREDENTIAL_SOURCE") or "~/.claude")
     ).expanduser()
@@ -248,12 +232,3 @@ def sync_from_host(source: Path | None, home: Path) -> None:
             )
         )
     print(f"Credentials synced into {home}")
-
-
-# NOTE (Stage 01 — Bootstrap hardening, R6): historically this module also
-# carried configure_git()/configure_gitlab(), which injected GitLab
-# credentials (GITLAB_GIT_TOKEN via ~/.netrc, GITLAB_API_TOKEN via an MCP
-# Authorization header) into the agent container. Both were removed — the
-# agent holds no Forge credential; GitLab access runs through the Warden
-# instead (git insteadOf rewrite in the generic entrypoint's
-# `configure_git_warden`, REST via the Warden's own base URL).

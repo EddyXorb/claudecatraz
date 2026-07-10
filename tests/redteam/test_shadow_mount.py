@@ -1,20 +1,8 @@
-"""Red-Team tests for Doc 03 — shadow mount.
-
-T1–T4, T7, T8 require Docker; T7b (host-side symlink guard) is a pure unit
-test that lives in tests/cli/test_invariants.py.
-
-Marker classification:
-  - T2, T7a, T8: only use `docker run alpine` (no catraz stack needed).
-    These run in CI via `-m "not slow"`.
-  - T1, T3, T4: require a live catraz stack (live_stack fixture, @slow).
-    These need a Docker runner with a real ANTHROPIC_API_KEY and are NOT CI-gated.
-
-Run fast (CI-equivalent):
-    uv run --with pytest python -m pytest tests/redteam/ -m "not slow" -q
-
-Run all (local, with real key + Docker):
-    uv run --with pytest python -m pytest tests/redteam/ -q
-"""
+"""Red-Team tests for shadow mount protection.
+T2, T7a, T8 run in CI (`-m "not slow"`, docker run alpine only); T1, T3, T4
+are @slow and need a live catraz stack with Docker plus a real
+ANTHROPIC_API_KEY. T7b (host-side symlink guard) lives in
+tests/cli/test_invariants.py."""
 
 import os
 import shutil
@@ -71,17 +59,10 @@ def test_t2_tmpfs_overdeck_ordering(tmp_path: Path) -> None:
 @pytest.fixture(scope="module")
 def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Start a catraz stack in a temporary project dir; tear down after module.
-
-    Requires Docker + a real ANTHROPIC_API_KEY in the environment.
-    Used only by @slow tests (T1/T3/T4) — not CI-gated.
-
-    Notes:
-    - init runs with check=False: the closing doctor may exit 3 (preflight warnings
-      such as missing GitLab tokens), but the .catraz scaffold is created regardless.
-    - .catraz/.env is written AFTER init so it is not overwritten by init's seed.
-    - run claude-remote starts the agent daemon (profiles: ["remote"] in compose).
-    - DEV_UID is set so bind-mount ownership matches the runner's uid.
-    """
+    Requires Docker + a real ANTHROPIC_API_KEY; used only by @slow tests
+    (T1/T3/T4). init runs with check=False (doctor may warn); .env is
+    written after init so it isn't overwritten; DEV_UID matches the
+    runner's uid."""
     root = tmp_path_factory.mktemp("catraz-proj")
     env = dict(os.environ, HOME=str(root))
     catraz = [sys.executable, "-m", "catraz"]
@@ -100,7 +81,7 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         f"DEV_UID={os.getuid()}\n"
     )
 
-    # `run claude-remote` starts the Remote-Control daemon (item 07 of cli-worklist).
+    # `run claude-remote` starts the Remote-Control daemon.
     subprocess.run([*catraz, "-C", str(root), "run", "claude-remote"], env=env, check=True)
     yield root
     subprocess.run([*catraz, "-C", str(root), "stop"], env=env, check=False)
