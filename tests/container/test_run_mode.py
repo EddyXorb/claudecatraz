@@ -21,7 +21,6 @@ def test_prepare_home_oneoff_run_bypass_default(
     secrets = claude_adapter.Secrets(
         auth_mode="api_key",
         subscription_ro_dir=None,
-        persistent_state_dir=None,
         api_key_file=None,
         api_key_env_fallback="",
         remote=False,
@@ -45,7 +44,6 @@ def test_prepare_home_remote_sets_dialog_seen(
     secrets = claude_adapter.Secrets(
         auth_mode="api_key",
         subscription_ro_dir=None,
-        persistent_state_dir=None,
         api_key_file=None,
         api_key_env_fallback="",
         remote=True,

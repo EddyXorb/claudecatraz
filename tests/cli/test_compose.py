@@ -127,3 +127,43 @@ def test_source_cmd_orders_hosts_fragment_before_user_override(tmp_path: Path) -
     hosts_idx = cmd.index(str(tmp_path / ".catraz/compose.hosts.yml"))
     override_idx = cmd.index(str(tmp_path / ".catraz/compose.override.yml"))
     assert hosts_idx < override_idx
+
+
+# ── credentials.mode overlay selection ────────────────────────────────
+
+
+def _persistent_home_yml() -> str:
+    from catraz.paths import asset_root
+
+    return str(asset_root() / "assets/compose/home.persistent.yml")
+
+
+def test_persistent_mode_layers_home_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".catraz").mkdir()
+    monkeypatch.setattr(compose, "_credentials_mode", lambda root: "persistent")
+    cmd = compose.base_cmd(tmp_path)
+    assert _persistent_home_yml() in cmd
+    # After the auth layer, before any user override (override still wins last).
+    auth_idx = next(i for i, a in enumerate(cmd) if a.endswith("auth.subscription.yml"))
+    assert cmd.index(_persistent_home_yml()) > auth_idx
+
+
+def test_sync_mode_omits_home_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".catraz").mkdir()
+    monkeypatch.setattr(compose, "_credentials_mode", lambda root: "sync")
+    assert _persistent_home_yml() not in compose.base_cmd(tmp_path)
+
+
+def test_claude_default_profile_is_persistent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shipped claude manifest selects persistent, so a default setup gets
+    the full-bind home overlay (and run/shell inherit it via _source_cmd)."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=subscription\n")
+    assert compose._credentials_mode(tmp_path) == "persistent"
+    assert _persistent_home_yml() in compose.base_cmd(tmp_path)

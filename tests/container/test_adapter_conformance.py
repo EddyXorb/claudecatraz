@@ -64,7 +64,6 @@ def _secrets_for(adapter: Any, **overrides: Any) -> Any:
     base = dict(
         auth_mode="api_key",
         subscription_ro_dir=None,
-        persistent_state_dir=None,
         api_key_file=None,
         api_key_env_fallback="dummy-key",
         remote=False,

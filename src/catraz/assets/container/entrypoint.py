@@ -22,12 +22,8 @@ def _env_true(name: str) -> bool:
 
 
 # Host-persistent target for --debug-file output; bind-mounted so debug logs
-# survive container exit (the live agent home is tmpfs and loses them).
+# survive container exit even when the live agent home is a tmpfs (sync mode).
 AGENT_LOG_DIR = Path("/var/log/agent-debug")
-
-# Writable per-repo state, always mounted (harmless if unused); an adapter
-# opts in via `credentials.mode = "persistent"` in its manifest.
-PERSISTENT_STATE_DIR = Path("/var/lib/agent-state")
 
 
 def resolve_log_dir(home: Path) -> Path:
@@ -140,7 +136,6 @@ def _resolve_secrets(home: Path, *, remote: bool) -> Secrets:
     return Secrets(
         auth_mode=mode,
         subscription_ro_dir=ro if ro.is_dir() else None,
-        persistent_state_dir=PERSISTENT_STATE_DIR if PERSISTENT_STATE_DIR.is_dir() else None,
         api_key_file=Path(api_key_file_env) if api_key_file_env else None,
         api_key_env_fallback=os.environ.get("ANTHROPIC_API_KEY", ""),
         remote=remote,

@@ -22,13 +22,11 @@ def read_toml(path: Path) -> dict[str, Any]:
 class Secrets:
     """File-based secret material the entrypoint resolves before handing off
     to the adapter — paths, not raw values, matching catraz's "secrets are
-    file references" convention. `persistent_state_dir` is a writable
-    per-repo directory, always mounted; an adapter opts into it only when
-    its manifest declares `credentials.mode = "persistent"`."""
+    file references" convention. How the live home persists is the adapter's
+    call, keyed off its manifest's `credentials.mode`, not a field here."""
 
     auth_mode: str
     subscription_ro_dir: Path | None
-    persistent_state_dir: Path | None
     api_key_file: Path | None
     api_key_env_fallback: str
     remote: bool

@@ -1,0 +1,11 @@
+# credentials.mode = "persistent": the live agent home IS the per-repo
+# persistent store. This bind replaces the base file's tmpfs mount of
+# /home/dev/.claude (compose merges volumes by target), so `claude login` and
+# token refreshes land in .catraz/state/<profile>/ and survive container exit.
+# Layered by compose.py only when the active profile's manifest selects it.
+services:
+  claude-dev-env:
+    volumes:
+      - type: bind
+        source: ${PROJECT_DIR}/.catraz/state/${AGENT_PROFILE:-claude}
+        target: /home/dev/.claude
