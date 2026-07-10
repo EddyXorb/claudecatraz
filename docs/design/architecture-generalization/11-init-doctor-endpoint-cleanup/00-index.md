@@ -13,7 +13,7 @@ column in the same commit as the step.
 
 | Level | Step | Purpose | Status |
 | --- | --- | --- | --- |
-| 01 | operator-surface | init wizard + doctor + `warden.toml` template + `.env.example` onto grouped host-keyed tokens and auto-synthesised `[[git.endpoint]]`; remove `GITLAB_MODE`/`GITLAB_URL`; sweep old secret filenames; update/extend tests | ☐ |
+| 01 | operator-surface | init wizard + doctor + `warden.toml` template + `.env.example` onto grouped host-keyed tokens and auto-synthesised `[[git.endpoint]]`; remove `GITLAB_MODE`/`GITLAB_URL`; sweep old secret filenames; update/extend tests | ✅ a33089a |
 | 01 | credential-modes | `persistent` = full `.catraz/state/<profile>/` bind (delete the selective-symlink wiring), `sync` = tmpfs (unchanged); compose overlay per `credentials.mode`; `prepare_home` merges instead of clobbering; update tests | ☐ |
 
 The two steps touch disjoint files and may be done in either order; do
