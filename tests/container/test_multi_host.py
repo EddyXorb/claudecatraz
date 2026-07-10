@@ -1,7 +1,7 @@
 """Container-level integration test for Doc 08 (multi-target) §8 / step 08
 (docs/design/architecture-generalization/08-multi-target/08-container-test.md):
 one `.catraz` serves TWO listed hosts through the same Warden and rejects a
-THIRD, unlisted host (R6 default-deny) — plus the optional closed-endpoint
+THIRD, unlisted host (default-deny) — plus the optional closed-endpoint
 case (§4.2 fail-closed-degrade).
 
 This is the compose-wired complement to the unit tests of steps 01-07: it
@@ -202,18 +202,17 @@ def _assert_routed(status: int, body: str, host: str) -> None:
     `forward()` — proof the host was routed to its upstream. With no real forge
     behind these mock hostnames (§"Nicht tun": no real instances) `forward()`
     then fails to connect, which surfaces as a deterministic 500 (verified
-    live). Any 403 here would mean a gate denied it (host OR project — both use
-    rule R6), so a plain "not 403" is too weak; the 500 pins "routed, upstream
-    just absent"."""
+    live). Any 403 here would mean a gate denied it (host OR project — both
+    the same allowlist gate), so a plain "not 403" is too weak; the 500 pins
+    "routed, upstream just absent"."""
     assert status == 500, (
         f"host {host!r} expected to route to its (absent) upstream -> 500, got {status}: {body}"
     )
 
 
 def _assert_host_denied(status: int, body: str, host: str) -> None:
-    assert status == 403, f"expected R6 default-deny for {host!r}, got {status}: {body}"
+    assert status == 403, f"expected default-deny for {host!r}, got {status}: {body}"
     payload = json.loads(body)
-    assert payload["rule"] == "R6"
     assert "multi-target allowlist" in payload["reason"]
     assert host in payload["reason"]
 
@@ -236,7 +235,7 @@ def test_two_listed_hosts_reachable_git_and_rest(live_stack: Stack) -> None:
 @pytest.mark.slow
 def test_third_unlisted_host_default_denied(live_stack: Stack) -> None:
     """§8 Umsetzung point 3: a Host header naming an endpoint nowhere in
-    warden.toml is R6 default-denied, for both git and REST paths."""
+    warden.toml is default-denied, for both git and REST paths."""
     status, body = _probe(live_stack, host=HOST_UNLISTED, path=_git_path(PROJECT))
     _assert_host_denied(status, body, HOST_UNLISTED)
 

@@ -232,10 +232,9 @@ def _assert_routed(status: int, body: str, host: str, label: str) -> None:
     )
 
 
-def _assert_denied(status: int, body: str, *, rule: str, reason_contains: list[str]) -> None:
-    assert status == 403, f"expected {rule} deny, got {status}: {body}"
+def _assert_denied(status: int, body: str, *, reason_contains: list[str]) -> None:
+    assert status == 403, f"expected deny, got {status}: {body}"
     payload = json.loads(body)
-    assert payload["rule"] == rule, f"expected rule {rule}, got {payload!r}"
     for needle in reason_contains:
         assert needle in payload["reason"], f"expected {needle!r} in reason, got {payload!r}"
 
@@ -255,15 +254,16 @@ def _assert_action_gate_cleared_but_state_locked(status: int, body: str, host: s
     That lock is checked in `policy._quota_check`, reached only *after* a
     write has already matched a recognizer in the host's effective table
     (`policy.decide` -> `decide_scope`) — a write whose action is *not*
-    enabled for the host never gets that far; it default-denies with R3
-    first (see `test_review_only_endpoint_narrows_selectively`'s `mr.create`
-    assertion). So R5 "state locked" here is itself the proof the action gate
-    passed for `mr.create` on this host: the *only* other way to reach this
-    exact deny is R3, and that is a different action-gate outcome entirely.
+    enabled for the host never gets that far; it default-denies with a "not
+    enabled for host" deny first (see
+    `test_review_only_endpoint_narrows_selectively`'s `mr.create` assertion).
+    So the "state locked" deny here is itself the proof the action gate
+    passed for `mr.create` on this host: the *only* other way to reach a deny
+    for this request shape is that action-gate "not enabled" outcome, which is
+    entirely different.
     """
-    assert status == 403, f"host {host!r}: expected R5 state-locked deny, got {status}: {body}"
+    assert status == 403, f"host {host!r}: expected state-locked deny, got {status}: {body}"
     payload = json.loads(body)
-    assert payload["rule"] == "R5", f"expected rule R5, got {payload!r}"
     assert "state locked" in payload["reason"], (
         f"expected 'state locked' in reason, got {payload!r}"
     )
@@ -280,10 +280,10 @@ def test_full_endpoint_push_and_mr_create_routed(live_stack: Stack) -> None:
     "routed" 500 (absent upstream). `mr.create` does consult quota state
     first — and in this environment (deliberately no real forge behind any
     of the three hosts) that state can never finish reconciling, so it
-    denies R5 "state locked" instead of reaching `forward()`; see
+    denies "state locked" instead of reaching `forward()`; see
     `_assert_action_gate_cleared_but_state_locked` for why that is still the
     correct, specific proof that the action gate passed (as opposed to
-    `review-only`'s R6 "not enabled" for the same request shape).
+    `review-only`'s "not enabled" deny for the same request shape).
     """
     status, body = _probe(live_stack, host=HOST_FULL, path=_git_advertise_path(PROJECT, push=True))
     _assert_routed(status, body, HOST_FULL, "push discovery (advertise-receive)")
@@ -317,15 +317,15 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
       a deliberate carve-out: MR diffs are visible under `project.read` alone,
       with no `repo.read` needed).
     - `project.mr.create` is denied (not in this host's effective actions) —
-      same status/rule as
+      same "not enabled for host" 403 as
       ``test_two_hosts_with_different_actions_behave_differently_on_the_same_guard``
-      in ``warden/tests/test_api_proxy.py`` (403, R6).
+      in ``warden/tests/test_api_proxy.py``.
     - `project.mr.comment` (a `mr.note` recognizer) stays allowed (routed) —
       proving the narrowing is selective: two REST writes on the very same
       host, one denied and one allowed, per the configured `actions` list
       alone.
-    - Merge is denied regardless of config (R4, the criticality gate) — a
-      config that could never enable it in the first place, unlike R6.
+    - Merge is denied regardless of config (the criticality gate) — a config
+      that could never enable it in the first place, unlike the action gate.
 
     A real, in-container push denial and an "API-with-repo.read-off" probe
     (repo.read disabled while project.read stays on) are deliberately not
@@ -360,7 +360,6 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
     _assert_denied(
         status,
         body,
-        rule="R6",
         reason_contains=["project.mr.create", "not enabled", HOST_REVIEW],
     )
 
@@ -376,7 +375,7 @@ def test_review_only_endpoint_narrows_selectively(live_stack: Stack) -> None:
     status, body = _probe(
         live_stack, host=HOST_REVIEW, path=_rest_mr_merge_path(PROJECT, 1), method="PUT"
     )
-    _assert_denied(status, body, rule="R4", reason_contains=["irreversible"])
+    _assert_denied(status, body, reason_contains=["irreversible"])
 
 
 @pytest.mark.slow
