@@ -50,7 +50,7 @@ def _run(
     explicitly), run configure_git_warden against it, return the toml path
     used (so callers can re-derive per-host insteadOf keys)."""
     monkeypatch.setenv("HOME", str(home))
-    for k in ("GITLAB_MODE", "GITLAB_URL", "WARDEN_GIT_URL"):
+    for k in ("WARDEN_GIT_URL",):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)

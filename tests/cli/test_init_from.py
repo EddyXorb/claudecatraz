@@ -1,4 +1,4 @@
-"""Workstream D — catraz init --from <path> tests."""
+"""catraz init --from <path> tests."""
 
 import argparse
 import types
@@ -8,6 +8,7 @@ import pytest
 
 from catraz.commands import setup
 from catraz.commands.setup._from import load_inherited, stage_inherited, _ENV_ALLOWLIST
+from catraz.commands.setup._secrets import _read_grouped_token
 from catraz.envfile import load_env
 from catraz.ui import Out
 
@@ -19,11 +20,9 @@ def _make_source(
     tmp_path: Path,
     *,
     auth_mode: str = "subscription",
-    gitlab_mode: str = "read-write",
-    gitlab_url: str = "https://gitlab.example.com",
     dev_uid: str = "9999",
 ) -> Path:
-    """Create a fully initialised source sandbox."""
+    """Create a fully initialised source sandbox (grouped host-keyed tokens)."""
     src = tmp_path / "src"
     src.mkdir()
     cat = src / ".catraz"
@@ -31,21 +30,19 @@ def _make_source(
     (cat / "config").mkdir()
     (cat / "config" / "image").mkdir(parents=True)
     (cat / "config" / "image" / "Dockerfile").write_text("FROM ubuntu:24.04\nRUN echo src\n")
-    (cat / "config" / "warden.toml").write_text('allowed_projects = ["group/proj"]\n')
+    (cat / "config" / "warden.toml").write_text(
+        'allowed_projects = ["group/proj"]\n\n'
+        '[[git.endpoint]]\nhost = "gitlab.example.com"\ntype = "gitlab"\n'
+    )
     (cat / "config" / "squid.conf").write_text("# squid src\n")
     (cat / "config" / "allowlist.txt").write_text("example.com\n")
-    (cat / ".env").write_text(
-        f"AUTH_MODE={auth_mode}\n"
-        f"GITLAB_MODE={gitlab_mode}\n"
-        f"GITLAB_URL={gitlab_url}\n"
-        f"DEV_UID={dev_uid}\n"
-    )
+    (cat / ".env").write_text(f"AUTH_MODE={auth_mode}\nDEV_UID={dev_uid}\n")
     secrets = cat / "secrets"
     secrets.mkdir(mode=0o700)
-    (secrets / "gitlab_read_token").write_text("glpat-src-read")
-    (secrets / "gitlab_read_token").chmod(0o600)
-    (secrets / "gitlab_write_token").write_text("glpat-src-write")
-    (secrets / "gitlab_write_token").chmod(0o600)
+    (secrets / "read_tokens").write_text("gitlab.example.com glpat-src-read\n")
+    (secrets / "read_tokens").chmod(0o600)
+    (secrets / "write_tokens").write_text("gitlab.example.com glpat-src-write\n")
+    (secrets / "write_tokens").chmod(0o600)
     claude_dir = secrets / "claude"
     claude_dir.mkdir(mode=0o700)
     (claude_dir / ".credentials.json").write_text('{"token":"src-cred"}')
@@ -89,7 +86,6 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_inherited_invalid_path(tmp_path: Path) -> None:
-    """Missing .catraz raises CliError."""
     from catraz.errors import CliError
 
     with pytest.raises(CliError):
@@ -97,7 +93,6 @@ def test_load_inherited_invalid_path(tmp_path: Path) -> None:
 
 
 def test_load_inherited_no_catraz_dir(tmp_path: Path) -> None:
-    """A dir without .catraz/ raises CliError."""
     from catraz.errors import CliError
 
     with pytest.raises(CliError):
@@ -105,25 +100,22 @@ def test_load_inherited_no_catraz_dir(tmp_path: Path) -> None:
 
 
 def test_load_inherited_curated_env_keys(tmp_path: Path) -> None:
-    """Only allowlisted keys are returned; DEV_UID is excluded."""
+    """AUTH_MODE is inherited; DEV_UID and the retired GITLAB_* keys are not."""
     src = _make_source(tmp_path)
-    result = load_inherited(src)
-    env = result["env"]
-    assert "DEV_UID" not in env, "DEV_UID must not be inherited"
-    for k in ("AUTH_MODE", "GITLAB_MODE", "GITLAB_URL"):
-        assert k in env, f"{k} should be in inherited env"
+    env = load_inherited(src)["env"]
+    assert "AUTH_MODE" in env
+    assert "DEV_UID" not in env
+    assert "GITLAB_MODE" not in env
+    assert "GITLAB_URL" not in env
 
 
 def test_load_inherited_all_allowlist_keys_only(tmp_path: Path) -> None:
-    """No key outside _ENV_ALLOWLIST appears in inherited env."""
     src = _make_source(tmp_path)
-    result = load_inherited(src)
-    for k in result["env"]:
+    for k in load_inherited(src)["env"]:
         assert k in _ENV_ALLOWLIST, f"unexpected key {k!r} in inherited env"
 
 
 def test_load_inherited_config_files(tmp_path: Path) -> None:
-    """Existing config files are discovered."""
     src = _make_source(tmp_path)
     result = load_inherited(src)
     assert "image/Dockerfile" in result["config"]
@@ -131,15 +123,13 @@ def test_load_inherited_config_files(tmp_path: Path) -> None:
 
 
 def test_load_inherited_secrets(tmp_path: Path) -> None:
-    """Secrets directory children are included."""
     src = _make_source(tmp_path)
     result = load_inherited(src)
-    assert "gitlab_read_token" in result["secrets"]
+    assert "read_tokens" in result["secrets"]
     assert "claude" in result["secrets"]
 
 
 def test_load_inherited_skips_empty_secrets(tmp_path: Path) -> None:
-    """Empty or whitespace-only secret files are not inherited."""
     src = tmp_path / "src"
     src.mkdir()
     cat = src / ".catraz"
@@ -147,18 +137,18 @@ def test_load_inherited_skips_empty_secrets(tmp_path: Path) -> None:
     (cat / ".env").write_text("AUTH_MODE=subscription\n")
     secrets = cat / "secrets"
     secrets.mkdir(mode=0o700)
-    (secrets / "gitlab_read_token").write_text("")
-    (secrets / "gitlab_read_token").chmod(0o600)
-    (secrets / "gitlab_write_token").write_text("  \n")
-    (secrets / "gitlab_write_token").chmod(0o600)
+    (secrets / "read_tokens").write_text("")
+    (secrets / "read_tokens").chmod(0o600)
+    (secrets / "write_tokens").write_text("  \n")
+    (secrets / "write_tokens").chmod(0o600)
     result = load_inherited(src)
-    assert "gitlab_read_token" not in result["secrets"]
-    assert "gitlab_write_token" not in result["secrets"]
+    assert "read_tokens" not in result["secrets"]
+    assert "write_tokens" not in result["secrets"]
 
 
 def test_stage_inherited_overwrites_empty_destination(tmp_path: Path) -> None:
-    """stage_inherited copies source secrets even when the destination file already
-    exists but is empty — e.g. a re-init after a partial setup."""
+    """stage_inherited copies source secrets even when the destination file
+    already exists but is empty — e.g. a re-init after a partial setup."""
     src = _make_source(tmp_path)
     dst = tmp_path / "dst"
     dst.mkdir()
@@ -166,17 +156,16 @@ def test_stage_inherited_overwrites_empty_destination(tmp_path: Path) -> None:
     cat.mkdir()
     secrets = cat / "secrets"
     secrets.mkdir(mode=0o700)
-    # Pre-seed empty placeholder files (like _ensure_secret creates).
-    (secrets / "gitlab_read_token").write_text("")
-    (secrets / "gitlab_read_token").chmod(0o600)
-    (secrets / "gitlab_write_token").write_text("")
-    (secrets / "gitlab_write_token").chmod(0o600)
+    (secrets / "read_tokens").write_text("")
+    (secrets / "read_tokens").chmod(0o600)
+    (secrets / "write_tokens").write_text("")
+    (secrets / "write_tokens").chmod(0o600)
 
     inherited = load_inherited(src)
     stage_inherited(cat, inherited, yes=False, out=Out(color=False))
 
-    assert (secrets / "gitlab_read_token").read_text() == "glpat-src-read"
-    assert (secrets / "gitlab_write_token").read_text() == "glpat-src-write"
+    assert _read_grouped_token(secrets, "read_tokens", "gitlab.example.com") == "glpat-src-read"
+    assert _read_grouped_token(secrets, "write_tokens", "gitlab.example.com") == "glpat-src-write"
 
 
 # ── -y (non-interactive) clone ────────────────────────────────────────────────
@@ -190,14 +179,13 @@ def test_yes_clone_inherits_env_keys(tmp_path: Path, monkeypatch: pytest.MonkeyP
     setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
     env = load_env(dst / ".catraz" / ".env")
     assert env.get("AUTH_MODE") == "subscription"
-    assert env.get("GITLAB_MODE") == "read-write"
-    assert env.get("GITLAB_URL") == "https://gitlab.example.com"
+    assert "GITLAB_MODE" not in env
+    assert "GITLAB_URL" not in env
 
 
 def test_yes_clone_does_not_inherit_dev_uid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """-y --from must NOT inherit DEV_UID; it is set locally."""
     src = _make_source(tmp_path, dev_uid="9999")
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
@@ -209,36 +197,37 @@ def test_yes_clone_does_not_inherit_dev_uid(
 def test_yes_clone_copies_secrets_without_env_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """-y --from copies secrets; env vars override."""
+    """-y --from copies the grouped token files; an env var overrides its host line."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
     setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
     secrets_dir = dst / ".catraz" / "secrets"
-    # Inherited token must be present.
-    tok = secrets_dir / "gitlab_read_token"
-    assert tok.exists()
-    # Env override takes precedence.
+    # Inherited host-keyed token present (the source endpoint host).
+    assert (
+        _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-src-read"
+    )
+    # Env override for that host wins on the next run.
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.example.com")
     monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-env-override")
     setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
-    # After env-override run, the env var was applied via _yes_apply_tokens.
-    assert (secrets_dir / "gitlab_read_token").read_text() == "glpat-env-override"
+    assert (
+        _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com")
+        == "glpat-env-override"
+    )
 
 
 def test_yes_clone_copies_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """-y --from copies secrets/claude/ without printing its contents."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
     setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
     cred = dst / ".catraz" / "secrets" / "claude" / ".credentials.json"
     assert cred.exists(), "secrets/claude/.credentials.json must be inherited"
-    # The content must be the source content (not echoed by the wizard).
     assert "src-cred" in cred.read_text()
 
 
 def test_yes_clone_config_file_copied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """-y --from copies config/image/Dockerfile from source."""
     src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
@@ -268,7 +257,7 @@ def test_interactive_clone_inherits_config_files(
 ) -> None:
     """Interactive `init --from` must inherit config/ files (Dockerfile,
     allowlist, squid.conf), not silently keep the freshly-seeded defaults."""
-    src = _make_source(tmp_path, gitlab_mode="off")  # off → wizard needs no tokens
+    src = _make_source(tmp_path)
     dst = _make_dst(tmp_path)
     _patch_common(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda p: "")  # accept inherited defaults
@@ -293,19 +282,15 @@ def test_secret_never_echoed_to_stdout(
     _patch_common(monkeypatch)
     setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
     captured = capsys.readouterr()
-    assert "glpat-src-read" not in captured.out
-    assert "glpat-src-read" not in captured.err
-    assert "glpat-src-write" not in captured.out
-    assert "glpat-src-write" not in captured.err
-    assert "src-cred" not in captured.out
-    assert "src-cred" not in captured.err
+    for secret in ("glpat-src-read", "glpat-src-write", "src-cred"):
+        assert secret not in captured.out
+        assert secret not in captured.err
 
 
 # ── error on invalid path ─────────────────────────────────────────────────────
 
 
 def test_invalid_from_path_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """--from pointing to a non-initialised dir raises CliError."""
     from catraz.errors import CliError
 
     dst = _make_dst(tmp_path)

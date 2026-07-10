@@ -16,21 +16,6 @@ from catraz.errors import CliError
 from catraz import paths
 from catraz import image
 
-# Secrets the wizard collects (filename, human prompt, description); mode 0600,
-# mounted into the warden via compose secrets, never stored in .env.
-SECRETS = [
-    (
-        "gitlab_read_token",
-        "GitLab READ token (scopes: read_api, read_repository)",
-        "GitLab READ token",
-    ),
-    (
-        "gitlab_write_token",
-        "GitLab WRITE token (classic 'api' scope, or fine-grained + 'User: Read')",
-        "GitLab WRITE token",
-    ),
-]
-
 OK, WARN, BAD = "ok", "warn", "bad"
 
 # Doctor-only mirror of the Warden's action vocabulary + cascade (reimplemented
@@ -236,26 +221,6 @@ def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
                 )
             else:
                 f.ok("env", f"{d.name}/ owned by DEV_UID")
-
-
-def _gitlab_mode(env: dict[str, str]) -> str:
-    return (env.get("GITLAB_MODE") or "read-write").strip()
-
-
-def check_gitlab(env: dict[str, str], f: Findings) -> None:
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        f.ok("tokens", "GitLab disabled (GITLAB_MODE=off)")
-        return
-    url = (env.get("GITLAB_URL") or "").strip()
-    if not url:
-        f.warn(
-            "tokens",
-            "GITLAB_URL unset — defaulting to https://gitlab.com",
-            "set GITLAB_URL in .catraz/.env for self-hosted GitLab",
-        )
-    else:
-        f.ok("tokens", f"GitLab endpoint: {url}")
 
 
 def _parse_grouped_tokens(text: str) -> dict[str, str]:
@@ -553,9 +518,8 @@ def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> Non
 def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
     """Fast pre-check of allowed_projects. Authoritative validation stays the
     warden reconcile — this just turns the obvious traps loud before start."""
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        f.ok("policy", "GitLab off — allowlist not required")
+    if not _read_git_endpoints(root):
+        f.ok("policy", "no [[git.endpoint]] configured — allowlist not required")
         return
     from catraz.policy import _resolve_allowed_projects, validate_project
 
@@ -591,9 +555,8 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
     from catraz.admin_client import AdminUnreachable
     from catraz.endpoints import fetch_policy_report
 
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        f.ok("endpoints", "GitLab off — endpoint catalog not applicable")
+    if not _read_git_endpoints(root):
+        f.ok("endpoints", "no [[git.endpoint]] configured — endpoint catalog not applicable")
         return
     try:
         report = fetch_policy_report(root)
@@ -641,9 +604,6 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
     Parses warden.toml/token files with the same cascade as the Warden so the
     two never drift; flags write actions with no write_token, and
     mr.create/ci.trigger configured without a branch-write action to source from."""
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        return
     endpoints = _read_git_endpoints(root)
     if not endpoints:
         return
@@ -848,8 +808,6 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
     if "env" in sections:
         check_env(root, env, f)
     if "tokens" in sections:
-        check_gitlab(env, f)
-    if "tokens" in sections:
         check_tokens(root, env, f)
     if "policy" in sections:
         check_policy(root, env, f)
@@ -898,9 +856,9 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     ]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
-    # read_tokens/write_tokens: grouped, multi-endpoint token files doctor/Warden
+    # read_tokens/write_tokens: grouped, host-keyed token files doctor/Warden
     # read host -> token from. Scaffolded so init always leaves a parseable, empty pair.
-    secret_files = ["read_tokens", "write_tokens"] + [f for f, _, _ in SECRETS]
+    secret_files = ["read_tokens", "write_tokens"]
     if mode == "api_key":
         secret_files.append("anthropic_api_key")
     for filename in secret_files:

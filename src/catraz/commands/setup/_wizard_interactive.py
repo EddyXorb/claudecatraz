@@ -7,14 +7,15 @@ from catraz.envfile import unset_env_keys
 from catraz.policy import (
     _discover_gitlab_projects,
     _resolve_allowed_projects,
+    ensure_git_endpoint,
+    normalize_host,
     remove_toml_key,
     set_toml_list,
     validate_project,
 )
 from catraz.ui import Out
 
-from ._secrets import _ensure_secret, _write_secret_value
-from ._wizard_yes import _VALID_GITLAB_MODES
+from ._secrets import _ensure_secret, _read_grouped_token, _upsert_grouped_token, _write_secret_value
 
 
 def _read_branch_prefix(warden_toml: Path | None) -> str:
@@ -31,6 +32,25 @@ def _read_branch_prefix(warden_toml: Path | None) -> str:
         return m.group(1)
     m = re.search(r'branch_prefix\s*=\s*"([^"]*)"', text)
     return m.group(1) if m else "claude/"
+
+
+def _read_endpoint_host(warden_toml: Path | None) -> str:
+    """First configured `[[git.endpoint]]` host, the wizard's host default;
+    `gitlab.com` when none is set yet."""
+    if not warden_toml or not warden_toml.exists():
+        return "gitlab.com"
+    import tomllib
+
+    try:
+        git = tomllib.loads(warden_toml.read_text(encoding="utf-8")).get("git", {})
+    except (tomllib.TOMLDecodeError, OSError):
+        return "gitlab.com"
+    endpoints = git.get("endpoint", []) if isinstance(git, dict) else []
+    for endpoint in endpoints if isinstance(endpoints, list) else []:
+        host = endpoint.get("host") if isinstance(endpoint, dict) else None
+        if isinstance(host, str) and host.strip():
+            return host.strip()
+    return "gitlab.com"
 
 
 def _inh_env(inherited: dict[str, Any] | None, key: str) -> str:
@@ -61,97 +81,55 @@ def _prompt_auth_mode(
     return auth_mode
 
 
-def _prompt_gitlab_mode(
-    env: dict[str, str],
-    out: Out,
-    inherited: dict[str, Any] | None = None,
-) -> str:
-    inh = _inh_env(inherited, "GITLAB_MODE")
-    cur_mode = (inh or env.get("GITLAB_MODE") or "read-write").strip()
-    if cur_mode not in _VALID_GITLAB_MODES:
-        cur_mode = "read-write"
+def _prompt_write_access(out: Out) -> bool:
+    """Read-only vs read-write is just "did the user give a write token"; ask it
+    directly instead of storing a mode."""
     return cast(
         str,
         out.choice(
-            "GitLab integration?",
+            "GitLab access?",
             [
                 ("read-write", "read-write — read + push (needs read & write tokens)"),
                 ("read-only", "read-only — read only (needs a read token)"),
-                ("off", "off — no GitLab (the agent can't talk to GitLab)"),
             ],
-            default={"read-write": 0, "read-only": 1, "off": 2}[cur_mode],
+            default=0,
         ),
-    )
+    ) == "read-write"
 
 
 def _prompt_gitlab_tokens(
     secrets_dir: Path,
-    mode: str,
+    host: str,
+    want_write: bool,
     args: argparse.Namespace,
     out: Out,
-    inherited: dict[str, Any] | None = None,
 ) -> None:
-    has_from = inherited is not None
-    p_read = secrets_dir / "gitlab_read_token"
-    # With --from: the file was staged; offer keep-inherited without echoing.
-    if has_from and p_read.exists():
-        _prompt_secret_keep_or_replace(
-            secrets_dir,
-            "gitlab_read_token",
-            "GitLab READ token (read_api, read_repository)",
-            out,
-        )
-    else:
-        existing_read = ""
-        if p_read.exists() and not args.force:
-            try:
-                existing_read = p_read.read_text(encoding="utf-8").strip()
-            except OSError:
-                pass
-        val = out.secret("GitLab READ token (read_api, read_repository)", current=existing_read)
-        _write_secret_value(secrets_dir, "gitlab_read_token", val)
-        if not val:
-            out.warn("gitlab_read_token left empty — doctor will flag it")
+    """Prompt the read token (always) and the write token (when write access is
+    wanted), upserting each into the grouped host-keyed token file."""
+    _ensure_secret(secrets_dir, "read_tokens")
+    _ensure_secret(secrets_dir, "write_tokens")
 
-    if mode == "read-write":
-        p_write = secrets_dir / "gitlab_write_token"
-        if has_from and p_write.exists():
-            _prompt_secret_keep_or_replace(
-                secrets_dir, "gitlab_write_token", "GitLab WRITE token (api scope)", out
-            )
+    current = "" if args.force else _read_grouped_token(secrets_dir, "read_tokens", host)
+    read_tok = out.secret("GitLab READ token (read_api, read_repository)", current=current)
+    if read_tok:
+        _upsert_grouped_token(secrets_dir, "read_tokens", host, read_tok)
+    else:
+        out.warn(f"no read token for {host} — doctor will flag it")
+
+    if want_write:
+        current = "" if args.force else _read_grouped_token(secrets_dir, "write_tokens", host)
+        write_tok = out.secret("GitLab WRITE token (api scope)", current=current)
+        if write_tok:
+            _upsert_grouped_token(secrets_dir, "write_tokens", host, write_tok)
         else:
-            existing_write = ""
-            if p_write.exists() and not args.force:
-                try:
-                    existing_write = p_write.read_text(encoding="utf-8").strip()
-                except OSError:
-                    pass
-            val = out.secret("GitLab WRITE token (api scope)", current=existing_write)
-            _write_secret_value(secrets_dir, "gitlab_write_token", val)
-            if not val:
-                out.warn("gitlab_write_token left empty — doctor will flag it")
-    else:
-        _ensure_secret(secrets_dir, "gitlab_write_token")
-
-
-def _prompt_secret_keep_or_replace(secrets_dir: Path, filename: str, label: str, out: Out) -> None:
-    """Offer "keep inherited (hidden)" / "enter new" without ever echoing the value."""
-    import getpass
-
-    out.info(f"  {label} — inherited (hidden); Enter to keep, or type a new value.")
-    try:
-        val = getpass.getpass(f"  {label}: ").strip()
-    except EOFError:
-        val = ""
-    if val:
-        _write_secret_value(secrets_dir, filename, val)
+            out.warn(f"no write token for {host} — doctor will flag it")
 
 
 def _prompt_allowed_projects(
     root: Path,
     warden_toml: Path,
     env_path: Path,
-    gitlab_url: str,
+    host: str,
     args: argparse.Namespace,
     out: Out,
 ) -> None:
@@ -164,7 +142,7 @@ def _prompt_allowed_projects(
     out.info("  e.g. group/sub/project — comma-separated, no wildcards.")
     # Offer (never silently add) any GitLab remotes found under the init folder as the
     # default — the user accepts with Enter, or edits/clears to decline.
-    discovered = _discover_gitlab_projects(root, gitlab_url)
+    discovered = _discover_gitlab_projects(root, f"https://{host}")
     default = ", ".join(discovered) if discovered else ""
     if discovered:
         out.info("  Detected GitLab project(s) from git remotes: " + ", ".join(discovered))
@@ -198,6 +176,19 @@ def _prompt_branch_prefix(warden_toml: Path, env_path: Path, out: Out) -> None:
         # wrote (Config aborts on both being set — one source of truth).
         remove_toml_key(warden_toml, "branch_prefix")
     unset_env_keys(env_path, ["WARDEN_BRANCH_PREFIX"])
+
+
+def _prompt_secret_keep_or_replace(secrets_dir: Path, filename: str, label: str, out: Out) -> None:
+    """Offer "keep inherited (hidden)" / "enter new" without ever echoing the value."""
+    import getpass
+
+    out.info(f"  {label} — inherited (hidden); Enter to keep, or type a new value.")
+    try:
+        val = getpass.getpass(f"  {label}: ").strip()
+    except EOFError:
+        val = ""
+    if val:
+        _write_secret_value(secrets_dir, filename, val)
 
 
 def _prompt_anthropic_key(
@@ -251,34 +242,22 @@ def _wizard_interactive(
     auth_mode = _prompt_auth_mode(env, args, out, inherited)
     updates["AUTH_MODE"] = auth_mode
 
-    mode = _prompt_gitlab_mode(env, out, inherited)
-    updates["GITLAB_MODE"] = mode
-
-    if mode != "off":
-        inh_url = _inh_env(inherited, "GITLAB_URL")
-        url = out.ask(
-            "GitLab base URL (set for self-hosted)",
-            inh_url or env.get("GITLAB_URL") or "https://gitlab.com",
-        )
-        updates["GITLAB_URL"] = url
-        _prompt_gitlab_tokens(secrets_dir, mode, args, out, inherited)
-        _prompt_allowed_projects(root, warden_toml, env_path, url, args, out)
-        _prompt_branch_prefix(warden_toml, env_path, out)
-    else:
-        _ensure_secret(secrets_dir, "gitlab_read_token")
-        _ensure_secret(secrets_dir, "gitlab_write_token")
+    host = normalize_host(out.ask("GitLab host", _read_endpoint_host(warden_toml)))
+    want_write = _prompt_write_access(out)
+    _prompt_gitlab_tokens(secrets_dir, host, want_write, args, out)
+    if warden_toml.exists():
+        ensure_git_endpoint(warden_toml, host, "gitlab")
+    _prompt_allowed_projects(root, warden_toml, env_path, host, args, out)
+    _prompt_branch_prefix(warden_toml, env_path, out)
 
     if auth_mode == "api_key":
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
     proj_count, _ = _resolve_allowed_projects(root)
-    url_part = (
-        f"  url={updates.get('GITLAB_URL', env.get('GITLAB_URL', ''))}" if mode != "off" else ""
-    )
-    proj_part = f"  projects={len(proj_count)}" if mode != "off" else ""
+    access = "read-write" if want_write else "read-only"
     out.info(
-        f"\n• auth_mode={auth_mode}  gitlab_mode={mode}"
-        f"{url_part}{proj_part}"
+        f"\n• auth_mode={auth_mode}  host={host}  access={access}"
+        f"  projects={len(proj_count)}"
         "  (edit quotas in .catraz/config/warden.toml)"
     )
     out.info("  To change the base image, edit .catraz/config/image/Dockerfile")

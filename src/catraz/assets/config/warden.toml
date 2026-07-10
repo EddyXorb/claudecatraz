@@ -3,8 +3,12 @@
 #
 # One setting, one source: edit this file directly for every value below, or
 # use `catraz allow` for allowed_projects. This file holds NO secrets: the
-# GitLab tokens live in .catraz/secrets/ (one file each, mounted as compose
-# secrets); GITLAB_URL / GITLAB_MODE live in .catraz/.env — never put any here.
+# GitLab tokens live in the grouped .catraz/secrets/read_tokens / write_tokens
+# files (<host> <token> per line). Which hosts the agent may reach, and their
+# access mode, are decided here + by those token files alone: each
+# [[git.endpoint]] names one host, and a host is read-write, read-only, or
+# closed purely by which of its tokens are present — there is no host or
+# access-mode setting in .catraz/.env anymore.
 
 # R2: only branches under one of these prefixes may be pushed (the allowed
 # namespace is the union of the list). Legacy single-prefix form still works:
@@ -111,8 +115,12 @@ actions = [
 
 # Example — add one [[git.endpoint]] table per host. Each host gets its own
 # DNS alias + git/REST routing through the Warden automatically (no compose
-# edit needed) — see docs/design/architecture-generalization/
-# 08-multi-target/07-compose-and-agent-routing.md.
+# edit needed).
+#
+# NOTE: per-endpoint `allowed_projects` below is parsed but NOT yet enforced —
+# the runtime authorizes projects only against the TOP-LEVEL `allowed_projects`
+# above. Set the projects there; the per-host lists shown here are illustrative
+# until host-aware project scoping lands.
 # [[git.endpoint]]
 # host             = "gitlab.com"
 # type             = "gitlab"
