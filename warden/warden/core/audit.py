@@ -19,8 +19,8 @@ from typing import Any, Final, Mapping, Optional
 
 from .model import Decision, StateView
 
-# A reader must keep accepting every past version: missing schema field
-# means version 1, channel without guard means version <3.
+# A reader must keep accepting older log lines: an absent schema field marks
+# the earliest ones.
 AUDIT_SCHEMA_VERSION: Final[int] = 4
 
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
