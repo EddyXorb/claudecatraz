@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from warden.core.config import Config, GitEndpoint, HostCredentials
-from warden.core.model import StateView
+from warden.core.model import StateView, TokenKind
 from warden.guards.git import actions as git_actions
 from warden.guards.git.gitlab.intent import ApiIntent
 from warden.guards.git.gitlab.policy import full_decide
@@ -247,7 +247,7 @@ def test_repo_read_disabled_still_allows_mr_diffs_via_project_read():
         _cfg(),
         frozenset({"project.read"}),
     )
-    assert d.allow and d.rule == "R1"
+    assert d.allow and d.token == TokenKind.READ
 
 
 # --- GraphQL: always denied, never proxied ------------------------------------
@@ -267,7 +267,7 @@ def test_repo_read_disabled_still_allows_mr_diffs_via_project_read():
 def test_graphql_denied_on_every_method_and_path(method, path):
     intent = ApiIntent(_project="", _method=method, path=path, _host=HOST)
     d = full_decide(intent, StateView(), _cfg())
-    assert not d.allow and d.rule == "R6"
+    assert not d.allow
     assert "unmodelled channel" in d.reason
 
 
@@ -281,9 +281,9 @@ def test_merge_denied_by_criticality_on_both_wire_shapes_even_with_everything_en
 
     via_merge_endpoint = _intent("PUT", "/projects/group%2Fproj/merge_requests/7/merge")
     d1 = full_decide(via_merge_endpoint, StateView(), _cfg(), everything)
-    assert not d1.allow and d1.rule == "R4"
+    assert not d1.allow and "irreversible" in d1.reason
 
     via_state_event = _intent("PUT", "/projects/group%2Fproj/merge_requests/7", state_event="merge")
     via_state_event.mr_source_ok = True
     d2 = full_decide(via_state_event, StateView(), _cfg(), everything)
-    assert not d2.allow and d2.rule == "R4"
+    assert not d2.allow and "irreversible" in d2.reason

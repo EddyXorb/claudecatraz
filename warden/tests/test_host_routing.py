@@ -21,7 +21,6 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.guard import host_gate
 from warden.core.model import Decision
-from warden.core.rules import R6
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter, base_urls
 from warden.guards.git.transport.guard import GitGuard
@@ -121,23 +120,23 @@ def test_host_gate_denies_everything_when_no_endpoint_configured(cfg):
     empty = replace(cfg, git_endpoints=(), git_credentials={})
     decision = host_gate("literally.anything", empty)
     assert decision == Decision(
-        False, R6, "host 'literally.anything' not in the multi-target allowlist"
+        False, "host 'literally.anything' not in the multi-target allowlist"
     )
 
 
-def test_host_gate_denies_unknown_host_with_r6(cfg):
+def test_host_gate_denies_unknown_host_not_in_allowlist(cfg):
     multi = _multi_cfg(cfg)
     decision = host_gate("evil.example", multi)
-    assert decision == Decision(False, R6, "host 'evil.example' not in the multi-target allowlist")
+    assert decision == Decision(False, "host 'evil.example' not in the multi-target allowlist")
 
 
-def test_host_gate_denies_a_closed_but_configured_host_with_r6():
+def test_host_gate_denies_a_closed_but_configured_host():
     """A host with a `[[git.endpoint]]` entry but no usable read token is
     denied here too — never reaches `UpstreamRouter.resolve` returning None
     past an "already denied" assertion downstream."""
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),))
     decision = host_gate("gitlab.example", cfg)
-    assert decision is not None and decision.rule == "R6"
+    assert decision is not None and "not in the multi-target allowlist" in decision.reason
 
 
 def test_host_gate_allows_a_listed_open_host(cfg):
@@ -178,7 +177,9 @@ async def test_end_to_end_request_routes_by_host_header_and_denies_unknown_host(
 
     assert resp1.status_code == 200 and resp1.json()[0]["name"] == "from-primary"
     assert resp2.status_code == 200 and resp2.json()[0]["name"] == "from-secondary"
-    assert resp3.status_code == 403 and resp3.json()["rule"] == "R6"
+    assert (
+        resp3.status_code == 403 and "not in the multi-target allowlist" in resp3.json()["reason"]
+    )
     await ctx.aclose()
 
 

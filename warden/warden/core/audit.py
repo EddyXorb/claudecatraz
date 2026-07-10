@@ -6,8 +6,11 @@ builds exactly one on every pipeline exit from shared envelope fields plus guard
 **JSONL schema version history** (independent of state DB's own counter):
 
 * **1** — no schema field.
-* **2** — introduces schema field; tag-push/branch-delete relogged from R2 to R4.
+* **2** — introduces schema field; tag-push/branch-delete reclassified from an
+  ordinary write to an irreversible, never-permitted action.
 * **3** — channel field renamed to guard (values unchanged: "git"/"api").
+* **4** — rule field removed; the recognized action id(s) in "actions" are
+  the audit key now.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from .model import Decision, StateView
 # Audit-JSONL schema version — see module docstring for version history.
 # A reader (viewer, catraz observe) must keep accepting all of them:
 # missing schema field means version 1, channel without guard means version <3.
-AUDIT_SCHEMA_VERSION: Final[int] = 3
+AUDIT_SCHEMA_VERSION: Final[int] = 4
 
 # Only these keys are ever serialised — anything else (tokens, headers, bodies)
 # is dropped by construction.
@@ -39,7 +42,6 @@ _ALLOWED_FIELDS = {
     "path",
     "project",
     "decision",
-    "rule",
     "reason",
     "refs",
     "kind",
@@ -91,7 +93,6 @@ class AuditEvent:
             "method": self.method,
             "project": self.project,
             "decision": "allow" if self.decision.allow else "deny",
-            "rule": self.decision.rule,
             "reason": self.decision.reason,
             "upstream_status": self.upstream_status,
             "latency_ms": round((time.monotonic() - self.started) * 1000, 1),

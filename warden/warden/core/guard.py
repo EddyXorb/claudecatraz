@@ -42,7 +42,6 @@ from .audit import AuditEvent, AuditLog
 from .config import Config
 from .model import Decision, Intent, StateView
 from .recognizer import Recognizer, first_recognized
-from .rules import R0, R3, R4, R6
 from .state import State
 
 
@@ -56,20 +55,20 @@ def write_credential_gate(host: str, cfg: Config) -> Optional[Decision]:
     it — this one does. Without it a push-discovery request to a read-only
     host would be forwarded with an absent write token instead of denied.
 
-    Per-host: a closed host is already denied earlier by host_gate (R6), so by
+    Per-host: a closed host is already denied earlier by host_gate, so by
     the time this runs the only two possibilities left are read-only (deny)
     and read-write (allow).
     """
     access = cfg.access_mode(host)
     if access != "read-write":
         return Decision(
-            False, R0, f"write token unavailable for host {host!r} (access_mode={access!r})"
+            False, f"write token unavailable for host {host!r} (access_mode={access!r})"
         )
     return None
 
 
 def host_gate(host: str, cfg: Config) -> Optional[Decision]:
-    """M6: default-deny for a Host header outside the configured
+    """Default-deny for a Host header outside the configured
     [[git.endpoint]] list (§2, §07 Punkt 8 follow-up).
 
     Real default-deny (step 03): an empty endpoint list denies every host, not
@@ -82,7 +81,7 @@ def host_gate(host: str, cfg: Config) -> Optional[Decision]:
     kernel_gates, since every guard's request carries a host.
     """
     if not cfg.host_allowed(host):
-        return Decision(False, R6, f"host {host!r} not in the multi-target allowlist")
+        return Decision(False, f"host {host!r} not in the multi-target allowlist")
     return None
 
 
@@ -97,24 +96,24 @@ def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Option
     cfg.project_allowed's path-only match.
     """
     if project and not project_allowed(project):
-        return Decision(False, R6, f"project {project!r} not in allowlist")
+        return Decision(False, f"project {project!r} not in allowlist")
     return None
 
 
 def criticality_gate(recognized: frozenset[Action]) -> Optional[Decision]:
-    """R4: any recognized action at or above Criticality.IRREVERSIBLE is
+    """Any recognized action at or above Criticality.IRREVERSIBLE is
     never permitted, regardless of configuration.
     """
     blocked = sorted(a.id for a in recognized if a.criticality >= Criticality.IRREVERSIBLE)
     if not blocked:
         return None
-    return Decision(False, R4, f"action {blocked[0]} is irreversible, never permitted")
+    return Decision(False, f"action {blocked[0]} is irreversible, never permitted")
 
 
 def action_gate(
     recognized: frozenset[Action], effective: frozenset[str], host: str
 ) -> Optional[Decision]:
-    """R6: every recognized action id must be enabled for host.
+    """Every recognized action id must be enabled for host.
 
     effective is the host's effective action ids, passed in rather than
     derived here, so a caller (production: Config.effective_actions;
@@ -124,7 +123,7 @@ def action_gate(
     missing = sorted(a.id for a in recognized if a.id not in effective)
     if not missing:
         return None
-    return Decision(False, R6, f"action {missing[0]} not enabled for host {host!r}")
+    return Decision(False, f"action {missing[0]} not enabled for host {host!r}")
 
 
 def kernel_gates(
@@ -144,7 +143,7 @@ def kernel_gates(
     recognized is this intent's whole action set (the guard's recognizers
     matched via first_recognized, already computed by the caller since the
     list is guard-specific). An unmatched or empty-recognized *write*
-    denies right here (R3) — a read falls through unchanged, since the
+    denies right here — a read falls through unchanged, since the
     project-bound read pass-through is the guard's own decide's job.
     """
     denied = host_gate(intent.host, cfg)
@@ -153,7 +152,7 @@ def kernel_gates(
     if denied is None:
         denied = project_gate(intent.project, project_allowed)
     if denied is None and intent.needs_write and not recognized:
-        denied = Decision(False, R3, "no recognized action for this request")
+        denied = Decision(False, "no recognized action for this request")
     if denied is None:
         denied = criticality_gate(recognized)
     if denied is None:
@@ -241,7 +240,7 @@ class Guard(ABC, Generic[IntentT]):
         ...
 
     def project_allowed(self, project: str) -> bool:
-        """M6 membership hook. Default: the config allowlist by path
+        """Resource allowlist membership hook. Default: the config allowlist by path
         (cfg.project_allowed). A guard whose forge resolves numeric-id
         aliases (e.g. ApiGuard) overrides this to also accept those.
         """

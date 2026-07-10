@@ -1,5 +1,5 @@
 """reconcile.py: the REST-API guard's MR reconcile pagination, fail-safe
-locking, and numeric-id project-alias resolution (M6). See
+locking, and numeric-id project-alias resolution. See
 ``test_api_mr_namespace.py`` for the MR source-branch-namespace-lookup side
 and ``test_git_reconcile.py`` for the git guard's own (branch) reconcile.
 
@@ -30,7 +30,7 @@ def _api_guard(cfg) -> ApiGuard:
     return ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
 
 
-# --- project_allowed (M6) -------------------------------------------------------
+# --- project_allowed (resource allowlist) ---------------------------------------
 def test_project_allowed_matches_reconciled_numeric_id_alias_only(api_guard):
     api_guard.project_id_aliases = {"81882161"}
     assert api_guard.project_allowed("81882161")
@@ -98,7 +98,7 @@ async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_rout
     assert view.locked is False
     assert view.open_mrs == 1
     # The numeric-id alias was resolved and added to the guard's alias set
-    # (R6 by id form) — Config itself is never mutated (D2).
+    # (the resource allowlist, by id form) — Config itself is never mutated (D2).
     assert guard.project_id_aliases == {"12345"}
     assert guard.project_allowed("12345")
 

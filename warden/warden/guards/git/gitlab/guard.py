@@ -1,6 +1,6 @@
 """GitLab REST guard I/O hooks: parse -> enrich -> forward/deny-response.
 
-Reads stream through with the read token (R1); writes are matched against
+Reads stream through with the read token; writes are matched against
 the recognizer catalog, source-branch-namespace checked, quota-checked, then
 forwarded with the write token — or denied with a 403 that never leaks a
 GitLab response. /api/graphql* shares this same pipeline and is always
@@ -126,7 +126,7 @@ class ApiGuard(Guard[ApiIntent]):
         return self._effective_by_host.get(self.cfg.normalize_host(host), frozenset())
 
     def project_allowed(self, project: str) -> bool:
-        """Check if project is allowed by path or numeric id (M6)."""
+        """Check if project is allowed by path or numeric id."""
         return (
             self.cfg.project_allowed(project)
             or normalize_project(project) in self.project_id_aliases

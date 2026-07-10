@@ -19,10 +19,8 @@ tbody tr:hover{background:#2a2d2e}
 td{padding:4px 8px;vertical-align:top}
 .deny{color:#f48771;font-weight:bold}
 .allow{color:#89d185}
-.r4{background:rgba(200,50,50,.18)}
-.r5{background:rgba(200,120,30,.18)}
 .ts{white-space:nowrap;color:#888}
-.rule{white-space:nowrap;font-weight:bold}
+.actions{white-space:nowrap;font-weight:bold}
 .path{word-break:break-all;max-width:280px;color:#9cdcfe}
 .proj{color:#ce9178}
 .rsn{color:#aaa;max-width:220px;word-break:break-word}
@@ -36,14 +34,14 @@ td{padding:4px 8px;vertical-align:top}
 <div id="filters">
   <label>Guard <select id="fc"><option value="">all</option><option>api</option><option>git</option></select></label>
   <label>Decision <select id="fd"><option value="">all</option><option>allow</option><option>deny</option></select></label>
-  <label>Rule <input id="fr" placeholder="e.g. R4" style="width:60px"></label>
+  <label>Action <input id="fr" placeholder="e.g. repo.read" style="width:120px"></label>
   <label>Project <input id="fp" placeholder="path filter" style="width:160px"></label>
   <button id="reload" onclick="load()">&#8635; Load</button>
   <span id="count"></span>
 </div>
 <div id="err"></div>
 <table>
-<thead><tr><th>Time</th><th>Schema</th><th>Guard</th><th>Method</th><th>Decision</th><th>Rule</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
+<thead><tr><th>Time</th><th>Schema</th><th>Guard</th><th>Method</th><th>Decision</th><th>Actions</th><th>Project</th><th>Path</th><th>Reason</th><th>ms</th></tr></thead>
 <tbody id="tb"></tbody>
 </table>
 <script>
@@ -55,6 +53,7 @@ function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
 // only carry `channel` — read either so the filter and the column work for
 // both old and new rows without a separate "legacy" code path.
 function guardOf(r){return r.guard!=null?r.guard:r.channel}
+function actionsOf(r){return Array.isArray(r.actions)?r.actions.join(', '):(r.actions||'')}
 async function load(){
   document.getElementById('err').textContent='';
   try{
@@ -68,22 +67,19 @@ async function load(){
 function render(){
   const ch=document.getElementById('fc').value;
   const dec=document.getElementById('fd').value;
-  const rule=document.getElementById('fr').value.toUpperCase();
+  const action=document.getElementById('fr').value.toLowerCase();
   const proj=document.getElementById('fp').value.toLowerCase();
   const f=rows.filter(r=>
     (!ch||guardOf(r)===ch)&&
     (!dec||r.decision===dec)&&
-    (!rule||(r.rule||'').toUpperCase().includes(rule))&&
+    (!action||actionsOf(r).toLowerCase().includes(action))&&
     (!proj||(r.project||'').toLowerCase().includes(proj))
   );
   document.getElementById('count').textContent=f.length+' / '+rows.length+' entries';
   const tb=document.getElementById('tb');
   tb.innerHTML='';
   for(const r of f){
-    const ru=(r.rule||'').toUpperCase();
-    const cls=r.decision==='deny'&&ru==='R4'?'r4':r.decision==='deny'&&ru==='R5'?'r5':'';
     const tr=document.createElement('tr');
-    if(cls)tr.className=cls;
     // Compat window (§06-migration.md Schritt 2): pre-schema lines (v1) carry no
     // `schema` field at all — shown as "legacy" rather than blank/broken.
     const schemaCell=r.schema!=null?`v${esc(r.schema)}`:'legacy';
@@ -91,7 +87,7 @@ function render(){
     tr.innerHTML=`<td class="ts">${fmt(r.ts)}</td><td class="${schemaCls}">${schemaCell}</td>`+
       `<td>${esc(guardOf(r))}</td><td>${esc(r.method)}</td>`+
       `<td class="${r.decision==='deny'?'deny':'allow'}">${esc(r.decision)}</td>`+
-      `<td class="rule">${esc(r.rule)}</td><td class="proj">${esc(r.project)}</td>`+
+      `<td class="actions">${esc(actionsOf(r))}</td><td class="proj">${esc(r.project)}</td>`+
       `<td class="path">${esc(r.path)}</td><td class="rsn">${esc(r.reason)}${r.enabled_via?' &middot; <i>'+esc(r.enabled_via)+'</i>':''}</td>`+
       `<td>${r.latency_ms!=null?r.latency_ms:''}</td>`;
     tb.appendChild(tr);

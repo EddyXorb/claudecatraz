@@ -32,7 +32,7 @@ async def reconcile_branches(
     Iterates cfg.open_hosts (not cfg.effective_hosts) — every
     configured endpoint whose access_mode is not "closed". A closed
     endpoint has no usable read credential, is unreachable via host_gate
-    (R6) anyway, and never needed reconciling. A single-endpoint deployment
+    anyway, and never needed reconciling. A single-endpoint deployment
     iterates that one host. The host×project loop and its fail-safe handling
     live in for_each_host_project (shared with the REST-API guard's
     reconcile_mrs), which trusts that the hosts it is given are

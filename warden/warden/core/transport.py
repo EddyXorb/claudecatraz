@@ -182,7 +182,7 @@ class UpstreamRouter:
     at all. Every host is explicit; there is no single-target special case.
     resolve normalises the raw Host header
     (Config.normalize_host) and looks it up in that map, returning
-    None for an unknown *or* closed host (default-deny, R6).
+    None for an unknown *or* closed host (default-deny).
     """
 
     def __init__(self, cfg: Config, *, client: Optional[httpx.AsyncClient] = None) -> None:

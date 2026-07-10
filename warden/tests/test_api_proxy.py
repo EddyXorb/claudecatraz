@@ -47,7 +47,7 @@ async def test_merge_endpoint_is_always_403(client, respx_router):
     resp = await client.put(f"/api/v4/projects/{PROJ}/merge_requests/7/merge")
     assert resp.status_code == 403
     body = resp.json()
-    assert body["rule"] == "R4"
+    assert "irreversible" in body["reason"]
     # No upstream call happened (respx would raise on an unmocked request).
 
 
@@ -57,7 +57,7 @@ async def test_create_mr_wrong_prefix_denied(client, respx_router):
         json={"source_branch": "feature/x", "target_branch": "main"},
     )
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R2"
+    assert "outside allowed prefixes" in resp.json()["reason"]
 
 
 async def test_create_mr_with_prefix_forwarded_with_write_token(client, respx_router):
@@ -80,7 +80,7 @@ async def test_note_on_non_namespace_branch_denied(client, respx_router):
     )
     resp = await client.post(f"/api/v4/projects/{PROJ}/merge_requests/7/notes", json={"body": "hi"})
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R3"
+    assert "outside the allowed branch namespace" in resp.json()["reason"]
 
 
 async def test_note_on_namespace_mr_allowed_even_with_foreign_author(client, respx_router):
@@ -129,7 +129,7 @@ async def test_inline_discussion_non_namespace_denied(client, respx_router):
         f"/api/v4/projects/{PROJ}/merge_requests/7/discussions", json={"body": "nit"}
     )
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R3"
+    assert "outside the allowed branch namespace" in resp.json()["reason"]
 
 
 async def test_discussion_reply_on_namespace_mr_allowed_even_with_foreign_author(
@@ -160,7 +160,7 @@ async def test_discussion_reply_non_namespace_denied(client, respx_router):
         json={"body": "done"},
     )
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R3"
+    assert "outside the allowed branch namespace" in resp.json()["reason"]
 
 
 async def test_unknown_write_endpoint_default_denied(client, respx_router):
@@ -168,13 +168,13 @@ async def test_unknown_write_endpoint_default_denied(client, respx_router):
     # the recognizer but the action gate denies it with no config override.
     resp = await client.post(f"/api/v4/projects/{PROJ}/issues", json={"title": "x"})
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not enabled for host" in resp.json()["reason"]
 
 
 async def test_project_outside_allowlist_denied(client, respx_router):
     resp = await client.get("/api/v4/projects/other%2Fsecret/repository/tree")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_create_mr_form_encoded_body_is_parsed(client, respx_router):
@@ -201,7 +201,7 @@ async def test_malformed_json_body_is_denied_not_crashed(client, respx_router):
         headers={"content-type": "application/json"},
     )
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R2"
+    assert "outside allowed prefixes" in resp.json()["reason"]
 
 
 # --- B1: projectless read scoping ("content, not visibility") -----------------
@@ -221,19 +221,19 @@ async def test_projectless_metadata_endpoint_passed_through(client, respx_router
 async def test_global_search_content_scope_denied(client, respx_router, scope):
     resp = await client.get(f"/api/v4/search?scope={scope}")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_global_search_without_scope_denied(client, respx_router):
     resp = await client.get("/api/v4/search")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_global_search_unknown_scope_denied(client, respx_router):
     resp = await client.get("/api/v4/search?scope=bogus")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_global_search_metadata_scope_allowed(client, respx_router):
@@ -247,19 +247,19 @@ async def test_global_search_metadata_scope_allowed(client, respx_router):
 async def test_group_search_content_scope_denied(client, respx_router):
     resp = await client.get("/api/v4/groups/1/search?scope=blobs")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_snippets_denied(client, respx_router):
     resp = await client.get("/api/v4/snippets")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_unknown_projectless_endpoint_denied(client, respx_router):
     resp = await client.get("/api/v4/admin/ci/variables")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 # --- F12: the query string reaches the upstream request, not just the decision -
@@ -291,19 +291,19 @@ async def test_search_scope_query_is_forwarded_when_allowed(client, respx_router
 async def test_graphql_post_denied_no_upstream_call(client, respx_router):
     resp = await client.post("/api/graphql", json={"query": "{ currentUser { id } }"})
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "GraphQL is not permitted" in resp.json()["reason"]
 
 
 async def test_graphql_get_denied(client, respx_router):
     resp = await client.get("/api/graphql")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "GraphQL is not permitted" in resp.json()["reason"]
 
 
 async def test_graphql_subpath_denied(client, respx_router):
     resp = await client.post("/api/graphql/whatever")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "GraphQL is not permitted" in resp.json()["reason"]
 
 
 # --- audit coverage: every new deny lands in the log ---------------------------
@@ -324,7 +324,7 @@ async def test_snippets_deny_is_audited(client, ctx, tmp_path):
     records = await _read_audit_lines(ctx, tmp_path, lambda: client.get("/api/v4/snippets"))
     assert len(records) == 1
     assert records[0]["decision"] == "deny"
-    assert records[0]["rule"] == "R6"
+    assert "not in allowlist" in records[0]["reason"]
     assert records[0]["path"] == "/snippets"
 
 
@@ -334,7 +334,7 @@ async def test_search_content_scope_deny_is_audited(client, ctx, tmp_path):
     )
     assert len(records) == 1
     assert records[0]["decision"] == "deny"
-    assert records[0]["rule"] == "R6"
+    assert "not in allowlist" in records[0]["reason"]
 
 
 async def test_graphql_deny_is_audited(client, ctx, tmp_path):
@@ -343,7 +343,7 @@ async def test_graphql_deny_is_audited(client, ctx, tmp_path):
     )
     assert len(records) == 1
     assert records[0]["decision"] == "deny"
-    assert records[0]["rule"] == "R6"
+    assert "GraphQL is not permitted" in records[0]["reason"]
     assert "graphql" in records[0]["path"]
 
 
@@ -380,7 +380,7 @@ async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client
         json={"target_branch": "main"},
     )
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R2"
+    assert "outside allowed prefixes" in resp.json()["reason"]
 
 
 # --- §04.3: audit marks non-default-activated catalog entries ------------------
@@ -474,7 +474,7 @@ async def test_branch_create_wrong_prefix_still_denied(client, respx_router):
         json={"branch": "main", "ref": "main"},
     )
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R2"
+    assert "outside allowed prefixes" in resp.json()["reason"]
 
 
 # --- per-host effective tables, one guard, two hosts ---------------------------
@@ -549,7 +549,7 @@ async def test_two_hosts_with_different_actions_behave_differently_on_the_same_g
 
     assert mr_on_a.status_code == 201  # host A: default actions include mr.create
     assert mr_on_b.status_code == 403  # host B: mr.create not in its actions
-    assert mr_on_b.json()["rule"] == "R6"
+    assert "not enabled for host" in mr_on_b.json()["reason"]
     assert comment_on_b.status_code == 201  # host B: mr.comment is active
 
     await ctx.router.aclose()

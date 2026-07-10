@@ -1,8 +1,8 @@
-"""The kernel: pipeline template, policy types, rule registry, audit, quota state, config.
+"""The kernel: pipeline template, policy types, audit, quota state, config.
 
 Everything a guard needs from the trust boundary that is *not itself* GitLab/git-specific:
 the pipeline template method (core.guard.Guard.handle), shared policy value types
-(core.model), the rule registry, typed audit event, durable quota state.
+(core.model), typed audit event, durable quota state.
 
 No GitLab/git vocabulary lives here (core.config.Config is the one documented exception).
 """
@@ -22,37 +22,11 @@ from .guard import (
 )
 from .model import Decision, Intent, StateView, TokenKind
 from .path_template import compile_template
-from .rules import (
-    GITLAB_NAMESPACE,
-    KERNEL_NAMESPACE,
-    R0,
-    R1,
-    R2,
-    R3,
-    R4,
-    R5,
-    R6,
-    RULES,
-    MetaRule,
-    RuleDef,
-    qualify,
-    rule,
-)
 from .state import CURRENT_SCHEMA_VERSION, SchemaError, State
 
 __all__ = [
     "AUDIT_SCHEMA_VERSION",
     "CURRENT_SCHEMA_VERSION",
-    "GITLAB_NAMESPACE",
-    "KERNEL_NAMESPACE",
-    "R0",
-    "R1",
-    "R2",
-    "R3",
-    "R4",
-    "R5",
-    "R6",
-    "RULES",
     "AuditEvent",
     "AuditLog",
     "Config",
@@ -60,8 +34,6 @@ __all__ = [
     "Decision",
     "Guard",
     "Intent",
-    "MetaRule",
-    "RuleDef",
     "SchemaError",
     "State",
     "StateView",
@@ -74,8 +46,6 @@ __all__ = [
     "kernel_gates",
     "normalize_project",
     "project_gate",
-    "qualify",
     "redact",
-    "rule",
     "write_credential_gate",
 ]

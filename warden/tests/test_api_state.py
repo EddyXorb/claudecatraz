@@ -3,7 +3,7 @@ the same :class:`~warden.core.state.StateStore` core state uses. Branch
 tracking (``agent_branches``) lives in the git guard's own
 :class:`~warden.guards.git.state.BranchState` — see :mod:`test_git_state`.
 
-This counter is what the REST-API guard's R5 quota reads via
+This counter is what the REST-API guard's quota check reads via
 :meth:`~warden.guards.git.gitlab.guard.ApiGuard.state_view`, so an off-by-one
 here would directly mis-gate writes.
 

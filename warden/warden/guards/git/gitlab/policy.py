@@ -5,19 +5,17 @@ The kernel's criticality/action gates deny an irreversible action, or one the
 host's config doesn't enable, before decide ever runs; decide handles
 what is left: read pass-through, or a write's branch-namespace/quota check.
 
-Rules enforced:
-  R1  Read pass-through   matched read action allowed with the READ token.
-  R2  Branch namespace     a literal branch field (source_branch/ref/branch)
+Checks enforced here:
+  Read pass-through   a matched read action is allowed with the READ token.
+  Branch namespace    a literal branch field (source_branch/ref/branch)
       must lie in the agent's configured namespace.
-  R3  API write filter    an unmatched/unrecognized write, or an
+  API write filter    an unmatched/unrecognized write, or an
       unverifiable iid -> MR namespace lookup, is denied.
-  R4  Irreversible verbs  any recognized action at IRREVERSIBLE criticality —
+  Irreversible verbs  any recognized action at IRREVERSIBLE criticality —
       never permitted, regardless of config (kernel gate).
-  R5  Quota & rate        max open MRs, max writes/hour; locked state denies.
-  R6  Project boundary    unmatched/not-enabled projectless reads; GraphQL;
+  Quota & rate        max open MRs, max writes/hour; locked state denies.
+  Project boundary    unmatched/not-enabled projectless reads; GraphQL;
       a recognized action not enabled for the host (kernel gate).
-
-Rule ids are core.rules constants, never bare literals.
 """
 
 from __future__ import annotations
@@ -28,7 +26,6 @@ from ....core.actions import Action
 from ....core.config import Config
 from ....core.guard import kernel_gates
 from ....core.model import Decision, StateView, TokenKind
-from ....core.rules import R1, R2, R3, R5, R6
 from .. import actions as git_actions
 from .intent import ApiIntent
 from .recognizers import RestRecognizer, ScopeKind, match_request
@@ -55,17 +52,17 @@ def decide(
     (read) or goes through decide_scope (write).
     """
     if intent.is_graphql:
-        return Decision(False, R6, "GraphQL is not permitted — unmodelled channel")
+        return Decision(False, "GraphQL is not permitted — unmodelled channel")
 
     match, recognized = _recognize(intent)
     if not recognized:
         kind = "write" if intent.needs_write else "read"
         reason = f"{kind} endpoint not in allowlist: {intent.method} {intent.path}"
-        return Decision(False, R3 if intent.needs_write else R6, reason)
+        return Decision(False, reason)
     assert match is not None  # non-empty recognized implies a match
 
     if not intent.needs_write:
-        return Decision(True, R1, "read pass-through", TokenKind.READ)
+        return Decision(True, "read pass-through", TokenKind.READ)
 
     return decide_scope(intent, match, recognized, state, cfg)
 
@@ -98,20 +95,20 @@ def decide_scope(
     quota = _quota_check(recognized, state, max_open_mrs, max_writes_per_hour)
     if quota is not None:
         return quota
-    return Decision(True, R3, "ok", TokenKind.WRITE)
+    return Decision(True, "ok", TokenKind.WRITE)
 
 
 def _branch_namespace_check(
     intent: ApiIntent, match: RestRecognizer, cfg: Config
 ) -> Optional[Decision]:
-    """R2/R3 for a BRANCH_NAMESPACE recognizer.
+    """Branch-namespace check for a BRANCH_NAMESPACE recognizer.
 
     namespace_field set: the branch is literally in the request (body or
-    query, per decision_fields) — a mismatch is R2 (the caller's own
+    query, per decision_fields) — a mismatch is denied here (the caller's own
     request is the witness). namespace_field is None: the branch was
     resolved via the iid -> MR upstream lookup, in intent.mr_source_ok
     (True/False/unverifiable None) — a mismatch or unverifiable
-    lookup is R3.
+    lookup is also denied.
     """
     if match.namespace_field is not None:
         value = intent.fields.get(match.namespace_field, "")
@@ -119,15 +116,14 @@ def _branch_namespace_check(
             return None
         return Decision(
             False,
-            R2,
             f"{match.namespace_field} {value!r} outside allowed prefixes {cfg.branch_prefixes!r}",
         )
 
     if intent.mr_source_ok is True:
         return None
     if intent.mr_source_ok is None:
-        return Decision(False, R3, "MR source branch could not be verified")
-    return Decision(False, R3, "MR source_branch is outside the allowed branch namespace")
+        return Decision(False, "MR source branch could not be verified")
+    return Decision(False, "MR source_branch is outside the allowed branch namespace")
 
 
 def _quota_check(
@@ -140,12 +136,12 @@ def _quota_check(
     by the time this runs.
     """
     if state.locked:  # Fail-safe: never "empty = free"
-        return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
+        return Decision(False, "state locked (fail-safe) — reconcile pending")
     if state.writes_last_hour >= max_writes_per_hour:
-        return Decision(False, R5, f"rate limit reached ({max_writes_per_hour}/h)")
+        return Decision(False, f"rate limit reached ({max_writes_per_hour}/h)")
     action = next(iter(recognized))
     if action.quota_kind == git_actions.QuotaKind.MR.value and state.open_mrs >= max_open_mrs:
-        return Decision(False, R5, f"max open MRs reached ({max_open_mrs})")
+        return Decision(False, f"max open MRs reached ({max_open_mrs})")
     return None
 
 

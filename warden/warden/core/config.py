@@ -156,8 +156,8 @@ class Config:
     def in_branch_namespace(self, name: str) -> bool:
         """True iff name starts with any configured branch prefix.
 
-        Single source of truth for the branch namespace: git guard's R2/R3 checks
-        and reconcile filters call this instead of comparing directly.
+        Single source of truth for the branch namespace: git guard's namespace
+        checks and reconcile filters call this instead of comparing directly.
         """
         return any(name.startswith(prefix) for prefix in self.branch_prefixes)
 
@@ -229,7 +229,7 @@ class Config:
         usable read credential. The single definition shared by
         warden.guards.git.reconcile.reconcile_branches
         and warden.guards.git.gitlab.reconcile.reconcile_mrs — a
-        closed endpoint is unreachable via host_gate anyway (R6) and
+        closed endpoint is unreachable via host_gate anyway and
         never needs reconciling (see warden.core.transport.for_each_host_project's
         docstring for why passing a closed host through would be a bug, not a
         tolerated case)."""

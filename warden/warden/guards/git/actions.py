@@ -16,7 +16,7 @@ from ...core.actions import Action, Criticality
 
 
 class QuotaKind(str, Enum):
-    """Which quota bucket a write action spends — drives the R5 accounting and
+    """Which quota bucket a write action spends — drives the quota accounting and
     the audit log's kind field. Only MR gates anything beyond the blanket
     writes-per-hour rate limit (the open-MR count). A git-namespace concept
     (branches, MRs, CI, issues), so it lives here alongside the vocabulary and
@@ -85,9 +85,23 @@ ALL: frozenset[Action] = frozenset(
     }
 )
 
-#: The built-in default: every row marked "yes" in the vocabulary table.
-#: Excludes the four never-class (IRREVERSIBLE) actions and the four
-#: issue.* opt-in actions.
+#: What an agent gets out of the box, and why each piece is there.
+#:
+#: Reads always flow through, and only ever with the least-privilege read
+#: credential — an agent can look at anything visible to that credential but
+#: cannot use a read to reach a write-scoped upstream token. Writes are
+#: confined to two independent boundaries: the branch namespace the agent
+#: owns (it can create and push its own branches, never touch anyone else's),
+#: and, where the shape of the action allows it, objects the agent itself
+#: authored. Actions that cannot be undone or that hand the agent more power
+#: than it started with — merging, pushing a tag, deleting a branch — are
+#: compiled out of this set entirely; no configuration cascade can turn them
+#: on for a host that only reaches DEFAULT. Quotas and rate limits are part
+#: of the same posture: if the counters backing them haven't been
+#: reconciled yet, the safe answer is to deny, not to assume zero usage.
+#: All of the above still sits inside the outer boundary of the host/project
+#: allowlist and the credential isolation between endpoints, so nothing here
+#: is reachable unless the deployment's own config already opened the door.
 DEFAULT: frozenset[Action] = frozenset(
     {
         REPO_READ,

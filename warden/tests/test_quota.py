@@ -51,7 +51,7 @@ def test_n_writes_ok_then_block():
         st.record_write("api", HOST, "mr")
     # (N+1)-th is blocked by the rate limit
     d = decide(_mr(cfg), st.view("api", HOST), cfg)
-    assert not d.allow and d.rule == "R5"
+    assert not d.allow and "rate limit" in d.reason
 
 
 def test_sliding_window_frees_budget_after_an_hour():

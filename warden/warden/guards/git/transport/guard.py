@@ -19,7 +19,6 @@ from ....core.audit import AuditLog
 from ....core.config import Config, normalize_project
 from ....core.guard import Guard
 from ....core.model import Decision, StateView, TokenKind
-from ....core.rules import R1
 from ....core.state import State
 from ....core.transport import UpstreamRouter, stream_upstream
 from ....errors import deny_json
@@ -48,7 +47,7 @@ def _forward_encoding(request: Request) -> dict[str, str]:
 
 
 def _content_length(request: Request) -> Optional[int]:
-    """Read Content-Length for the cheap push-size gate (R5).
+    """Read Content-Length for the cheap push-size quota gate.
 
     No packfile parsing: an absent/non-numeric header (chunked transfer)
     yields None — the size gate simply has nothing to check then.
@@ -179,8 +178,8 @@ class GitGuard(Guard[GitIntent]):
         if intent.operation == "receive-pack":
             return policy.decide(intent, state, cfg)
         if intent.needs_write:
-            return Decision(True, R1, "push discovery", TokenKind.WRITE)
-        return Decision(True, R1, "read pass-through", TokenKind.READ)
+            return Decision(True, "push discovery", TokenKind.WRITE)
+        return Decision(True, "read pass-through", TokenKind.READ)
 
     def record(self, intent: GitIntent, decision: Decision) -> None:
         """Record every ref write before the upstream call to ensure a crash never loses a write.
@@ -244,9 +243,9 @@ class GitGuard(Guard[GitIntent]):
     def deny_response(self, intent: GitIntent, decision: Decision, state: StateView) -> Response:
         """Per-ref rejection for receive-pack: client sees which ref failed and why.
 
-        Each ref reports its own action-gate/R2/R5 decision; a ref that
-        individually clears both but was denied at the whole-push level
-        (e.g. R6 project, or R5 push size) reports the overall decision,
+        Each ref reports its own action-gate/namespace/quota decision; a ref
+        that individually clears both but was denied at the whole-push level
+        (e.g. project allowlist, or push size) reports the overall decision,
         never a misleading "ok". advertise/upload-pack denials get a plain
         JSON body instead — there is no per-ref shape for a read.
         """

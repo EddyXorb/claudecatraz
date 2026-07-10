@@ -2,19 +2,18 @@
 
 Branch namespace and quotas are the only checks left here — irreversible
 verbs (tag push, branch/tag delete) are denied by the recognized action's
-criticality, before any of this runs. Mode gate (R0) and the project
-resource allowlist (R6, project scope) are the kernel's job.
+criticality, before any of this runs. The write-credential gate and the
+project resource allowlist are the kernel's job.
 
-Rules enforced:
-  R2  git write limits   push only to branches under allowed <branch_prefix>.
-  R4  Irreversible verb  a recognized IRREVERSIBLE action is never enabled.
-  R5  Quota & rate       max open branches, max writes/hour, max push size;
-                         locked state denies (fail-safe).
-  R6  Action allowlist   the recognized action must be in the host's
-                         effective actions — same rule id as the kernel's
-                         project allowlist, both instances of the same
-                         "resource/action outside the configured boundary"
-                         meta-rule (M6).
+Checks enforced here:
+  git write limits    push only to branches under allowed <branch_prefix>.
+  Irreversible verb    a recognized IRREVERSIBLE action is never enabled.
+  Quota & rate         max open branches, max writes/hour, max push size;
+                       locked state denies (fail-safe).
+  Action allowlist     the recognized action must be in the host's
+                       effective actions — the same boundary the kernel's
+                       project allowlist enforces, both instances of
+                       "resource/action outside the configured boundary."
 """
 
 from __future__ import annotations
@@ -26,24 +25,23 @@ from ....core.actions import Action, Criticality
 from ....core.config import Config
 from ....core.guard import kernel_gates
 from ....core.model import Decision, StateView, TokenKind
-from ....core.rules import R2, R4, R5, R6
 from . import recognizers
 from .intent import GitIntent
 from .pktline import RefCommand
 
 
 def _action_decision(actions: frozenset[Action], host: str, cfg: Config) -> Optional[Decision]:
-    """Deny if any recognized action is irreversible (R4) or missing from the
-    host's effective actions (R6). An empty actions set — an unrecognized
-    ref shape — denies fail-closed under R6 too.
+    """Deny if any recognized action is irreversible or missing from the
+    host's effective actions. An empty actions set — an unrecognized
+    ref shape — denies fail-closed too.
     """
     if not actions:
-        return Decision(False, R6, "no recognized action for this request")
+        return Decision(False, "no recognized action for this request")
     for action in sorted(actions, key=lambda a: a.id):
         if action.criticality is Criticality.IRREVERSIBLE:
-            return Decision(False, R4, f"action {action.id} is irreversible, never permitted")
+            return Decision(False, f"action {action.id} is irreversible, never permitted")
         if action.id not in cfg.effective_actions(host):
-            return Decision(False, R6, f"action {action.id} not enabled for host {host!r}")
+            return Decision(False, f"action {action.id} not enabled for host {host!r}")
     return None
 
 
@@ -65,7 +63,7 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
     ref-command is checked; the first denial rejects the whole batch,
     matching decide's per-ref quota atomicity.
 
-    Relies on the kernel's host gate (R6) having already run and passed for
+    Relies on the kernel's host gate having already run and passed for
     intent.host: a host with no [[git.endpoint]] entry is denied
     there first. This matters because effective_actions cannot itself
     distinguish "no endpoint" from "endpoint inheriting the domain/built-in
@@ -84,8 +82,9 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
 def check_ref(
     cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
 ) -> Decision:
-    """R2/R5 for one ref-command already cleared by action_gate — a
-    tag or a delete never reaches here, both denied earlier as irreversible.
+    """Branch-namespace and quota checks for one ref-command already cleared
+    by action_gate — a tag or a delete never reaches here, both denied
+    earlier as irreversible.
 
     max_open_branches/max_writes_per_hour are the endpoint's own
     resolved ceilings (Config.effective_rules(intent.host)) —
@@ -96,17 +95,15 @@ def check_ref(
     None-after-cascade invariant is asserted).
     """
     ref = cmd.ref.removeprefix("refs/heads/")
-    if not cfg.in_branch_namespace(ref):  # R2
-        return Decision(
-            False, R2, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}"
-        )
+    if not cfg.in_branch_namespace(ref):  # branch namespace
+        return Decision(False, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}")
     if state.locked:  # Fail-safe
-        return Decision(False, R5, "state locked (fail-safe) — reconcile pending")
-    if cmd.is_create and state.open_branches >= max_open_branches:  # R5
-        return Decision(False, R5, f"max open branches reached ({max_open_branches})")
-    if state.writes_last_hour >= max_writes_per_hour:  # R5
-        return Decision(False, R5, f"rate limit reached ({max_writes_per_hour}/h)")
-    return Decision(True, R2, "ok", TokenKind.WRITE)
+        return Decision(False, "state locked (fail-safe) — reconcile pending")
+    if cmd.is_create and state.open_branches >= max_open_branches:  # quota
+        return Decision(False, f"max open branches reached ({max_open_branches})")
+    if state.writes_last_hour >= max_writes_per_hour:  # rate
+        return Decision(False, f"rate limit reached ({max_writes_per_hour}/h)")
+    return Decision(True, "ok", TokenKind.WRITE)
 
 
 def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
@@ -116,11 +113,10 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     within the batch — N creates against max_open_branches - 1 must reject.
     """
     if not intent.ref_commands:
-        return Decision(False, R2, "no ref commands in push")
+        return Decision(False, "no ref commands in push")
     if intent.push_bytes is not None and intent.push_bytes > cfg.max_push_bytes:
         return Decision(
             False,
-            R5,
             f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({cfg.max_push_bytes})",
         )
     rules = cfg.effective_rules(intent.host)
@@ -142,7 +138,7 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
         pending_writes += 1
         if cmd.is_create:
             pending_branches += 1
-    return Decision(True, R2, "ok", TokenKind.WRITE)
+    return Decision(True, "ok", TokenKind.WRITE)
 
 
 def full_decide(

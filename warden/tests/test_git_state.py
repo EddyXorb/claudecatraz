@@ -4,7 +4,7 @@ git guard's own branch quota table (``agent_branches``), built on the same
 :mod:`test_forge_state` when branch tracking moved from the shared forge to
 the git guard itself.
 
-This counter is what the git guard's R5 quota reads via
+This counter is what the git guard's quota check reads via
 :meth:`~warden.guards.git.guard.GitGuard.state_view`, so an off-by-one here
 would directly mis-gate pushes.
 

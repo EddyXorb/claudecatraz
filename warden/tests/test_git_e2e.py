@@ -269,7 +269,7 @@ def test_push_forbidden_branch_is_rejected(e2e):
 
     res = _git(work, "push", "origin", "main", check=False)
     assert res.returncode != 0
-    assert "warden: R2" in (res.stderr + res.stdout)
+    assert "outside allowed prefixes" in (res.stderr + res.stdout)
 
 
 def test_push_update_denied_when_branch_push_disabled_names_the_action(e2e_no_branch_push):

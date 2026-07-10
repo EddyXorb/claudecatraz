@@ -4,7 +4,7 @@ counter tests live in ``test_git_state`` (``guards.git.transport.state.BranchSta
 MR counter tests live in ``test_api_state`` (``guards.git.gitlab.state.MrState``)
 — neither is core.
 
-These counters are what the policy's R5 quotas read, so an off-by-one or a
+These counters are what the policy's quota checks read, so an off-by-one or a
 missed time-window here would directly mis-gate writes.
 """
 

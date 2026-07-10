@@ -62,7 +62,7 @@ async def test_push_wrong_prefix_rejected_without_upstream(client, respx_router)
     resp = await client.post(RECV, content=body)
     assert resp.status_code == 200  # rejection is in-band
     assert b"ng refs/heads/main" in resp.content
-    assert b"warden: R2" in resp.content
+    assert b"outside allowed prefixes" in resp.content
 
 
 async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router, ctx):
@@ -86,30 +86,31 @@ async def test_push_prefixed_branch_streamed_sha_preserving(client, respx_router
     # Regression: the project key is normalised (no ``.git`` suffix) so it matches
     # the reconcile/allowlist form. Otherwise the push row (``proj.git``) and the
     # reconcile row (``proj``) coexist → the branch is counted twice and the push
-    # row is never pruned (R5 ``max_open_branches`` drift).
+    # row is never pruned (``max_open_branches`` quota drift).
     keys = [r["project"] for r in ctx.state.store.execute("SELECT project FROM agent_branches")]
     assert keys == ["group/proj"]
 
 
 async def test_push_delete_rejected(client, respx_router):
-    # Branch delete is an irreversible verb (M4) — reported as R4, not R2.
+    # Branch delete is an irreversible verb — never permitted, not just a
+    # branch-namespace mismatch.
     body = make_push([(SHA1, ZERO, "refs/heads/claude/feature")])
     resp = await client.post(RECV, content=body)
     assert b"ng refs/heads/claude/feature" in resp.content
-    assert b"warden: R4" in resp.content
+    assert b"irreversible" in resp.content
 
 
 async def test_advertise_denied_for_project_outside_allowlist(client, respx_router):
-    # A non-allowlisted project must not even be discoverable over git (R6).
+    # A non-allowlisted project must not even be discoverable over git.
     resp = await client.get("/git/other/secret.git/info/refs?service=git-upload-pack")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_upload_pack_denied_for_project_outside_allowlist(client, respx_router):
     resp = await client.post("/git/other/secret.git/git-upload-pack", content=b"0032want ...")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in allowlist" in resp.json()["reason"]
 
 
 async def test_push_forwards_content_encoding(client, respx_router):
@@ -138,14 +139,13 @@ def _client_with(cfg: Config) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, base_url="http://gitlab.example")
 
 
-async def test_push_over_max_push_bytes_rejected_r5(cfg, respx_router):
+async def test_push_over_max_push_bytes_rejected(cfg, respx_router):
     small_cfg = replace(cfg, max_push_bytes=200)
     async with _client_with(small_cfg) as c:
         body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")], pack=b"PACK" + b"\x00" * 500)
         assert len(body) > 200
         resp = await c.post(RECV, content=body)
     assert resp.status_code == 200  # in-band rejection
-    assert b"warden: R5" in resp.content
     assert b"exceeds max_push_bytes" in resp.content
 
 
@@ -202,39 +202,37 @@ def _access_client(access: str) -> httpx.AsyncClient:
 
 async def test_closed_advertise_clone_denied_no_upstream():
     """A closed host: git clone discovery (git-upload-pack) is denied by
-    `host_gate` (R6), before any mode/write check; no upstream call."""
+    `host_gate`, before any mode/write check; no upstream call."""
     async with _access_client("closed") as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in the multi-target allowlist" in resp.json()["reason"]
 
 
 async def test_closed_upload_pack_denied_no_upstream():
-    """A closed host: git fetch body (upload-pack) is denied R6; no upstream call."""
+    """A closed host: git fetch body (upload-pack) is denied; no upstream call."""
     async with _access_client("closed") as c:
         resp = await c.post("/git/group/proj.git/git-upload-pack", content=b"0032want ...")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R6"
+    assert "not in the multi-target allowlist" in resp.json()["reason"]
 
 
 async def test_read_only_advertise_receive_pack_denied_no_upstream():
-    """A read-only host: push discovery (git-receive-pack) is denied R0
-    before git_get."""
+    """A read-only host: push discovery (git-receive-pack) is denied by the
+    write-credential gate before git_get."""
     async with _access_client("read-only") as c:
         resp = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R0"
     assert "read-only" in resp.json()["reason"]
 
 
-async def test_read_only_push_discovery_denied_r0_not_r6_for_unallowed_project():
+async def test_read_only_push_discovery_denied_for_unallowed_project_too():
     # The kernel checks host -> writes -> project in that order, so a
-    # write-mode denial (R0) preempts the allowlist check here rather than
-    # reporting R6.
+    # write-credential denial preempts the allowlist check here.
     async with _access_client("read-only") as c:
         resp = await c.get("/git/other/secret.git/info/refs?service=git-receive-pack")
     assert resp.status_code == 403
-    assert resp.json()["rule"] == "R0"
+    assert "read-only" in resp.json()["reason"]
 
 
 async def _read_audit_lines(ctx, tmp_path, make_request):
@@ -339,7 +337,7 @@ async def test_action_gate_denies_receive_pack_create_when_repo_branch_create_no
         body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])  # create: old oid is zero
         resp = await c.post(RECV, content=body)
     assert resp.status_code == 200  # in-band rejection, git convention
-    assert b"warden: R6" in resp.content
+    assert b"not enabled for host" in resp.content
     assert REPO_BRANCH_CREATE.id.encode() in resp.content
 
 
@@ -351,7 +349,7 @@ async def test_action_gate_denies_receive_pack_push_when_repo_branch_push_not_en
         body = make_push([(SHA1, SHA2, "refs/heads/claude/feature")])
         resp = await c.post(RECV, content=body)
     assert resp.status_code == 200
-    assert b"warden: R6" in resp.content
+    assert b"not enabled for host" in resp.content
     assert REPO_BRANCH_PUSH.id.encode() in resp.content
 
 
@@ -374,8 +372,9 @@ async def test_action_gate_allows_fetch_advertise_and_upload_pack_when_only_git_
 
 async def test_action_gate_full_default_allows_fetch_and_push(respx_router):
     # Host with both actions enabled: fetch *and* push discovery both pass
-    # the action gate (they still go through the usual R0/R2/etc. checks
-    # afterwards — this only asserts the action gate itself doesn't deny).
+    # the action gate (they still go through the usual write-credential/
+    # branch-namespace/etc. checks afterwards — this only asserts the action
+    # gate itself doesn't deny).
     respx_router.route(method="GET", url__regex=r".*/info/refs.*").mock(
         return_value=httpx.Response(200, content=b"001e# service=git-upload-pack\n")
     )
@@ -383,4 +382,4 @@ async def test_action_gate_full_default_allows_fetch_and_push(respx_router):
         fetch_advertise = await c.get("/git/group/proj.git/info/refs?service=git-upload-pack")
         push_advertise = await c.get("/git/group/proj.git/info/refs?service=git-receive-pack")
     assert fetch_advertise.status_code == 200
-    assert push_advertise.status_code == 200  # push discovery passes; R1
+    assert push_advertise.status_code == 200  # push discovery passes as a read

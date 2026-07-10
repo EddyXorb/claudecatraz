@@ -1,4 +1,4 @@
-"""The kernel's action gates: criticality (R4), enablement (R6), and the
+"""The kernel's action gates: criticality, enablement, and the
 per-type action-id derivation they depend on.
 
 Every guard's own recognizer/policy tests already pin down *which* action a
@@ -63,7 +63,7 @@ def _api(method: str, path: str) -> ApiIntent:
     return ApiIntent(_project=project, _method=method, path=path, _host=HOST)
 
 
-# --- criticality gate (R4): unit-level -----------------------------------------
+# --- criticality gate: unit-level -----------------------------------------------
 
 
 def test_criticality_gate_passes_an_empty_action_set():
@@ -78,28 +78,28 @@ def test_criticality_gate_passes_actions_below_irreversible():
 def test_criticality_gate_denies_an_irreversible_action():
     d = criticality_gate(frozenset({Action("x.destroy", Criticality.IRREVERSIBLE)}))
     assert d is not None
-    assert not d.allow and d.rule == "R4"
+    assert not d.allow and "irreversible" in d.reason
     assert "x.destroy" in d.reason
 
 
-# --- criticality gate (R4): every guard, via full_decide, regardless of config -
+# --- criticality gate: every guard, via full_decide, regardless of config ------
 
 
 def test_criticality_gate_denies_irreversible_for_git_transport_even_if_enabled():
     cfg = _cfg(actions=tuple(sorted(git_actions.by_id)))  # every id explicitly on
     intent = _push(RefCommand(SHA, ZERO, "refs/heads/claude/x"))  # branch delete
     d = git_full_decide(intent, StateView(), cfg)
-    assert not d.allow and d.rule == "R4"
+    assert not d.allow and "irreversible" in d.reason
 
 
 def test_criticality_gate_denies_irreversible_for_gitlab_even_if_enabled():
     cfg = _cfg(actions=tuple(sorted(git_actions.by_id)))
     intent = _api("PUT", "/projects/group%2Fproj/merge_requests/7/merge")
     d = api_full_decide(intent, StateView(), cfg)
-    assert not d.allow and d.rule == "R4"
+    assert not d.allow and "irreversible" in d.reason
 
 
-# --- action gate (R6): unit-level -----------------------------------------------
+# --- action gate: unit-level -----------------------------------------------------
 
 
 def test_action_gate_passes_when_every_recognized_action_is_enabled():
@@ -107,22 +107,22 @@ def test_action_gate_passes_when_every_recognized_action_is_enabled():
     assert action_gate(actions, frozenset({"x.read", "x.other"}), HOST) is None
 
 
-def test_action_gate_denies_a_disabled_action_with_r6_and_names_the_id():
+def test_action_gate_denies_a_disabled_action_and_names_the_id():
     actions = frozenset({Action("x.read", Criticality.READ)})
     d = action_gate(actions, frozenset({"x.other"}), HOST)
     assert d is not None
-    assert not d.allow and d.rule == "R6"
+    assert not d.allow and "not enabled for host" in d.reason
     assert "x.read" in d.reason
 
 
-# --- action gate (R6): every guard, via full_decide -----------------------------
+# --- action gate: every guard, via full_decide -----------------------------------
 
 
 def test_action_gate_denies_a_disabled_action_for_git_transport():
     cfg = _cfg(actions=("repo.read",))
     intent = _push(RefCommand(ZERO, SHA, "refs/heads/claude/x"))  # create
     d = git_full_decide(intent, StateView(), cfg)
-    assert not d.allow and d.rule == "R6"
+    assert not d.allow and "not enabled for host" in d.reason
     assert "repo.branch.create" in d.reason
 
 
@@ -136,7 +136,7 @@ def test_action_gate_allows_an_enabled_action_for_git_transport():
 def test_action_gate_denies_a_disabled_action_for_gitlab():
     intent = _api("GET", "/projects/group%2Fproj/repository/tree")
     d = api_full_decide(intent, StateView(), _cfg(), frozenset({"project.read"}))
-    assert not d.allow and d.rule == "R6"
+    assert not d.allow and "not enabled for host" in d.reason
     assert "repo.read" in d.reason
 
 
@@ -146,18 +146,18 @@ def test_action_gate_allows_an_enabled_action_for_gitlab():
     assert d.allow
 
 
-# --- unmatched/empty recognized: writes deny in the kernel (R3) ----------------
+# --- unmatched/empty recognized: writes deny in the kernel ---------------------
 
 
-def test_unmatched_write_denies_in_the_kernel_with_r3_for_gitlab():
+def test_unmatched_write_denies_in_the_kernel_for_gitlab():
     intent = _api("DELETE", "/projects/group%2Fproj/repository/branches/claude%2Fx")
     d = api_full_decide(intent, StateView(), _cfg())
-    assert not d.allow and d.rule == "R3"
+    assert not d.allow and "no recognized action" in d.reason
 
 
-def test_empty_recognized_write_denies_in_the_kernel_with_r3_for_git_transport():
+def test_empty_recognized_write_denies_in_the_kernel_for_git_transport():
     d = git_full_decide(_push(), StateView(), _cfg())
-    assert not d.allow and d.rule == "R3"
+    assert not d.allow and "no recognized action" in d.reason
 
 
 # --- order proof: a denied action performs no upstream lookup -----------------
@@ -185,7 +185,7 @@ async def test_disabled_write_action_performs_no_upstream_lookup(respx_router):
     await ctx.router.aclose()
     assert resp.status_code == 403
     body = resp.json()
-    assert body["rule"] == "R6"
+    assert "not enabled for host" in body["reason"]
     assert "project.mr.comment" in body["reason"]
 
 

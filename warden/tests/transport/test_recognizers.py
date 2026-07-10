@@ -119,7 +119,7 @@ def test_receive_pack_denies_per_ref_naming_the_disabled_action():
     )
     denied = policy.action_gate(intent, cfg)
     assert denied is not None
-    assert not denied.allow and denied.rule == "R6"
+    assert not denied.allow and "not enabled for host" in denied.reason
     assert git_actions.REPO_BRANCH_CREATE.id in denied.reason
 
 
@@ -136,7 +136,7 @@ def test_receive_pack_batch_denies_on_first_bad_ref_action():
     )
     denied = policy.action_gate(intent, cfg)
     assert denied is not None
-    assert not denied.allow and denied.rule == "R6"
+    assert not denied.allow and "not enabled for host" in denied.reason
     assert git_actions.REPO_BRANCH_PUSH.id in denied.reason
 
 
@@ -152,5 +152,5 @@ def test_tag_and_delete_denied_by_criticality_even_with_every_action_enabled():
         _intent("receive-pack", ref_commands=[RefCommand(SHA, ZERO, "refs/heads/claude/feature")]),
         cfg,
     )
-    assert tag is not None and not tag.allow and tag.rule == "R4"
-    assert delete is not None and not delete.allow and delete.rule == "R4"
+    assert tag is not None and not tag.allow and "irreversible" in tag.reason
+    assert delete is not None and not delete.allow and "irreversible" in delete.reason

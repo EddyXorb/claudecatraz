@@ -357,7 +357,7 @@ def test_host_allowed_allows_a_configured_open_endpoint():
 
 def test_host_allowed_denies_a_configured_but_closed_endpoint():
     """A host with a `[[git.endpoint]]` entry but no usable read token is
-    denied by the same R6 gate as an entirely unlisted host — never reaches
+    denied by the same host gate as an entirely unlisted host — never reaches
     `UpstreamRouter.resolve` returning ``None`` past an "already denied"
     assertion."""
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.com", type="gitlab"),))

@@ -15,20 +15,21 @@ from warden.core.model import Decision, StateView
 
 def test_schema_v3_event_carries_guard_not_channel():
     """§06-migration.md Schritt 6 (F11): the JSONL field is ``guard`` now, the
-    line is stamped version 3, and ``channel`` is gone — from the event *and*
-    from the redaction allowlist (an allowlist keeps only what is named)."""
-    assert AUDIT_SCHEMA_VERSION == 3  # pinned: v3 = channel→guard (audit.py docstring)
+    line is stamped the current schema version, and ``channel`` is gone —
+    from the event *and* from the redaction allowlist (an allowlist keeps
+    only what is named)."""
+    assert AUDIT_SCHEMA_VERSION == 4  # pinned: v4 = rule field removed (audit.py docstring)
     event = build_event(
         guard="git",
         correlation_id="cid",
         method="push",
         project="group/proj",
-        decision=Decision(True, "R2", "ok"),
+        decision=Decision(True, "ok"),
         state=StateView(),
         started=0.0,
         upstream_status=200,
     )
-    assert event["schema"] == 3
+    assert event["schema"] == 4
     assert event["guard"] == "git"
     assert "channel" not in event
     assert "guard" in _ALLOWED_FIELDS and "channel" not in _ALLOWED_FIELDS
@@ -37,26 +38,27 @@ def test_schema_v3_event_carries_guard_not_channel():
 def test_redact_keeps_only_allowlisted_fields():
     entry = {
         "ts": 1.0,
-        "rule": "R2",
+        "rule": "R2",  # dropped: no longer a recognized field
         "reason": "ok",
         "authorization": "Bearer secret",  # must be dropped
         "private-token": "tok",  # must be dropped
         "body": "payload",  # unknown field, dropped
     }
-    assert redact(entry) == {"ts": 1.0, "rule": "R2", "reason": "ok"}
+    assert redact(entry) == {"ts": 1.0, "reason": "ok"}
+    assert "rule" not in _ALLOWED_FIELDS
 
 
 async def test_log_writes_one_redacted_json_line(tmp_path):
     path = tmp_path / "audit.jsonl"
     al = AuditLog(str(path))
     al.start()
-    al.log({"guard": "api", "rule": "R3", "decision": "allow", "authorization": "secret"})
+    al.log({"guard": "api", "reason": "ok", "decision": "allow", "authorization": "secret"})
     await al.stop()  # drains the queue before returning
 
     lines = path.read_text().splitlines()
     assert len(lines) == 1
     rec = json.loads(lines[0])
-    assert rec["guard"] == "api" and rec["rule"] == "R3" and rec["decision"] == "allow"
+    assert rec["guard"] == "api" and rec["reason"] == "ok" and rec["decision"] == "allow"
     assert "ts" in rec  # timestamp stamped by log()
     assert "authorization" not in rec  # the secret never reached disk
 
@@ -65,20 +67,23 @@ async def test_log_appends_across_calls(tmp_path):
     path = tmp_path / "audit.jsonl"
     al = AuditLog(str(path))
     al.start()
-    al.log({"rule": "R1", "decision": "allow"})
-    al.log({"rule": "R4", "decision": "deny"})
+    al.log({"reason": "read pass-through", "decision": "allow"})
+    al.log({"reason": "action is irreversible, never permitted", "decision": "deny"})
     await al.stop()
 
-    rules = [json.loads(line)["rule"] for line in path.read_text().splitlines()]
-    assert rules == ["R1", "R4"]  # O_APPEND, in order
+    reasons = [json.loads(line)["reason"] for line in path.read_text().splitlines()]
+    assert reasons == [
+        "read pass-through",
+        "action is irreversible, never permitted",
+    ]  # O_APPEND, in order
 
 
 async def test_log_to_dash_goes_to_stderr_not_a_file(capsys):
     al = AuditLog("-")
     al.start()
-    al.log({"rule": "R1", "decision": "allow"})
+    al.log({"reason": "read pass-through", "decision": "allow"})
     await al.stop()
-    assert '"rule":"R1"' in capsys.readouterr().err
+    assert '"reason":"read pass-through"' in capsys.readouterr().err
 
 
 async def test_write_failure_is_swallowed_not_fatal(tmp_path, capsys, monkeypatch):
@@ -90,7 +95,7 @@ async def test_write_failure_is_swallowed_not_fatal(tmp_path, capsys, monkeypatc
 
     monkeypatch.setattr(al, "_write", boom)
     al.start()
-    al.log({"rule": "R1", "decision": "allow"})
+    al.log({"reason": "read pass-through", "decision": "allow"})
     await al.stop()  # would hang/raise if the failure crashed the task
     assert "audit write failed" in capsys.readouterr().err
 
@@ -104,7 +109,7 @@ def test_build_event_api_guard_has_exactly_the_expected_fields():
         correlation_id="cid-1",
         method="POST",
         project="group/proj",
-        decision=Decision(True, "R3", "ok"),
+        decision=Decision(True, "ok"),
         state=StateView(open_mrs=1, open_branches=2, writes_last_hour=3),
         started=0.0,
         upstream_status=201,
@@ -119,7 +124,6 @@ def test_build_event_api_guard_has_exactly_the_expected_fields():
         "path",
         "project",
         "decision",
-        "rule",
         "reason",
         "kind",
         "upstream_status",
@@ -132,7 +136,8 @@ def test_build_event_api_guard_has_exactly_the_expected_fields():
     assert event["schema"] == AUDIT_SCHEMA_VERSION
     assert event["guard"] == "api"
     assert event["decision"] == "allow"
-    assert event["rule"] == "R3"
+    assert "rule" not in event
+    assert event["reason"] == "ok"
     assert event["path"] == "/projects/1/merge_requests"
     assert event["kind"] == "mr"
 
@@ -143,7 +148,7 @@ def test_build_event_git_guard_has_exactly_the_expected_fields():
         correlation_id="cid-2",
         method="push",
         project="group/proj",
-        decision=Decision(False, "R2", "no"),
+        decision=Decision(False, "no"),
         state=StateView(),
         started=0.0,
         upstream_status=None,
@@ -156,7 +161,6 @@ def test_build_event_git_guard_has_exactly_the_expected_fields():
         "method",
         "project",
         "decision",
-        "rule",
         "reason",
         "refs",
         "upstream_status",
@@ -169,5 +173,6 @@ def test_build_event_git_guard_has_exactly_the_expected_fields():
     assert event["schema"] == AUDIT_SCHEMA_VERSION
     assert event["guard"] == "git"
     assert event["decision"] == "deny"
-    assert event["rule"] == "R2"
+    assert "rule" not in event
+    assert event["reason"] == "no"
     assert event["refs"] == ["aaaaaaaa→bbbbbbbb refs/heads/claude/x"]

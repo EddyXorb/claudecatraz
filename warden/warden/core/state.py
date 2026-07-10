@@ -3,7 +3,7 @@
 SQLite with WAL + synchronous=FULL: every write-record commits *before* the upstream call.
 State view is **locked** until a reconcile succeeds (never "empty = all free").
 
-Kernel-owned: counters and fail-safe locking are resource-agnostic (M5), keyed by
+Kernel-owned: counters and fail-safe locking are resource-agnostic, keyed by
 guard/kind strings. Module has no forge vocabulary — each guard owns its
 own domain table on the shared connection: branches in
 warden.guards.git.state.BranchState, MRs in

@@ -44,7 +44,7 @@ class GitIntent(Intent):
     sideband: bool = False
     # receive-pack only: the request's Content-Length, when the client sent one
     # (git normally does). None when absent (e.g. chunked transfer) — the size
-    # gate (R5) then has nothing cheap to check against and lets the push
+    # gate then has nothing cheap to check against and lets the push
     # through; it is a cap on the common case, not packfile parsing.
     push_bytes: Optional[int] = None
 

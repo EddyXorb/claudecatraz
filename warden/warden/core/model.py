@@ -21,7 +21,6 @@ class TokenKind(str, Enum):
 @dataclass(frozen=True)
 class Decision:
     allow: bool
-    rule: str  # bare rule id ("R0".."R6") — sourced from core.rules, for the audit log
     reason: str
     token: TokenKind = TokenKind.NONE  # which upstream token, if allow
 

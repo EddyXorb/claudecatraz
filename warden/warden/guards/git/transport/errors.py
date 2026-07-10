@@ -1,5 +1,5 @@
 """git Smart-HTTP reject responses: a correctly framed report-status
-over the side-band so git push shows a clear ! [remote rejected] … (warden: R2 …)."""
+over the side-band so git push shows a clear ! [remote rejected] … (warden: …)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def git_reject_body(decisions: list[Decision], refs: list[str], *, sideband: boo
     """Build a report-status payload rejecting every ref with the deny reason."""
     inner = pkt_line(b"unpack ok\n")
     for ref, d in zip(refs, decisions):
-        reason = f"warden: {d.rule} {d.reason}"
+        reason = f"warden: {d.reason}"
         inner += pkt_line(f"ng {ref} {reason}\n".encode())
     inner += FLUSH
     if sideband:
