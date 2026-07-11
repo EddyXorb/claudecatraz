@@ -52,12 +52,22 @@ def _read_json(p: Path) -> dict[str, Any]:
         return {}
 
 
+def _config_dir() -> Path:
+    """Claude's config dir. With a custom `CLAUDE_CONFIG_DIR` (our persistent
+    layout) both `.claude.json` and the user-memory `CLAUDE.md` live INSIDE it;
+    the default layout keeps them under `~/.claude`. This is the single source
+    of truth for every home-relative path the adapter writes, so a change to
+    the compose `CLAUDE_CONFIG_DIR` never needs a matching edit here."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(d) if d else Path.home() / ".claude"
+
+
 def _log_dir() -> Path:
     """Where to place `--debug-file` output — the entrypoint resolves a
-    durable-if-possible directory via `AGENT_LOG_DIR`; fall back to the live
-    home."""
+    durable-if-possible directory via `AGENT_LOG_DIR`; fall back to the config
+    dir (the live home)."""
     d = os.environ.get("AGENT_LOG_DIR")
-    return Path(d) if d else Path.home() / ".claude"
+    return Path(d) if d else _config_dir()
 
 
 # ── prepare_home ─────────────────────────────────────────────────────────────
@@ -95,7 +105,7 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
     if secrets.auth_mode == "subscription" and not persistent:
         seed = _seed_from_ro(home, secrets.subscription_ro_dir)
 
-    claude_json = Path.home() / ".claude.json"
+    claude_json = home / ".claude.json"
     # Persistent: merge onto the existing file so the durable home is not
     # clobbered each start; otherwise (re)seed fresh.
     if persistent and claude_json.exists():
@@ -104,12 +114,14 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
         data = seed or {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
     data.setdefault("hasCompletedOnboarding", True)
     data.setdefault("lastOnboardingVersion", "1.0")
-    # bypassPermissionsModeAccepted moved into settings.json's
-    # skipDangerousModePermissionPrompt on newer CLI versions; set both keys.
+    #skipDangerousModePermissionPrompt on newer CLI versions; set both keys.
     data["bypassPermissionsModeAccepted"] = True
-    if secrets.remote:
-        data["remoteDialogSeen"] = True
-    data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
+    data["remoteDialogSeen"] = True
+
+    data.setdefault("projects", {}).setdefault("/workspace", {})[
+        "hasTrustDialogAccepted"
+    ] = True
+
     claude_json.write_text(json.dumps(data, indent=2))
 
     settings = home / "settings.json"
@@ -121,6 +133,7 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
                     "theme": "dark",
                     "hasCompletedOnboarding": True,
                     "skipDangerousModePermissionPrompt": True,
+                    "remoteDialogSeen": True,
                 },
                 indent=2,
             )
@@ -192,7 +205,7 @@ def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
         .replace("__BRANCH_PREFIX_EXAMPLE__", prefix_example)
         .replace("__WARDEN_TOML_PATH__", str(ctx.warden_toml_path))
     )
-    return Path.home() / ".claude" / "CLAUDE.md", content
+    return _config_dir() / "CLAUDE.md", content
 
 
 # ── host-side credential sync (credentials.mode = "sync") ───────────────────
@@ -207,7 +220,9 @@ def sync_from_host(source: Path | None, home: Path) -> None:
     ).expanduser()
     cred = src_dir / ".credentials.json"
     if not cred.exists():
-        sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
+        sys.exit(
+            f"error: {cred} not found — authenticate with `claude` on the host first"
+        )
     import shutil
 
     home.mkdir(parents=True, exist_ok=True)
