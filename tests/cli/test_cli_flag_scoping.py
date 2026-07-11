@@ -55,17 +55,17 @@ def test_audit_dry_run_fails(capsys: pytest.CaptureFixture[str]) -> None:
         parse(["audit", "--dry-run"])
 
 
-# ── 3. Pre-subcommand form now fail-loud (pins deliberate decision) ───────────
+# ── 3. Pre-subcommand form fails loud (pins deliberate decision) ───────────
 
 
 def test_dry_run_before_stop_fails(capsys: pytest.CaptureFixture[str]) -> None:
-    """--dry-run is no longer on the top-level parser; pre-subcommand form must fail."""
+    """--dry-run is not on the top-level parser; pre-subcommand form must fail."""
     with pytest.raises(SystemExit):
         parse(["--dry-run", "stop"])
 
 
 def test_yes_before_init_fails(capsys: pytest.CaptureFixture[str]) -> None:
-    """-y is no longer on the top-level parser; pre-subcommand form must fail."""
+    """-y is not on the top-level parser; pre-subcommand form must fail."""
     with pytest.raises(SystemExit):
         parse(["-y", "init"])
 

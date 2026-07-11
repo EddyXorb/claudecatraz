@@ -79,7 +79,7 @@ def test_present_seed_failure_does_not_nag(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(setup_sync, "_run_sync", boom)
     out = _Out()
     setup._auto_sync_if_needed(tmp_path, cast(Out, out))  # must not raise
-    assert all(t != "warn" for t, _ in out.msgs)  # existing seed still works → silent
+    assert all(t != "warn" for t, _ in out.msgs)  # existing seed is valid → silent
 
 
 def test_missing_seed_failure_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

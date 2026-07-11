@@ -24,7 +24,7 @@ from catraz.commands import setup, stack, observe
 from catraz.commands import run as run_cmd
 from catraz.commands import reload as reload_cmd
 
-# ── re-exports (importable from catraz.cli for test back-compat) ─────
+# ── re-exports (importable from catraz.cli by tests) ─────
 # `X as X` marks these as explicit re-exports so mypy --strict allows cli.* access.
 from catraz.errors import CliError as CliError  # noqa: F811 (already imported above, explicit re-export)
 from catraz.commands.setup import (
@@ -212,7 +212,7 @@ HANDLERS = {
     "init": setup.cmd_init,
     "doctor": setup.cmd_doctor,
     "stop": stack.cmd_down,  # canonical
-    "down": stack.cmd_down,  # back-compat alias (argparse aliases=["down"])
+    "down": stack.cmd_down,  # alias (argparse aliases=["down"])
     "status": stack.cmd_status,
     "ps": observe.cmd_ps,
     "reload": reload_cmd.cmd_reload,

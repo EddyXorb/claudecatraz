@@ -164,8 +164,8 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
 
 
 def remove_toml_key(path: Path, key: str) -> None:
-    """Delete a whole key = ... assignment line from a TOML file, if present. Used to
-    retire a superseded key so old and new can't coexist and trip a ConfigError."""
+    """Delete a whole key = ... assignment line from a TOML file, if present, so
+    two forms of a setting can't coexist and trip a ConfigError."""
     text = path.read_text(encoding="utf-8")
     pat = re.compile(
         rf'^\s*{re.escape(key)}\s*=\s*("[^"]*"|\[[^\]]*\])\s*(#.*)?\n?',

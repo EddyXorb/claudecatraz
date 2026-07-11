@@ -52,7 +52,7 @@ def test_host_report_actions_reflect_the_effective_set():
     assert "repo.branch.create" in host_report["actions"]
 
 
-# --- git transport rows now genuinely appear (previously they didn't) --------
+# --- git transport rows appear in the report --------
 
 
 def test_gitlab_type_host_includes_git_transport_rows():

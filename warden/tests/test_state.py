@@ -93,7 +93,7 @@ def test_fresh_db_is_created_at_current_schema_version():
 
 
 def test_fresh_db_has_target_tables():
-    """A brand-new DB gets the current shape directly — no legacy names, no
+    """A brand-new DB gets the current shape directly — no renaming, no
     lift needed: agent_branches (the git guard's own BranchState),
     agent_mrs (the REST-API guard's own MrState, both sharing the same
     connection) and writes.guard."""

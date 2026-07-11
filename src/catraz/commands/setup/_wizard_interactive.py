@@ -26,8 +26,8 @@ from ._secrets import (
 def _read_branch_prefix(warden_toml: Path | None) -> str:
     """Current (first) branch prefix, shown as the wizard's default.
 
-    Reads warden.toml — either the new list form (`branch_prefixes =
-    [...]`) or the legacy scalar (`branch_prefix = "..."`); the wizard only
+    Reads warden.toml — either the list form (`branch_prefixes =
+    [...]`) or the scalar form (`branch_prefix = "..."`); the wizard only
     ever prompts for one, but reads whichever form is on disk."""
     if not warden_toml or not warden_toml.exists():
         return "claude/"
@@ -186,7 +186,7 @@ def _prompt_branch_prefix(warden_toml: Path, env_path: Path, out: Out) -> None:
     prefix = out.ask("Branch prefix the agent may push to", cur_prefix or "claude/")
     if warden_toml.exists():
         set_toml_list(warden_toml, "branch_prefixes", [prefix])
-        # Retire the legacy scalar key so it can't coexist with the list we just
+        # Retire the scalar key so it can't coexist with the list we just
         # wrote (Config aborts on both being set — one source of truth).
         remove_toml_key(warden_toml, "branch_prefix")
     unset_env_keys(env_path, ["WARDEN_BRANCH_PREFIX"])

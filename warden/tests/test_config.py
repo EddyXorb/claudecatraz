@@ -113,7 +113,7 @@ def test_branch_prefixes_list_with_empty_element_aborts_startup(tmp_path):
 
 
 def test_branch_prefixes_and_legacy_branch_prefix_both_set_aborts(tmp_path):
-    """Two sources of truth for the same namespace (list + legacy scalar) is an error."""
+    """Two sources of truth for the same namespace (list + scalar) is an error."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/"]\nbranch_prefix = "claude/"\n')
     with pytest.raises(
@@ -131,7 +131,7 @@ def test_branch_prefixes_list_from_toml(tmp_path):
 
 
 def test_legacy_branch_prefix_scalar_becomes_single_element_tuple(tmp_path):
-    """The legacy scalar branch_prefix = "..." form stays valid as a 1-element list."""
+    """The scalar branch_prefix = "..." form is valid as a 1-element list."""
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefix = "claude/"\n')
     cfg = from_env({}, strict=True, toml_path=str(toml))

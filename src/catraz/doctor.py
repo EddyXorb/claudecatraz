@@ -470,7 +470,7 @@ def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> Non
     """The warden resolves its service-account id via GET /user with the WRITE
     token, needed to enforce MR ownership (R3). Fine-grained PATs often omit
     "User: Read", so GET /user 403s and every ownership-gated write is silently
-    denied while MR creation still works — probe it explicitly so it surfaces at setup."""
+    denied while MR creation is allowed — probe it explicitly so it surfaces at setup."""
     try:
         me = _gitlab_get(base, "/api/v4/user", token)
     except urllib.error.HTTPError as e:

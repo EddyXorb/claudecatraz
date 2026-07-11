@@ -11,9 +11,9 @@ def test_prepare_home_oneoff_run_bypass_default(
 ) -> None:
     """Run mode (remote=False) starts with bypass permissions pre-accepted too.
 
-    Since the "bypass by default in run mode" change the bypass accept is no longer
-    remote-only: prepare_home pre-accepts it for every mode and also sets the
-    canonical settings.json key. The only remaining remote-only flag is remoteDialogSeen.
+    The bypass accept is not remote-only: prepare_home pre-accepts it for every
+    mode and also sets the canonical settings.json key. The only remote-only
+    flag is remoteDialogSeen.
     """
     home = tmp_path / ".claude"
     home.mkdir()

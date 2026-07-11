@@ -34,7 +34,7 @@ def test_schema_v3_event_carries_guard_not_channel():
 def test_redact_keeps_only_allowlisted_fields():
     entry = {
         "ts": 1.0,
-        "rule": "R2",  # dropped: no longer a recognized field
+        "rule": "R2",  # dropped: not an allowlisted field
         "reason": "ok",
         "authorization": "Bearer secret",  # must be dropped
         "private-token": "tok",  # must be dropped

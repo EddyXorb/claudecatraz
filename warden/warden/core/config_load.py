@@ -313,15 +313,14 @@ def from_env(
     ) -> tuple[str, ...]:
         """Resolve branch_prefixes — one namespace-list setting, one source.
 
-        warden.toml may set the list form or the legacy scalar form, never
+        warden.toml may set the list form or the scalar form, never
         both. Emptiness is not rejected here; _validate does that.
         """
         has_list = list_key in file
         has_scalar = legacy_scalar_key in file
         if has_list and has_scalar:
             raise ConfigError(
-                f"warden.toml: set only one of {list_key!r} or the legacy "
-                f"{legacy_scalar_key!r}, not both"
+                f"warden.toml: set only one of {list_key!r} or {legacy_scalar_key!r}, not both"
             )
         if has_list:
             val = file[list_key]
