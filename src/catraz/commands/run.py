@@ -188,13 +188,21 @@ def _agent_survived_startup(
     return True
 
 
-def _print_remote_command(root: Path, out: Out, prefix: list[str] | None, timeout: int = 10) -> None:
+def _print_remote_command(
+    root: Path, out: Out, prefix: list[str] | None, timeout: int = 10
+) -> None:
     """Surface the exact argv the entrypoint exec'd (logged as `[entrypoint]
     remote-control exec: …`), so a silent `up -d` doesn't hide what's running."""
     marker = "[entrypoint] remote-control daemon exec:"
     deadline = time.time() + timeout
     while time.time() < deadline:
-        r = compose_run(root, ["logs", "--no-log-prefix", "claude-dev-env"], prefix=prefix, capture=True, check=False)
+        r = compose_run(
+            root,
+            ["logs", "--no-log-prefix", "claude-dev-env"],
+            prefix=prefix,
+            capture=True,
+            check=False,
+        )
         if r and marker in r.stdout:
             line = next(ln for ln in r.stdout.splitlines() if marker in ln)
             out.info(line.removeprefix("[entrypoint] ").strip())

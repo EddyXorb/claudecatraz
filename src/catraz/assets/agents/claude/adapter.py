@@ -114,13 +114,11 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
         data = seed or {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
     data.setdefault("hasCompletedOnboarding", True)
     data.setdefault("lastOnboardingVersion", "1.0")
-    #skipDangerousModePermissionPrompt on newer CLI versions; set both keys.
+    # skipDangerousModePermissionPrompt on newer CLI versions; set both keys.
     data["bypassPermissionsModeAccepted"] = True
     data["remoteDialogSeen"] = True
 
-    data.setdefault("projects", {}).setdefault("/workspace", {})[
-        "hasTrustDialogAccepted"
-    ] = True
+    data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
 
     claude_json.write_text(json.dumps(data, indent=2))
 
@@ -220,9 +218,7 @@ def sync_from_host(source: Path | None, home: Path) -> None:
     ).expanduser()
     cred = src_dir / ".credentials.json"
     if not cred.exists():
-        sys.exit(
-            f"error: {cred} not found — authenticate with `claude` on the host first"
-        )
+        sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
     import shutil
 
     home.mkdir(parents=True, exist_ok=True)

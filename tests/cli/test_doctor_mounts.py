@@ -60,7 +60,9 @@ def test_check_mounts_matching_inode_is_ok(tmp_path: Path, monkeypatch: pytest.M
     assert sum(1 for i in f.items if i[0] == doctor.OK) == expected
 
 
-def test_check_mounts_mismatched_inode_is_bad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_mounts_mismatched_inode_is_bad(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _mkdirs(tmp_path)
     monkeypatch.setattr(doctor, "which", lambda c: True)
     monkeypatch.setattr(
