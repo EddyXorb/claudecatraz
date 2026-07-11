@@ -145,15 +145,33 @@ def test_persistent_mode_layers_home_overlay(
     monkeypatch.setattr(compose, "_credentials_mode", lambda root: "persistent")
     cmd = compose.base_cmd(tmp_path)
     assert _persistent_home_yml() in cmd
-    # After the auth layer, before any user override (override still wins last).
-    auth_idx = next(i for i, a in enumerate(cmd) if a.endswith("auth.subscription.yml"))
-    assert cmd.index(_persistent_home_yml()) > auth_idx
+    # Persistent + subscription drops the sync-only credential seed overlay,
+    # so it must not create empty secrets/claude files.
+    assert not any(a.endswith("auth.subscription.yml") for a in cmd)
 
 
-def test_sync_mode_omits_home_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_mode_omits_home_overlay_and_keeps_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / ".catraz").mkdir()
     monkeypatch.setattr(compose, "_credentials_mode", lambda root: "sync")
-    assert _persistent_home_yml() not in compose.base_cmd(tmp_path)
+    cmd = compose.base_cmd(tmp_path)
+    assert _persistent_home_yml() not in cmd
+    # Sync subscription still needs the read-only host-credential seed.
+    assert any(a.endswith("auth.subscription.yml") for a in cmd)
+
+
+def test_persistent_api_key_still_layers_api_key_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the subscription seed is sync-specific; the api_key overlay carries
+    env and must layer in persistent mode too."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
+    monkeypatch.setattr(compose, "_credentials_mode", lambda root: "persistent")
+    cmd = compose.base_cmd(tmp_path)
+    assert any(a.endswith("auth.api_key.yml") for a in cmd)
+    assert _persistent_home_yml() in cmd
 
 
 def test_claude_default_profile_is_persistent(

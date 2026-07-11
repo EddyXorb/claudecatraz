@@ -846,6 +846,20 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
     return f
 
 
+def _wants_ro_credential_seed(root: Path, env: dict[str, str]) -> bool:
+    """True when the sync credential seed under secrets/claude is actually used:
+    subscription auth with credentials mode "sync". Fail closed (no scaffold) if
+    the mode is unresolvable — persistent, the default, needs no seed."""
+    if (env.get("AUTH_MODE") or "subscription") != "subscription":
+        return False
+    from catraz.agents import effective_credentials_mode
+
+    try:
+        return effective_credentials_mode(root, env) == "sync"
+    except CliError:
+        return False
+
+
 def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     """Repair only the safe things: missing dirs + chown. Never secrets/policy."""
     dev_uid = env.get("DEV_UID", "")
@@ -858,9 +872,13 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
     secrets_dir.chmod(0o700)
-    claude_secrets = cat / "secrets" / "claude"
-    claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
-    claude_secrets.chmod(0o700)
+    # secrets/claude holds the read-only host-credential seed used only by the
+    # sync credential mode; persistent keeps the login in state/<profile>/, so
+    # scaffold it only when a sync subscription setup will actually mount it.
+    if _wants_ro_credential_seed(root, env):
+        claude_secrets = secrets_dir / "claude"
+        claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
+        claude_secrets.chmod(0o700)
     # The active agent profile's persistent-state + debug-log dirs; best-effort
     # default ("claude") if AGENT_PROFILE is unresolvable — check_agent validates.
     profile = (env.get("AGENT_PROFILE") or "claude").strip() or "claude"

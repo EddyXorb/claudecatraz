@@ -146,6 +146,9 @@ def test_prepare_render_false_no_resolved(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_source_cmd_includes_auth_asset_subscription(tmp_path: Path) -> None:
     root = _make_root(tmp_path)
+    # The subscription overlay seeds the read-only host credential — a sync-mode
+    # concern; persistent skips it. Pin sync so the overlay is expected.
+    (root / ".catraz" / ".env").write_text("AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n")
     cmd = compose._source_cmd(root)
     ar = str(asset_root() / "assets" / "compose" / "auth.subscription.yml")
     assert ar in cmd
