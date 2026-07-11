@@ -729,16 +729,19 @@ def check_net(root: Path, f: Findings) -> None:
         f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
 
 
-# Durable directory bind mounts a running infra container writes into —
+# Bind mounts a running infra container reads/writes at a fixed path —
 # (host path relative to .catraz, container-absolute path) pairs.
 MOUNT_TARGETS: dict[str, list[tuple[str, str]]] = {
     "gitlab-warden": [
         ("state/warden/db", "/var/lib/warden"),
         ("logs/warden", "/var/log/warden"),
         ("state/warden/run", "/run/warden"),
+        ("config/warden.toml", "/etc/warden/warden.toml"),
     ],
     "forward-proxy": [
         ("logs/squid", "/var/log/squid"),
+        ("config/squid.conf", "/etc/squid/squid.conf"),
+        ("config/allowlist.txt", "/etc/squid/allowlist.txt"),
     ],
 }
 
@@ -759,11 +762,11 @@ def _container_inode(name: str, path: str) -> int | None:
 
 
 def check_mounts(root: Path, f: Findings) -> None:
-    """A host directory deleted and recreated at the same path while its
+    """A host path deleted and recreated at the same location while its
     container keeps running orphans the bind mount: the container keeps
-    writing into the old, unlinked directory and the host never sees new
-    output. Compares each durable mount's host-side inode against the inode
-    the running container sees; a mismatch flags the mount as stale."""
+    seeing the old, unlinked file or directory. Compares each mount's
+    host-side inode against the inode the running container sees; a
+    mismatch flags the mount as stale."""
     if not which("docker"):
         f.warn("mounts", "cannot verify bind mounts (docker missing)")
         return
@@ -787,12 +790,12 @@ def check_mounts(root: Path, f: Findings) -> None:
             if host_path.stat().st_ino != container_inode:
                 f.bad(
                     "mounts",
-                    f"{service}: {rel}/ bind mount is stale (host directory was "
+                    f"{service}: {rel} bind mount is stale (host path was "
                     "recreated while the container kept running)",
                     "catraz reload --force",
                 )
             else:
-                f.ok("mounts", f"{service}: {rel}/ bind mount intact")
+                f.ok("mounts", f"{service}: {rel} bind mount intact")
 
 
 def _read_secret_file(root: Path, filename: str) -> str:

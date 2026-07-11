@@ -10,6 +10,10 @@ from catraz import doctor
 def _mkdirs(root: Path) -> None:
     for rel in ("state/warden/db", "logs/warden", "state/warden/run", "logs/squid"):
         (root / ".catraz" / rel).mkdir(parents=True)
+    for rel in ("config/warden.toml", "config/squid.conf", "config/allowlist.txt"):
+        p = root / ".catraz" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch()
 
 
 def test_check_mounts_stack_down_is_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,7 +56,8 @@ def test_check_mounts_matching_inode_is_ok(tmp_path: Path, monkeypatch: pytest.M
     doctor.check_mounts(tmp_path, f)
     assert not any(i[0] == doctor.BAD for i in f.items)
     assert not any(i[0] == doctor.WARN for i in f.items)
-    assert sum(1 for i in f.items if i[0] == doctor.OK) == 4
+    expected = sum(len(v) for v in doctor.MOUNT_TARGETS.values())
+    assert sum(1 for i in f.items if i[0] == doctor.OK) == expected
 
 
 def test_check_mounts_mismatched_inode_is_bad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,7 +77,7 @@ def test_check_mounts_mismatched_inode_is_bad(tmp_path: Path, monkeypatch: pytes
     f = doctor.Findings()
     doctor.check_mounts(tmp_path, f)
     bad = [i for i in f.items if i[0] == doctor.BAD]
-    assert len(bad) == 1
+    assert len(bad) == len(doctor.MOUNT_TARGETS["forward-proxy"])
     assert bad[0][3] is not None and "catraz reload --force" in bad[0][3]
 
 
