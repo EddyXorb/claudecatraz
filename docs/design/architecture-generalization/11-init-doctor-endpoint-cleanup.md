@@ -117,6 +117,24 @@ git-namespace defaults (`[git].actions`, `[git.rules]`) but ships no
 `[[git.endpoint]]`. `.env.example` (already free of `GITLAB_MODE` /
 `GITLAB_URL`) has its auth note aligned with the two credential modes.
 
+### 2.5 The credential mode is operator-selectable
+
+The choice between the two modes of §2.2 is a setup decision, so the operator
+makes it at `init` rather than by hand-editing the shipped manifest. A
+`.catraz/.env` key `CLAUDE_CREDENTIALS_MODE` (`persistent` | `sync`) overrides
+the agent manifest's `credentials.mode`; absent, the manifest default
+(`persistent`) stands. The wizard prompts for it (default `persistent`) and
+writes the key; `doctor` reports the active mode and validates the value, but
+does not prompt.
+
+The mode drives two places that must agree: the host picks the compose overlay
+(`compose._credentials_mode`) and the in-container adapter branches
+`prepare_home` on it. The override therefore resolves from `.env` on the host
+and is passed into the container as an env var (the way `AUTH_MODE` already is),
+so both read the same effective mode. An unset or unknown value falls to the
+manifest default; a value the operator set but mistyped is a `doctor` finding,
+never a silent mode switch.
+
 ## 3. Behavioral changes vs. today
 
 * A fresh `catraz init` for one GitLab host yields a warden that actually routes
