@@ -496,6 +496,29 @@ class TestInteractiveAuthMode:
         setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
         assert load_env(root / ".catraz" / ".env").get("AUTH_MODE") == "subscription"
 
+    def test_fresh_init_seeded_from_example_prompts_auth(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """.env.example leaves AUTH_MODE unset, so a fresh init asks — choosing
+        "2" (api_key) proves the question is reached rather than defaulted."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.unlink()  # force _init_seed_env to copy .env.example
+        _patch_common(monkeypatch)
+        # auth "2" (api_key), credential mode Enter (persistent), decline endpoint.
+        inputs = iter(["2", "", "n"])
+
+        def _input(p: object) -> str:
+            try:
+                return next(inputs)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
+        assert load_env(env_path).get("AUTH_MODE") == "api_key"
+
 
 class TestInteractiveCredentialsMode:
     """CLAUDE_CREDENTIALS_MODE is prompted (default persistent) and written to
@@ -549,9 +572,9 @@ class TestInteractiveCredentialsMode:
         env_path = root / ".catraz" / ".env"
         env_path.unlink()  # force _init_seed_env to copy .env.example
         _patch_common(monkeypatch)
-        # AUTH_MODE is seeded from the example (no prompt); the first and only
-        # choice is the credential mode — pick "2" (sync), then decline the endpoint.
-        inputs = iter(["2", "n"])
+        # .env.example sets neither key, so init prompts auth first (Enter =
+        # subscription), then the credential mode — pick "2" (sync), then decline.
+        inputs = iter(["", "2", "n"])
 
         def _input(p: object) -> str:
             try:
