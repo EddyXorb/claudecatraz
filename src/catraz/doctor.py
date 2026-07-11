@@ -644,13 +644,17 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
 
 
 def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Active agent profile + credential-mode consistency check.
-
-    credentials.mode = "sync" checks the sandbox seed is present and not
-    root-owned (Docker auto-creates root-owned bind targets when the source
-    is missing). credentials.mode = "persistent" instead checks the state dir:
-    present, mode 0700."""
-    from catraz.agents import load_manifest, resolve_agent_profile
+    """Active agent profile + credential-mode consistency check: "sync" checks
+    the sandbox seed is present and not root-owned (Docker auto-creates a
+    root-owned bind target when the source is missing); "persistent" checks
+    the state dir at mode 0700. The mode is CLAUDE_CREDENTIALS_MODE from .env
+    when valid, else the manifest default."""
+    from catraz.agents import (
+        CREDENTIALS_MODES,
+        effective_credentials_mode,
+        load_manifest,
+        resolve_agent_profile,
+    )
     from catraz.errors import CliError as _CliError
     from catraz.paths import agent_state_dir, claude_home
 
@@ -662,7 +666,17 @@ def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
         return
     f.ok("agent", f"profile: {profile} (command: {manifest.command})")
 
-    if manifest.credentials_mode == "persistent":
+    raw_mode = env.get("CLAUDE_CREDENTIALS_MODE", "").strip()
+    if raw_mode and raw_mode not in CREDENTIALS_MODES:
+        f.bad(
+            "agent",
+            "CLAUDE_CREDENTIALS_MODE must be persistent|sync",
+            "set it in .catraz/.env",
+        )
+    creds_mode = effective_credentials_mode(root, env)
+    f.ok("agent", f"credentials mode: {creds_mode}")
+
+    if creds_mode == "persistent":
         state_dir = agent_state_dir(root, profile)
         if not state_dir.is_dir():
             f.bad(

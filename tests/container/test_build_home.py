@@ -99,6 +99,53 @@ def test_prepare_home_persistent_merges_and_seeds_only_when_absent(
     assert json.loads((home / "settings.json").read_text()) == {"theme": "custom"}
 
 
+def test_prepare_home_env_override_wins_sync_over_persistent_manifest(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CREDENTIALS_MODE=sync in the environment makes prepare_home take
+    the sync branch even though the baked manifest defaults to persistent."""
+    home = tmp_path / ".claude"
+    (home / ".ro").mkdir(parents=True)
+    (home / ".ro" / ".credentials.json").write_text("{}")
+    monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setenv("CLAUDE_CREDENTIALS_MODE", "sync")
+    adapter = ep._load_adapter()
+    adapter.prepare_home(home, _secrets(ep, subscription_ro_dir=home / ".ro"))
+    assert (home / ".credentials.json").exists()
+
+
+def test_prepare_home_env_override_wins_persistent_over_sync_manifest(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CREDENTIALS_MODE=persistent makes prepare_home take the
+    persistent branch even though the manifest is forced to sync."""
+    home = tmp_path / ".claude"
+    home.mkdir()
+    monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setenv("CLAUDE_CREDENTIALS_MODE", "persistent")
+    adapter = ep._load_adapter()
+    _force_sync_manifest(adapter, monkeypatch)
+    adapter.prepare_home(home, _secrets(ep))
+    # persistent: no .ro seed, no credential fabricated by prepare_home.
+    assert not (home / ".credentials.json").exists()
+    assert (home / "settings.json").exists()
+
+
+def test_prepare_home_invalid_env_value_falls_back_to_manifest(
+    ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A garbage CLAUDE_CREDENTIALS_MODE never silently flips the mode — it
+    falls through to the manifest default (persistent for claude)."""
+    home = tmp_path / ".claude"
+    home.mkdir()
+    monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setenv("CLAUDE_CREDENTIALS_MODE", "bogus")
+    adapter = ep._load_adapter()
+    adapter.prepare_home(home, _secrets(ep))
+    assert not (home / ".credentials.json").exists()
+    assert (home / "settings.json").exists()
+
+
 def test_prepare_home_persistent_credential_survives_restart(
     ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -80,6 +80,14 @@ def _wizard_yes(
     )
     updates["AUTH_MODE"] = auth_mode
 
+    creds_mode = (
+        os.environ.get("CLAUDE_CREDENTIALS_MODE")
+        or inh_env.get("CLAUDE_CREDENTIALS_MODE")
+        or env.get("CLAUDE_CREDENTIALS_MODE")
+        or "persistent"
+    )
+    updates["CLAUDE_CREDENTIALS_MODE"] = creds_mode
+
     merged = {**inh_env, **env}
     if _yes_endpoint_requested(merged):
         host = _yes_host(merged)

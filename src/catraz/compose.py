@@ -111,13 +111,14 @@ def write_hosts_fragment(root: Path) -> Path:
 
 
 def _credentials_mode(root: Path) -> str:
-    """Active profile's `credentials.mode` ("sync"|"persistent"). Falls back to
-    the more-isolated "sync" (tmpfs home) if the profile/manifest is
-    unresolvable — doctor's `agent` check surfaces that separately."""
-    from catraz.agents import load_manifest, resolve_agent_profile
+    """Effective credentials mode ("sync"|"persistent"): `.catraz/.env`'s
+    CLAUDE_CREDENTIALS_MODE overrides the active profile's manifest default.
+    Falls back to the more-isolated "sync" (tmpfs home) if unresolvable —
+    doctor's `agent` check surfaces that separately."""
+    from catraz.agents import effective_credentials_mode
 
     try:
-        return load_manifest(resolve_agent_profile(root)).credentials_mode
+        return effective_credentials_mode(root)
     except CliError:
         return "sync"
 

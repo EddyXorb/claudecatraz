@@ -115,6 +115,16 @@ def test_load_inherited_all_allowlist_keys_only(tmp_path: Path) -> None:
         assert k in _ENV_ALLOWLIST, f"unexpected key {k!r} in inherited env"
 
 
+def test_load_inherited_credentials_mode(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    cat = src / ".catraz"
+    cat.mkdir()
+    (cat / ".env").write_text("AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n")
+    env = load_inherited(src)["env"]
+    assert env.get("CLAUDE_CREDENTIALS_MODE") == "sync"
+
+
 def test_load_inherited_config_files(tmp_path: Path) -> None:
     src = _make_source(tmp_path)
     result = load_inherited(src)
@@ -181,6 +191,18 @@ def test_yes_clone_inherits_env_keys(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert env.get("AUTH_MODE") == "subscription"
     assert "GITLAB_MODE" not in env
     assert "GITLAB_URL" not in env
+
+
+def test_yes_clone_inherits_credentials_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = _make_source(tmp_path)
+    (src / ".catraz" / ".env").write_text("AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n")
+    dst = _make_dst(tmp_path)
+    _patch_common(monkeypatch)
+    setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
+    env = load_env(dst / ".catraz" / ".env")
+    assert env.get("CLAUDE_CREDENTIALS_MODE") == "sync"
 
 
 def test_yes_clone_does_not_inherit_dev_uid(

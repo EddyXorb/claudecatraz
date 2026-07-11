@@ -86,6 +86,27 @@ def _prompt_auth_mode(
     return auth_mode
 
 
+def _prompt_credentials_mode(
+    env: dict[str, str],
+    args: argparse.Namespace,
+    out: Out,
+    inherited: dict[str, Any] | None = None,
+) -> str:
+    inh = _inh_env(inherited, "CLAUDE_CREDENTIALS_MODE")
+    mode = inh or env.get("CLAUDE_CREDENTIALS_MODE") or "persistent"
+    has_from = inherited is not None
+    if args.force or "CLAUDE_CREDENTIALS_MODE" not in env or has_from:
+        mode = out.choice(
+            "Claude credential storage?",
+            [
+                ("persistent", "persistent — durable login inside the container (default)"),
+                ("sync", "sync — read-only import from host ~/.claude, no write-back"),
+            ],
+            default=0 if mode == "persistent" else 1,
+        )
+    return mode
+
+
 def _prompt_write_access(out: Out) -> bool:
     """Read-only vs read-write is just "did the user give a write token"; ask it
     directly instead of storing a mode."""
@@ -255,6 +276,9 @@ def _wizard_interactive(
 
     auth_mode = _prompt_auth_mode(env, args, out, inherited)
     updates["AUTH_MODE"] = auth_mode
+
+    creds_mode = _prompt_credentials_mode(env, args, out, inherited)
+    updates["CLAUDE_CREDENTIALS_MODE"] = creds_mode
 
     host = ""
     access = "none"

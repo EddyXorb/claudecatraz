@@ -113,6 +113,7 @@ services:
       - no-new-privileges:true
     environment:
       - AUTH_MODE=${AUTH_MODE}
+      - CLAUDE_CREDENTIALS_MODE=${CLAUDE_CREDENTIALS_MODE:-}
       - AGENT_HOME=/home/dev/.claude
       # Agent runtime (advanced) — remote-control invocation tuning (claude-specific
       # env vars the adapter itself reads; see assets/agents/claude/adapter.py):

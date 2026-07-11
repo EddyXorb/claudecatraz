@@ -29,6 +29,10 @@ container (adapter `prepare_home`).
   (env override > manifest) in `check_agent`; validate a set
   `CLAUDE_CREDENTIALS_MODE` is `persistent`/`sync` (the way `AUTH_MODE` is
   validated). Doctor reports, never prompts.
+* **Sync gating** (`src/catraz/commands/setup/_sync.py:_credentials_mode`): route
+  through the shared resolver too, so `catraz sync` / auto-sync / the init-time
+  hint agree with the overlay and adapter — a `sync` override against a
+  `persistent` manifest must actually import the host credential.
 * **`.env.example`**: document `CLAUDE_CREDENTIALS_MODE` beside `AUTH_MODE`.
 
 ## Tests

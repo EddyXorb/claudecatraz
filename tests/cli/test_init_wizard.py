@@ -127,6 +127,28 @@ class TestYesNoTokens:
         assert _endpoints(root) == {("gitlab.com", "gitlab")}
 
 
+class TestYesCredentialsMode:
+    """--yes defaults CLAUDE_CREDENTIALS_MODE to persistent; CLAUDE_CREDENTIALS_MODE
+    in the environment overrides that default."""
+
+    def test_default_is_persistent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(root / ".catraz" / ".env")
+        assert env.get("CLAUDE_CREDENTIALS_MODE") == "persistent"
+
+    def test_env_var_overrides_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("CLAUDE_CREDENTIALS_MODE", "sync")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        env = load_env(root / ".catraz" / ".env")
+        assert env.get("CLAUDE_CREDENTIALS_MODE") == "sync"
+
+
 class TestYesReadOnly:
     """--yes with a read token only → read_tokens set, write_tokens empty."""
 
@@ -305,9 +327,10 @@ class TestInteractiveReadWrite:
     def test_read_write_wizard(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # force=True → auth prompt shown; inputs: auth default, endpoint Y,
-        # host default, access default (read-write), projects, branch default.
-        inputs = iter(["", "", "", "", "group/my-proj", ""])
+        # force=True → auth prompt shown; inputs: auth default, credentials
+        # mode default, endpoint Y, host default, access default (read-write),
+        # projects, branch default.
+        inputs = iter(["", "", "", "", "", "group/my-proj", ""])
 
         def _input(p: object) -> str:
             try:
@@ -354,8 +377,9 @@ class TestInteractiveReadOnly:
     def test_read_only_wizard(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # auth default, endpoint Y, host default, access "2" (read-only), projects, branch.
-        inputs = iter(["", "", "", "2", "group/my-proj", ""])
+        # auth default, credentials mode default, endpoint Y, host default,
+        # access "2" (read-only), projects, branch.
+        inputs = iter(["", "", "", "", "2", "group/my-proj", ""])
 
         def _input(p: object) -> str:
             try:
@@ -390,7 +414,7 @@ class TestInteractiveReadOnly:
         secrets_dir.mkdir(mode=0o700, exist_ok=True)
         (secrets_dir / "write_tokens").write_text("gitlab.com glpat-existing\n")
         (secrets_dir / "write_tokens").chmod(0o600)
-        inputs = iter(["", "", "", "2", "", ""])  # endpoint Y, then read-only
+        inputs = iter(["", "", "", "", "2", "", ""])  # endpoint Y, then read-only
 
         def _input(p: object) -> str:
             try:
@@ -410,8 +434,8 @@ class TestInteractiveHost:
     def test_custom_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # auth, endpoint Y, host, access "2" (read-only), projects, branch.
-        inputs = iter(["", "", "gitlab.example.com", "2", "", ""])
+        # auth, credentials mode, endpoint Y, host, access "2" (read-only), projects, branch.
+        inputs = iter(["", "", "", "gitlab.example.com", "2", "", ""])
 
         def _input(p: object) -> str:
             try:
@@ -435,8 +459,9 @@ class TestInteractiveDeclineEndpoint:
     def test_decline_skips_gitlab(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # auth default, then "n" to decline the endpoint; nothing after is prompted.
-        inputs = iter(["", "n"])
+        # auth default, credentials mode default, then "n" to decline the
+        # endpoint; nothing after is prompted.
+        inputs = iter(["", "", "n"])
 
         def _input(p: object) -> str:
             try:
@@ -470,6 +495,49 @@ class TestInteractiveAuthMode:
         monkeypatch.setattr("getpass.getpass", lambda p: "")
         setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
         assert load_env(root / ".catraz" / ".env").get("AUTH_MODE") == "subscription"
+
+
+class TestInteractiveCredentialsMode:
+    """CLAUDE_CREDENTIALS_MODE is prompted (default persistent) and written to
+    .env; an existing value is kept when present and no --force."""
+
+    def test_default_is_persistent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setattr("builtins.input", lambda p: "")
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
+        assert load_env(root / ".catraz" / ".env").get("CLAUDE_CREDENTIALS_MODE") == "persistent"
+
+    def test_choosing_sync_is_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        # auth default, credentials mode "2" (sync), decline endpoint.
+        inputs = iter(["", "2", "n"])
+
+        def _input(p: object) -> str:
+            try:
+                return next(inputs)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        setup.cmd_init(root, _interactive_args(force=True), Out(color=False))
+        assert load_env(root / ".catraz" / ".env").get("CLAUDE_CREDENTIALS_MODE") == "sync"
+
+    def test_kept_when_present_and_no_force(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.write_text("DEV_UID=1000\nAUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n")
+        _patch_common(monkeypatch)
+        monkeypatch.setattr("builtins.input", lambda p: "")
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
+        assert load_env(env_path).get("CLAUDE_CREDENTIALS_MODE") == "sync"
 
 
 # TOML setters — must round-trip against the real shipped template

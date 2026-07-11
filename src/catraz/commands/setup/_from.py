@@ -13,6 +13,7 @@ from catraz.errors import CliError, EXIT_CONFIG
 # The git host lives in warden.toml (inherited as a config file), not .env.
 _ENV_ALLOWLIST = (
     "AUTH_MODE",
+    "CLAUDE_CREDENTIALS_MODE",
     "BASE_IMAGE",
     "BASE_DOCKERFILE",
     "BASE_CONTEXT",

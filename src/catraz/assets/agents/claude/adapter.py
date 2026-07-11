@@ -35,6 +35,16 @@ def _manifest() -> _Manifest:
     return _Manifest(read_toml(_MANIFEST_PATH))
 
 
+def _effective_credentials_mode(manifest: _Manifest) -> str:
+    """`CLAUDE_CREDENTIALS_MODE` (set by the host from `.catraz/.env`) when it
+    is `persistent`/`sync`, else the manifest default — kept in lockstep with
+    the compose overlay the host picked for this same value."""
+    override = os.environ.get("CLAUDE_CREDENTIALS_MODE", "").strip()
+    if override in ("persistent", "sync"):
+        return override
+    return manifest.credentials_mode
+
+
 def _read_json(p: Path) -> dict[str, Any]:
     try:
         return cast(dict[str, Any], json.loads(p.read_text()))
@@ -79,7 +89,7 @@ def prepare_home(home: Path, secrets: Secrets) -> None:
     merge flags into an existing `.claude.json` — never clobber a login. Never
     touches Forge or foreign-model credentials."""
     home.mkdir(parents=True, exist_ok=True)
-    persistent = _manifest().credentials_mode == "persistent"
+    persistent = _effective_credentials_mode(_manifest()) == "persistent"
 
     seed: dict[str, Any] = {}
     if secrets.auth_mode == "subscription" and not persistent:

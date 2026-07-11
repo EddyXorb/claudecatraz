@@ -165,3 +165,52 @@ def test_claude_default_profile_is_persistent(
     (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=subscription\n")
     assert compose._credentials_mode(tmp_path) == "persistent"
     assert _persistent_home_yml() in compose.base_cmd(tmp_path)
+
+
+# ── CLAUDE_CREDENTIALS_MODE env override ────────────────────────────────
+
+
+def test_credentials_mode_env_override_to_sync(tmp_path: Path) -> None:
+    """CLAUDE_CREDENTIALS_MODE=sync overrides the claude manifest's persistent
+    default, independently of the manifest."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text(
+        "AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n"
+    )
+    assert compose._credentials_mode(tmp_path) == "sync"
+    assert _persistent_home_yml() not in compose.base_cmd(tmp_path)
+
+
+def test_credentials_mode_env_override_to_persistent_wins_over_sync_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CREDENTIALS_MODE=persistent overrides a manifest default of sync."""
+    import catraz.agents as agents_mod
+
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text(
+        "AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=persistent\n"
+    )
+    fake = agents_mod.AgentManifest(
+        name="claude",
+        command="claude",
+        subscription_source="",
+        api_key_env="ANTHROPIC_API_KEY",
+        credentials_mode="sync",
+        remote_allowed=True,
+        debug_flag="--debug-file",
+        egress_domains=(),
+    )
+    monkeypatch.setattr(agents_mod, "load_manifest", lambda profile: fake)
+    assert compose._credentials_mode(tmp_path) == "persistent"
+    assert _persistent_home_yml() in compose.base_cmd(tmp_path)
+
+
+def test_credentials_mode_invalid_env_value_falls_back_to_manifest(tmp_path: Path) -> None:
+    """A garbage CLAUDE_CREDENTIALS_MODE value never silently flips the mode —
+    it falls through to the manifest default."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text(
+        "AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=bogus\n"
+    )
+    assert compose._credentials_mode(tmp_path) == "persistent"
