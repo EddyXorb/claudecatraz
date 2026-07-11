@@ -28,12 +28,18 @@ container (adapter `prepare_home`).
 * **Doctor** (`src/catraz/doctor.py`): resolve and report the active mode
   (env override > manifest) in `check_agent`; validate a set
   `CLAUDE_CREDENTIALS_MODE` is `persistent`/`sync` (the way `AUTH_MODE` is
-  validated). Doctor reports, never prompts.
+  validated). `check_auth` reads the same effective mode: in `persistent` the
+  login lives in the container, so a missing host `.credentials.json` is not a
+  finding and `catraz sync` is never suggested; in `sync` the host credential is
+  required (its absence stays a `bad`). Doctor reports, never prompts.
 * **Sync gating** (`src/catraz/commands/setup/_sync.py:_credentials_mode`): route
   through the shared resolver too, so `catraz sync` / auto-sync / the init-time
   hint agree with the overlay and adapter — a `sync` override against a
   `persistent` manifest must actually import the host credential.
-* **`.env.example`**: document `CLAUDE_CREDENTIALS_MODE` beside `AUTH_MODE`.
+* **`.env.example`**: document `CLAUDE_CREDENTIALS_MODE` beside `AUTH_MODE`, but
+  keep the key **commented**. A fresh `init` seeds `.env` from this file, and the
+  wizard only prompts when the key is absent — an uncommented default would seed
+  the value and silently swallow the question.
 
 ## Tests
 

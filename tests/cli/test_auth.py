@@ -60,10 +60,37 @@ def test_doctor_auth_warns_about_refresh_persistence(tmp_path: Path) -> None:
     (tmp_path / ".catraz" / "secrets" / "claude").mkdir(mode=0o700)
     (tmp_path / ".catraz" / "secrets" / "claude" / ".credentials.json").write_text("{}")
     f = doctor.Findings()
-    doctor.check_auth(tmp_path, {"AUTH_MODE": "subscription"}, f)
+    env = {"AUTH_MODE": "subscription", "CLAUDE_CREDENTIALS_MODE": "sync"}
+    doctor.check_auth(tmp_path, env, f)
     assert any(
         i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower() for i in f.items
     )
+
+
+def test_doctor_auth_persistent_needs_no_host_credential(tmp_path: Path) -> None:
+    """Persistent mode keeps the login inside the container, so a missing host
+    .credentials.json is not a finding and `catraz sync` is never suggested."""
+    from catraz import doctor
+
+    (tmp_path / ".catraz" / "secrets").mkdir(parents=True, mode=0o700)
+    (tmp_path / ".catraz" / "secrets" / "claude").mkdir(mode=0o700)
+    f = doctor.Findings()
+    env = {"AUTH_MODE": "subscription", "CLAUDE_CREDENTIALS_MODE": "persistent"}
+    doctor.check_auth(tmp_path, env, f)
+    assert not any(i[0] == doctor.BAD for i in f.items)
+    assert not any("catraz sync" in i[2].lower() for i in f.items)
+
+
+def test_doctor_auth_sync_missing_credential_is_bad(tmp_path: Path) -> None:
+    """Sync mode does rely on the imported host credential — its absence is bad."""
+    from catraz import doctor
+
+    (tmp_path / ".catraz" / "secrets").mkdir(parents=True, mode=0o700)
+    (tmp_path / ".catraz" / "secrets" / "claude").mkdir(mode=0o700)
+    f = doctor.Findings()
+    env = {"AUTH_MODE": "subscription", "CLAUDE_CREDENTIALS_MODE": "sync"}
+    doctor.check_auth(tmp_path, env, f)
+    assert any(i[0] == doctor.BAD and "credentials.json" in i[2] for i in f.items)
 
 
 def test_doctor_auth_absent_auth_mode_is_subscription(tmp_path: Path) -> None:

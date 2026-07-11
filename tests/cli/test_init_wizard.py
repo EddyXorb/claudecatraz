@@ -539,6 +539,31 @@ class TestInteractiveCredentialsMode:
         setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
         assert load_env(env_path).get("CLAUDE_CREDENTIALS_MODE") == "sync"
 
+    def test_fresh_init_seeded_from_example_still_prompts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A truly fresh init seeds .env from the shipped .env.example. That file
+        must not pre-set CLAUDE_CREDENTIALS_MODE, or the "already set" gate would
+        swallow the prompt — choosing "sync" here proves the question is asked."""
+        root = _make_root(tmp_path)
+        env_path = root / ".catraz" / ".env"
+        env_path.unlink()  # force _init_seed_env to copy .env.example
+        _patch_common(monkeypatch)
+        # AUTH_MODE is seeded from the example (no prompt); the first and only
+        # choice is the credential mode — pick "2" (sync), then decline the endpoint.
+        inputs = iter(["2", "n"])
+
+        def _input(p: object) -> str:
+            try:
+                return next(inputs)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+        monkeypatch.setattr("getpass.getpass", lambda p: "")
+        setup.cmd_init(root, _interactive_args(force=False), Out(color=False))
+        assert load_env(env_path).get("CLAUDE_CREDENTIALS_MODE") == "sync"
+
 
 # TOML setters — must round-trip against the real shipped template
 

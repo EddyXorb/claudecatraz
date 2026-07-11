@@ -744,13 +744,20 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
     if mode not in ("subscription", "api_key"):
         f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env")
         return
+    from catraz.agents import effective_credentials_mode
+
     cred = paths.claude_home(root) / ".credentials.json"
     # api_key: key is in .catraz/secrets/anthropic_api_key (compose secret); bare env var is fallback.
     api_key = _read_secret_file(root, "anthropic_api_key") or env.get("ANTHROPIC_API_KEY", "")
     if mode == "subscription":
         if api_key:
             f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
-        if not cred.exists():
+        if effective_credentials_mode(root, env) == "persistent":
+            # Persistent home keeps the login inside the container
+            # (.catraz/state/<profile>/); the `agent` section validates it and
+            # `catraz sync` does not apply.
+            f.ok("auth", "subscription — credential managed in the persistent container home")
+        elif not cred.exists():
             f.bad("auth", "no .credentials.json", "run `catraz sync`")
         else:
             f.ok("auth", "subscription credential present")
