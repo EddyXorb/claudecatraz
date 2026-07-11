@@ -16,6 +16,7 @@
 # through claude.ai. Without this a blocked domain gets the proxy's bump cert,
 # which the container reads as SELF_SIGNED_CERT_IN_CHAIN.
 .claude.ai
+.claude.com
 
 # --- GitLab ---
 # The git path runs through the Warden (dedicated egress-net path, NOT via this
