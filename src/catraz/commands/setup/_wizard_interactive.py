@@ -15,7 +15,12 @@ from catraz.policy import (
 )
 from catraz.ui import Out
 
-from ._secrets import _ensure_secret, _read_grouped_token, _upsert_grouped_token, _write_secret_value
+from ._secrets import (
+    _ensure_secret,
+    _read_grouped_token,
+    _upsert_grouped_token,
+    _write_secret_value,
+)
 
 
 def _read_branch_prefix(warden_toml: Path | None) -> str:
@@ -84,17 +89,20 @@ def _prompt_auth_mode(
 def _prompt_write_access(out: Out) -> bool:
     """Read-only vs read-write is just "did the user give a write token"; ask it
     directly instead of storing a mode."""
-    return cast(
-        str,
-        out.choice(
-            "GitLab access?",
-            [
-                ("read-write", "read-write — read + push (needs read & write tokens)"),
-                ("read-only", "read-only — read only (needs a read token)"),
-            ],
-            default=0,
-        ),
-    ) == "read-write"
+    return (
+        cast(
+            str,
+            out.choice(
+                "GitLab access?",
+                [
+                    ("read-write", "read-write — read + push (needs read & write tokens)"),
+                    ("read-only", "read-only — read only (needs a read token)"),
+                ],
+                default=0,
+            ),
+        )
+        == "read-write"
+    )
 
 
 def _prompt_configure_endpoint(out: Out) -> bool:
@@ -251,7 +259,9 @@ def _wizard_interactive(
     host = ""
     access = "none"
     if _prompt_configure_endpoint(out):
-        host = normalize_host(out.ask("GitLab host", _read_endpoint_host(warden_toml) or "gitlab.com"))
+        host = normalize_host(
+            out.ask("GitLab host", _read_endpoint_host(warden_toml) or "gitlab.com")
+        )
         want_write = _prompt_write_access(out)
         _prompt_gitlab_tokens(secrets_dir, host, want_write, args, out)
         if warden_toml.exists():
@@ -268,11 +278,12 @@ def _wizard_interactive(
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
     proj_count, _ = _resolve_allowed_projects(root)
-    endpoint_part = f"  host={host}  access={access}  projects={len(proj_count)}" if host else (
-        "  gitlab=not configured"
+    endpoint_part = (
+        f"  host={host}  access={access}  projects={len(proj_count)}"
+        if host
+        else ("  gitlab=not configured")
     )
     out.info(
-        f"\n• auth_mode={auth_mode}{endpoint_part}"
-        "  (edit quotas in .catraz/config/warden.toml)"
+        f"\n• auth_mode={auth_mode}{endpoint_part}  (edit quotas in .catraz/config/warden.toml)"
     )
     out.info("  To change the base image, edit .catraz/config/image/Dockerfile")

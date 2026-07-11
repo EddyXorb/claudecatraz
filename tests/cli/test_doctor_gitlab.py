@@ -27,9 +27,7 @@ class TestCheckPolicy:
         assert not any(i[0] == doctor.BAD for i in f.items)
         assert any(i[0] == doctor.OK for i in f.items)
 
-    def test_empty_allowlist_warns(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_allowlist_warns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
         _mock_allowlist(tmp_path, monkeypatch, [])
         f = doctor.Findings()

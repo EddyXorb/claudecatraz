@@ -218,9 +218,7 @@ def test_cmd_init_yes_reads_tokens_from_env(
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_cmd_init_yes_reads_host_from_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cmd_init_yes_reads_host_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """--yes honours GITLAB_HOST for both the token key and the endpoint."""
     import tomllib
 
@@ -233,8 +231,7 @@ def test_cmd_init_yes_reads_host_from_env(
 
     secrets_dir = root / ".catraz" / "secrets"
     assert (
-        _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com")
-        == "glpat-self-hosted"
+        _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-self-hosted"
     )
     data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
     assert {e["host"] for e in data["git"]["endpoint"]} == {"gitlab.example.com"}

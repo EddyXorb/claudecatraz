@@ -424,9 +424,7 @@ class TestInteractiveHost:
         setup.cmd_init(root, _interactive_args(force=True), Out(color=False))
 
         secrets_dir = root / ".catraz" / "secrets"
-        assert (
-            _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-read"
-        )
+        assert _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-read"
         assert _endpoints(root) == {("gitlab.example.com", "gitlab")}
 
 

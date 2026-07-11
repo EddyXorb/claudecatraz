@@ -150,9 +150,7 @@ def test_persistent_mode_layers_home_overlay(
     assert cmd.index(_persistent_home_yml()) > auth_idx
 
 
-def test_sync_mode_omits_home_overlay(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_sync_mode_omits_home_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".catraz").mkdir()
     monkeypatch.setattr(compose, "_credentials_mode", lambda root: "sync")
     assert _persistent_home_yml() not in compose.base_cmd(tmp_path)

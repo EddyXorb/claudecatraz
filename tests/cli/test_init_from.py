@@ -204,9 +204,7 @@ def test_yes_clone_copies_secrets_without_env_override(
     setup.cmd_init(dst, _yes_args(str(src)), Out(color=False))
     secrets_dir = dst / ".catraz" / "secrets"
     # Inherited host-keyed token present (the source endpoint host).
-    assert (
-        _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-src-read"
-    )
+    assert _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-src-read"
     # Env override for that host wins on the next run.
     monkeypatch.setenv("GITLAB_HOST", "gitlab.example.com")
     monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-env-override")

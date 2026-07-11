@@ -51,7 +51,9 @@ def _upsert_grouped_token(secrets_dir: Path, filename: str, host: str, token: st
     for line in text.splitlines():
         stripped = line.strip()
         parts = stripped.split(None, 1)
-        is_hostline = bool(parts) and not stripped.startswith("#") and normalize_host(parts[0]) == key
+        is_hostline = (
+            bool(parts) and not stripped.startswith("#") and normalize_host(parts[0]) == key
+        )
         if not is_hostline:
             kept.append(line)
     kept.append(f"{key} {token}")

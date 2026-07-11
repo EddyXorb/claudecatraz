@@ -16,9 +16,7 @@ def _write_endpoint(root: Path, host: str = "gitlab.com") -> None:
     """A configured endpoint is what makes check_endpoints reach for /policy."""
     config_dir = root / ".catraz" / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "warden.toml").write_text(
-        f'[[git.endpoint]]\nhost = "{host}"\ntype = "gitlab"\n'
-    )
+    (config_dir / "warden.toml").write_text(f'[[git.endpoint]]\nhost = "{host}"\ntype = "gitlab"\n')
 
 
 def _action(id_: str, criticality: str, default: bool, active: bool) -> dict[str, object]:

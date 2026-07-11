@@ -62,9 +62,7 @@ def _yes_args() -> argparse.Namespace:
     )
 
 
-def test_read_write_setup_loads_read_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_read_write_setup_loads_read_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _make_root(tmp_path)
     _patch_common(monkeypatch)
     monkeypatch.setenv("GITLAB_HOST", "gitlab.example.com")
@@ -74,9 +72,7 @@ def test_read_write_setup_loads_read_write(
     assert _load_warden_config(root, "gitlab.example.com") == "read-write"
 
 
-def test_read_only_setup_loads_read_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_read_only_setup_loads_read_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _make_root(tmp_path)
     _patch_common(monkeypatch)
     monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")  # default host gitlab.com
