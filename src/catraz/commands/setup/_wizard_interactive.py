@@ -78,7 +78,7 @@ def _prompt_auth_mode(
         auth_mode = out.choice(
             "Claude auth mode?",
             [
-                ("subscription", "subscription — import host ~/.claude (default)"),
+                ("subscription", "subscription — use your Claude login (default)"),
                 ("api_key", "api_key — dedicated Anthropic API key"),
             ],
             default=0 if auth_mode == "subscription" else 1,
