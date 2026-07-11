@@ -17,9 +17,19 @@ def _yes_host(env: dict[str, str]) -> str:
     return normalize_host(host) or "gitlab.com"
 
 
-def _yes_apply_tokens(secrets_dir: Path, host: str, auth_mode: str, out: Out) -> None:
-    """Scaffold the grouped token files and upsert env-provided tokens under
-    *host*; provision anthropic_api_key under api_key auth."""
+def _yes_endpoint_requested(env: dict[str, str]) -> bool:
+    """True iff --yes was given an explicit host or token — the signal to
+    synthesise an endpoint. With nothing provided, init stays endpoint-less."""
+    if (os.environ.get("GITLAB_HOST") or env.get("GITLAB_HOST") or "").strip():
+        return True
+    return bool(
+        os.environ.get("GITLAB_READ_TOKEN", "").strip()
+        or os.environ.get("GITLAB_WRITE_TOKEN", "").strip()
+    )
+
+
+def _yes_apply_tokens(secrets_dir: Path, host: str, out: Out) -> None:
+    """Scaffold the grouped token files and upsert env-provided tokens under *host*."""
     _ensure_secret(secrets_dir, "read_tokens")
     _ensure_secret(secrets_dir, "write_tokens")
     read_t = os.environ.get("GITLAB_READ_TOKEN", "").strip()
@@ -29,12 +39,16 @@ def _yes_apply_tokens(secrets_dir: Path, host: str, auth_mode: str, out: Out) ->
     if write_t:
         _upsert_grouped_token(secrets_dir, "write_tokens", host, write_t)
 
-    if auth_mode == "api_key":
-        env_val = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        if env_val:
-            _write_secret_value(secrets_dir, "anthropic_api_key", env_val)
-        else:
-            _ensure_secret(secrets_dir, "anthropic_api_key")
+
+def _yes_apply_anthropic(secrets_dir: Path, auth_mode: str) -> None:
+    """Provision anthropic_api_key under api_key auth (from env, else empty stub)."""
+    if auth_mode != "api_key":
+        return
+    env_val = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if env_val:
+        _write_secret_value(secrets_dir, "anthropic_api_key", env_val)
+    else:
+        _ensure_secret(secrets_dir, "anthropic_api_key")
 
 
 def _yes_clear_stale_policy_env(env_path: Path) -> None:
@@ -66,10 +80,17 @@ def _wizard_yes(
     )
     updates["AUTH_MODE"] = auth_mode
 
-    host = _yes_host({**inh_env, **env})
-    _yes_apply_tokens(secrets_dir, host, auth_mode, out)
-    if warden_toml.exists():
-        ensure_git_endpoint(warden_toml, host, "gitlab")
+    merged = {**inh_env, **env}
+    if _yes_endpoint_requested(merged):
+        host = _yes_host(merged)
+        _yes_apply_tokens(secrets_dir, host, out)
+        if warden_toml.exists():
+            ensure_git_endpoint(warden_toml, host, "gitlab")
+    else:
+        # No host/token given: scaffold empty token files, add no endpoint.
+        _ensure_secret(secrets_dir, "read_tokens")
+        _ensure_secret(secrets_dir, "write_tokens")
+    _yes_apply_anthropic(secrets_dir, auth_mode)
     _yes_clear_stale_policy_env(env_path)
 
     base_image = (

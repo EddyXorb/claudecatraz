@@ -97,6 +97,12 @@ def _prompt_write_access(out: Out) -> bool:
     ) == "read-write"
 
 
+def _prompt_configure_endpoint(out: Out) -> bool:
+    """Whether to set up a GitLab endpoint now. Declining leaves a valid,
+    endpoint-less config — a host is added later by re-running or by hand."""
+    return not out.ask("Configure a GitLab endpoint now?", "Y").strip().lower().startswith("n")
+
+
 def _prompt_gitlab_tokens(
     secrets_dir: Path,
     host: str,
@@ -242,22 +248,31 @@ def _wizard_interactive(
     auth_mode = _prompt_auth_mode(env, args, out, inherited)
     updates["AUTH_MODE"] = auth_mode
 
-    host = normalize_host(out.ask("GitLab host", _read_endpoint_host(warden_toml)))
-    want_write = _prompt_write_access(out)
-    _prompt_gitlab_tokens(secrets_dir, host, want_write, args, out)
-    if warden_toml.exists():
-        ensure_git_endpoint(warden_toml, host, "gitlab")
-    _prompt_allowed_projects(root, warden_toml, env_path, host, args, out)
-    _prompt_branch_prefix(warden_toml, env_path, out)
+    host = ""
+    access = "none"
+    if _prompt_configure_endpoint(out):
+        host = normalize_host(out.ask("GitLab host", _read_endpoint_host(warden_toml)))
+        want_write = _prompt_write_access(out)
+        _prompt_gitlab_tokens(secrets_dir, host, want_write, args, out)
+        if warden_toml.exists():
+            ensure_git_endpoint(warden_toml, host, "gitlab")
+        _prompt_allowed_projects(root, warden_toml, env_path, host, args, out)
+        _prompt_branch_prefix(warden_toml, env_path, out)
+        access = "read-write" if want_write else "read-only"
+    else:
+        # No endpoint: leave both grouped token files present but empty.
+        _ensure_secret(secrets_dir, "read_tokens")
+        _ensure_secret(secrets_dir, "write_tokens")
 
     if auth_mode == "api_key":
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
     proj_count, _ = _resolve_allowed_projects(root)
-    access = "read-write" if want_write else "read-only"
+    endpoint_part = f"  host={host}  access={access}  projects={len(proj_count)}" if host else (
+        "  gitlab=not configured"
+    )
     out.info(
-        f"\n• auth_mode={auth_mode}  host={host}  access={access}"
-        f"  projects={len(proj_count)}"
+        f"\n• auth_mode={auth_mode}{endpoint_part}"
         "  (edit quotas in .catraz/config/warden.toml)"
     )
     out.info("  To change the base image, edit .catraz/config/image/Dockerfile")

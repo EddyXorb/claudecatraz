@@ -98,16 +98,32 @@ def test_cmd_init_writes_host_keyed_token_via_getpass(
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
-def test_cmd_init_writes_git_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wizard ensures a [[git.endpoint]] (host, type=gitlab) in warden.toml."""
+def test_cmd_init_writes_git_endpoint_when_token_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--yes with an explicit token synthesises a [[git.endpoint]] in warden.toml."""
+    import tomllib
+
+    root = _make_root(tmp_path)
+    monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
+    _patch_common(monkeypatch)
+    setup.cmd_init(root, _yes_args(), Out(color=False))
+    data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
+    endpoints = data["git"]["endpoint"]
+    assert {(e["host"], e["type"]) for e in endpoints} == {("gitlab.com", "gitlab")}
+
+
+def test_cmd_init_writes_no_endpoint_without_host_or_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--yes with nothing provided stays endpoint-less (offer, don't force)."""
     import tomllib
 
     root = _make_root(tmp_path)
     _patch_common(monkeypatch)
     setup.cmd_init(root, _yes_args(), Out(color=False))
     data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
-    endpoints = data["git"]["endpoint"]
-    assert {(e["host"], e["type"]) for e in endpoints} == {("gitlab.com", "gitlab")}
+    assert "endpoint" not in data.get("git", {})
 
 
 def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:

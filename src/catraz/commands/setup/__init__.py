@@ -48,7 +48,7 @@ def cmd_doctor(root: Path, args: argparse.Namespace, out: Out) -> int:
 def _init_config_templates(cat: Path, assets: Path, out: Out) -> None:
     cfg_dst = cat / "config"
     cfg_src = assets / "config"
-    for name in ("warden.toml", "allowlist.txt", "squid.conf"):
+    for name in ("warden.toml", "allowlist.txt", "squid.conf", "README.md"):
         src = cfg_src / name
         dst = cfg_dst / name
         if src.exists() and not dst.exists():

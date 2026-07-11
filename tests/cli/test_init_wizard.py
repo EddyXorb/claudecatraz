@@ -89,8 +89,8 @@ def _endpoints(root: Path) -> set[tuple[str, str]]:
 
 
 class TestYesNoTokens:
-    """--yes with no token env vars: grouped files stay empty, no GITLAB_MODE in
-    .env, but the single-host endpoint is still created (it runs closed)."""
+    """--yes with nothing provided: grouped files stay empty, no GITLAB_MODE in
+    .env, and NO endpoint is synthesised (offer, don't force)."""
 
     def test_no_gitlab_mode_in_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
@@ -111,9 +111,18 @@ class TestYesNoTokens:
             assert p.read_text() == ""
             assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
-    def test_endpoint_created(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_endpoint_created(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        assert _endpoints(root) == set()
+
+    def test_endpoint_created_when_host_given(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        monkeypatch.setenv("GITLAB_HOST", "gitlab.com")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         assert _endpoints(root) == {("gitlab.com", "gitlab")}
 
@@ -188,8 +197,9 @@ class TestYesScaffold:
     def test_warden_toml_scaffolds_explicit_git_actions_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`init` keeps the shipped `[git] actions = [...]` full default plus the
-        vocabulary comment, and adds no `[api.endpoints]` remnant."""
+        """`init` keeps the shipped `[git] actions = [...]` full default and the
+        `[git.rules]` block; the long vocabulary now lives in the README, which
+        the slim toml points at. No `[api.endpoints]` remnant."""
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
         setup.cmd_init(root, _yes_args(), Out(color=False))
@@ -209,21 +219,49 @@ class TestYesScaffold:
             "instance.users.read",
             "instance.meta.read",
         ]
+        assert "rules" in data["git"]
+        assert ".catraz/config/README.md" in text
+        assert "[api.endpoints]" not in text
+        # Slimmed: the long opt-in/never vocabulary comment is out of the toml.
+        for moved in ("project.issue.create", "repo.tag.delete", "criticality"):
+            assert moved not in text
+
+    def test_shipped_toml_is_slim_and_endpointless(self) -> None:
+        from catraz.paths import asset_root
+
+        text = (asset_root() / "assets" / "config" / "warden.toml").read_text(encoding="utf-8")
+        assert len(text.splitlines()) <= 40, "template should stay scannable (~30 lines)"
+        data = tomllib.loads(text)
+        assert "endpoint" not in data.get("git", {}), "no active endpoint ships"
+
+    def test_config_readme_carries_the_vocabulary(self) -> None:
+        from catraz.paths import asset_root
+
+        readme = (asset_root() / "assets" / "config" / "README.md").read_text(encoding="utf-8")
         for action in (
+            "repo.read",
             "repo.branch.delete",
             "repo.tag.create",
             "project.mr.merge",
             "project.issue.create",
             "instance.meta.read",
         ):
-            assert action in text
-        assert "[api.endpoints]" not in text
+            assert action in readme, f"vocabulary row {action} missing from config README"
+
+    def test_init_places_config_readme(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        assert (root / ".catraz" / "config" / "README.md").exists()
 
     def test_reinit_does_not_duplicate_endpoint(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
+        monkeypatch.setenv("GITLAB_HOST", "gitlab.com")
         setup.cmd_init(root, _yes_args(), Out(color=False))
         setup.cmd_init(root, _yes_args(), Out(color=False))
         data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
@@ -267,9 +305,9 @@ class TestInteractiveReadWrite:
     def test_read_write_wizard(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # force=True → auth prompt shown; inputs: auth default, host default,
-        # access default (read-write), projects, branch default.
-        inputs = iter(["", "", "", "group/my-proj", ""])
+        # force=True → auth prompt shown; inputs: auth default, endpoint Y,
+        # host default, access default (read-write), projects, branch default.
+        inputs = iter(["", "", "", "", "group/my-proj", ""])
 
         def _input(p: object) -> str:
             try:
@@ -316,8 +354,8 @@ class TestInteractiveReadOnly:
     def test_read_only_wizard(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # auth default, host default, access "2" (read-only), projects, branch.
-        inputs = iter(["", "", "2", "group/my-proj", ""])
+        # auth default, endpoint Y, host default, access "2" (read-only), projects, branch.
+        inputs = iter(["", "", "", "2", "group/my-proj", ""])
 
         def _input(p: object) -> str:
             try:
@@ -352,7 +390,7 @@ class TestInteractiveReadOnly:
         secrets_dir.mkdir(mode=0o700, exist_ok=True)
         (secrets_dir / "write_tokens").write_text("gitlab.com glpat-existing\n")
         (secrets_dir / "write_tokens").chmod(0o600)
-        inputs = iter(["", "", "2", "", ""])  # read-only
+        inputs = iter(["", "", "", "2", "", ""])  # endpoint Y, then read-only
 
         def _input(p: object) -> str:
             try:
@@ -372,8 +410,8 @@ class TestInteractiveHost:
     def test_custom_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)
         _patch_common(monkeypatch)
-        # auth default, host "gitlab.example.com", access "2" (read-only), projects, branch.
-        inputs = iter(["", "gitlab.example.com", "2", "", ""])
+        # auth, endpoint Y, host, access "2" (read-only), projects, branch.
+        inputs = iter(["", "", "gitlab.example.com", "2", "", ""])
 
         def _input(p: object) -> str:
             try:
@@ -390,6 +428,36 @@ class TestInteractiveHost:
             _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-read"
         )
         assert _endpoints(root) == {("gitlab.example.com", "gitlab")}
+
+
+class TestInteractiveDeclineEndpoint:
+    """Answering 'n' to the endpoint prompt skips every GitLab prompt, writes no
+    endpoint, and leaves empty grouped token files."""
+
+    def test_decline_skips_gitlab(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        # auth default, then "n" to decline the endpoint; nothing after is prompted.
+        inputs = iter(["", "n"])
+
+        def _input(p: object) -> str:
+            try:
+                return next(inputs)
+            except StopIteration:
+                return ""
+
+        monkeypatch.setattr("builtins.input", _input)
+
+        def _fail_getpass(p: object) -> str:
+            raise AssertionError("no token must be prompted when the endpoint is declined")
+
+        monkeypatch.setattr("getpass.getpass", _fail_getpass)
+        setup.cmd_init(root, _interactive_args(force=True), Out(color=False))
+
+        secrets_dir = root / ".catraz" / "secrets"
+        assert (secrets_dir / "read_tokens").read_text() == ""
+        assert (secrets_dir / "write_tokens").read_text() == ""
+        assert _endpoints(root) == set()
 
 
 class TestInteractiveAuthMode:

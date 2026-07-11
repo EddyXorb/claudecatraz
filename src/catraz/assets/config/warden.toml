@@ -1,107 +1,19 @@
-# Warden — non-secret policy parameters. SOURCE OF TRUTH for these settings.
-# Host-editable, mounted read-only. Details: docs/design/agentic-workflow/02-warden.md (W10)
-#
-# One setting, one source: edit this file directly for every value below, or
-# use `catraz allow` for allowed_projects. This file holds NO secrets: the
-# GitLab tokens live in the grouped .catraz/secrets/read_tokens / write_tokens
-# files (<host> <token> per line). Which hosts the agent may reach, and their
-# access mode, are decided here + by those token files alone: each
-# [[git.endpoint]] names one host, and a host is read-write, read-only, or
-# closed purely by which of its tokens are present — there is no host or
-# access-mode setting in .catraz/.env anymore.
+# Warden non-secret policy — SOURCE OF TRUTH, host-editable, mounted read-only.
+# Full action vocabulary + endpoint guide: .catraz/config/README.md. NO secrets
+# here — GitLab tokens live in .catraz/secrets/read_tokens / write_tokens.
 
-# R2: only branches under one of these prefixes may be pushed (the allowed
-# namespace is the union of the list). Legacy single-prefix form still works:
-#   branch_prefix = "claude/"
+# R2: branches are pushable only under one of these prefixes (union of the list).
 branch_prefixes     = ["claude/"]
 max_open_mrs        = 5                   # R5: max simultaneously open MRs
 max_open_branches   = 10                  # R5: max simultaneously existing branches
 max_writes_per_hour = 60                  # R5: max write actions per hour
 
-# Full paths of concrete projects only — NO wildcards/globs, NO partial/leaf names,
-# NO group prefixes. Empty = fail-closed (nothing allowed).
+# Concrete project paths (group/sub/project) only — no wildcards/leaf/group names.
+# Empty = fail-closed: every GitLab op denied until you add one (or `catraz allow`).
 allowed_projects    = []
 
-# --- Multi-target endpoint taxonomy (docs/design/architecture-generalization/
-# 08-multi-target.md) — this is the live, enforced way to reach one or more git
-# hosts through the Warden: DNS alias, git insteadOf rewrite, per-host REST
-# base, and host_gate/UpstreamRouter all key off the [[git.endpoint]] entries
-# below (§1-§4). [git.rules] holds the same domain-default knobs as the
-# top-level settings above (branch_prefixes, max_open_branches, max_open_mrs,
-# max_writes_per_hour, max_push_bytes), scoped to the endpoint model; each
-# [[git.endpoint]] table configures exactly one git host, with an optional
-# per-endpoint `rules = { ... }` overriding a [git.rules] default for that host
-# only (per-key merge, §3.3). Tokens are NEVER set here — they live in the
-# grouped .catraz/secrets/read_tokens / write_tokens files (<host> <token> per
-# line); an endpoint with no matching token simply runs closed (deny-all for
-# that host only), it never blocks startup or the other endpoints (§4.2).
-#
-# No [[git.endpoint]] at all = no host is routed/reachable through the Warden
-# (real default-deny, not "use the settings above instead") — the top-level
-# settings above remain a separate, domain-wide fallback the Warden still
-# reads for backward compatibility, not an implicit single endpoint.
-#
-# Implemented `type` values:
-#   "gitlab" — git + REST API (gitlab.com or self-hosted GitLab)
-#   "plain"  — git smart-HTTP only, no REST API assumed
-# "github" is reserved for a future guard — the Warden refuses to start if used.
-#
-# --- actions: what an agent is allowed to DO — layered UNDER the token
-# deck: a write action with no write_token for a host still runs closed,
-# `catraz doctor` warns about that mismatch rather than the Warden failing.
-# Three scopes, each with its own enforcement boundary:
-#   repo     — the version-controlled content itself, independent of wire
-#              (git transport and REST reach the same bytes).
-#   project  — the forge objects around it (MRs, CI, issues) in an
-#              allowlisted project.
-#   instance — projectless, forge-wide metadata.
-# Vocabulary (twenty ids, closed set, no wildcards, no read/write split
-# beyond what's listed — "never" rows are compiled-in denies, never
-# configurable regardless of what you put below):
-#
-#   action                   | criticality | covers                                          | default?
-#   -------------------------|-------------|--------------------------------------------------|--------
-#   repo.read                | READ        | clone/fetch + push discovery; repository files/  |   yes
-#                            |             | trees/commits/archive/compare; CI artifact        |
-#                            |             | downloads; project snippets                       |
-#   repo.branch.create       | WRITE       | new branch — git push or REST                     |   yes
-#   repo.branch.push         | WRITE       | move tip of existing branch                       |   yes
-#   repo.branch.delete       | never       | —                                                  |   never
-#   repo.tag.create          | never       | —                                                  |   never
-#   repo.tag.delete          | never       | —                                                  |   never
-#   project.read             | READ        | all forge-object reads in an allowlisted project: |   yes
-#                            |             | attributes, MRs incl. diffs, issues, pipelines/    |
-#                            |             | jobs incl. logs, labels, milestones, releases      |
-#   project.mr.create        | WRITE       | open MR                                           |   yes
-#   project.mr.edit          | WRITE       | title/description/labels (no state_event)         |   yes
-#   project.mr.close         | WRITE       | state_event = close/reopen                        |   yes
-#   project.mr.comment       | WRITE       | notes, discussions, replies                       |   yes
-#   project.mr.merge         | never       | /merge endpoint + state_event=merge alias         |   never
-#   project.ci.trigger       | WRITE       | branch and MR pipelines; retry, play, cancel      |   yes
-#   project.issue.create     | WRITE       | —                                                  |   opt-in
-#   project.issue.edit       | WRITE       | title/description/labels                          |   opt-in
-#   project.issue.close      | WRITE       | state_event = close/reopen                        |   opt-in
-#   project.issue.comment    | WRITE       | issue notes                                       |   opt-in
-#   instance.projects.read   | READ        | /projects, /groups*, global MR/issue listings,    |   yes
-#                            |             | search scopes {projects, merge_requests, issues,  |
-#                            |             | milestones}                                        |
-#   instance.users.read      | READ        | /users, /user*, /events, search scope users        |   yes
-#   instance.meta.read       | READ        | /version, /metadata, /broadcast_messages           |   yes
-#
-# The repo/project content line is enforced mechanically by path, never by
-# response inspection: MR diff views (…/merge_requests/{iid}/diffs|changes|
-# versions) are `project.read` — reviewing a diff never needs `repo.read` —
-# while CI artifact downloads are `repo.read` (artifacts are files, often the
-# built code); job *logs* stay `project.read` (babysitting a pipeline without
-# repo access is a real review-only workflow).
-#
-# The built-in default below (the twelve "yes" rows) ALSO lives in code
-# (warden/warden/guards/git/actions.py DEFAULT) — this key is documentation/a
-# starting point, NOT the sole source of truth: deleting it does not mean "no
-# actions", it falls back to the same code default (missing key != empty
-# list). Each [[git.endpoint]] below can override this domain default per
-# host with its own `actions = [...]` — the list REPLACES completely (no
-# actions_add/actions_remove).
+# Domain default: what the agent may DO on a git host (the twelve "yes" actions).
+# Closed set; per-host override via a [[git.endpoint]] `actions` key (see README).
 [git]
 actions = [
   "repo.read", "repo.branch.create", "repo.branch.push",
@@ -110,38 +22,13 @@ actions = [
   "instance.projects.read", "instance.users.read", "instance.meta.read",
 ]
 
+# Domain-default quotas/prefixes for the endpoint model (same knobs as above).
 [git.rules]
 # branch_prefixes = ["claude/"]
 
-# Example — add one [[git.endpoint]] table per host. Each host gets its own
-# DNS alias + git/REST routing through the Warden automatically (no compose
-# edit needed).
-#
-# NOTE: per-endpoint `allowed_projects` below is parsed but NOT yet enforced —
-# the runtime authorizes projects only against the TOP-LEVEL `allowed_projects`
-# above. Set the projects there; the per-host lists shown here are illustrative
-# until host-aware project scoping lands.
+# Which hosts the agent may reach: one [[git.endpoint]] per host (type =
+# "gitlab"|"plain"). `catraz init` offers to add one; none ships by default (no
+# endpoint = no host routed). Example + full docs: .catraz/config/README.md.
 # [[git.endpoint]]
-# host             = "gitlab.com"
-# type             = "gitlab"
-# allowed_projects = []
-#
-# [[git.endpoint]]
-# host             = "my-gitlab.example.com"
-# type             = "gitlab"
-# allowed_projects = []
-# rules            = { max_open_mrs = 20 }
-#
-# Review-only endpoint: overrides the domain `actions` default above to just
-# read + comment (no project.mr.create/repo.branch.push/project.ci.trigger)
-# — this host can never write anything but a comment. Per-endpoint `rules`
-# overrides are ALWAYS an inline `{ ... }` table like this, NEVER a
-# `[git.endpoint.rules]` header: a header binds to the positionally-last
-# [[git.endpoint]] array element, so reordering endpoint blocks and
-# forgetting to move the header silently attaches the rules to the wrong host.
-# [[git.endpoint]]
-# host             = "review-only.example.com"
-# type             = "gitlab"
-# allowed_projects = []
-# actions          = ["repo.read", "project.read", "project.mr.comment"]
-# rules            = { max_writes_per_hour = 30 }
+# host = "gitlab.com"
+# type = "gitlab"
