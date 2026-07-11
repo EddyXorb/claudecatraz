@@ -11,11 +11,11 @@ command = "claude"
 
 [credentials]
 # What `catraz sync` imports for credentials.mode = "sync". Ignored entirely
-# in the default "persistent" mode (§05.6) — the adapter does its own
+# in the default "persistent" mode — the adapter does its own
 # `claude login` flow against .catraz/state/claude/ instead.
 subscription_source = "~/.claude/.credentials.json"
 api_key_env         = "ANTHROPIC_API_KEY"
-mode                = "persistent"   # "sync" | "persistent" — Maintainer-Entscheid, 2026-07 (§05.6)
+mode                = "persistent"   # "sync" | "persistent"
 
 [modes]
 remote = true            # Remote-Control is a Claude feature -> gated per agent
@@ -24,4 +24,4 @@ remote = true            # Remote-Control is a Claude feature -> gated per agent
 debug_flag = "--debug-file"
 
 [egress]
-domains = ["api.anthropic.com", "statsig.anthropic.com"]   # §05.4 — NEVER auto-merged
+domains = ["api.anthropic.com", "statsig.anthropic.com", ".claude.ai", ".claude.com"]   # NEVER auto-merged
