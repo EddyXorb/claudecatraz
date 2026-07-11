@@ -54,8 +54,10 @@ token, and optionally a write token, then:
 
 * writes host-keyed lines (`<host> <token>`) into `read_tokens` / `write_tokens`,
   upserting the host's line;
-* ensures a `[[git.endpoint]]` (`host`, `type = "gitlab"`) exists in
-  `warden.toml`;
+* **offers** to add a `[[git.endpoint]]` (`host`, `type = "gitlab"`) to
+  `warden.toml` — the shipped template ships no endpoint (a host runs only once
+  the operator or this prompt adds one), so declining leaves a valid,
+  endpoint-less config that doctor treats as "no host configured";
 * keeps writing `allowed_projects` and `branch_prefixes` where the runtime
   actually enforces them (§4), and asks for the project allowlist as today.
 
@@ -107,10 +109,13 @@ each start.
 
 ### 2.4 Template and `.env` tell one story
 
-`assets/config/warden.toml`'s header stops pointing at `.env` for token mode and
-describes the endpoint model. The action vocabulary table is already correct.
-`.env.example` (already free of `GITLAB_MODE` / `GITLAB_URL`) has its auth note
-aligned with the two credential modes.
+`assets/config/warden.toml` is slimmed to the keys plus short comments and a
+pointer: the long action-vocabulary table and prose move to
+`assets/config/README.md` (the operator reference), so the shipped toml is
+scannable (~30 lines) rather than a wall of comments. The template keeps the
+git-namespace defaults (`[git].actions`, `[git.rules]`) but ships no
+`[[git.endpoint]]`. `.env.example` (already free of `GITLAB_MODE` /
+`GITLAB_URL`) has its auth note aligned with the two credential modes.
 
 ## 3. Behavioral changes vs. today
 

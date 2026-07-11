@@ -20,6 +20,9 @@ The two steps touch disjoint files and may be done in either order; do
 operator-surface first so the init/doctor fix lands before the credential-mode
 change.
 
+| 02 | config-slim-and-endpoint-optin | move the vocabulary table + prose from `warden.toml` into `config/README.md`, slim the toml to ~30 lines; make the wizard **offer** (not force) a `[[git.endpoint]]`, default template ships none | ☐ |
+| 03 | warden-project-and-rules-model | fix F1 (enforce per-endpoint `allowed_projects`, host-aware) and F2 (collapse legacy top-level rule keys into `[git.rules]`/per-endpoint); update config/guards/kernel + wizard/doctor/template; design note below | ☐ |
+
 ## Step 01 — operator-surface (the *how*)
 
 Main doc §2.1, §2.3, §2.4. Fail-closed and one-source-of-truth throughout.
