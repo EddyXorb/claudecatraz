@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from catraz.envfile import load_env
-from catraz.compose import run as compose_run
+from catraz.compose import run as compose_run, compose_ps
 from catraz.errors import CliError
 from catraz import paths
 from catraz import image
@@ -84,6 +84,7 @@ DOCTOR_SECTIONS = [
     "endpoints",
     "agent",
     "net",
+    "mounts",
     "auth",
     "base",
 ]
@@ -728,6 +729,72 @@ def check_net(root: Path, f: Findings) -> None:
         f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
 
 
+# Durable directory bind mounts a running infra container writes into —
+# (host path relative to .catraz, container-absolute path) pairs.
+MOUNT_TARGETS: dict[str, list[tuple[str, str]]] = {
+    "gitlab-warden": [
+        ("state/warden/db", "/var/lib/warden"),
+        ("logs/warden", "/var/log/warden"),
+        ("state/warden/run", "/run/warden"),
+    ],
+    "forward-proxy": [
+        ("logs/squid", "/var/log/squid"),
+    ],
+}
+
+
+def _container_inode(name: str, path: str) -> int | None:
+    """Inode of `path` inside container `name`, or None if unreachable."""
+    r = subprocess.run(
+        ["docker", "exec", name, "stat", "-c", "%i", path],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return None
+    try:
+        return int(r.stdout.strip())
+    except ValueError:
+        return None
+
+
+def check_mounts(root: Path, f: Findings) -> None:
+    """A host directory deleted and recreated at the same path while its
+    container keeps running orphans the bind mount: the container keeps
+    writing into the old, unlinked directory and the host never sees new
+    output. Compares each durable mount's host-side inode against the inode
+    the running container sees; a mismatch flags the mount as stale."""
+    if not which("docker"):
+        f.warn("mounts", "cannot verify bind mounts (docker missing)")
+        return
+    rows = compose_ps(root)
+    running = {r.get("Service"): r.get("Name") for r in rows}
+    if not running:
+        f.ok("mounts", "stack not running — nothing to verify")
+        return
+    for service, targets in MOUNT_TARGETS.items():
+        name = running.get(service)
+        if not name:
+            continue
+        for rel, container_path in targets:
+            host_path = root / ".catraz" / rel
+            if not host_path.exists():
+                continue
+            container_inode = _container_inode(name, container_path)
+            if container_inode is None:
+                f.warn("mounts", f"{service}: could not stat {container_path} in container")
+                continue
+            if host_path.stat().st_ino != container_inode:
+                f.bad(
+                    "mounts",
+                    f"{service}: {rel}/ bind mount is stale (host directory was "
+                    "recreated while the container kept running)",
+                    "catraz reload --force",
+                )
+            else:
+                f.ok("mounts", f"{service}: {rel}/ bind mount intact")
+
+
 def _read_secret_file(root: Path, filename: str) -> str:
     """Return the stripped contents of .catraz/secrets/<filename>, or '' if missing/empty."""
     p = root / ".catraz" / "secrets" / filename
@@ -839,6 +906,8 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
         check_agent(root, env, f)
     if "net" in sections:
         check_net(root, f)
+    if "mounts" in sections:
+        check_mounts(root, f)
     if "auth" in sections:
         check_auth(root, env, f)
     if "base" in sections:
