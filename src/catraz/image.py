@@ -1,8 +1,29 @@
 import hashlib
+import json
 import subprocess
+import urllib.request
 from pathlib import Path
 from catraz.envfile import load_env
 from catraz.errors import CliError, EXIT_DOCKER
+
+_CLAUDE_CODE_LATEST_URL = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
+
+
+def resolve_claude_code_version(root: Path) -> str:
+    """Concrete claude-code version for the image build arg. A pinned
+    CLAUDE_CODE_VERSION is used verbatim; "latest" (or unset) is resolved to the
+    currently published version so a new release changes the build arg and busts
+    the Docker layer cache — a bare `@latest` string never would, so the image
+    would keep the stale CLI. Falls back to "latest" when the registry is
+    unreachable (the build still works; it just reuses the cached layer)."""
+    configured = load_env(root / ".catraz/.env").get("CLAUDE_CODE_VERSION", "").strip()
+    if configured and configured != "latest":
+        return configured
+    try:
+        with urllib.request.urlopen(_CLAUDE_CODE_LATEST_URL, timeout=5) as resp:
+            return str(json.load(resp)["version"]) or "latest"
+    except (OSError, ValueError, KeyError):
+        return "latest"
 
 
 def _image_exists(tag: str) -> bool:

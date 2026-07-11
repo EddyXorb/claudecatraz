@@ -24,6 +24,7 @@ def _mock_cmd_run(
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "_ensure_infra", lambda *a, **k: None)
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
+    monkeypatch.setattr(image, "resolve_claude_code_version", lambda root: "cc:test")
     # Host gitconfig is environment-dependent; pin it off so extra_env is deterministic.
     monkeypatch.setattr(run_cmd, "_host_gitconfig_env", lambda: {})
 
@@ -58,7 +59,10 @@ def test_cmd_run_passes_base_image_to_prepare(
     rc = run_cmd.cmd_run(tmp_path, args, Out(color=False))
     assert rc == 0
     assert len(prepare_calls) == 1
-    assert prepare_calls[0]["extra_env"] == {"BASE_IMAGE": "catraz-base:test"}
+    assert prepare_calls[0]["extra_env"] == {
+        "BASE_IMAGE": "catraz-base:test",
+        "CLAUDE_CODE_VERSION": "cc:test",
+    }
     assert prepare_calls[0]["render"] is True
 
 

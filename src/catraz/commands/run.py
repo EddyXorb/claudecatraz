@@ -93,7 +93,11 @@ def _host_gitconfig_env() -> dict[str, str]:
 def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
     """Shared ephemeral one-off path for `claude` (sub=run) and `shell` (sub=exec)."""
     assert_real_dirs(root)
-    extra_env = {"BASE_IMAGE": image.resolve_base(root), **_host_gitconfig_env()}
+    extra_env = {
+        "BASE_IMAGE": image.resolve_base(root),
+        "CLAUDE_CODE_VERSION": image.resolve_claude_code_version(root),
+        **_host_gitconfig_env(),
+    }
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     _ensure_infra(root, out, prefix=prefix)
@@ -128,7 +132,11 @@ def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
         return EXIT_DOCTOR
     print()
     _auto_sync_if_needed(root, out)
-    extra_env = {"BASE_IMAGE": image.resolve_base(root), **_host_gitconfig_env()}
+    extra_env = {
+        "BASE_IMAGE": image.resolve_base(root),
+        "CLAUDE_CODE_VERSION": image.resolve_claude_code_version(root),
+        **_host_gitconfig_env(),
+    }
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     out.info("• starting the agent daemon…")
