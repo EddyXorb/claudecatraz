@@ -176,6 +176,9 @@ def cmd_start(adapter: AgentAdapter, home: Path) -> None:
         sys.exit(
             "error: this agent profile does not support remote-control mode (modes.remote=false)"
         )
+    # flush=True: execvp replaces this process image, so anything still buffered
+    # in Python's stdio would never reach the container's stdout.
+    print(f"[entrypoint] remote-control daemon exec: {' '.join(argv)}", flush=True)
     os.execvp(argv[0], argv)
 
 

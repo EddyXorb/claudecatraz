@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import sys
+import time
 from pathlib import Path
 
 from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
@@ -140,8 +141,30 @@ def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     out.info("• starting the agent daemon…")
-    r = compose_run(root, ["--profile", "remote", "up", "-d"], prefix=prefix, check=False)
+    # --build self-heals CLI/image skew, same as the one-off path (_oneoff_args) —
+    # near-instant no-op via layer cache when the image is already current.
+    r = compose_run(
+        root,
+        ["--profile", "remote", "up", "-d", "--build", "--quiet-build"],
+        prefix=prefix,
+        check=False,
+    )
     if r and r.returncode == 0:
+        _print_remote_command(root, out, prefix=prefix)
         _wait_healthy(root, out, prefix=prefix)
         _print_urls(out)
     return r.returncode if r else EXIT_GENERAL
+
+
+def _print_remote_command(root: Path, out: Out, prefix: list[str] | None, timeout: int = 10) -> None:
+    """Surface the exact argv the entrypoint exec'd (logged as `[entrypoint]
+    remote-control exec: …`), so a silent `up -d` doesn't hide what's running."""
+    marker = "[entrypoint] remote-control daemon exec:"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = compose_run(root, ["logs", "--no-log-prefix", "claude-dev-env"], prefix=prefix, capture=True, check=False)
+        if r and marker in r.stdout:
+            line = next(ln for ln in r.stdout.splitlines() if marker in ln)
+            out.info(line.removeprefix("[entrypoint] ").strip())
+            return
+        time.sleep(0.5)
