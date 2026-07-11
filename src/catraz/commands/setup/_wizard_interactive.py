@@ -34,23 +34,23 @@ def _read_branch_prefix(warden_toml: Path | None) -> str:
     return m.group(1) if m else "claude/"
 
 
-def _read_endpoint_host(warden_toml: Path | None) -> str:
-    """First configured `[[git.endpoint]]` host, the wizard's host default;
-    `gitlab.com` when none is set yet."""
+def _read_endpoint_host(warden_toml: Path | None) -> str | None:
+    """First configured `[[git.endpoint]]` host, or None when none is set —
+    a fresh repo has no endpoint until the wizard adds one."""
     if not warden_toml or not warden_toml.exists():
-        return "gitlab.com"
+        return None
     import tomllib
 
     try:
         git = tomllib.loads(warden_toml.read_text(encoding="utf-8")).get("git", {})
     except (tomllib.TOMLDecodeError, OSError):
-        return "gitlab.com"
+        return None
     endpoints = git.get("endpoint", []) if isinstance(git, dict) else []
     for endpoint in endpoints if isinstance(endpoints, list) else []:
         host = endpoint.get("host") if isinstance(endpoint, dict) else None
         if isinstance(host, str) and host.strip():
             return host.strip()
-    return "gitlab.com"
+    return None
 
 
 def _inh_env(inherited: dict[str, Any] | None, key: str) -> str:
@@ -251,7 +251,7 @@ def _wizard_interactive(
     host = ""
     access = "none"
     if _prompt_configure_endpoint(out):
-        host = normalize_host(out.ask("GitLab host", _read_endpoint_host(warden_toml)))
+        host = normalize_host(out.ask("GitLab host", _read_endpoint_host(warden_toml) or "gitlab.com"))
         want_write = _prompt_write_access(out)
         _prompt_gitlab_tokens(secrets_dir, host, want_write, args, out)
         if warden_toml.exists():

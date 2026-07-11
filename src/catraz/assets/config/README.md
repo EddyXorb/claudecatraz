@@ -26,17 +26,16 @@ take effect with the stage-02 containers (Warden, forward-proxy).
 
 ## `warden.toml` reference
 
-The shipped `warden.toml` is intentionally short: the keys with a one-line comment each,
-and a pointer here. This section is the full reference for what those keys mean.
+Reference for the `warden.toml` keys.
 
 ### Top-level keys (the enforced policy)
 
 | Key | Meaning |
 | --- | --- |
-| `branch_prefixes` | R2 — a branch may be pushed only if its name starts with one of these prefixes (the allowed namespace is the union of the list). The legacy single-prefix form `branch_prefix = "claude/"` still works, but set only one of the two. |
-| `max_open_mrs` | R5 — max simultaneously open merge requests. |
-| `max_open_branches` | R5 — max simultaneously existing agent branches. |
-| `max_writes_per_hour` | R5 — max write actions per hour. |
+| `branch_prefixes` | A branch may be pushed only if its name starts with one of these prefixes (the allowed namespace is the union of the list). A single prefix may also be given as the scalar `branch_prefix = "claude/"`; set only one of the two forms. |
+| `max_open_mrs` | Max simultaneously open merge requests. |
+| `max_open_branches` | Max simultaneously existing agent branches. |
+| `max_writes_per_hour` | Max write actions per hour. |
 | `allowed_projects` | Concrete project paths (`group/sub/project`) only — **no** wildcards/globs, **no** partial/leaf names, **no** group prefixes. Empty = fail-closed (every GitLab op denied until you add one, or run `catraz allow`). This top-level list is the one the runtime actually enforces. |
 
 ### The endpoint model (`[[git.endpoint]]`)

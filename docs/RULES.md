@@ -9,11 +9,18 @@ Every request maps, via recognizers, to a set of actions; it proceeds iff
 every action is below IRREVERSIBLE in criticality and enabled for the target
 host; everything else is denied.
 
-## Docstrings & comments
+## Prose (docstrings, comments, config & doc text)
+
+These apply to all repo prose — docstrings, code comments, config-file
+comments, `.env`, and operator docs — not just Python docstrings.
 
 - Never reference markdown docs outside the sources (`docs/design/` paths,
-  design-doc filenames, `§` section numbers) — code explains itself.
-- No history ("formerly", "was called X", commits).
+  design-doc filenames, `§` section numbers, rule-ids like `R2`/`R5`) — code
+  explains itself. Rule-ids and the action vocabulary live in exactly one
+  place, the git-namespace default in code; operator files never cite them.
+- Greenfield always: describe what is, never what changed. No history and no
+  "anymore" / "no longer" / "now" / "formerly" / "was called X" framing —
+  there is no prior version.
 - Never state the obvious.
 - Hard limits: docstrings at most 5 lines, comments at most 2 lines.
 - Only the surprising, load-bearing facts; plain prose, no Sphinx roles
