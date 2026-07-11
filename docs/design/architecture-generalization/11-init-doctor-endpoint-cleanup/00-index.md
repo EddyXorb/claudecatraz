@@ -21,7 +21,7 @@ operator-surface first so the init/doctor fix lands before the credential-mode
 change.
 
 | 02 | config-slim-and-endpoint-optin | move the vocabulary table + prose from `warden.toml` into `config/README.md`, slim the toml to ~30 lines; make the wizard **offer** (not force) a `[[git.endpoint]]`, default template ships none | ✅ da1d28b |
-| 03 | warden-project-and-rules-model | fix F1 (enforce per-endpoint `allowed_projects`, host-aware) and F2 (collapse legacy top-level rule keys into `[git.rules]`/per-endpoint); update config/guards/kernel + wizard/doctor/template; design note below | ☐ |
+| 03 | warden-project-and-rules-model | fix F1 (enforce per-endpoint `allowed_projects`, host-aware) and F2 (collapse legacy top-level rule keys into `[git.rules]`/per-endpoint); update config/guards/kernel + wizard/doctor/template | → moved to [`../12-per-host-scoping.md`](../12-per-host-scoping.md) |
 
 ## Step 01 — operator-surface (the *how*)
 
