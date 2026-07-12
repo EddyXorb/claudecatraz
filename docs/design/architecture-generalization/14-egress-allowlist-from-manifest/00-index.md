@@ -17,7 +17,7 @@ column in the same commit as the step.
 | --- | --- | --- |
 | 01 | [egress-allowlist-model](01-egress-allowlist-model.md) | ☑ |
 | 02 | [init-egress-offer](02-init-egress-offer.md) | ☑ |
-| 02 | [doctor-egress-provenance](02-doctor-egress-provenance.md) | ☐ |
+| 02 | [doctor-egress-provenance](02-doctor-egress-provenance.md) | ☑ |
 
 Level 01 is the pure model (`catraz.egress_allowlist`): parsing, the
 `# agent:<profile>` block writer, the coverage check, and the provenance

@@ -82,6 +82,7 @@ DOCTOR_SECTIONS = [
     "tokens",
     "policy",
     "endpoints",
+    "egress",
     "agent",
     "net",
     "mounts",
@@ -548,6 +549,29 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         f.ok("policy", f"{len(resolved)} allowed project(s) [{source}]")
 
 
+def check_egress(root: Path, env: dict[str, str], f: Findings) -> None:
+    """The effective Squid egress allowlist with per-domain provenance — shipped
+    baseline, an `# agent:<profile>` block, or a manual operator edit. Advisory:
+    Squid enforces the file, doctor only surfaces how it was assembled. Distinct
+    from the warden project allowlist reported by the `policy` section."""
+    from catraz.egress_allowlist import classify_domains
+
+    allowlist = root / ".catraz" / "config" / "allowlist.txt"
+    if not allowlist.exists():
+        f.bad("egress", "allowlist.txt missing", "run `catraz init`")
+        return
+    text = allowlist.read_text(encoding="utf-8")
+    baseline = (paths.asset_root() / "assets" / "config" / "allowlist.txt").read_text(
+        encoding="utf-8"
+    )
+    entries = classify_domains(text, baseline)
+    if not entries:
+        f.warn("egress", "no domains allowed — the agent cannot reach any network host")
+        return
+    for entry in entries:
+        f.ok("egress", f"{entry.entry} [{entry.provenance}]")
+
+
 def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
     """Effective endpoint-catalog table, per host: default set + activations for
     each configured [[git.endpoint]]. Fetched from the running warden's /policy
@@ -905,6 +929,8 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
     if "endpoints" in sections:
         check_endpoints(root, env, f)
         check_action_coherence(root, env, f)
+    if "egress" in sections:
+        check_egress(root, env, f)
     if "agent" in sections:
         check_agent(root, env, f)
     if "net" in sections:
