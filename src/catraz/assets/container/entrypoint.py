@@ -195,7 +195,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    default_home = os.environ.get("AGENT_HOME", str(Path.home() / ".agent-home"))
+    default_home = os.environ.get("AGENT_HOME", str(Path.home() / "agent-home"))
     parser.add_argument(
         "--agent-home",
         default=default_home,

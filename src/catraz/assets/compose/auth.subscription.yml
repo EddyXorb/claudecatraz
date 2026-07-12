@@ -3,9 +3,9 @@ services:
     volumes:
       - type: bind
         source: ${PROJECT_DIR}/.catraz/secrets/claude/.credentials.json
-        target: /home/dev/.claude/.ro/.credentials.json
+        target: /home/dev/agent-home/.ro/.credentials.json
         read_only: true
       - type: bind
         source: ${PROJECT_DIR}/.catraz/secrets/claude/.claude.json
-        target: /home/dev/.claude/.ro/.claude.json
+        target: /home/dev/agent-home/.ro/.claude.json
         read_only: true
