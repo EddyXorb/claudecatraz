@@ -257,6 +257,46 @@ def _prompt_anthropic_key(
         out.warn("anthropic_api_key left empty — doctor will flag it")
 
 
+def _prompt_egress_offer(root: Path, cat: Path, out: Out) -> None:
+    """Offer each manifest egress domain not already reachable, one by one, and
+    write the accepted ones into the profile's marked allowlist block. Declining
+    writes nothing; a domain the operator hand-deleted is offered again, never
+    silently restored. Interactive path only — `--yes` never offers or adds."""
+    from catraz.agents import SHIPPED_PROFILES, load_manifest, resolve_agent_profile
+    from catraz.egress_allowlist import agent_block, domain_covered, upsert_agent_block
+
+    profile = resolve_agent_profile(root)
+    manifest = load_manifest(profile)
+    allowlist_path = cat / "config" / "allowlist.txt"
+    if not manifest.egress_domains or not allowlist_path.exists():
+        return
+    text = allowlist_path.read_text(encoding="utf-8")
+    candidates = [d for d in manifest.egress_domains if not domain_covered(text, d)]
+    if not candidates:
+        return
+
+    if profile not in SHIPPED_PROFILES:
+        # An out-of-tree manifest cannot reach the per-domain offer without the
+        # operator first confirming its whole egress set from a shown diff.
+        out.info(f"\n  Profile {profile!r} is not shipped — its egress domains would add:")
+        for d in candidates:
+            out.info(f"    + {d}")
+        gate = out.ask(f"review these {len(candidates)} domain(s) for {profile!r}?", "n")
+        if not gate.strip().lower().startswith("y"):
+            return
+
+    existing = agent_block(text, profile) or ()
+    accepted = [
+        d for d in candidates if out.ask(f"allow {d}?", "n").strip().lower().startswith("y")
+    ]
+    confirmed = list(existing) + [d for d in accepted if d not in existing]
+    if not accepted and not existing:
+        out.info(f"\n• no domains added for profile {profile!r}")
+        return
+    allowlist_path.write_text(upsert_agent_block(text, profile, tuple(confirmed)))
+    out.info(f"\n• {len(accepted)} domain(s) allowed for profile {profile!r}")
+
+
 def _wizard_interactive(
     root: Path,
     env: dict[str, str],
@@ -311,3 +351,5 @@ def _wizard_interactive(
         f"\n• auth_mode={auth_mode}{endpoint_part}  (edit quotas in .catraz/config/warden.toml)"
     )
     out.info("  To change the base image, edit .catraz/config/image/Dockerfile")
+
+    _prompt_egress_offer(root, root / ".catraz", out)
