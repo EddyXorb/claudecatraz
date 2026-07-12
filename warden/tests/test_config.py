@@ -682,3 +682,30 @@ def test_git_endpoint_actions_non_list_aborts_startup(tmp_path):
     )
     with pytest.raises(ConfigError, match="must be a list of strings"):
         from_env({}, strict=True, toml_path=str(toml))
+
+
+# --- removed top-level keys: each moved into a git table, a leftover copy
+# aborts startup naming its new home rather than being silently ignored. ---
+
+
+def test_stale_top_level_max_quota_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text("max_open_mrs = 7\n")
+    with pytest.raises(ConfigError, match=r"top-level 'max_open_mrs' moved to \[git\.rules\]"):
+        from_env({}, strict=True, toml_path=str(toml))
+
+
+def test_stale_top_level_branch_prefixes_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('branch_prefixes = ["claude/"]\n')
+    with pytest.raises(
+        ConfigError, match=r"top-level 'branch_prefixes' moved to \[git\.rules\]"
+    ):
+        from_env({}, strict=True, toml_path=str(toml))
+
+
+def test_stale_top_level_allowed_projects_aborts_startup(tmp_path):
+    toml = tmp_path / "warden.toml"
+    toml.write_text('allowed_projects = ["group/proj"]\n')
+    with pytest.raises(ConfigError, match=r"top-level 'allowed_projects' moved to .*git\.endpoint"):
+        from_env({}, strict=True, toml_path=str(toml))

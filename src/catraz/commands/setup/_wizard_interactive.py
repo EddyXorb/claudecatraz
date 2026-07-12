@@ -1,5 +1,4 @@
 import argparse
-import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,9 +7,10 @@ from catraz.policy import (
     _discover_gitlab_projects,
     _resolve_allowed_projects,
     ensure_git_endpoint,
+    first_endpoint_host,
     normalize_host,
-    remove_toml_key,
-    set_toml_list,
+    set_endpoint_allowed_projects,
+    set_git_rules_branch_prefixes,
     validate_project,
 )
 from catraz.ui import Out
@@ -24,19 +24,21 @@ from ._secrets import (
 
 
 def _read_branch_prefix(warden_toml: Path | None) -> str:
-    """Current (first) branch prefix, shown as the wizard's default.
-
-    Reads warden.toml — either the list form (`branch_prefixes =
-    [...]`) or the scalar form (`branch_prefix = "..."`); the wizard only
-    ever prompts for one, but reads whichever form is on disk."""
+    """Current (first) `[git.rules].branch_prefixes` entry, shown as the
+    wizard's default; falls back to "claude/" when unset."""
     if not warden_toml or not warden_toml.exists():
         return "claude/"
-    text = warden_toml.read_text(encoding="utf-8")
-    m = re.search(r'branch_prefixes\s*=\s*\[\s*"([^"]*)"', text)
-    if m:
-        return m.group(1)
-    m = re.search(r'branch_prefix\s*=\s*"([^"]*)"', text)
-    return m.group(1) if m else "claude/"
+    import tomllib
+
+    try:
+        git = tomllib.loads(warden_toml.read_text(encoding="utf-8")).get("git", {})
+    except (tomllib.TOMLDecodeError, OSError):
+        return "claude/"
+    rules = git.get("rules", {}) if isinstance(git, dict) else {}
+    prefixes = rules.get("branch_prefixes") if isinstance(rules, dict) else None
+    if isinstance(prefixes, list) and prefixes and isinstance(prefixes[0], str):
+        return prefixes[0]
+    return "claude/"
 
 
 def _read_endpoint_host(warden_toml: Path | None) -> str | None:
@@ -44,18 +46,7 @@ def _read_endpoint_host(warden_toml: Path | None) -> str | None:
     a fresh repo has no endpoint until the wizard adds one."""
     if not warden_toml or not warden_toml.exists():
         return None
-    import tomllib
-
-    try:
-        git = tomllib.loads(warden_toml.read_text(encoding="utf-8")).get("git", {})
-    except (tomllib.TOMLDecodeError, OSError):
-        return None
-    endpoints = git.get("endpoint", []) if isinstance(git, dict) else []
-    for endpoint in endpoints if isinstance(endpoints, list) else []:
-        host = endpoint.get("host") if isinstance(endpoint, dict) else None
-        if isinstance(host, str) and host.strip():
-            return host.strip()
-    return None
+    return first_endpoint_host(warden_toml)
 
 
 def _inh_env(inherited: dict[str, Any] | None, key: str) -> str:
@@ -168,7 +159,7 @@ def _prompt_allowed_projects(
     args: argparse.Namespace,
     out: Out,
 ) -> None:
-    cur_proj, _ = _resolve_allowed_projects(root)
+    cur_proj, _ = _resolve_allowed_projects(root, host)
     if cur_proj and not args.force:
         out.info(f"\n  allowed projects already set: {', '.join(cur_proj)} — keeping.")
         return
@@ -191,13 +182,14 @@ def _prompt_allowed_projects(
         else:
             valid.append(p)
     if valid and warden_toml.exists():
-        set_toml_list(warden_toml, "allowed_projects", valid)
+        set_endpoint_allowed_projects(warden_toml, host, valid)
         out.info(f"  • wrote {len(valid)} project(s) to warden.toml")
     elif not valid:
         out.warn(
             "no projects allowed yet — the stack still starts (you can "
             "work offline), but every GitLab op is denied until you add a "
-            "project to allowed_projects in .catraz/config/warden.toml"
+            f"project to allowed_projects on the {host!r} endpoint in "
+            ".catraz/config/warden.toml"
         )
     unset_env_keys(env_path, ["WARDEN_ALLOWED_PROJECTS"])
 
@@ -206,10 +198,7 @@ def _prompt_branch_prefix(warden_toml: Path, env_path: Path, out: Out) -> None:
     cur_prefix = _read_branch_prefix(warden_toml)
     prefix = out.ask("Branch prefix the agent may push to", cur_prefix or "claude/")
     if warden_toml.exists():
-        set_toml_list(warden_toml, "branch_prefixes", [prefix])
-        # Retire the scalar key so it can't coexist with the list we just
-        # wrote (Config aborts on both being set — one source of truth).
-        remove_toml_key(warden_toml, "branch_prefix")
+        set_git_rules_branch_prefixes(warden_toml, [prefix])
     unset_env_keys(env_path, ["WARDEN_BRANCH_PREFIX"])
 
 
@@ -301,7 +290,7 @@ def _wizard_interactive(
     if auth_mode == "api_key":
         _prompt_anthropic_key(secrets_dir, args, out, inherited)
 
-    proj_count, _ = _resolve_allowed_projects(root)
+    proj_count, _ = _resolve_allowed_projects(root, host) if host else ([], "")
     endpoint_part = (
         f"  host={host}  access={access}  projects={len(proj_count)}"
         if host

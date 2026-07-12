@@ -8,8 +8,8 @@ from catraz import doctor
 
 
 # check_policy — the allowlist pre-check keys off configured endpoints now
-# ("no endpoint configured" replaces the old GITLAB_MODE=off short-circuit)
-# and the (separately-owned) allowed_projects resolution.
+# ("no endpoint configured" replaces the old GITLAB_MODE=off short-circuit);
+# each endpoint's own allowed_projects is checked in isolation.
 
 
 class TestCheckPolicy:
@@ -19,21 +19,41 @@ class TestCheckPolicy:
         assert not any(i[0] == doctor.BAD for i in f.items)
         assert any(i[0] == doctor.OK and "allowlist not required" in i[2] for i in f.items)
 
-    def test_nonempty_allowlist_ok(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
-        _mock_allowlist(tmp_path, monkeypatch, ["group/project"])
+    def test_nonempty_allowlist_ok(self, tmp_path: Path) -> None:
+        _write_endpoints(tmp_path, [("gitlab.com", "gitlab")], {"gitlab.com": ["group/project"]})
         f = doctor.Findings()
         doctor.check_policy(tmp_path, {}, f)
         assert not any(i[0] == doctor.BAD for i in f.items)
-        assert any(i[0] == doctor.OK for i in f.items)
+        assert any(i[0] == doctor.OK and "gitlab.com" in i[2] for i in f.items)
 
-    def test_empty_allowlist_warns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_empty_allowlist_warns(self, tmp_path: Path) -> None:
         _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
-        _mock_allowlist(tmp_path, monkeypatch, [])
         f = doctor.Findings()
         doctor.check_policy(tmp_path, {}, f)
-        assert any(i[0] == doctor.WARN for i in f.items)
+        assert any(i[0] == doctor.WARN and "gitlab.com" in i[2] for i in f.items)
         assert not any(i[0] == doctor.BAD for i in f.items)
+
+    def test_invalid_project_is_bad(self, tmp_path: Path) -> None:
+        _write_endpoints(tmp_path, [("gitlab.com", "gitlab")], {"gitlab.com": ["leaf-name"]})
+        f = doctor.Findings()
+        doctor.check_policy(tmp_path, {}, f)
+        assert any(i[0] == doctor.BAD and "gitlab.com" in i[2] for i in f.items)
+
+    def test_allowlists_are_isolated_per_host(self, tmp_path: Path) -> None:
+        """One host's populated allowlist must never mask another host's
+        empty one — each endpoint is checked independently."""
+        _write_endpoints(
+            tmp_path,
+            [("gitlab.com", "gitlab"), ("my-gitlab.de", "gitlab")],
+            {"gitlab.com": ["group/project"]},
+        )
+        f = doctor.Findings()
+        doctor.check_policy(tmp_path, {}, f)
+        assert any(
+            i[0] == doctor.OK and "gitlab.com" in i[2] and "allowed project" in i[2]
+            for i in f.items
+        )
+        assert any(i[0] == doctor.WARN and "my-gitlab.de" in i[2] for i in f.items)
 
 
 # Multi-endpoint token model: grouped read_tokens/write_tokens files
@@ -48,8 +68,16 @@ def _write_grouped(root: Path, filename: str, tokens: dict[str, str]) -> None:
     (secrets_dir / filename).write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
-def _write_endpoints(root: Path, endpoints: list[tuple[str, str]]) -> None:
-    """Write a minimal warden.toml with one [[git.endpoint]] per (host, type)."""
+def _write_endpoints(
+    root: Path,
+    endpoints: list[tuple[str, str]],
+    allowed_projects: dict[str, list[str]] | None = None,
+) -> None:
+    """Write a minimal warden.toml with one [[git.endpoint]] per (host, type),
+    optionally seeding that host's own allowed_projects."""
+    import json
+
+    allowed_projects = allowed_projects or {}
     config_dir = root / ".catraz" / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     lines = ["[git.rules]", ""]
@@ -57,6 +85,8 @@ def _write_endpoints(root: Path, endpoints: list[tuple[str, str]]) -> None:
         lines.append("[[git.endpoint]]")
         lines.append(f'host = "{host}"')
         lines.append(f'type = "{etype}"')
+        if host in allowed_projects:
+            lines.append(f"allowed_projects = {json.dumps(allowed_projects[host])}")
         lines.append("")
     (config_dir / "warden.toml").write_text("\n".join(lines))
 
@@ -264,10 +294,3 @@ def _http_error(code: int) -> "Any":
         raise urllib.error.HTTPError(url="x", code=code, msg="x", hdrs=None, fp=None)  # type: ignore[arg-type]
 
     return _raise
-
-
-def _mock_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, projects: list[str]) -> None:
-    """Patch _resolve_allowed_projects to return the given list."""
-    import catraz.policy as policy_mod
-
-    monkeypatch.setattr(policy_mod, "_resolve_allowed_projects", lambda root: (projects, "mock"))

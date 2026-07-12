@@ -72,11 +72,19 @@ def test_merge_allowed_dedupes_preserving_order() -> None:
 
 # ── cmd_allow ─────────────────────────────────────────────────────────────────
 
+_HOST = "gitlab.com"
 
-def _seed(tmp_path: Path, allowed_line: str = "allowed_projects    = []") -> Path:
+
+def _seed(tmp_path: Path, projects: list[str] | None = None, *, with_endpoint: bool = True) -> Path:
+    import json
+
     cfg = tmp_path / ".catraz" / "config"
     cfg.mkdir(parents=True, exist_ok=True)
-    (cfg / "warden.toml").write_text(f"# warden\n{allowed_line}\n")
+    text = "# warden\n"
+    if with_endpoint:
+        proj_line = f"allowed_projects = {json.dumps(projects)}\n" if projects is not None else ""
+        text += f'[[git.endpoint]]\nhost = "{_HOST}"\ntype = "gitlab"\n{proj_line}'
+    (cfg / "warden.toml").write_text(text)
     (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
     return cfg / "warden.toml"
 
@@ -89,21 +97,21 @@ def test_cmd_allow_appends(tmp_path: Path) -> None:
     warden = _seed(tmp_path)
     rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
     assert rc == EXIT_OK
-    assert policy._read_toml_allowed_projects(warden) == ["grp/proj"]
+    assert policy._read_toml_allowed_projects(warden, _HOST) == ["grp/proj"]
 
 
 def test_cmd_allow_defensive_empty_string_default(tmp_path: Path) -> None:
-    warden = _seed(tmp_path, allowed_line='allowed_projects    = [""]')
+    warden = _seed(tmp_path, projects=[""])
     rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
     assert rc == EXIT_OK
-    assert policy._read_toml_allowed_projects(warden) == ["grp/proj"]
+    assert policy._read_toml_allowed_projects(warden, _HOST) == ["grp/proj"]
 
 
 def test_cmd_allow_rejects_wildcard_writes_valid(tmp_path: Path) -> None:
     warden = _seed(tmp_path)
     rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/*", "grp/ok"])), _out())
     assert rc == EXIT_OK
-    assert policy._read_toml_allowed_projects(warden) == ["grp/ok"]
+    assert policy._read_toml_allowed_projects(warden, _HOST) == ["grp/ok"]
 
 
 def test_cmd_allow_all_invalid_is_config_error(tmp_path: Path) -> None:
@@ -122,6 +130,14 @@ def test_cmd_allow_idempotent(tmp_path: Path) -> None:
 def test_cmd_allow_not_set_up(tmp_path: Path) -> None:
     with pytest.raises(CliError):
         setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
+
+
+def test_cmd_allow_no_endpoint_configured(tmp_path: Path) -> None:
+    """A warden.toml with no [[git.endpoint]] has nowhere to write
+    allowed_projects — catraz allow refuses rather than guessing a host."""
+    _seed(tmp_path, with_endpoint=False)
+    rc = setup.cmd_allow(tmp_path, cast(argparse.Namespace, _ns(["grp/proj"])), _out())
+    assert rc == EXIT_CONFIG
 
 
 # ── _discover_gitlab_projects ─────────────────────────────────────────────────

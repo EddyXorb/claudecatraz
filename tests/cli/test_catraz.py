@@ -87,26 +87,36 @@ def test_set_env_values_appends_absent_key(tmp_path: Path) -> None:
     assert envfile.load_env(p)["NEW_KEY"] == "value"
 
 
-# ── allowed_projects resolution (single source: warden.toml) ───────────────
+# ── allowed_projects resolution (single source: the endpoint's own entry
+# in warden.toml) ────────────────────────────────────────────────────────
 
 
-def _project(tmp_path: Path, toml_projects: list[str] | None = None) -> None:
+def _project(tmp_path: Path, toml_projects: list[str] | None = None, host: str = "gitlab.com") -> None:
     config = tmp_path / ".catraz" / "config"
     config.mkdir(parents=True, exist_ok=True)
     if toml_projects is not None:
         arr = ", ".join(f'"{x}"' for x in toml_projects)
-        (config / "warden.toml").write_text(f"allowed_projects = [{arr}]\n")
+        (config / "warden.toml").write_text(
+            f'[[git.endpoint]]\nhost = "{host}"\ntype = "gitlab"\nallowed_projects = [{arr}]\n'
+        )
 
 
 def test_resolves_allowed_projects_from_toml(tmp_path: Path) -> None:
     _project(tmp_path, toml_projects=["group/sub/a", "group/sub/b"])
-    resolved, source = policy._resolve_allowed_projects(tmp_path)
+    resolved, source = policy._resolve_allowed_projects(tmp_path, "gitlab.com")
     assert resolved == ["group/sub/a", "group/sub/b"]
     assert source == "warden.toml"
 
 
+def test_resolves_empty_for_unconfigured_host(tmp_path: Path) -> None:
+    _project(tmp_path, toml_projects=["group/sub/a"], host="gitlab.com")
+    resolved, source = policy._resolve_allowed_projects(tmp_path, "other-host.example")
+    assert resolved == []
+    assert source == "warden.toml"
+
+
 def test_resolves_empty_without_warden_toml(tmp_path: Path) -> None:
-    resolved, source = policy._resolve_allowed_projects(tmp_path)
+    resolved, source = policy._resolve_allowed_projects(tmp_path, "gitlab.com")
     assert resolved == []
     assert source == "no warden.toml"
 
