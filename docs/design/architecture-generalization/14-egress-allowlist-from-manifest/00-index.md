@@ -15,7 +15,7 @@ column in the same commit as the step.
 
 | Level | Step | Status |
 | --- | --- | --- |
-| 01 | [egress-allowlist-model](01-egress-allowlist-model.md) | ☐ |
+| 01 | [egress-allowlist-model](01-egress-allowlist-model.md) | ☑ |
 | 02 | [init-egress-offer](02-init-egress-offer.md) | ☐ |
 | 02 | [doctor-egress-provenance](02-doctor-egress-provenance.md) | ☐ |
 
