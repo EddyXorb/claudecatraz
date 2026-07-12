@@ -96,70 +96,67 @@ def test_non_integer_quota_aborts_startup(tmp_path):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_empty_branch_prefix_aborts_startup(tmp_path):
+def test_empty_global_branch_prefixes_list_aborts_startup(tmp_path):
+    """An empty [git.rules] branch_prefixes is fail-closed: it must not mean "no filter"."""
     toml = tmp_path / "warden.toml"
-    toml.write_text('branch_prefix = ""\n')
-    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
+    toml.write_text("[git.rules]\nbranch_prefixes = []\n")
+    with pytest.raises(ConfigError, match="branch_prefixes"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_empty_branch_prefixes_list_aborts_startup(tmp_path):
-    """An empty branch_prefixes list is fail-closed: it must not mean "no filter"."""
-    toml = tmp_path / "warden.toml"
-    toml.write_text("branch_prefixes = []\n")
-    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
-        from_env({}, strict=True, toml_path=str(toml))
-
-
-def test_branch_prefixes_list_with_empty_element_aborts_startup(tmp_path):
+def test_global_branch_prefixes_list_with_empty_element_aborts_startup(tmp_path):
     """A blank element (e.g. ["claude/", ""]) would allow every branch — reject it."""
     toml = tmp_path / "warden.toml"
-    toml.write_text('branch_prefixes = ["claude/", ""]\n')
-    with pytest.raises(ConfigError, match="BRANCH_PREFIX"):
+    toml.write_text('[git.rules]\nbranch_prefixes = ["claude/", ""]\n')
+    with pytest.raises(ConfigError, match="branch_prefixes"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_branch_prefixes_and_legacy_branch_prefix_both_set_aborts(tmp_path):
-    """Two sources of truth for the same namespace (list + scalar) is an error."""
+def test_endpoint_branch_prefixes_override_with_empty_element_aborts_startup(tmp_path):
+    """An endpoint's branch_prefixes override is enforced on that host, so a
+    blank element there opens its namespace just like the global — reject it."""
     toml = tmp_path / "warden.toml"
-    toml.write_text('branch_prefixes = ["claude/"]\nbranch_prefix = "claude/"\n')
-    with pytest.raises(
-        ConfigError, match="branch_prefixes.*branch_prefix|branch_prefix.*branch_prefixes"
-    ):
+    toml.write_text(
+        '[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n'
+        'rules = { branch_prefixes = ["claude/", ""] }\n'
+    )
+    with pytest.raises(ConfigError, match="branch_prefixes"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_branch_prefixes_list_from_toml(tmp_path):
-    """A branch_prefixes list in warden.toml becomes the tuple as-is."""
+def test_global_branch_prefixes_list_from_toml(tmp_path):
+    """A [git.rules] branch_prefixes list becomes the global namespace tuple."""
     toml = tmp_path / "warden.toml"
-    toml.write_text('branch_prefixes = ["claude/", "bot/"]\n')
+    toml.write_text('[git.rules]\nbranch_prefixes = ["claude/", "bot/"]\n')
     cfg = from_env({}, strict=True, toml_path=str(toml))
-    assert cfg.branch_prefixes == ("claude/", "bot/")
+    assert cfg.git_rules.branch_prefixes == ("claude/", "bot/")
 
 
-def test_legacy_branch_prefix_scalar_becomes_single_element_tuple(tmp_path):
-    """The scalar branch_prefix = "..." form is valid as a 1-element list."""
+def test_unset_global_branch_prefixes_uses_builtin_default(tmp_path):
+    """No [git.rules] branch_prefixes leaves it unset; the built-in default applies."""
     toml = tmp_path / "warden.toml"
-    toml.write_text('branch_prefix = "claude/"\n')
+    toml.write_text('[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n')
     cfg = from_env({}, strict=True, toml_path=str(toml))
-    assert cfg.branch_prefixes == ("claude/",)
+    assert cfg.git_rules.branch_prefixes is None
+    assert cfg.effective_rules("gitlab.example").branch_prefixes == ("claude/",)
 
 
 def test_branch_prefix_env_has_no_effect(tmp_path):
     """BRANCH_PREFIX has no effect — only warden.toml sets the branch
     namespace; a set env var is silently ignored, not applied."""
     toml = tmp_path / "warden.toml"
-    toml.write_text('branch_prefixes = ["claude/"]\n')
+    toml.write_text('[git.rules]\nbranch_prefixes = ["claude/"]\n')
     cfg = from_env({"BRANCH_PREFIX": "test/,bot/"}, strict=True, toml_path=str(toml))
-    assert cfg.branch_prefixes == ("claude/",)
+    assert cfg.git_rules.branch_prefixes == ("claude/",)
 
 
 # --- toml is the only source for policy tunables --------------------------------
 _TOML = (
-    'branch_prefix = "claude/"\n'
     "max_open_mrs = 7\n"
     "max_open_branches = 3\n"
     "max_writes_per_hour = 99\n"
+    "[git.rules]\n"
+    'branch_prefixes = ["claude/"]\n'
     '[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n'
     'allowed_projects = ["group/a", "group/b"]\n'
 )
@@ -169,7 +166,7 @@ def test_tunables_read_from_toml(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(_TOML)
     cfg = from_env({}, toml_path=str(toml))
-    assert cfg.branch_prefixes == ("claude/",)
+    assert cfg.git_rules.branch_prefixes == ("claude/",)
     assert (cfg.max_open_mrs, cfg.max_open_branches, cfg.max_writes_per_hour) == (7, 3, 99)
     assert cfg.endpoint_for("gitlab.example").allowed_projects == ("group/a", "group/b")
 
@@ -190,7 +187,7 @@ def test_policy_env_vars_have_no_effect(tmp_path):
         },
         toml_path=str(toml),
     )
-    assert cfg.branch_prefixes == ("claude/",)  # toml wins, env ignored
+    assert cfg.git_rules.branch_prefixes == ("claude/",)  # toml wins, env ignored
     assert cfg.max_open_mrs == 7  # toml wins, env ignored
     assert cfg.endpoint_for("gitlab.example").allowed_projects == (
         "group/a",
@@ -456,6 +453,26 @@ def test_effective_rules_falls_back_through_domain_to_builtin_default():
     assert rules.branch_prefixes == ("claude/",)  # built-in default
     assert rules.max_writes_per_hour == 60  # built-in default
     assert rules.max_push_bytes == 50 * 1024 * 1024  # built-in default
+
+
+def test_in_branch_namespace_override_is_per_host():
+    """An endpoint that narrows its branch prefixes changes only its own host;
+    another host with no override keeps the [git.rules] global namespace."""
+    cfg = Config(
+        git_rules=GitRules(branch_prefixes=("claude/",)),
+        git_endpoints=(
+            GitEndpoint(
+                host="strict.example", type="gitlab", rules=GitRules(branch_prefixes=("bot/",))
+            ),
+            GitEndpoint(host="default.example", type="gitlab"),
+        ),
+    )
+    # strict.example is narrowed to bot/: claude/x is outside ITS namespace...
+    assert not cfg.in_branch_namespace("strict.example", "claude/x")
+    assert cfg.in_branch_namespace("strict.example", "bot/x")
+    # ...but default.example, un-overridden, still uses the global claude/ namespace.
+    assert cfg.in_branch_namespace("default.example", "claude/x")
+    assert not cfg.in_branch_namespace("default.example", "bot/x")
 
 
 def test_endpoint_for_and_git_allowed_hosts_are_normalised():

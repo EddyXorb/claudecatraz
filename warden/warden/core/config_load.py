@@ -308,41 +308,10 @@ def from_env(
             raise ConfigError(f"{toml_key} in warden.toml must be an integer, got {val!r}")
         return val
 
-    def _tunable_branch_prefixes(
-        list_key: str, legacy_scalar_key: str, default: tuple[str, ...]
-    ) -> tuple[str, ...]:
-        """Resolve branch_prefixes — one namespace-list setting, one source.
-
-        warden.toml may set the list form or the scalar form, never
-        both. Emptiness is not rejected here; _validate does that.
-        """
-        has_list = list_key in file
-        has_scalar = legacy_scalar_key in file
-        if has_list and has_scalar:
-            raise ConfigError(
-                f"warden.toml: set only one of {list_key!r} or {legacy_scalar_key!r}, not both"
-            )
-        if has_list:
-            val = file[list_key]
-            if not isinstance(val, list) or not all(isinstance(p, str) for p in val):
-                raise ConfigError(
-                    f"{list_key} in warden.toml must be a list of strings, got {val!r}"
-                )
-            return tuple(val)
-        if has_scalar:
-            val = file[legacy_scalar_key]
-            if not isinstance(val, str):
-                raise ConfigError(
-                    f"{legacy_scalar_key} in warden.toml must be a string, got {val!r}"
-                )
-            return (val,)
-        return default
-
     git_rules, git_actions, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
-        branch_prefixes=_tunable_branch_prefixes("branch_prefixes", "branch_prefix", ("claude/",)),
         max_open_mrs=_tunable_int("max_open_mrs", 5),
         max_open_branches=_tunable_int("max_open_branches", 10),
         max_writes_per_hour=_tunable_int("max_writes_per_hour", 60),
@@ -385,13 +354,22 @@ def _validate(cfg: Config) -> None:
 
 
 def _branch_prefixes_problems(cfg: Config) -> list[str]:
-    """Fail-closed validation of the branch namespace.
+    """Fail-closed validation of every enforced branch namespace.
 
-    An empty list or empty element would make in_branch_namespace accept
-    any branch name ("".startswith("") is always true).
+    An empty list or empty element makes in_branch_namespace accept any
+    name ("".startswith("") is always true); the global default and each
+    endpoint override that sets it must be non-empty with no empty element.
     """
-    if not cfg.branch_prefixes:
-        return ["BRANCH_PREFIX must be non-empty"]
-    if any(not prefix for prefix in cfg.branch_prefixes):
-        return ["BRANCH_PREFIX entries must be non-empty"]
-    return []
+    sources = [("[git.rules].branch_prefixes", cfg.git_rules.branch_prefixes)]
+    for endpoint in cfg.git_endpoints:
+        label = f"[[git.endpoint]] host={endpoint.host!r} rules.branch_prefixes"
+        sources.append((label, endpoint.rules.branch_prefixes))
+    problems: list[str] = []
+    for label, prefixes in sources:
+        if prefixes is None:
+            continue  # unset falls back to the non-empty built-in default
+        if not prefixes:
+            problems.append(f"{label} must be non-empty")
+        elif any(not prefix for prefix in prefixes):
+            problems.append(f"{label} entries must be non-empty")
+    return problems

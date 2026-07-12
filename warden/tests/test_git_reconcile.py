@@ -140,7 +140,6 @@ async def test_reconcile_ignores_a_host_with_no_push_action(respx_router):
     """A host with only repo.read must still reconcile like any other open
     endpoint — reconcile only does GETs and is never gated by the action gate."""
     cfg = Config(
-        branch_prefixes=("claude/",),
         git_endpoints=(
             GitEndpoint(
                 host=HOST,

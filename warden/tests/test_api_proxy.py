@@ -481,7 +481,6 @@ async def test_two_hosts_with_different_actions_behave_differently_on_the_same_g
 
     host_a, host_b = "full.example", "review-only.example"
     cfg = Config(
-        branch_prefixes=("claude/",),
         state_db_path=":memory:",
         git_endpoints=(
             GitEndpoint(host=host_a, type="gitlab", allowed_projects=("group/proj",)),

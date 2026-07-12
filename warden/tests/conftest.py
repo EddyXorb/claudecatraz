@@ -21,7 +21,6 @@ HOST = "gitlab.example"
 @pytest.fixture
 def cfg() -> Config:
     return Config(
-        branch_prefixes=("claude/",),
         max_open_mrs=5,
         max_open_branches=10,
         max_writes_per_hour=60,

@@ -26,13 +26,15 @@ async def _resolve_project_id(upstream: Upstream, pid: str) -> str:
     return str(resp.json()["id"])
 
 
-async def _list_agent_mrs(upstream: Upstream, cfg: Config, pid: str) -> list[tuple[int, str]]:
+async def _list_agent_mrs(
+    upstream: Upstream, cfg: Config, host: str, pid: str
+) -> list[tuple[int, str]]:
     path = f"projects/{pid}/merge_requests?state=opened"
     mrs = await get_paginated(upstream, path)
     return [
         (int(m["iid"]), m.get("state", "opened"))
         for m in mrs
-        if cfg.in_branch_namespace(m.get("source_branch", "") or "")
+        if cfg.in_branch_namespace(host, m.get("source_branch", "") or "")
     ]
 
 
@@ -50,7 +52,7 @@ async def reconcile_mrs(
     async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
         pid = project_id(project)
         numeric_id = await _resolve_project_id(upstream, pid)
-        mrs = await _list_agent_mrs(upstream, cfg, pid)
+        mrs = await _list_agent_mrs(upstream, cfg, host, pid)
         resolved_ids.setdefault(host, set()).add(numeric_id)
         mr_state.replace_mrs(host, project, mrs)
 

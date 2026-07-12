@@ -57,7 +57,12 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
 
 
 def check_ref(
-    cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
+    cmd: RefCommand,
+    state: StateView,
+    cfg: Config,
+    host: str,
+    max_open_branches: int,
+    max_writes_per_hour: int,
 ) -> Decision:
     """Branch-namespace and quota checks for one ref-command already cleared
     by action_gate — a tag or delete never reaches here.
@@ -65,8 +70,9 @@ def check_ref(
     max_open_branches/max_writes_per_hour are the endpoint's own resolved
     ceilings; stateful quotas are per-endpoint, never a global Config field."""
     ref = cmd.ref.removeprefix("refs/heads/")
-    if not cfg.in_branch_namespace(ref):  # branch namespace
-        return Decision(False, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}")
+    if not cfg.in_branch_namespace(host, ref):  # branch namespace
+        prefixes = cfg.effective_rules(host).branch_prefixes
+        return Decision(False, f"branch {ref!r} outside allowed prefixes {prefixes!r}")
     if state.locked:  # Fail-safe
         return Decision(False, "state locked (fail-safe) — reconcile pending")
     if cmd.is_create and state.open_branches >= max_open_branches:  # quota
@@ -102,7 +108,7 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
             open_branches=state.open_branches + pending_branches,
             writes_last_hour=state.writes_last_hour + pending_writes,
         )
-        d = check_ref(cmd, view, cfg, max_open_branches, max_writes_per_hour)
+        d = check_ref(cmd, view, cfg, intent.host, max_open_branches, max_writes_per_hour)
         if not d.allow:
             return d
         pending_writes += 1

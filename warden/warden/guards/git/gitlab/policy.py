@@ -90,11 +90,12 @@ def _branch_namespace_check(
     a mismatch or unverifiable lookup is denied."""
     if match.namespace_field is not None:
         value = intent.fields.get(match.namespace_field, "")
-        if cfg.in_branch_namespace(value):
+        if cfg.in_branch_namespace(intent.host, value):
             return None
+        prefixes = cfg.effective_rules(intent.host).branch_prefixes
         return Decision(
             False,
-            f"{match.namespace_field} {value!r} outside allowed prefixes {cfg.branch_prefixes!r}",
+            f"{match.namespace_field} {value!r} outside allowed prefixes {prefixes!r}",
         )
 
     if intent.mr_source_ok is True:

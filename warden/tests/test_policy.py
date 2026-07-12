@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from warden.core.config import Config, GitEndpoint, HostCredentials
+from warden.core.config import Config, GitEndpoint, GitRules, HostCredentials
 from warden.core.model import Decision, StateView, TokenKind
 from warden.guards.git import actions as git_actions
 from warden.guards.git.gitlab import policy as api_policy
@@ -45,7 +45,7 @@ def cfg() -> Config:
 def multi_prefix_cfg() -> Config:
     # The branch namespace is the *union* of all configured prefixes.
     return Config(
-        branch_prefixes=("claude/", "bot/"),
+        git_rules=GitRules(branch_prefixes=("claude/", "bot/")),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )

@@ -93,7 +93,6 @@ class GitEndpoint:
 
 @dataclass(frozen=True)
 class Config:
-    branch_prefixes: tuple[str, ...] = ("claude/",)
     max_open_mrs: int = 5
     max_open_branches: int = 10
     max_writes_per_hour: int = 60
@@ -116,13 +115,15 @@ class Config:
     # Per-endpoint tokens resolved from secret files, keyed by normalised host.
     git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
 
-    def in_branch_namespace(self, name: str) -> bool:
-        """True iff name starts with any configured branch prefix.
+    def in_branch_namespace(self, host: str, name: str) -> bool:
+        """True iff name starts with any of host's effective branch prefixes.
 
         Single source of truth for the branch namespace: git guard's namespace
         checks and reconcile filters call this instead of comparing directly.
+        The namespace resolves per host through the same cascade as the quotas.
         """
-        return any(name.startswith(prefix) for prefix in self.branch_prefixes)
+        prefixes = self.effective_rules(host).branch_prefixes or ()
+        return any(name.startswith(prefix) for prefix in prefixes)
 
     @staticmethod
     def normalize_host(host: str) -> str:

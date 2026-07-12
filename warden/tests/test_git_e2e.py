@@ -180,7 +180,6 @@ def _run_e2e(tmp_path, *, actions=None):
     # `git http-backend` has no GitLab REST surface at all.
     backend_host = f"127.0.0.1:{backend_port}"
     cfg = Config(
-        branch_prefixes=("claude/",),
         state_db_path=str(tmp_path / "state.db"),
         git_endpoints=(
             GitEndpoint(
