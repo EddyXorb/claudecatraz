@@ -54,6 +54,10 @@ comments, `.env`, and operator docs — not just Python docstrings.
 - Guard constants like `SUPPORTED` are accessed qualified
   (`gitlab.actions.SUPPORTED`), never imported bare.
 - "Endpoint" means one configured host + type — nothing else.
+- The in-container agent home is `/home/dev/agent-home` for every agent
+  profile — one agent-agnostic path across `AGENT_HOME`/`CLAUDE_CONFIG_DIR`,
+  the home mounts, and the `.ro` seed. The persistent store is per-profile on
+  the host at `state/<profile>`; only the container mount target is shared.
 
 ## Design docs
 
