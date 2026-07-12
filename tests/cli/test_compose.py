@@ -97,12 +97,29 @@ def test_render_hosts_fragment_empty_hosts_is_valid_shape(tmp_path: Path) -> Non
     assert "no_proxy=localhost,127.0.0.1" in text
 
 
-def test_write_hosts_fragment_writes_from_warden_toml(tmp_path: Path) -> None:
+def test_render_hosts_fragment_pins_resolved_ip_on_warden(tmp_path: Path) -> None:
+    text = compose.render_hosts_fragment(["gitlab.com"], {"gitlab.com": "172.65.251.78"})
+    assert "extra_hosts:" in text
+    assert '- "gitlab.com:172.65.251.78"' in text
+    # The agent-facing alias is untouched — the pin only shadows the warden's lookup.
+    assert "- gitlab.com" in text
+
+
+def test_render_hosts_fragment_no_pin_without_resolved_ip(tmp_path: Path) -> None:
+    assert "extra_hosts:" not in compose.render_hosts_fragment(["gitlab.com"])
+
+
+def test_write_hosts_fragment_writes_from_warden_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / ".catraz").mkdir()
     _write_endpoints(tmp_path, ["gitlab.com"])
+    monkeypatch.setattr(compose, "_resolve_host_ipv4", lambda host: "203.0.113.7")
     path = compose.write_hosts_fragment(tmp_path)
     assert path == tmp_path / ".catraz" / "compose.hosts.yml"
-    assert "- gitlab.com" in path.read_text()
+    text = path.read_text()
+    assert "- gitlab.com" in text
+    assert '- "gitlab.com:203.0.113.7"' in text  # real IP pinned for the warden
 
 
 def test_source_cmd_includes_hosts_fragment_when_present(tmp_path: Path) -> None:
