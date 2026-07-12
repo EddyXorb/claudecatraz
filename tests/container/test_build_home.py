@@ -44,7 +44,7 @@ def test_prepare_home_subscription_sync(
     _force_sync_manifest(adapter, monkeypatch)
     adapter.prepare_home(home, _secrets(ep, subscription_ro_dir=home / ".ro"))
     assert (home / ".credentials.json").exists()
-    cj = json.loads((tmp_path / ".claude.json").read_text())
+    cj = json.loads((home / ".claude.json").read_text())
     assert cj["organizationUuid"] == "org" and cj["bypassPermissionsModeAccepted"] is True
     assert (home / "settings.json").exists()
 
@@ -58,7 +58,7 @@ def test_prepare_home_api_key_synthesizes(
     adapter = ep._load_adapter()
     adapter.prepare_home(home, _secrets(ep, auth_mode="api_key"))
     assert not (home / ".credentials.json").exists()
-    assert (tmp_path / ".claude.json").exists()
+    assert (home / ".claude.json").exists()
 
 
 def test_prepare_home_persistent_full_bind_no_symlinks(
@@ -74,7 +74,7 @@ def test_prepare_home_persistent_full_bind_no_symlinks(
     adapter.prepare_home(home, _secrets(ep))
     assert (home / "settings.json").exists()
     assert not (home / "settings.json").is_symlink()
-    assert (tmp_path / ".claude.json").exists()
+    assert (home / ".claude.json").exists()
     # prepare_home never fabricates the credential and never symlinks state.
     assert not (home / ".credentials.json").exists()
     assert not (home / "projects").is_symlink()
@@ -88,11 +88,11 @@ def test_prepare_home_persistent_merges_and_seeds_only_when_absent(
     home = tmp_path / ".claude"
     home.mkdir()
     (home / "settings.json").write_text('{"theme":"custom"}')
-    (tmp_path / ".claude.json").write_text('{"organizationUuid":"persisted-org"}')
+    (home / ".claude.json").write_text('{"organizationUuid":"persisted-org"}')
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     adapter = ep._load_adapter()
     adapter.prepare_home(home, _secrets(ep))
-    cj = json.loads((tmp_path / ".claude.json").read_text())
+    cj = json.loads((home / ".claude.json").read_text())
     assert cj["organizationUuid"] == "persisted-org"  # not clobbered
     assert cj["bypassPermissionsModeAccepted"] is True  # flag merged in
     # settings.json is only seeded when absent — the persisted one survives.

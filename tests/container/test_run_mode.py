@@ -11,9 +11,9 @@ def test_prepare_home_oneoff_run_bypass_default(
 ) -> None:
     """Run mode (remote=False) starts with bypass permissions pre-accepted too.
 
-    The bypass accept is not remote-only: prepare_home pre-accepts it for every
-    mode and also sets the canonical settings.json key. The only remote-only
-    flag is remoteDialogSeen.
+    prepare_home pre-accepts the bypass for every mode and sets the canonical
+    settings.json key; remoteDialogSeen is likewise pre-set unconditionally so a
+    later switch to the remote daemon never stops for the dialog.
     """
     home = tmp_path / ".claude"
     home.mkdir()
@@ -26,9 +26,9 @@ def test_prepare_home_oneoff_run_bypass_default(
         remote=False,
     )
     claude_adapter.prepare_home(home, secrets)
-    cj = json.loads((tmp_path / ".claude.json").read_text())
+    cj = json.loads((home / ".claude.json").read_text())
     assert cj["bypassPermissionsModeAccepted"] is True
-    assert "remoteDialogSeen" not in cj  # still remote-only
+    assert cj["remoteDialogSeen"] is True
     settings = json.loads((home / "settings.json").read_text())
     assert settings["skipDangerousModePermissionPrompt"] is True
 
@@ -49,5 +49,5 @@ def test_prepare_home_remote_sets_dialog_seen(
         remote=True,
     )
     claude_adapter.prepare_home(home, secrets)
-    cj = json.loads((tmp_path / ".claude.json").read_text())
+    cj = json.loads((home / ".claude.json").read_text())
     assert cj["remoteDialogSeen"] is True
