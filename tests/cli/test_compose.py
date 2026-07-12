@@ -97,12 +97,29 @@ def test_render_hosts_fragment_empty_hosts_is_valid_shape(tmp_path: Path) -> Non
     assert "no_proxy=localhost,127.0.0.1" in text
 
 
-def test_write_hosts_fragment_writes_from_warden_toml(tmp_path: Path) -> None:
+def test_render_hosts_fragment_pins_resolved_ip_on_warden(tmp_path: Path) -> None:
+    text = compose.render_hosts_fragment(["gitlab.com"], {"gitlab.com": "172.65.251.78"})
+    assert "extra_hosts:" in text
+    assert '- "gitlab.com:172.65.251.78"' in text
+    # The agent-facing alias is untouched — the pin only shadows the warden's lookup.
+    assert "- gitlab.com" in text
+
+
+def test_render_hosts_fragment_no_pin_without_resolved_ip(tmp_path: Path) -> None:
+    assert "extra_hosts:" not in compose.render_hosts_fragment(["gitlab.com"])
+
+
+def test_write_hosts_fragment_writes_from_warden_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / ".catraz").mkdir()
     _write_endpoints(tmp_path, ["gitlab.com"])
+    monkeypatch.setattr(compose, "_resolve_host_ipv4", lambda host: "203.0.113.7")
     path = compose.write_hosts_fragment(tmp_path)
     assert path == tmp_path / ".catraz" / "compose.hosts.yml"
-    assert "- gitlab.com" in path.read_text()
+    text = path.read_text()
+    assert "- gitlab.com" in text
+    assert '- "gitlab.com:203.0.113.7"' in text  # real IP pinned for the warden
 
 
 def test_source_cmd_includes_hosts_fragment_when_present(tmp_path: Path) -> None:
@@ -127,3 +144,108 @@ def test_source_cmd_orders_hosts_fragment_before_user_override(tmp_path: Path) -
     hosts_idx = cmd.index(str(tmp_path / ".catraz/compose.hosts.yml"))
     override_idx = cmd.index(str(tmp_path / ".catraz/compose.override.yml"))
     assert hosts_idx < override_idx
+
+
+# ── credentials.mode overlay selection ────────────────────────────────
+
+
+def _persistent_home_yml() -> str:
+    from catraz.paths import asset_root
+
+    return str(asset_root() / "assets/compose/home.persistent.yml")
+
+
+def test_persistent_mode_layers_home_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".catraz").mkdir()
+    monkeypatch.setattr(compose, "_credentials_mode", lambda root: "persistent")
+    cmd = compose.base_cmd(tmp_path)
+    assert _persistent_home_yml() in cmd
+    # Persistent + subscription drops the sync-only credential seed overlay,
+    # so it must not create empty secrets/claude files.
+    assert not any(a.endswith("auth.subscription.yml") for a in cmd)
+
+
+def test_sync_mode_omits_home_overlay_and_keeps_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".catraz").mkdir()
+    monkeypatch.setattr(compose, "_credentials_mode", lambda root: "sync")
+    cmd = compose.base_cmd(tmp_path)
+    assert _persistent_home_yml() not in cmd
+    # Sync subscription still needs the read-only host-credential seed.
+    assert any(a.endswith("auth.subscription.yml") for a in cmd)
+
+
+def test_persistent_api_key_still_layers_api_key_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the subscription seed is sync-specific; the api_key overlay carries
+    env and must layer in persistent mode too."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=api_key\n")
+    monkeypatch.setattr(compose, "_credentials_mode", lambda root: "persistent")
+    cmd = compose.base_cmd(tmp_path)
+    assert any(a.endswith("auth.api_key.yml") for a in cmd)
+    assert _persistent_home_yml() in cmd
+
+
+def test_claude_default_profile_is_persistent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shipped claude manifest selects persistent, so a default setup gets
+    the full-bind home overlay (and run/shell inherit it via _source_cmd)."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text("AUTH_MODE=subscription\n")
+    assert compose._credentials_mode(tmp_path) == "persistent"
+    assert _persistent_home_yml() in compose.base_cmd(tmp_path)
+
+
+# ── CLAUDE_CREDENTIALS_MODE env override ────────────────────────────────
+
+
+def test_credentials_mode_env_override_to_sync(tmp_path: Path) -> None:
+    """CLAUDE_CREDENTIALS_MODE=sync overrides the claude manifest's persistent
+    default, independently of the manifest."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text(
+        "AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n"
+    )
+    assert compose._credentials_mode(tmp_path) == "sync"
+    assert _persistent_home_yml() not in compose.base_cmd(tmp_path)
+
+
+def test_credentials_mode_env_override_to_persistent_wins_over_sync_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CREDENTIALS_MODE=persistent overrides a manifest default of sync."""
+    import catraz.agents as agents_mod
+
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text(
+        "AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=persistent\n"
+    )
+    fake = agents_mod.AgentManifest(
+        name="claude",
+        command="claude",
+        subscription_source="",
+        api_key_env="ANTHROPIC_API_KEY",
+        credentials_mode="sync",
+        remote_allowed=True,
+        debug_flag="--debug-file",
+        egress_domains=(),
+    )
+    monkeypatch.setattr(agents_mod, "load_manifest", lambda profile: fake)
+    assert compose._credentials_mode(tmp_path) == "persistent"
+    assert _persistent_home_yml() in compose.base_cmd(tmp_path)
+
+
+def test_credentials_mode_invalid_env_value_falls_back_to_manifest(tmp_path: Path) -> None:
+    """A garbage CLAUDE_CREDENTIALS_MODE value never silently flips the mode —
+    it falls through to the manifest default."""
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz" / ".env").write_text(
+        "AUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=bogus\n"
+    )
+    assert compose._credentials_mode(tmp_path) == "persistent"

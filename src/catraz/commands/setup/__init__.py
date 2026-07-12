@@ -14,7 +14,7 @@ from catraz.ui import Out
 from ._secrets import _ensure_secret, _write_secret_value  # noqa: F401
 from ._sync import _auto_sync_if_needed, _ensure_gitignore, _run_sync  # noqa: F401
 from ._wizard_interactive import _wizard_interactive
-from ._wizard_yes import _wizard_yes, _yes_gitlab_mode  # noqa: F401
+from ._wizard_yes import _wizard_yes  # noqa: F401
 
 __all__ = [
     "cmd_doctor",
@@ -28,7 +28,6 @@ __all__ = [
     "_write_secret_value",
     "_wizard_interactive",
     "_wizard_yes",
-    "_yes_gitlab_mode",
 ]
 
 
@@ -49,7 +48,7 @@ def cmd_doctor(root: Path, args: argparse.Namespace, out: Out) -> int:
 def _init_config_templates(cat: Path, assets: Path, out: Out) -> None:
     cfg_dst = cat / "config"
     cfg_src = assets / "config"
-    for name in ("warden.toml", "allowlist.txt", "squid.conf"):
+    for name in ("warden.toml", "allowlist.txt", "squid.conf", "README.md"):
         src = cfg_src / name
         dst = cfg_dst / name
         if src.exists() and not dst.exists():
@@ -175,7 +174,7 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     warden_toml = cat / "config" / "warden.toml"
 
     if args.yes:
-        _wizard_yes(env, env_path, secrets_dir, updates, out, inherited)
+        _wizard_yes(env, env_path, secrets_dir, warden_toml, updates, out, inherited)
     else:
         _wizard_interactive(
             root, env, env_path, secrets_dir, warden_toml, updates, args, out, inherited

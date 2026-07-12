@@ -10,10 +10,10 @@ from catraz.envfile import load_env
 from catraz.errors import CliError, EXIT_CONFIG
 
 # Curated .env keys that are portable across hosts (no DEV_UID, no WARDEN_*).
+# The git host lives in warden.toml (inherited as a config file), not .env.
 _ENV_ALLOWLIST = (
     "AUTH_MODE",
-    "GITLAB_MODE",
-    "GITLAB_URL",
+    "CLAUDE_CREDENTIALS_MODE",
     "BASE_IMAGE",
     "BASE_DOCKERFILE",
     "BASE_CONTEXT",

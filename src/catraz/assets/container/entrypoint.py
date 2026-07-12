@@ -22,12 +22,8 @@ def _env_true(name: str) -> bool:
 
 
 # Host-persistent target for --debug-file output; bind-mounted so debug logs
-# survive container exit (the live agent home is tmpfs and loses them).
+# survive container exit even when the live agent home is a tmpfs (sync mode).
 AGENT_LOG_DIR = Path("/var/log/agent-debug")
-
-# Writable per-repo state, always mounted (harmless if unused); an adapter
-# opts in via `credentials.mode = "persistent"` in its manifest.
-PERSISTENT_STATE_DIR = Path("/var/lib/agent-state")
 
 
 def resolve_log_dir(home: Path) -> Path:
@@ -104,7 +100,7 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
 
 
 def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:
-    """Best-effort `branch_prefixes` (or the legacy scalar `branch_prefix`)
+    """Best-effort `branch_prefixes` (or the scalar `branch_prefix`)
     read from the mounted warden.toml, for the rendered instructions'
     example only. A missing/unreadable/malformed file degrades to the
     `claude/` default rather than crashing the entrypoint before the agent
@@ -140,7 +136,6 @@ def _resolve_secrets(home: Path, *, remote: bool) -> Secrets:
     return Secrets(
         auth_mode=mode,
         subscription_ro_dir=ro if ro.is_dir() else None,
-        persistent_state_dir=PERSISTENT_STATE_DIR if PERSISTENT_STATE_DIR.is_dir() else None,
         api_key_file=Path(api_key_file_env) if api_key_file_env else None,
         api_key_env_fallback=os.environ.get("ANTHROPIC_API_KEY", ""),
         remote=remote,
@@ -181,6 +176,9 @@ def cmd_start(adapter: AgentAdapter, home: Path) -> None:
         sys.exit(
             "error: this agent profile does not support remote-control mode (modes.remote=false)"
         )
+    # flush=True: execvp replaces this process image, so anything still buffered
+    # in Python's stdio would never reach the container's stdout.
+    print(f"[entrypoint] remote-control daemon exec: {' '.join(argv)}", flush=True)
     os.execvp(argv[0], argv)
 
 
@@ -197,7 +195,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    default_home = os.environ.get("AGENT_HOME", str(Path.home() / ".agent-home"))
+    default_home = os.environ.get("AGENT_HOME", str(Path.home() / "agent-home"))
     parser.add_argument(
         "--agent-home",
         default=default_home,

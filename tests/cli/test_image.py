@@ -47,6 +47,71 @@ def test_resolve_default_uses_local_dockerfile(
     assert str(df) in seen["cmd"]
 
 
+class _FakeResp:
+    def __init__(self, body: str) -> None:
+        self._body = body
+
+    def __enter__(self) -> "_FakeResp":
+        return self
+
+    def __exit__(self, *a: Any) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body.encode()
+
+
+def _mk_env(tmp_path: Path, version_line: str) -> Path:
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/.env").write_text(version_line)
+    return tmp_path
+
+
+def test_claude_version_pinned_is_used_verbatim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pinned version never hits the registry."""
+    _mk_env(tmp_path, "CLAUDE_CODE_VERSION=1.2.3\n")
+
+    def _boom(*a: Any, **k: Any) -> Any:
+        raise AssertionError("registry must not be queried for a pinned version")
+
+    monkeypatch.setattr("catraz.image.urllib.request.urlopen", _boom)
+    assert image.resolve_claude_code_version(tmp_path) == "1.2.3"
+
+
+def test_claude_version_latest_resolves_to_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mk_env(tmp_path, "CLAUDE_CODE_VERSION=latest\n")
+    monkeypatch.setattr(
+        "catraz.image.urllib.request.urlopen", lambda *a, **k: _FakeResp('{"version": "9.9.9"}')
+    )
+    assert image.resolve_claude_code_version(tmp_path) == "9.9.9"
+
+
+def test_claude_version_unset_resolves_to_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mk_env(tmp_path, "")
+    monkeypatch.setattr(
+        "catraz.image.urllib.request.urlopen", lambda *a, **k: _FakeResp('{"version": "9.9.9"}')
+    )
+    assert image.resolve_claude_code_version(tmp_path) == "9.9.9"
+
+
+def test_claude_version_falls_back_when_registry_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mk_env(tmp_path, "CLAUDE_CODE_VERSION=latest\n")
+
+    def _boom(*a: Any, **k: Any) -> Any:
+        raise OSError("no network")
+
+    monkeypatch.setattr("catraz.image.urllib.request.urlopen", _boom)
+    assert image.resolve_claude_code_version(tmp_path) == "latest"
+
+
 def test_resolve_default_raises_if_dockerfile_missing(tmp_path: Path) -> None:
     """Missing local Dockerfile raises CliError, not FileNotFoundError."""
     (tmp_path / ".catraz").mkdir()

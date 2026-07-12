@@ -7,92 +7,33 @@ import pytest
 from catraz import doctor
 
 
-# check_gitlab / _gitlab_mode — GITLAB_URL/.env informational checks,
-# untouched by the multi-endpoint cutover.
+# check_policy — the allowlist pre-check keys off configured endpoints now
+# ("no endpoint configured" replaces the old GITLAB_MODE=off short-circuit)
+# and the (separately-owned) allowed_projects resolution.
 
 
-def test_check_gitlab_url_set() -> None:
-    f = doctor.Findings()
-    doctor.check_gitlab({"GITLAB_URL": "https://gitlab.example.com"}, f)
-    assert any(i[0] == doctor.OK and "gitlab.example.com" in i[2] for i in f.items)
-
-
-def test_check_gitlab_url_unset() -> None:
-    f = doctor.Findings()
-    doctor.check_gitlab({}, f)
-    assert any(i[0] == doctor.WARN and "GITLAB_URL" in i[2] for i in f.items)
-
-
-def test_check_gitlab_url_empty() -> None:
-    f = doctor.Findings()
-    doctor.check_gitlab({"GITLAB_URL": ""}, f)
-    assert any(i[0] == doctor.WARN for i in f.items)
-
-
-class TestGitLabModeOff:
-    def test_check_gitlab_returns_ok(self) -> None:
+class TestCheckPolicy:
+    def test_no_endpoint_allowlist_not_required(self, tmp_path: Path) -> None:
         f = doctor.Findings()
-        doctor.check_gitlab({"GITLAB_MODE": "off"}, f)
-        assert any(i[0] == doctor.OK and "GITLAB_MODE=off" in i[2] for i in f.items)
-        assert not any(i[0] == doctor.BAD for i in f.items)
-
-    def test_check_gitlab_no_url_nag(self) -> None:
-        """GITLAB_URL being unset must not warn when mode=off."""
-        f = doctor.Findings()
-        doctor.check_gitlab({"GITLAB_MODE": "off"}, f)
-        assert not any("GITLAB_URL" in i[2] for i in f.items)
-
-    def test_check_policy_no_bad_empty_allowlist(self, tmp_path: Path) -> None:
-        """Empty allowed_projects must not be bad when GitLab is off."""
-        f = doctor.Findings()
-        doctor.check_policy(tmp_path, {"GITLAB_MODE": "off"}, f)
+        doctor.check_policy(tmp_path, {}, f)
         assert not any(i[0] == doctor.BAD for i in f.items)
         assert any(i[0] == doctor.OK and "allowlist not required" in i[2] for i in f.items)
 
-
-class TestGitLabModePolicy:
-    """check_policy is untouched by the token/endpoint cutover — still keyed
-    off GITLAB_MODE and the (separately-owned) allowed_projects resolution."""
-
-    def test_check_policy_nonempty_allowlist_ok(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_nonempty_allowlist_ok(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
         _mock_allowlist(tmp_path, monkeypatch, ["group/project"])
         f = doctor.Findings()
-        doctor.check_policy(tmp_path, {"GITLAB_MODE": "read-only"}, f)
+        doctor.check_policy(tmp_path, {}, f)
         assert not any(i[0] == doctor.BAD for i in f.items)
         assert any(i[0] == doctor.OK for i in f.items)
 
-    def test_check_policy_empty_allowlist_warns(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_allowlist_warns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_endpoints(tmp_path, [("gitlab.com", "gitlab")])
         _mock_allowlist(tmp_path, monkeypatch, [])
         f = doctor.Findings()
-        doctor.check_policy(tmp_path, {"GITLAB_MODE": "read-write"}, f)
+        doctor.check_policy(tmp_path, {}, f)
         assert any(i[0] == doctor.WARN for i in f.items)
         assert not any(i[0] == doctor.BAD for i in f.items)
-
-    def test_check_gitlab_url_unset_warns(self) -> None:
-        f = doctor.Findings()
-        doctor.check_gitlab({"GITLAB_MODE": "read-write"}, f)
-        assert any(i[0] == doctor.WARN and "GITLAB_URL" in i[2] for i in f.items)
-
-
-class TestGitLabModeHelper:
-    def test_absent_defaults_read_write(self) -> None:
-        assert doctor._gitlab_mode({}) == "read-write"
-
-    def test_empty_defaults_read_write(self) -> None:
-        assert doctor._gitlab_mode({"GITLAB_MODE": ""}) == "read-write"
-
-    def test_off(self) -> None:
-        assert doctor._gitlab_mode({"GITLAB_MODE": "off"}) == "off"
-
-    def test_read_only(self) -> None:
-        assert doctor._gitlab_mode({"GITLAB_MODE": "read-only"}) == "read-only"
-
-    def test_strips_whitespace(self) -> None:
-        assert doctor._gitlab_mode({"GITLAB_MODE": "  off  "}) == "off"
 
 
 # Multi-endpoint token model: grouped read_tokens/write_tokens files

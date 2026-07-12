@@ -11,25 +11,10 @@ from pathlib import Path
 from typing import Any, cast
 
 from catraz.envfile import load_env
-from catraz.compose import run as compose_run
+from catraz.compose import run as compose_run, compose_ps
 from catraz.errors import CliError
 from catraz import paths
 from catraz import image
-
-# Secrets the wizard collects (filename, human prompt, description); mode 0600,
-# mounted into the warden via compose secrets, never stored in .env.
-SECRETS = [
-    (
-        "gitlab_read_token",
-        "GitLab READ token (scopes: read_api, read_repository)",
-        "GitLab READ token",
-    ),
-    (
-        "gitlab_write_token",
-        "GitLab WRITE token (classic 'api' scope, or fine-grained + 'User: Read')",
-        "GitLab WRITE token",
-    ),
-]
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
@@ -99,6 +84,7 @@ DOCTOR_SECTIONS = [
     "endpoints",
     "agent",
     "net",
+    "mounts",
     "auth",
     "base",
 ]
@@ -236,26 +222,6 @@ def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
                 )
             else:
                 f.ok("env", f"{d.name}/ owned by DEV_UID")
-
-
-def _gitlab_mode(env: dict[str, str]) -> str:
-    return (env.get("GITLAB_MODE") or "read-write").strip()
-
-
-def check_gitlab(env: dict[str, str], f: Findings) -> None:
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        f.ok("tokens", "GitLab disabled (GITLAB_MODE=off)")
-        return
-    url = (env.get("GITLAB_URL") or "").strip()
-    if not url:
-        f.warn(
-            "tokens",
-            "GITLAB_URL unset — defaulting to https://gitlab.com",
-            "set GITLAB_URL in .catraz/.env for self-hosted GitLab",
-        )
-    else:
-        f.ok("tokens", f"GitLab endpoint: {url}")
 
 
 def _parse_grouped_tokens(text: str) -> dict[str, str]:
@@ -505,7 +471,7 @@ def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> Non
     """The warden resolves its service-account id via GET /user with the WRITE
     token, needed to enforce MR ownership (R3). Fine-grained PATs often omit
     "User: Read", so GET /user 403s and every ownership-gated write is silently
-    denied while MR creation still works — probe it explicitly so it surfaces at setup."""
+    denied while MR creation is allowed — probe it explicitly so it surfaces at setup."""
     try:
         me = _gitlab_get(base, "/api/v4/user", token)
     except urllib.error.HTTPError as e:
@@ -553,9 +519,8 @@ def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> Non
 def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
     """Fast pre-check of allowed_projects. Authoritative validation stays the
     warden reconcile — this just turns the obvious traps loud before start."""
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        f.ok("policy", "GitLab off — allowlist not required")
+    if not _read_git_endpoints(root):
+        f.ok("policy", "no [[git.endpoint]] configured — allowlist not required")
         return
     from catraz.policy import _resolve_allowed_projects, validate_project
 
@@ -591,9 +556,8 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
     from catraz.admin_client import AdminUnreachable
     from catraz.endpoints import fetch_policy_report
 
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        f.ok("endpoints", "GitLab off — endpoint catalog not applicable")
+    if not _read_git_endpoints(root):
+        f.ok("endpoints", "no [[git.endpoint]] configured — endpoint catalog not applicable")
         return
     try:
         report = fetch_policy_report(root)
@@ -641,9 +605,6 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
     Parses warden.toml/token files with the same cascade as the Warden so the
     two never drift; flags write actions with no write_token, and
     mr.create/ci.trigger configured without a branch-write action to source from."""
-    mode = _gitlab_mode(env)
-    if mode == "off":
-        return
     endpoints = _read_git_endpoints(root)
     if not endpoints:
         return
@@ -684,13 +645,17 @@ def check_action_coherence(root: Path, env: dict[str, str], f: Findings) -> None
 
 
 def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Active agent profile + credential-mode consistency check.
-
-    credentials.mode = "sync" checks the sandbox seed is present and not
-    root-owned (Docker auto-creates root-owned bind targets when the source
-    is missing). credentials.mode = "persistent" instead checks the state dir:
-    present, mode 0700."""
-    from catraz.agents import load_manifest, resolve_agent_profile
+    """Active agent profile + credential-mode consistency check: "sync" checks
+    the sandbox seed is present and not root-owned (Docker auto-creates a
+    root-owned bind target when the source is missing); "persistent" checks
+    the state dir at mode 0700. The mode is CLAUDE_CREDENTIALS_MODE from .env
+    when valid, else the manifest default."""
+    from catraz.agents import (
+        CREDENTIALS_MODES,
+        effective_credentials_mode,
+        load_manifest,
+        resolve_agent_profile,
+    )
     from catraz.errors import CliError as _CliError
     from catraz.paths import agent_state_dir, claude_home
 
@@ -702,7 +667,17 @@ def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
         return
     f.ok("agent", f"profile: {profile} (command: {manifest.command})")
 
-    if manifest.credentials_mode == "persistent":
+    raw_mode = env.get("CLAUDE_CREDENTIALS_MODE", "").strip()
+    if raw_mode and raw_mode not in CREDENTIALS_MODES:
+        f.bad(
+            "agent",
+            "CLAUDE_CREDENTIALS_MODE must be persistent|sync",
+            "set it in .catraz/.env",
+        )
+    creds_mode = effective_credentials_mode(root, env)
+    f.ok("agent", f"credentials mode: {creds_mode}")
+
+    if creds_mode == "persistent":
         state_dir = agent_state_dir(root, profile)
         if not state_dir.is_dir():
             f.bad(
@@ -754,6 +729,75 @@ def check_net(root: Path, f: Findings) -> None:
         f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
 
 
+# Bind mounts a running infra container reads/writes at a fixed path —
+# (host path relative to .catraz, container-absolute path) pairs.
+MOUNT_TARGETS: dict[str, list[tuple[str, str]]] = {
+    "gitlab-warden": [
+        ("state/warden/db", "/var/lib/warden"),
+        ("logs/warden", "/var/log/warden"),
+        ("state/warden/run", "/run/warden"),
+        ("config/warden.toml", "/etc/warden/warden.toml"),
+    ],
+    "forward-proxy": [
+        ("logs/squid", "/var/log/squid"),
+        ("config/squid.conf", "/etc/squid/squid.conf"),
+        ("config/allowlist.txt", "/etc/squid/allowlist.txt"),
+    ],
+}
+
+
+def _container_inode(name: str, path: str) -> int | None:
+    """Inode of `path` inside container `name`, or None if unreachable."""
+    r = subprocess.run(
+        ["docker", "exec", name, "stat", "-c", "%i", path],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return None
+    try:
+        return int(r.stdout.strip())
+    except ValueError:
+        return None
+
+
+def check_mounts(root: Path, f: Findings) -> None:
+    """A host path deleted and recreated at the same location while its
+    container keeps running orphans the bind mount: the container keeps
+    seeing the old, unlinked file or directory. Compares each mount's
+    host-side inode against the inode the running container sees; a
+    mismatch flags the mount as stale."""
+    if not which("docker"):
+        f.warn("mounts", "cannot verify bind mounts (docker missing)")
+        return
+    rows = compose_ps(root)
+    running = {r.get("Service"): r.get("Name") for r in rows}
+    if not running:
+        f.ok("mounts", "stack not running — nothing to verify")
+        return
+    for service, targets in MOUNT_TARGETS.items():
+        name = running.get(service)
+        if not name:
+            continue
+        for rel, container_path in targets:
+            host_path = root / ".catraz" / rel
+            if not host_path.exists():
+                continue
+            container_inode = _container_inode(name, container_path)
+            if container_inode is None:
+                f.warn("mounts", f"{service}: could not stat {container_path} in container")
+                continue
+            if host_path.stat().st_ino != container_inode:
+                f.bad(
+                    "mounts",
+                    f"{service}: {rel} bind mount is stale (host path was "
+                    "recreated while the container kept running)",
+                    "catraz reload --force",
+                )
+            else:
+                f.ok("mounts", f"{service}: {rel} bind mount intact")
+
+
 def _read_secret_file(root: Path, filename: str) -> str:
     """Return the stripped contents of .catraz/secrets/<filename>, or '' if missing/empty."""
     p = root / ".catraz" / "secrets" / filename
@@ -770,13 +814,20 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
     if mode not in ("subscription", "api_key"):
         f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env")
         return
+    from catraz.agents import effective_credentials_mode
+
     cred = paths.claude_home(root) / ".credentials.json"
     # api_key: key is in .catraz/secrets/anthropic_api_key (compose secret); bare env var is fallback.
     api_key = _read_secret_file(root, "anthropic_api_key") or env.get("ANTHROPIC_API_KEY", "")
     if mode == "subscription":
         if api_key:
             f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
-        if not cred.exists():
+        if effective_credentials_mode(root, env) == "persistent":
+            # Persistent home keeps the login inside the container
+            # (.catraz/state/<profile>/); the `agent` section validates it and
+            # `catraz sync` does not apply.
+            f.ok("auth", "subscription — credential managed in the persistent container home")
+        elif not cred.exists():
             f.bad("auth", "no .credentials.json", "run `catraz sync`")
         else:
             f.ok("auth", "subscription credential present")
@@ -848,8 +899,6 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
     if "env" in sections:
         check_env(root, env, f)
     if "tokens" in sections:
-        check_gitlab(env, f)
-    if "tokens" in sections:
         check_tokens(root, env, f)
     if "policy" in sections:
         check_policy(root, env, f)
@@ -860,11 +909,27 @@ def run_doctor(root: Path, only: list[str] | None = None, fix: bool = False) -> 
         check_agent(root, env, f)
     if "net" in sections:
         check_net(root, f)
+    if "mounts" in sections:
+        check_mounts(root, f)
     if "auth" in sections:
         check_auth(root, env, f)
     if "base" in sections:
         check_base(root, env, f)
     return f
+
+
+def _wants_ro_credential_seed(root: Path, env: dict[str, str]) -> bool:
+    """True when the sync credential seed under secrets/claude is actually used:
+    subscription auth with credentials mode "sync". Fail closed (no scaffold) if
+    the mode is unresolvable — persistent, the default, needs no seed."""
+    if (env.get("AUTH_MODE") or "subscription") != "subscription":
+        return False
+    from catraz.agents import effective_credentials_mode
+
+    try:
+        return effective_credentials_mode(root, env) == "sync"
+    except CliError:
+        return False
 
 
 def _doctor_fix(root: Path, env: dict[str, str]) -> None:
@@ -879,9 +944,13 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
     secrets_dir.chmod(0o700)
-    claude_secrets = cat / "secrets" / "claude"
-    claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
-    claude_secrets.chmod(0o700)
+    # secrets/claude holds the read-only host-credential seed used only by the
+    # sync credential mode; persistent keeps the login in state/<profile>/, so
+    # scaffold it only when a sync subscription setup will actually mount it.
+    if _wants_ro_credential_seed(root, env):
+        claude_secrets = secrets_dir / "claude"
+        claude_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
+        claude_secrets.chmod(0o700)
     # The active agent profile's persistent-state + debug-log dirs; best-effort
     # default ("claude") if AGENT_PROFILE is unresolvable — check_agent validates.
     profile = (env.get("AGENT_PROFILE") or "claude").strip() or "claude"
@@ -898,9 +967,9 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
     ]:
         (cat / d).mkdir(parents=True, exist_ok=True)
     mode = env.get("AUTH_MODE") or "subscription"
-    # read_tokens/write_tokens: grouped, multi-endpoint token files doctor/Warden
+    # read_tokens/write_tokens: grouped, host-keyed token files doctor/Warden
     # read host -> token from. Scaffolded so init always leaves a parseable, empty pair.
-    secret_files = ["read_tokens", "write_tokens"] + [f for f, _, _ in SECRETS]
+    secret_files = ["read_tokens", "write_tokens"]
     if mode == "api_key":
         secret_files.append("anthropic_api_key")
     for filename in secret_files:

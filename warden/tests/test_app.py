@@ -62,8 +62,7 @@ async def test_policy_route_reports_the_effective_table(cfg):
     host_report = body["hosts"]["gitlab.example"]
     ids = {row["id"] for row in host_report["catalog"]}
     assert "mr.create" in ids and "branch.create" in ids and "mr.merge" in ids
-    # git transport rows: previously the report only walked the REST catalog
-    # and these appeared as names without rows.
+    # git transport rows appear with full rows, not just names.
     assert "git.read" in ids and "git.receive_pack" in ids
     assert "project.mr.create" in host_report["actions"]
     # repo.branch.create is default-on in the new vocabulary.

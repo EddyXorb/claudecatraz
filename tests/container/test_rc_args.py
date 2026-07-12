@@ -53,7 +53,6 @@ def _secrets(claude_adapter: Any, **overrides: Any) -> Any:
     base = dict(
         auth_mode="api_key",
         subscription_ro_dir=None,
-        persistent_state_dir=None,
         api_key_file=None,
         api_key_env_fallback="",
         remote=False,

@@ -201,16 +201,6 @@ class TestCheckActionCoherence:
         doctor.check_action_coherence(tmp_path, {}, f)
         assert not any(i[0] in (doctor.WARN, doctor.BAD) for i in f.items)
 
-    def test_gitlab_mode_off_short_circuits(self, tmp_path: Path) -> None:
-        _write_config(
-            tmp_path,
-            '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
-            'actions = ["project.mr.comment"]\n',
-        )
-        f = doctor.Findings()
-        doctor.check_action_coherence(tmp_path, {"GITLAB_MODE": "off"}, f)
-        assert f.items == []
-
     def test_no_endpoints_no_findings(self, tmp_path: Path) -> None:
         f = doctor.Findings()
         doctor.check_action_coherence(tmp_path, {}, f)

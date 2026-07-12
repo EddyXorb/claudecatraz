@@ -164,8 +164,8 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
 
 
 def remove_toml_key(path: Path, key: str) -> None:
-    """Delete a whole key = ... assignment line from a TOML file, if present. Used to
-    retire a superseded key so old and new can't coexist and trip a ConfigError."""
+    """Delete a whole key = ... assignment line from a TOML file, if present, so
+    two forms of a setting can't coexist and trip a ConfigError."""
     text = path.read_text(encoding="utf-8")
     pat = re.compile(
         rf'^\s*{re.escape(key)}\s*=\s*("[^"]*"|\[[^\]]*\])\s*(#.*)?\n?',
@@ -174,3 +174,32 @@ def remove_toml_key(path: Path, key: str) -> None:
     new_text = pat.sub("", text)
     if new_text != text:
         path.write_text(new_text, encoding="utf-8")
+
+
+def normalize_host(host: str) -> str:
+    """Case/port/trailing-dot-insensitive host key, matching the warden's rule.
+    A raw host from config or a token line maps to the same key everywhere."""
+    return host.split(":", 1)[0].strip().lower().rstrip(".")
+
+
+def ensure_git_endpoint(path: Path, host: str, endpoint_type: str = "gitlab") -> None:
+    """Append a `[[git.endpoint]]` for *host* to warden.toml unless one already
+    exists (matched on normalised host). Hand-edited endpoint blocks are left
+    untouched — this only fills the single-host common case."""
+    import tomllib
+
+    host = host.strip()
+    if not host:
+        return
+    text = path.read_text(encoding="utf-8")
+    try:
+        git = tomllib.loads(text).get("git", {})
+    except tomllib.TOMLDecodeError:
+        git = {}
+    endpoints = git.get("endpoint", []) if isinstance(git, dict) else []
+    target = normalize_host(host)
+    for endpoint in endpoints if isinstance(endpoints, list) else []:
+        if isinstance(endpoint, dict) and normalize_host(str(endpoint.get("host", ""))) == target:
+            return
+    block = f'\n[[git.endpoint]]\nhost = "{host}"\ntype = "{endpoint_type}"\n'
+    path.write_text(text.rstrip("\n") + "\n" + block, encoding="utf-8")

@@ -2,47 +2,53 @@ import os
 from pathlib import Path
 from typing import Any
 
-from catraz.doctor import SECRETS
 from catraz.envfile import unset_env_keys
+from catraz.policy import ensure_git_endpoint, normalize_host
 from catraz.ui import Out
 
-_VALID_GITLAB_MODES: tuple[str, ...] = ("off", "read-only", "read-write")
+from ._secrets import _ensure_secret, _upsert_grouped_token, _write_secret_value
 
 
-def _yes_gitlab_mode(env: dict[str, str]) -> str:
-    """Determine GITLAB_MODE for --yes: explicit env wins, else infer from tokens."""
-    mode = (os.environ.get("GITLAB_MODE") or env.get("GITLAB_MODE") or "").strip()
-    if mode in _VALID_GITLAB_MODES:
-        return mode
+def _yes_host(env: dict[str, str]) -> str:
+    """Resolve the git host for --yes: env var > inherited/existing .env >
+    default. The host is the only git-routing input; access mode is derived
+    from which tokens are present, never stored."""
+    host = (os.environ.get("GITLAB_HOST") or env.get("GITLAB_HOST") or "gitlab.com").strip()
+    return normalize_host(host) or "gitlab.com"
+
+
+def _yes_endpoint_requested(env: dict[str, str]) -> bool:
+    """True iff --yes was given an explicit host or token — the signal to
+    synthesise an endpoint. With nothing provided, init stays endpoint-less."""
+    if (os.environ.get("GITLAB_HOST") or env.get("GITLAB_HOST") or "").strip():
+        return True
+    return bool(
+        os.environ.get("GITLAB_READ_TOKEN", "").strip()
+        or os.environ.get("GITLAB_WRITE_TOKEN", "").strip()
+    )
+
+
+def _yes_apply_tokens(secrets_dir: Path, host: str, out: Out) -> None:
+    """Scaffold the grouped token files and upsert env-provided tokens under *host*."""
+    _ensure_secret(secrets_dir, "read_tokens")
+    _ensure_secret(secrets_dir, "write_tokens")
     read_t = os.environ.get("GITLAB_READ_TOKEN", "").strip()
     write_t = os.environ.get("GITLAB_WRITE_TOKEN", "").strip()
-    if read_t and write_t:
-        return "read-write"
     if read_t:
-        return "read-only"
-    return "off"
+        _upsert_grouped_token(secrets_dir, "read_tokens", host, read_t)
+    if write_t:
+        _upsert_grouped_token(secrets_dir, "write_tokens", host, write_t)
 
 
-def _yes_apply_tokens(secrets_dir: Path, auth_mode: str, out: Out) -> None:
-    for filename, _, _ in SECRETS:
-        p = secrets_dir / filename
-        env_val = os.environ.get(filename.upper(), "").strip()
-        if env_val:
-            p.write_text(env_val)
-            p.chmod(0o600)
-        elif not p.exists():
-            p.write_text("")
-            p.chmod(0o600)
-
-    if auth_mode == "api_key":
-        p = secrets_dir / "anthropic_api_key"
-        env_val = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        if env_val:
-            p.write_text(env_val)
-            p.chmod(0o600)
-        elif not p.exists():
-            p.write_text("")
-            p.chmod(0o600)
+def _yes_apply_anthropic(secrets_dir: Path, auth_mode: str) -> None:
+    """Provision anthropic_api_key under api_key auth (from env, else empty stub)."""
+    if auth_mode != "api_key":
+        return
+    env_val = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if env_val:
+        _write_secret_value(secrets_dir, "anthropic_api_key", env_val)
+    else:
+        _ensure_secret(secrets_dir, "anthropic_api_key")
 
 
 def _yes_clear_stale_policy_env(env_path: Path) -> None:
@@ -53,6 +59,7 @@ def _wizard_yes(
     env: dict[str, str],
     env_path: Path,
     secrets_dir: Path,
+    warden_toml: Path,
     updates: dict[str, str],
     out: Out,
     inherited: dict[str, Any] | None = None,
@@ -73,22 +80,25 @@ def _wizard_yes(
     )
     updates["AUTH_MODE"] = auth_mode
 
-    mode = _yes_gitlab_mode({**inh_env, **env})  # inherited provides fallback
-    # But env vars and explicit GITLAB_MODE in env still win; re-apply env-var priority.
-    env_gitlab = os.environ.get("GITLAB_MODE", "").strip()
-    if env_gitlab in _VALID_GITLAB_MODES:
-        mode = env_gitlab
-    updates["GITLAB_MODE"] = mode
-
-    gitlab_url = (
-        os.environ.get("GITLAB_URL", "").strip()
-        or inh_env.get("GITLAB_URL", "")
-        or env.get("GITLAB_URL", "")
+    creds_mode = (
+        os.environ.get("CLAUDE_CREDENTIALS_MODE")
+        or inh_env.get("CLAUDE_CREDENTIALS_MODE")
+        or env.get("CLAUDE_CREDENTIALS_MODE")
+        or "persistent"
     )
-    if gitlab_url:
-        updates["GITLAB_URL"] = gitlab_url
+    updates["CLAUDE_CREDENTIALS_MODE"] = creds_mode
 
-    _yes_apply_tokens(secrets_dir, auth_mode, out)
+    merged = {**inh_env, **env}
+    if _yes_endpoint_requested(merged):
+        host = _yes_host(merged)
+        _yes_apply_tokens(secrets_dir, host, out)
+        if warden_toml.exists():
+            ensure_git_endpoint(warden_toml, host, "gitlab")
+    else:
+        # No host/token given: scaffold empty token files, add no endpoint.
+        _ensure_secret(secrets_dir, "read_tokens")
+        _ensure_secret(secrets_dir, "write_tokens")
+    _yes_apply_anthropic(secrets_dir, auth_mode)
     _yes_clear_stale_policy_env(env_path)
 
     base_image = (

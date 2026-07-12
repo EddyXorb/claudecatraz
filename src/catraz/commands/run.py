@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import sys
+import time
 from pathlib import Path
 
 from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
@@ -93,7 +94,11 @@ def _host_gitconfig_env() -> dict[str, str]:
 def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
     """Shared ephemeral one-off path for `claude` (sub=run) and `shell` (sub=exec)."""
     assert_real_dirs(root)
-    extra_env = {"BASE_IMAGE": image.resolve_base(root), **_host_gitconfig_env()}
+    extra_env = {
+        "BASE_IMAGE": image.resolve_base(root),
+        "CLAUDE_CODE_VERSION": image.resolve_claude_code_version(root),
+        **_host_gitconfig_env(),
+    }
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     _ensure_infra(root, out, prefix=prefix)
@@ -128,12 +133,78 @@ def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
         return EXIT_DOCTOR
     print()
     _auto_sync_if_needed(root, out)
-    extra_env = {"BASE_IMAGE": image.resolve_base(root), **_host_gitconfig_env()}
+    extra_env = {
+        "BASE_IMAGE": image.resolve_base(root),
+        "CLAUDE_CODE_VERSION": image.resolve_claude_code_version(root),
+        **_host_gitconfig_env(),
+    }
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     out.info("• starting the agent daemon…")
-    r = compose_run(root, ["--profile", "remote", "up", "-d"], prefix=prefix, check=False)
+    # --build self-heals CLI/image skew, same as the one-off path (_oneoff_args) —
+    # near-instant no-op via layer cache when the image is already current.
+    r = compose_run(
+        root,
+        ["--profile", "remote", "up", "-d", "--build", "--quiet-build"],
+        prefix=prefix,
+        check=False,
+    )
     if r and r.returncode == 0:
+        _print_remote_command(root, out, prefix=prefix)
+        if not _agent_survived_startup(root, out, prefix=prefix):
+            return EXIT_GENERAL
         _wait_healthy(root, out, prefix=prefix)
         _print_urls(out)
     return r.returncode if r else EXIT_GENERAL
+
+
+def _agent_survived_startup(
+    root: Path, out: Out, prefix: list[str] | None, grace: int = 15
+) -> bool:
+    """`compose ps`'s default view hides exited containers, so a daemon that
+    crashes right after start (e.g. Claude's own remote-control eligibility
+    check) would otherwise be masked behind a false 'all services healthy'.
+    Poll briefly and fail loud, with the crash's own log tail, if it already died."""
+    deadline = time.time() + grace
+    seen_running = 0
+    while time.time() < deadline:
+        rows = compose_ps(root, prefix=prefix, all=True)
+        agent = next((r for r in rows if r.get("Service") == "claude-dev-env"), None)
+        state = (agent.get("State") or "").lower() if agent else ""
+        if state == "exited":
+            out.err("agent daemon exited right after start — last log lines:")
+            compose_run(
+                root,
+                ["logs", "--no-log-prefix", "--tail", "15", "claude-dev-env"],
+                prefix=prefix,
+                check=False,
+            )
+            return False
+        if state == "running":
+            seen_running += 1
+            if seen_running >= 2:
+                return True
+        time.sleep(0.5)
+    return True
+
+
+def _print_remote_command(
+    root: Path, out: Out, prefix: list[str] | None, timeout: int = 10
+) -> None:
+    """Surface the exact argv the entrypoint exec'd (logged as `[entrypoint]
+    remote-control exec: …`), so a silent `up -d` doesn't hide what's running."""
+    marker = "[entrypoint] remote-control daemon exec:"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = compose_run(
+            root,
+            ["logs", "--no-log-prefix", "claude-dev-env"],
+            prefix=prefix,
+            capture=True,
+            check=False,
+        )
+        if r and marker in r.stdout:
+            line = next(ln for ln in r.stdout.splitlines() if marker in ln)
+            out.info(line.removeprefix("[entrypoint] ").strip())
+            return
+        time.sleep(0.5)

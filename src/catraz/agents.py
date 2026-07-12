@@ -26,6 +26,10 @@ AGENT_REGISTRY: dict[str, str] = {
 
 DEFAULT_AGENT_PROFILE = "claude"
 
+# Valid values of `.catraz/.env`'s CLAUDE_CREDENTIALS_MODE override, mirroring
+# AgentManifest.credentials_mode's own two values.
+CREDENTIALS_MODES = ("persistent", "sync")
+
 
 @dataclass(frozen=True)
 class AgentManifest:
@@ -54,6 +58,18 @@ def resolve_agent_profile(root: Path) -> str:
             EXIT_CONFIG,
         )
     return name
+
+
+def effective_credentials_mode(root: Path, env: dict[str, str] | None = None) -> str:
+    """The mode that governs this project's credential storage: `.catraz/.env`'s
+    `CLAUDE_CREDENTIALS_MODE` when it is `persistent`/`sync`, otherwise the
+    active profile's manifest default. *env* lets a caller that already loaded
+    `.catraz/.env` reuse it instead of reading the file again."""
+    e = env if env is not None else load_env(root / ".catraz" / ".env")
+    override = e.get("CLAUDE_CREDENTIALS_MODE", "").strip()
+    if override in CREDENTIALS_MODES:
+        return override
+    return load_manifest(resolve_agent_profile(root)).credentials_mode
 
 
 def agent_dir(profile: str) -> Path:

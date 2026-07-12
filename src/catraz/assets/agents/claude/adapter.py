@@ -35,6 +35,16 @@ def _manifest() -> _Manifest:
     return _Manifest(read_toml(_MANIFEST_PATH))
 
 
+def _effective_credentials_mode(manifest: _Manifest) -> str:
+    """`CLAUDE_CREDENTIALS_MODE` (set by the host from `.catraz/.env`) when it
+    is `persistent`/`sync`, else the manifest default — kept in lockstep with
+    the compose overlay the host picked for this same value."""
+    override = os.environ.get("CLAUDE_CREDENTIALS_MODE", "").strip()
+    if override in ("persistent", "sync"):
+        return override
+    return manifest.credentials_mode
+
+
 def _read_json(p: Path) -> dict[str, Any]:
     try:
         return cast(dict[str, Any], json.loads(p.read_text()))
@@ -42,21 +52,31 @@ def _read_json(p: Path) -> dict[str, Any]:
         return {}
 
 
+def _config_dir() -> Path:
+    """Claude's config dir. With a custom `CLAUDE_CONFIG_DIR` (our persistent
+    layout) both `.claude.json` and the user-memory `CLAUDE.md` live INSIDE it;
+    the default layout keeps them under `~/.claude`. This is the single source
+    of truth for every home-relative path the adapter writes, so a change to
+    the compose `CLAUDE_CONFIG_DIR` never needs a matching edit here."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(d) if d else Path.home() / ".claude"
+
+
 def _log_dir() -> Path:
     """Where to place `--debug-file` output — the entrypoint resolves a
-    durable-if-possible directory via `AGENT_LOG_DIR`; fall back to the live
-    home."""
+    durable-if-possible directory via `AGENT_LOG_DIR`; fall back to the config
+    dir (the live home)."""
     d = os.environ.get("AGENT_LOG_DIR")
-    return Path(d) if d else Path.home() / ".claude"
+    return Path(d) if d else _config_dir()
 
 
 # ── prepare_home ─────────────────────────────────────────────────────────────
 
 
 def _seed_from_ro(home: Path, ro_dir: Path | None) -> dict[str, Any]:
-    """`credentials.mode = "sync"` (or first-ever start before a persistent
-    login): copy the read-only seed the host synced in. Returns the
-    `.claude.json` seed data (org info etc.), or defaults if none mounted."""
+    """`credentials.mode = "sync"`: copy the read-only credential the host
+    synced in. Returns the `.claude.json` seed data (org info etc.), or
+    defaults if none mounted."""
     ro = ro_dir or (home / ".ro")
     src = ro / ".credentials.json"
     if not src.exists():
@@ -73,62 +93,49 @@ def _seed_from_ro(home: Path, ro_dir: Path | None) -> dict[str, Any]:
     return {}
 
 
-def _wire_persistent(home: Path, state_dir: Path) -> None:
-    """`credentials.mode = "persistent"`: symlinks only the credential file
-    and session/project state into the writable per-repo state dir; settings
-    and hooks are rebuilt fresh every start so a compromised session can't
-    persist. A first-ever login has nothing to symlink to yet — `claude
-    login` creates the target through the dangling symlink on first write."""
-    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    state_dir.chmod(0o700)
-    cred_link = home / ".credentials.json"
-    if not cred_link.is_symlink():
-        cred_link.unlink(missing_ok=True)
-        cred_link.symlink_to(state_dir / ".credentials.json")
-    projects_dir = state_dir / "projects"
-    projects_dir.mkdir(mode=0o700, exist_ok=True)
-    projects_link = home / "projects"
-    if not projects_link.is_symlink():
-        if projects_link.exists():
-            import shutil
-
-            shutil.rmtree(projects_link)
-        projects_link.symlink_to(projects_dir)
-
-
 def prepare_home(home: Path, secrets: Secrets) -> None:
-    """Write credential files and settings layout into the live (tmpfs)
-    home. Never touches Forge or foreign-model credentials."""
+    """Write the credential/settings layout into the live home. In persistent
+    mode the home is the durable bind, so seed each file only when absent and
+    merge flags into an existing `.claude.json` — never clobber a login. Never
+    touches Forge or foreign-model credentials."""
     home.mkdir(parents=True, exist_ok=True)
-    manifest = _manifest()
-    seed: dict[str, Any] = {}
-    if secrets.auth_mode == "subscription":
-        if manifest.credentials_mode == "persistent" and secrets.persistent_state_dir:
-            _wire_persistent(home, secrets.persistent_state_dir)
-        else:
-            seed = _seed_from_ro(home, secrets.subscription_ro_dir)
+    persistent = _effective_credentials_mode(_manifest()) == "persistent"
 
-    data: dict[str, Any] = seed or {
-        "hasCompletedOnboarding": True,
-        "lastOnboardingVersion": "1.0",
-    }
-    # bypassPermissionsModeAccepted moved into settings.json's
+    seed: dict[str, Any] = {}
+    if secrets.auth_mode == "subscription" and not persistent:
+        seed = _seed_from_ro(home, secrets.subscription_ro_dir)
+
+    claude_json = home / ".claude.json"
+    # Persistent: merge onto the existing file so the durable home is not
+    # clobbered each start; otherwise (re)seed fresh.
+    if persistent and claude_json.exists():
+        data = _read_json(claude_json)
+    else:
+        data = seed or {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}
+    data.setdefault("hasCompletedOnboarding", True)
+    data.setdefault("lastOnboardingVersion", "1.0")
     # skipDangerousModePermissionPrompt on newer CLI versions; set both keys.
     data["bypassPermissionsModeAccepted"] = True
-    if secrets.remote:
-        data["remoteDialogSeen"] = True
+    data["remoteDialogSeen"] = True
+
     data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
-    (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
-    (home / "settings.json").write_text(
-        json.dumps(
-            {
-                "theme": "dark",
-                "hasCompletedOnboarding": True,
-                "skipDangerousModePermissionPrompt": True,
-            },
-            indent=2,
+
+    claude_json.write_text(json.dumps(data, indent=2))
+
+    settings = home / "settings.json"
+    # Persistent: keep a settings.json the user (or a prior start) already wrote.
+    if not (persistent and settings.exists()):
+        settings.write_text(
+            json.dumps(
+                {
+                    "theme": "dark",
+                    "hasCompletedOnboarding": True,
+                    "skipDangerousModePermissionPrompt": True,
+                    "remoteDialogSeen": True,
+                },
+                indent=2,
+            )
         )
-    )
 
 
 # ── command / environ / remote_command ──────────────────────────────────────
@@ -196,7 +203,7 @@ def render_instructions(ctx: InstructionContext) -> tuple[Path, str]:
         .replace("__BRANCH_PREFIX_EXAMPLE__", prefix_example)
         .replace("__WARDEN_TOML_PATH__", str(ctx.warden_toml_path))
     )
-    return Path.home() / ".claude" / "CLAUDE.md", content
+    return _config_dir() / "CLAUDE.md", content
 
 
 # ── host-side credential sync (credentials.mode = "sync") ───────────────────

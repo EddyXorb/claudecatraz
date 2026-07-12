@@ -12,6 +12,13 @@ from catraz import doctor
 from catraz.admin_client import AdminUnreachable
 
 
+def _write_endpoint(root: Path, host: str = "gitlab.com") -> None:
+    """A configured endpoint is what makes check_endpoints reach for /policy."""
+    config_dir = root / ".catraz" / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "warden.toml").write_text(f'[[git.endpoint]]\nhost = "{host}"\ntype = "gitlab"\n')
+
+
 def _action(id_: str, criticality: str, default: bool, active: bool) -> dict[str, object]:
     return {"id": id_, "criticality": criticality, "default": default, "active": active}
 
@@ -60,15 +67,17 @@ _REPORT = {
 }
 
 
-def test_gitlab_off_short_circuits(tmp_path: Path) -> None:
+def test_no_endpoint_short_circuits(tmp_path: Path) -> None:
     f = doctor.Findings()
-    doctor.check_endpoints(tmp_path, {"GITLAB_MODE": "off"}, f)
+    doctor.check_endpoints(tmp_path, {}, f)
     assert any(i[0] == doctor.OK and "not applicable" in i[2] for i in f.items)
 
 
 def test_admin_unreachable_warns_and_does_not_fail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _write_endpoint(tmp_path)
+
     def _raise(root: Path) -> dict[str, object]:
         raise AdminUnreachable("admin socket not found")
 
@@ -82,6 +91,7 @@ def test_admin_unreachable_warns_and_does_not_fail(
 def test_no_hosts_configured_is_ok_not_warn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _write_endpoint(tmp_path)
     monkeypatch.setattr("catraz.endpoints.fetch_policy_report", lambda root: {"hosts": {}})
     f = doctor.Findings()
     doctor.check_endpoints(tmp_path, {}, f)
@@ -92,6 +102,7 @@ def test_no_hosts_configured_is_ok_not_warn(
 def test_reachable_reports_active_and_inactive_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _write_endpoint(tmp_path, "gitlab.example")
     monkeypatch.setattr("catraz.endpoints.fetch_policy_report", lambda root: _REPORT)
     f = doctor.Findings()
     doctor.check_endpoints(tmp_path, {}, f)
@@ -128,6 +139,7 @@ def test_two_hosts_get_independent_findings(
             },
         },
     }
+    _write_endpoint(tmp_path)
     monkeypatch.setattr("catraz.endpoints.fetch_policy_report", lambda root: two_hosts_report)
     f = doctor.Findings()
     doctor.check_endpoints(tmp_path, {}, f)

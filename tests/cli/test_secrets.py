@@ -1,4 +1,4 @@
-"""Commit 11.2 — .catraz/secrets/ for GitLab tokens."""
+"""Init writes host-keyed grouped tokens into .catraz/secrets/."""
 
 import argparse
 import stat
@@ -8,9 +8,12 @@ from pathlib import Path
 import pytest
 
 from catraz.commands import setup
-from catraz.doctor import run_doctor, _doctor_fix, SECRETS
+from catraz.commands.setup._secrets import _read_grouped_token
+from catraz.doctor import run_doctor, _doctor_fix
 from catraz.envfile import load_env
 from catraz.ui import Out
+
+_GROUPED = ("read_tokens", "write_tokens")
 
 
 def _make_root(tmp_path: Path) -> Path:
@@ -35,15 +38,7 @@ def _yes_args() -> argparse.Namespace:
     )
 
 
-def test_cmd_init_creates_secret_files_even_blank(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """cmd_init --yes creates secrets/ at 0700 and both token files at 0600, even if blank.
-
-    With no token env vars the wizard infers GITLAB_MODE=off and writes it to .env.
-    """
-    root = _make_root(tmp_path)
-
+def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
     monkeypatch.setattr(
         "catraz.commands.setup.run_doctor",
@@ -51,41 +46,40 @@ def test_cmd_init_creates_secret_files_even_blank(
     )
     monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
 
-    out = Out(color=False)
-    setup.cmd_init(root, _yes_args(), out)
+
+def test_cmd_init_creates_grouped_token_files_even_blank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cmd_init --yes creates secrets/ at 0700 and both grouped token files at
+    0600, even with no token env vars; no GITLAB_MODE lands in .env."""
+    root = _make_root(tmp_path)
+    _patch_common(monkeypatch)
+
+    setup.cmd_init(root, _yes_args(), Out(color=False))
 
     secrets_dir = root / ".catraz" / "secrets"
     assert secrets_dir.is_dir()
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
-
-    for filename, _, _ in SECRETS:
+    for filename in _GROUPED:
         p = secrets_dir / filename
         assert p.exists(), f"missing: {p}"
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
-    # GITLAB_MODE must be written to .env (inferred as "off" — no tokens provided)
     env = load_env(root / ".catraz" / ".env")
-    assert env.get("GITLAB_MODE") == "off"
+    assert "GITLAB_MODE" not in env
+    assert "GITLAB_URL" not in env
 
 
-def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """cmd_init (interactive) writes the token value to the secret file at
-    0600. The wizard uses out.secret() (in ui.py), which calls getpass
-    internally, so we patch catraz.ui.getpass.getpass rather than
-    catraz.commands.setup.getpass. Empty input() returns wizard defaults."""
+def test_cmd_init_writes_host_keyed_token_via_getpass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive init upserts `<host> <token>` lines into the grouped files."""
     root = _make_root(tmp_path)
 
     secrets = iter(["glpat-readtoken", "glpat-writetoken"])
-    # out.secret() imports getpass locally and calls getpass.getpass(); patch at the module level
     monkeypatch.setattr("getpass.getpass", lambda prompt: next(secrets))
-    # out.choice() and out.ask() use input(); "" picks the default each time
-    monkeypatch.setattr("builtins.input", lambda prompt: "")
-    monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "catraz.commands.setup.run_doctor",
-        lambda *a, **kw: types.SimpleNamespace(items=[]),
-    )
-    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
+    monkeypatch.setattr("builtins.input", lambda prompt: "")  # defaults everywhere
+    _patch_common(monkeypatch)
 
     args = argparse.Namespace(
         yes=False,
@@ -95,21 +89,45 @@ def test_cmd_init_writes_token_via_getpass(tmp_path: Path, monkeypatch: pytest.M
         no_color=True,
         print_only=False,
     )
-    out = Out(color=False)
-    setup.cmd_init(root, args, out)
+    setup.cmd_init(root, args, Out(color=False))
 
     secrets_dir = root / ".catraz" / "secrets"
-    assert (secrets_dir / "gitlab_read_token").read_text().strip() == "glpat-readtoken"
-    assert (secrets_dir / "gitlab_write_token").read_text().strip() == "glpat-writetoken"
-    for filename, _, _ in SECRETS:
+    assert (secrets_dir / "read_tokens").read_text() == "gitlab.com glpat-readtoken\n"
+    assert (secrets_dir / "write_tokens").read_text() == "gitlab.com glpat-writetoken\n"
+    for filename in _GROUPED:
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
+def test_cmd_init_writes_git_endpoint_when_token_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--yes with an explicit token synthesises a [[git.endpoint]] in warden.toml."""
+    import tomllib
+
+    root = _make_root(tmp_path)
+    monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read")
+    _patch_common(monkeypatch)
+    setup.cmd_init(root, _yes_args(), Out(color=False))
+    data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
+    endpoints = data["git"]["endpoint"]
+    assert {(e["host"], e["type"]) for e in endpoints} == {("gitlab.com", "gitlab")}
+
+
+def test_cmd_init_writes_no_endpoint_without_host_or_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--yes with nothing provided stays endpoint-less (offer, don't force)."""
+    import tomllib
+
+    root = _make_root(tmp_path)
+    _patch_common(monkeypatch)
+    setup.cmd_init(root, _yes_args(), Out(color=False))
+    data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
+    assert "endpoint" not in data.get("git", {})
+
+
 def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
-    """_doctor_fix on a project where .catraz/ does not exist yet must not
-    crash. The 0700 secrets dirs are created with mode= (not parents=), so
-    .catraz/ itself must be created first, or the first mkdir raises
-    FileNotFoundError."""
+    """_doctor_fix on a project where .catraz/ does not exist yet must not crash."""
     root = tmp_path / "fresh"
     root.mkdir()
     assert not (root / ".catraz").exists()
@@ -119,22 +137,22 @@ def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
     secrets_dir = root / ".catraz" / "secrets"
     claude_dir = secrets_dir / "claude"
     assert secrets_dir.is_dir()
-    assert claude_dir.is_dir()
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
-    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700
+    # Default (persistent) mode keeps the login in state/<profile>/, so the
+    # sync-only credential seed dir must not be scaffolded.
+    assert not claude_dir.exists()
 
 
 def test_doctor_warns_endpoint_closed_on_empty_grouped_files(tmp_path: Path) -> None:
-    """An `[[git.endpoint]]` with no token in the grouped read_tokens/write_tokens
-    files warns "closed" — never a failing (bad) exit; the Warden, not doctor,
-    is the side that enforces fail-closed."""
+    """An `[[git.endpoint]]` with no token in the grouped files warns "closed" —
+    never a failing (bad) exit; the Warden, not doctor, enforces fail-closed."""
     root = _make_root(tmp_path)
     (root / ".catraz" / "config" / "warden.toml").write_text(
         '[[git.endpoint]]\nhost = "gitlab.com"\ntype = "gitlab"\n'
     )
     secrets_dir = root / ".catraz" / "secrets"
     secrets_dir.mkdir(mode=0o700)
-    for filename in ("read_tokens", "write_tokens"):
+    for filename in _GROUPED:
         p = secrets_dir / filename
         p.write_text("")
         p.chmod(0o600)
@@ -147,8 +165,7 @@ def test_doctor_warns_endpoint_closed_on_empty_grouped_files(tmp_path: Path) -> 
 def test_doctor_ok_on_non_empty_grouped_tokens(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """doctor reports ok when a configured endpoint has both tokens set (probe
-    skipped in unit tests)."""
+    """doctor reports ok when a configured endpoint has both tokens set."""
     import catraz.doctor as doc
 
     monkeypatch.setattr(doc, "_probe_gitlab_tokens", lambda *a, **kw: None)
@@ -169,8 +186,8 @@ def test_doctor_ok_on_non_empty_grouped_tokens(
     assert any(i[0] == "ok" and "gitlab.com" in i[2] and "read-write" in i[2] for i in f.items)
 
 
-def test_doctor_fix_creates_secrets_dir_and_files(tmp_path: Path) -> None:
-    """doctor --fix always creates secrets/ dir (0700) and empty token files (0600)."""
+def test_doctor_fix_creates_grouped_files(tmp_path: Path) -> None:
+    """doctor --fix always creates secrets/ (0700) and empty grouped files (0600)."""
     root = _make_root(tmp_path)
     env = load_env(root / ".catraz" / ".env")
     _doctor_fix(root, env)
@@ -178,7 +195,7 @@ def test_doctor_fix_creates_secrets_dir_and_files(tmp_path: Path) -> None:
     secrets_dir = root / ".catraz" / "secrets"
     assert secrets_dir.is_dir()
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
-    for filename, _, _ in SECRETS:
+    for filename in _GROUPED:
         p = secrets_dir / filename
         assert p.exists(), f"missing: {p}"
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
@@ -187,24 +204,38 @@ def test_doctor_fix_creates_secrets_dir_and_files(tmp_path: Path) -> None:
 def test_cmd_init_yes_reads_tokens_from_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """--yes writes token env vars to secret files at 0600."""
+    """--yes upserts token env vars into the grouped files, keyed by host."""
     root = _make_root(tmp_path)
     monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-read-from-env")
     monkeypatch.setenv("GITLAB_WRITE_TOKEN", "glpat-write-from-env")
-    monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "catraz.commands.setup.run_doctor",
-        lambda *a, **kw: types.SimpleNamespace(items=[]),
-    )
-    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
+    _patch_common(monkeypatch)
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
     secrets_dir = root / ".catraz" / "secrets"
-    assert (secrets_dir / "gitlab_read_token").read_text() == "glpat-read-from-env"
-    assert (secrets_dir / "gitlab_write_token").read_text() == "glpat-write-from-env"
-    for filename, _, _ in SECRETS:
+    assert _read_grouped_token(secrets_dir, "read_tokens", "gitlab.com") == "glpat-read-from-env"
+    assert _read_grouped_token(secrets_dir, "write_tokens", "gitlab.com") == "glpat-write-from-env"
+    for filename in _GROUPED:
         assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
+
+
+def test_cmd_init_yes_reads_host_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--yes honours GITLAB_HOST for both the token key and the endpoint."""
+    import tomllib
+
+    root = _make_root(tmp_path)
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.example.com")
+    monkeypatch.setenv("GITLAB_READ_TOKEN", "glpat-self-hosted")
+    _patch_common(monkeypatch)
+
+    setup.cmd_init(root, _yes_args(), Out(color=False))
+
+    secrets_dir = root / ".catraz" / "secrets"
+    assert (
+        _read_grouped_token(secrets_dir, "read_tokens", "gitlab.example.com") == "glpat-self-hosted"
+    )
+    data = tomllib.loads((root / ".catraz" / "config" / "warden.toml").read_text())
+    assert {e["host"] for e in data["git"]["endpoint"]} == {"gitlab.example.com"}
 
 
 def test_cmd_init_yes_clears_stale_warden_projects_env(
@@ -214,12 +245,7 @@ def test_cmd_init_yes_clears_stale_warden_projects_env(
     (root / ".catraz" / ".env").write_text(
         "DEV_UID=1000\nAUTH_MODE=subscription\nWARDEN_ALLOWED_PROJECTS=group/old-proj\n"
     )
-    monkeypatch.setattr("catraz.commands.setup._run_sync", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "catraz.commands.setup.run_doctor",
-        lambda *a, **kw: types.SimpleNamespace(items=[]),
-    )
-    monkeypatch.setattr("catraz.commands.setup.print_findings", lambda *a, **kw: (0, 0))
+    _patch_common(monkeypatch)
 
     setup.cmd_init(root, _yes_args(), Out(color=False))
 
@@ -228,31 +254,42 @@ def test_cmd_init_yes_clears_stale_warden_projects_env(
 
 
 def test_doctor_fix_does_not_overwrite_existing_token(tmp_path: Path) -> None:
-    """doctor --fix leaves an already-populated token file unchanged."""
+    """doctor --fix leaves an already-populated grouped file unchanged."""
     root = _make_root(tmp_path)
     secrets_dir = root / ".catraz" / "secrets"
     secrets_dir.mkdir(mode=0o700)
-    first_file = SECRETS[0][0]
-    (secrets_dir / first_file).write_text("existing-token")
-    (secrets_dir / first_file).chmod(0o600)
+    (secrets_dir / "read_tokens").write_text("gitlab.com glpat-existing\n")
+    (secrets_dir / "read_tokens").chmod(0o600)
 
     env = load_env(root / ".catraz" / ".env")
     _doctor_fix(root, env)
 
-    assert (secrets_dir / first_file).read_text() == "existing-token"
+    assert (secrets_dir / "read_tokens").read_text() == "gitlab.com glpat-existing\n"
 
 
-def test_doctor_fix_secrets_and_claude_are_0700(tmp_path: Path) -> None:
-    """secrets/ and secrets/claude/ must both be 0700 after _doctor_fix.
-    Ensures dir-creation order doesn't let the umask default (0755) win
-    over the explicit 0700 mode, which would happen if mkdir(parents=True)
-    created secrets/ implicitly before the explicit 0700 call."""
+def test_doctor_fix_sync_mode_creates_claude_seed_0700(tmp_path: Path) -> None:
+    """secrets/ is always 0700; the secrets/claude/ seed exists at 0700 only in
+    the sync credential mode, which mounts it read-only into the agent home."""
     root = _make_root(tmp_path)
+    (root / ".catraz" / ".env").write_text(
+        "DEV_UID=1000\nAUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=sync\n"
+    )
     env = load_env(root / ".catraz" / ".env")
     _doctor_fix(root, env)
 
     secrets_dir = root / ".catraz" / "secrets"
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700, "secrets/ must be 0700"
     claude_dir = secrets_dir / "claude"
-    assert claude_dir.is_dir(), "secrets/claude/ must exist"
+    assert claude_dir.is_dir(), "secrets/claude/ must exist in sync mode"
     assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700, "secrets/claude/ must be 0700"
+
+
+def test_doctor_fix_persistent_mode_omits_claude_seed(tmp_path: Path) -> None:
+    """Persistent mode keeps the login in state/<profile>/, so _doctor_fix must
+    not create the secrets/claude seed dir."""
+    root = _make_root(tmp_path)
+    (root / ".catraz" / ".env").write_text(
+        "DEV_UID=1000\nAUTH_MODE=subscription\nCLAUDE_CREDENTIALS_MODE=persistent\n"
+    )
+    _doctor_fix(root, load_env(root / ".catraz" / ".env"))
+    assert not (root / ".catraz" / "secrets" / "claude").exists()

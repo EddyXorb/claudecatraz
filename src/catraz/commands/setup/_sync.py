@@ -3,7 +3,7 @@ import io
 import os
 from pathlib import Path
 
-from catraz.agents import load_adapter_module, load_manifest, resolve_agent_profile
+from catraz.agents import effective_credentials_mode, load_adapter_module, resolve_agent_profile
 from catraz.envfile import load_env
 from catraz.errors import CliError, EXIT_GENERAL
 from catraz.paths import claude_home
@@ -11,12 +11,12 @@ from catraz.ui import Out
 
 
 def _credentials_mode(root: Path) -> str:
-    """The active agent profile's `credentials.mode`: "sync" or "persistent".
-    Falls back to "sync" if the profile/manifest can't be resolved — a
-    doctor `agent` finding surfaces that separately, so sync-gating doesn't
-    silently block an otherwise-working setup."""
+    """Effective credentials mode ("sync"|"persistent"): `.catraz/.env`'s
+    CLAUDE_CREDENTIALS_MODE overrides the manifest default, so sync-gating
+    agrees with the compose overlay and the adapter. Falls back to "sync" if
+    unresolvable — a doctor `agent` finding surfaces that separately."""
     try:
-        return load_manifest(resolve_agent_profile(root)).credentials_mode
+        return effective_credentials_mode(root)
     except CliError:
         return "sync"
 

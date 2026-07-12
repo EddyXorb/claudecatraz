@@ -1,4 +1,4 @@
-"""P3: `up` removed; `down` renamed to `stop` with `down` kept as a back-compat alias."""
+"""`stop` is the teardown verb; `down` is an alias for it."""
 
 import pytest
 

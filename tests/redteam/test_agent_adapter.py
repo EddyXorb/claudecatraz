@@ -89,7 +89,7 @@ def test_agent_home_has_no_gitlab_token_file(live_stack: Path) -> None:
     prepare_home() must only ever write agent-model credentials."""
     r = _compose_exec(
         live_stack,
-        "grep -rl GITLAB_READ_TOKEN /home/dev/.claude 2>/dev/null; echo rc=$?",
+        "grep -rl GITLAB_READ_TOKEN /home/dev/agent-home 2>/dev/null; echo rc=$?",
     )
     assert r.returncode == 0
     assert r.stdout.strip().splitlines()[-1] in (

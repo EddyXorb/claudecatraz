@@ -113,7 +113,11 @@ services:
       - no-new-privileges:true
     environment:
       - AUTH_MODE=${AUTH_MODE}
-      - AGENT_HOME=/home/dev/.claude
+      - CLAUDE_CREDENTIALS_MODE=${CLAUDE_CREDENTIALS_MODE:-}
+      - AGENT_HOME=/home/dev/agent-home
+      # Without this, Claude writes .claude.json beside the home dir instead of
+      # inside it, so it would fall outside the persistent bind and be lost.
+      - CLAUDE_CONFIG_DIR=/home/dev/agent-home
       # Agent runtime (advanced) — remote-control invocation tuning (claude-specific
       # env vars the adapter itself reads; see assets/agents/claude/adapter.py):
       - CLAUDE_RC_SPAWN=${CLAUDE_RC_SPAWN:-same-dir}
@@ -151,15 +155,13 @@ services:
       - type: tmpfs
         target: /workspace/.catraz
         tmpfs: { size: 1048576, mode: 0700 }
+      # Live agent home. Ephemeral by default (credentials.mode = "sync"): a
+      # tmpfs seeded read-only from .ro/ each start. credentials.mode =
+      # "persistent" replaces this with a bind to .catraz/state/<profile> via
+      # the home.persistent.yml overlay (compose.py layers it per manifest), so
+      # the home itself is the durable store — no separate state mount.
       - type: tmpfs
-        target: /home/dev/.claude
-      # Writable per-repo agent state (§05.6, credentials.mode = "persistent"):
-      # always mounted (harmless if the active profile ignores it) so the same
-      # compose file serves every profile; the adapter decides whether/how to
-      # wire it into the live home (assets/agents/claude/adapter.py:_wire_persistent).
-      - type: bind
-        source: ${PROJECT_DIR}/.catraz/state/${AGENT_PROFILE:-claude}
-        target: /var/lib/agent-state
+        target: /home/dev/agent-home
       # Host git identity (user.name/email, etc.), copied to the writable ~/.gitconfig
       # at startup so the agent can commit. Staged read-only under .ro/ because the
       # entrypoint's warden setup appends insteadOf rules to the live ~/.gitconfig — a
@@ -167,7 +169,7 @@ services:
       # is unset (no host gitconfig); the entrypoint skips the empty staged file.
       - type: bind
         source: ${HOST_GITCONFIG:-/dev/null}
-        target: /home/dev/.claude/.ro/.gitconfig
+        target: /home/dev/agent-home/.ro/.gitconfig
         read_only: true
       # Non-secret warden policy (branch_prefixes, allowed_projects, quotas), read-only.
       # Lets the agent discover its ACTUAL limits — especially custom branch_prefixes —
