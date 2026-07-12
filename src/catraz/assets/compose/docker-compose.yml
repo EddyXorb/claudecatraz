@@ -115,7 +115,8 @@ services:
       - AUTH_MODE=${AUTH_MODE}
       - CLAUDE_CREDENTIALS_MODE=${CLAUDE_CREDENTIALS_MODE:-}
       - AGENT_HOME=/home/dev/agent-home
-      # when this not it set the .claude.json file is BENEATH the agent-dir, not within it
+      # Without this, Claude writes .claude.json beside the home dir instead of
+      # inside it, so it would fall outside the persistent bind and be lost.
       - CLAUDE_CONFIG_DIR=/home/dev/agent-home
       # Agent runtime (advanced) — remote-control invocation tuning (claude-specific
       # env vars the adapter itself reads; see assets/agents/claude/adapter.py):
