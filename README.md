@@ -83,21 +83,23 @@ account (not your primary), and a GitLab service account with a read and a write
 Three containers on an internal network with **no egress of its own**:
 
 ```text
- ┌─────────────────────────────────────────────────────────────────────┐
- │  agent-net · internal — the agent has NO direct route out            │
- │                                                                       │
- │   ┌──────────────────┐   git + REST    ┌──────────────────┐          │
- │   │ agent            │   (no token)     │ Warden           │ ──▶ gitlab.com
- │   │ Claude Code      │ ───────────────▶ │ holds all tokens │          │
- │   │ no token         │                  │ enforces policy  │          │
- │   │ [untrusted]      │                  │ audits every op  │          │
- │   └──────────────────┘                  └──────────────────┘          │
- │        │                                                              │
- │        │ http/https              ┌──────────────────────┐            │
- │        └────────────────────────▶│ forward proxy (Squid)│ ──▶ npm · pypi ·
- │                                   │ domain allowlist     │     crates · docs
- │                                   └──────────────────────┘            │
- └─────────────────────────────────────────────────────────────────────┘
+agent-net · internal — the agent has NO direct route out:
+
+┌────────────────────────┐               ┌───────────────────────┐     ┌───────────────┐
+│         agent          │               │                       │     │               │
+│      Claude Code       │               │ forward proxy (Squid) │     │  npm · pypi   │
+│        no token        │  http/https   │   domain allowlist    │     │ crates · docs │
+│      [untrusted]       │ ────────────> │                       │ ──> │               │
+└────────────────────────┘               └───────────────────────┘     └───────────────┘
+  │
+  │ git + REST (no token)
+  ∨
+┌────────────────────────┐               ┌───────────────────────┐
+│         Warden         │               │                       │
+│    holds all tokens    │               │      gitlab.com       │
+│    enforces policy     │               │                       │
+│    audits every op     │ ────────────> │                       │
+└────────────────────────┘               └───────────────────────┘
 ```
 
 - **Agent** — **Claude Code for now** (the sandbox is agent-agnostic by design; support for
