@@ -301,21 +301,10 @@ def from_env(
         except ValueError as exc:
             raise ConfigError(f"{key} must be an integer, got {raw!r}") from exc
 
-    # --- tunables: warden.toml only, no env override ---
-    def _tunable_int(toml_key: str, default: int) -> int:
-        val = file.get(toml_key, default)
-        if not isinstance(val, int) or isinstance(val, bool):
-            raise ConfigError(f"{toml_key} in warden.toml must be an integer, got {val!r}")
-        return val
-
     git_rules, git_actions, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
-        max_open_mrs=_tunable_int("max_open_mrs", 5),
-        max_open_branches=_tunable_int("max_open_branches", 10),
-        max_writes_per_hour=_tunable_int("max_writes_per_hour", 60),
-        max_push_bytes=_tunable_int("max_push_bytes", 50 * 1024 * 1024),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
@@ -342,15 +331,32 @@ def _validate(cfg: Config) -> None:
     allowed_projects just means every op is denied until one is added.
     """
     problems: list[str] = []
-
-    for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour", "max_push_bytes"):
-        if getattr(cfg, name) <= 0:
-            problems.append(f"{name.upper()} must be > 0")
-
+    problems.extend(_quota_problems(cfg))
     problems.extend(_branch_prefixes_problems(cfg))
 
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))
+
+
+_QUOTA_KEYS = ("max_open_mrs", "max_open_branches", "max_writes_per_hour", "max_push_bytes")
+
+
+def _quota_problems(cfg: Config) -> list[str]:
+    """Fail-closed validation of every set quota knob.
+
+    A non-positive ceiling in the global default or any endpoint override
+    would deny every write; an unset knob falls back to the built-in.
+    """
+    sources = [("[git.rules]", cfg.git_rules)]
+    for endpoint in cfg.git_endpoints:
+        sources.append((f"[[git.endpoint]] host={endpoint.host!r} rules", endpoint.rules))
+    problems: list[str] = []
+    for label, rules in sources:
+        for key in _QUOTA_KEYS:
+            val = getattr(rules, key)
+            if val is not None and val <= 0:
+                problems.append(f"{label}.{key} must be > 0")
+    return problems
 
 
 def _branch_prefixes_problems(cfg: Config) -> list[str]:

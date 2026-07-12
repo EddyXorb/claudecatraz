@@ -252,7 +252,7 @@ def test_default_deny_unknown_write_endpoint(cfg):
 
 # --- quotas ------------------------------------------------------------------
 def test_rate_limit_blocks_writes(cfg):
-    state = StateView(writes_last_hour=cfg.max_writes_per_hour)
+    state = StateView(writes_last_hour=cfg.effective_rules(HOST).max_writes_per_hour)
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
         state,
@@ -262,7 +262,7 @@ def test_rate_limit_blocks_writes(cfg):
 
 
 def test_max_open_mrs_blocks_mr_creation(cfg):
-    state = StateView(open_mrs=cfg.max_open_mrs)
+    state = StateView(open_mrs=cfg.effective_rules(HOST).max_open_mrs)
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
         state,
@@ -334,7 +334,7 @@ def test_git_atomic_reject_on_one_bad_ref(cfg):
 
 
 def test_git_max_branches_blocks_create(cfg):
-    state = StateView(open_branches=cfg.max_open_branches)
+    state = StateView(open_branches=cfg.effective_rules(HOST).max_open_branches)
     d = decide(_git((ZERO, SHA, "refs/heads/claude/new")), state, cfg)
     assert not d.allow and "max open branches reached" in d.reason
 
@@ -346,7 +346,7 @@ def test_git_locked_state_denies_push(cfg):
 
 
 def test_git_rate_limit_blocks_push(cfg):
-    state = StateView(writes_last_hour=cfg.max_writes_per_hour)
+    state = StateView(writes_last_hour=cfg.effective_rules(HOST).max_writes_per_hour)
     d = decide(_git((ZERO, SHA, "refs/heads/claude/feature")), state, cfg)
     assert not d.allow and "rate limit" in d.reason
 
@@ -354,7 +354,7 @@ def test_git_rate_limit_blocks_push(cfg):
 def test_git_multiref_quota_accounts_within_batch(cfg):
     # max-1 open branches + two creates in one push must reject the batch (not
     # let both pass against the same stale snapshot).
-    state = StateView(open_branches=cfg.max_open_branches - 1)
+    state = StateView(open_branches=cfg.effective_rules(HOST).max_open_branches - 1)
     d = decide(
         _git(
             (ZERO, SHA, "refs/heads/claude/a"),

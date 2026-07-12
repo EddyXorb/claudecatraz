@@ -90,16 +90,20 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     """
     if not intent.ref_commands:
         return Decision(False, "no ref commands in push")
-    if intent.push_bytes is not None and intent.push_bytes > cfg.max_push_bytes:
-        return Decision(
-            False,
-            f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({cfg.max_push_bytes})",
-        )
     rules = cfg.effective_rules(intent.host)
     max_open_branches, max_writes_per_hour = rules.max_open_branches, rules.max_writes_per_hour
+    max_push_bytes = rules.max_push_bytes
     assert max_open_branches is not None and max_writes_per_hour is not None, (
         "effective_rules always resolves every field to a concrete built-in default"
     )
+    assert max_push_bytes is not None, (
+        "effective_rules always resolves every field to a concrete built-in default"
+    )
+    if intent.push_bytes is not None and intent.push_bytes > max_push_bytes:
+        return Decision(
+            False,
+            f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({max_push_bytes})",
+        )
     pending_branches = 0
     pending_writes = 0
     for cmd in intent.ref_commands:

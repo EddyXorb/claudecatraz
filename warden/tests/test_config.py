@@ -49,13 +49,13 @@ def test_git_project_allowed_empty_allowlist_denies_all():
 def test_from_env_parses_projects_and_quota_from_toml(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text(
-        "max_open_mrs = 3\n"
+        "[git.rules]\nmax_open_mrs = 3\n"
         '[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n'
         'allowed_projects = ["group/proj", "group/two"]\n'
     )
     cfg = from_env({}, strict=True, toml_path=str(toml))
     assert cfg.endpoint_for("gitlab.example").allowed_projects == ("group/proj", "group/two")
-    assert cfg.max_open_mrs == 3
+    assert cfg.effective_rules("gitlab.example").max_open_mrs == 3
 
 
 def test_from_env_non_strict_allows_partial_config():
@@ -84,14 +84,14 @@ def test_empty_allowlist_boots_and_denies():
 
 def test_non_positive_quota_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text("max_open_mrs = 0\n")
-    with pytest.raises(ConfigError, match="MAX_OPEN_MRS"):
+    toml.write_text("[git.rules]\nmax_open_mrs = 0\n")
+    with pytest.raises(ConfigError, match="max_open_mrs must be > 0"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
 def test_non_integer_quota_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('max_open_mrs = "abc"\n')
+    toml.write_text('[git.rules]\nmax_open_mrs = "abc"\n')
     with pytest.raises(ConfigError, match="integer"):
         from_env({}, strict=True, toml_path=str(toml))
 
@@ -152,11 +152,11 @@ def test_branch_prefix_env_has_no_effect(tmp_path):
 
 # --- toml is the only source for policy tunables --------------------------------
 _TOML = (
+    "[git.rules]\n"
+    'branch_prefixes = ["claude/"]\n'
     "max_open_mrs = 7\n"
     "max_open_branches = 3\n"
     "max_writes_per_hour = 99\n"
-    "[git.rules]\n"
-    'branch_prefixes = ["claude/"]\n'
     '[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n'
     'allowed_projects = ["group/a", "group/b"]\n'
 )
@@ -167,7 +167,8 @@ def test_tunables_read_from_toml(tmp_path):
     toml.write_text(_TOML)
     cfg = from_env({}, toml_path=str(toml))
     assert cfg.git_rules.branch_prefixes == ("claude/",)
-    assert (cfg.max_open_mrs, cfg.max_open_branches, cfg.max_writes_per_hour) == (7, 3, 99)
+    rules = cfg.git_rules
+    assert (rules.max_open_mrs, rules.max_open_branches, rules.max_writes_per_hour) == (7, 3, 99)
     assert cfg.endpoint_for("gitlab.example").allowed_projects == ("group/a", "group/b")
 
 
@@ -188,7 +189,7 @@ def test_policy_env_vars_have_no_effect(tmp_path):
         toml_path=str(toml),
     )
     assert cfg.git_rules.branch_prefixes == ("claude/",)  # toml wins, env ignored
-    assert cfg.max_open_mrs == 7  # toml wins, env ignored
+    assert cfg.git_rules.max_open_mrs == 7  # toml wins, env ignored
     assert cfg.endpoint_for("gitlab.example").allowed_projects == (
         "group/a",
         "group/b",
@@ -198,12 +199,12 @@ def test_policy_env_vars_have_no_effect(tmp_path):
 def test_missing_toml_uses_builtin_defaults(tmp_path):
     cfg = from_env({}, toml_path=str(tmp_path / "absent.toml"))
     assert cfg.git_endpoints == ()
-    assert cfg.max_open_mrs == 5  # built-in default
+    assert cfg.effective_rules("gitlab.example").max_open_mrs == 5  # built-in default
 
 
 def test_invalid_toml_type_aborts(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('max_open_mrs = "lots"\n')
+    toml.write_text('[git.rules]\nmax_open_mrs = "lots"\n')
     with pytest.raises(ConfigError, match="integer"):
         from_env({}, strict=False, toml_path=str(toml))
 

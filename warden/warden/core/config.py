@@ -93,11 +93,6 @@ class GitEndpoint:
 
 @dataclass(frozen=True)
 class Config:
-    max_open_mrs: int = 5
-    max_open_branches: int = 10
-    max_writes_per_hour: int = 60
-    # Cheap push-size cap checked against Content-Length before streaming.
-    max_push_bytes: int = 50 * 1024 * 1024
     reconcile_interval_s: int = 300
     state_db_path: str = "/var/lib/warden/state.db"
     audit_log_path: str = "/var/log/warden/audit.jsonl"
