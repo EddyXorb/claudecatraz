@@ -49,14 +49,17 @@ def host_gate(host: str, cfg: Config) -> Optional[Decision]:
     return None
 
 
-def project_gate(project: str, project_allowed: Callable[[str], bool]) -> Optional[Decision]:
+def project_gate(
+    project: str, host: str, project_allowed: Callable[[str, str], bool]
+) -> Optional[Decision]:
     """Resource allowlist — the single source of truth, shared by every guard.
 
     An empty project passes; projectless requests are gated by the guard's
     own decide. project_allowed is a callable, not raw Config, so a guard
-    can widen the check beyond a path-only match.
+    can widen the check beyond a path-only match. Host-scoped: the same
+    project id authorises different things on different hosts.
     """
-    if project and not project_allowed(project):
+    if project and not project_allowed(host, project):
         return Decision(False, f"project {project!r} not in allowlist")
     return None
 
@@ -88,7 +91,7 @@ def action_gate(
 def kernel_gates(
     intent: Intent,
     cfg: Config,
-    project_allowed: Callable[[str], bool],
+    project_allowed: Callable[[str, str], bool],
     recognized: frozenset[Action],
     effective_actions: Optional[frozenset[str]] = None,
 ) -> Optional[Decision]:
@@ -102,7 +105,7 @@ def kernel_gates(
     if denied is None and intent.needs_write:
         denied = write_credential_gate(intent.host, cfg)
     if denied is None:
-        denied = project_gate(intent.project, project_allowed)
+        denied = project_gate(intent.project, intent.host, project_allowed)
     if denied is None and intent.needs_write and not recognized:
         denied = Decision(False, "no recognized action for this request")
     if denied is None:
@@ -188,12 +191,12 @@ class Guard(ABC, Generic[IntentT]):
         """
         ...
 
-    def project_allowed(self, project: str) -> bool:
-        """Resource allowlist membership hook. Default: the config allowlist by path
-        (cfg.project_allowed). A guard whose forge resolves numeric-id
-        aliases (e.g. ApiGuard) overrides this to also accept those.
+    def project_allowed(self, host: str, project: str) -> bool:
+        """Resource allowlist membership hook. Default: the per-host config
+        allowlist (cfg.git_project_allowed). A guard whose forge resolves
+        numeric-id aliases (e.g. ApiGuard) overrides this to also accept those.
         """
-        return self.cfg.project_allowed(project)
+        return self.cfg.git_project_allowed(host, project)
 
     def state_view(self, host: str) -> StateView:
         """Quota snapshot hook. Default: this guard's own core-only view (no

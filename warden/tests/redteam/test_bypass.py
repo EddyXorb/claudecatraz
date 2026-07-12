@@ -201,8 +201,7 @@ _CL_HOST = "gitlab.example"
 
 def _content_line_cfg() -> Config:
     return Config(
-        allowed_projects=("group/proj",),
-        git_endpoints=(GitEndpoint(host=_CL_HOST, type="gitlab"),),
+        git_endpoints=(GitEndpoint(host=_CL_HOST, type="gitlab", allowed_projects=("group/proj",)),),
         git_credentials={_CL_HOST: HostCredentials(read_token="r", write_token="w")},
     )
 

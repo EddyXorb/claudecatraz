@@ -37,8 +37,11 @@ _OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
 
 def _cfg(actions: tuple[str, ...] | None = None) -> Config:
     return Config(
-        allowed_projects=("group/proj",),
-        git_endpoints=(GitEndpoint(host=HOST, type="gitlab", actions=actions),),
+        git_endpoints=(
+            GitEndpoint(
+                host=HOST, type="gitlab", allowed_projects=("group/proj",), actions=actions
+            ),
+        ),
         git_credentials=_OPEN_CREDENTIALS,
     )
 
@@ -140,6 +143,59 @@ def test_action_gate_allows_an_enabled_action_for_gitlab():
     intent = _api("GET", "/projects/group%2Fproj/repository/tree")
     d = api_full_decide(intent, StateView(), _cfg(), frozenset({"repo.read"}))
     assert d.allow
+
+
+# --- project gate: per host, not global -----------------------------------------
+
+HOST_B = "other-gitlab.example"
+_TWO_HOST_CREDENTIALS = {
+    HOST: HostCredentials(read_token="r", write_token="w"),
+    HOST_B: HostCredentials(read_token="r", write_token="w"),
+}
+
+
+def _two_host_cfg() -> Config:
+    return Config(
+        git_endpoints=(
+            GitEndpoint(host=HOST, type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host=HOST_B, type="gitlab"),  # group/proj not listed here
+        ),
+        git_credentials=_TWO_HOST_CREDENTIALS,
+    )
+
+
+def _push_on(host: str, *ref_commands: RefCommand) -> GitIntent:
+    return GitIntent(
+        _project="group/proj",
+        operation="receive-pack",
+        _method="push",
+        _needs_write=True,
+        _host=host,
+        ref_commands=list(ref_commands),
+    )
+
+
+def _api_on(host: str, method: str, path: str) -> ApiIntent:
+    project = "group/proj" if "/projects/" in path else ""
+    return ApiIntent(_project=project, _method=method, path=path, _host=host)
+
+
+def test_git_project_scoping_is_per_host_not_global():
+    cfg = _two_host_cfg()
+    a = _push_on(HOST, RefCommand(ZERO, SHA, "refs/heads/claude/x"))
+    b = _push_on(HOST_B, RefCommand(ZERO, SHA, "refs/heads/claude/x"))
+    assert git_full_decide(a, StateView(), cfg).allow
+    d = git_full_decide(b, StateView(), cfg)
+    assert not d.allow and "not in allowlist" in d.reason
+
+
+def test_api_project_scoping_is_per_host_not_global():
+    cfg = _two_host_cfg()
+    a = _api_on(HOST, "GET", "/projects/group%2Fproj/repository/tree")
+    b = _api_on(HOST_B, "GET", "/projects/group%2Fproj/repository/tree")
+    assert api_full_decide(a, StateView(), cfg).allow
+    d = api_full_decide(b, StateView(), cfg)
+    assert not d.allow and "not in allowlist" in d.reason
 
 
 # --- unmatched/empty recognized: writes deny in the kernel ---------------------

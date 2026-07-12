@@ -338,12 +338,6 @@ def from_env(
             return (val,)
         return default
 
-    def _tunable_projects(toml_key: str) -> tuple[str, ...]:
-        val = file.get(toml_key, [])
-        if not isinstance(val, list) or not all(isinstance(p, str) for p in val):
-            raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
-        return tuple(p.strip() for p in val if p.strip())
-
     git_rules, git_actions, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
@@ -353,7 +347,6 @@ def from_env(
         max_open_branches=_tunable_int("max_open_branches", 10),
         max_writes_per_hour=_tunable_int("max_writes_per_hour", 60),
         max_push_bytes=_tunable_int("max_push_bytes", 50 * 1024 * 1024),
-        allowed_projects=_tunable_projects("allowed_projects"),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),

@@ -13,7 +13,7 @@ column in the same commit as the step.
 
 | Level | Step | Status |
 | --- | --- | --- |
-| 01 | [project-scoping-per-host](01-project-scoping-per-host.md) | ☐ |
+| 01 | [project-scoping-per-host](01-project-scoping-per-host.md) | ☑ |
 | 01 | [branch-namespace-per-host](01-branch-namespace-per-host.md) | ☐ |
 | 02 | [drop-legacy-top-level-quotas](02-drop-legacy-top-level-quotas.md) | ☐ |
 | 03 | [operator-surface-follow-through](03-operator-surface-follow-through.md) | ☐ |

@@ -182,9 +182,10 @@ def _access_client(access: str) -> httpx.AsyncClient:
         }
     cfg = Config(
         branch_prefixes=("claude/",),
-        allowed_projects=("group/proj",),
         state_db_path=":memory:",
-        git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),),
+        git_endpoints=(
+            GitEndpoint(host="gitlab.example", type="gitlab", allowed_projects=("group/proj",)),
+        ),
         git_credentials=creds,
     )
     state = State(":memory:")
@@ -298,9 +299,15 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
 def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
     cfg = Config(
         branch_prefixes=("claude/",),
-        allowed_projects=("group/proj",),
         state_db_path=":memory:",
-        git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab", actions=actions),),
+        git_endpoints=(
+            GitEndpoint(
+                host="gitlab.example",
+                type="gitlab",
+                allowed_projects=("group/proj",),
+                actions=actions,
+            ),
+        ),
         git_credentials={
             "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
         },

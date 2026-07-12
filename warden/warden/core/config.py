@@ -99,7 +99,6 @@ class Config:
     max_writes_per_hour: int = 60
     # Cheap push-size cap checked against Content-Length before streaming.
     max_push_bytes: int = 50 * 1024 * 1024
-    allowed_projects: tuple[str, ...] = ()
     reconcile_interval_s: int = 300
     state_db_path: str = "/var/lib/warden/state.db"
     audit_log_path: str = "/var/log/warden/audit.jsonl"
@@ -116,15 +115,6 @@ class Config:
     git_endpoints: tuple[GitEndpoint, ...] = ()
     # Per-endpoint tokens resolved from secret files, keyed by normalised host.
     git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
-
-    def project_allowed(self, project: str) -> bool:
-        """Default-deny match against ALLOWED_PROJECTS, path form only.
-
-        No prefix/subpath match. GitLab's numeric project ids are matched
-        separately by the REST-API guard's own project_allowed, not here.
-        """
-        project = normalize_project(project)
-        return any(project == allowed.strip("/") for allowed in self.allowed_projects)
 
     def in_branch_namespace(self, name: str) -> bool:
         """True iff name starts with any configured branch prefix.

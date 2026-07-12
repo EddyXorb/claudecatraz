@@ -482,11 +482,15 @@ async def test_two_hosts_with_different_actions_behave_differently_on_the_same_g
     host_a, host_b = "full.example", "review-only.example"
     cfg = Config(
         branch_prefixes=("claude/",),
-        allowed_projects=("group/proj",),
         state_db_path=":memory:",
         git_endpoints=(
-            GitEndpoint(host=host_a, type="gitlab"),
-            GitEndpoint(host=host_b, type="gitlab", actions=("repo.read", "project.mr.comment")),
+            GitEndpoint(host=host_a, type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(
+                host=host_b,
+                type="gitlab",
+                actions=("repo.read", "project.mr.comment"),
+                allowed_projects=("group/proj",),
+            ),
         ),
         git_credentials={
             host_a: HostCredentials(read_token="r", write_token="w"),

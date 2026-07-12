@@ -73,9 +73,9 @@ class ApiGuard(Guard[ApiIntent]):
         self.router = router
         self.mr_state = MrState(state.store)
         self.mr_namespace = MrNamespace(router, cfg)
-        # Numeric-id aliases of cfg.allowed_projects, resolved at reconcile.
-        # Guard state, not Config, since Config stays immutable.
-        self.project_id_aliases: set[str] = set()
+        # Numeric-id aliases of each host's allowed_projects, resolved at
+        # reconcile. Guard state, not Config, since Config stays immutable.
+        self.project_id_aliases: Mapping[str, set[str]] = {}
         # Built once at construction, never rebuilt. One set per configured
         # host — an action allowed on one host can be denied on another.
         self._effective_by_host: Mapping[str, frozenset[str]] = {
@@ -111,12 +111,14 @@ class ApiGuard(Guard[ApiIntent]):
         """
         return self._effective_by_host.get(self.cfg.normalize_host(host), frozenset())
 
-    def project_allowed(self, project: str) -> bool:
-        """Check if project is allowed by path or numeric id."""
-        return (
-            self.cfg.project_allowed(project)
-            or normalize_project(project) in self.project_id_aliases
-        )
+    def project_allowed(self, host: str, project: str) -> bool:
+        """Check if project is allowed on host by path or numeric id.
+
+        Numeric-id aliases are looked up under this host only — an id
+        resolved on another host never satisfies this one.
+        """
+        aliases = self.project_id_aliases.get(self.cfg.normalize_host(host), set())
+        return self.cfg.git_project_allowed(host, project) or normalize_project(project) in aliases
 
     def state_view(self, host: str) -> StateView:
         """This guard's own snapshot: its per-guard fail-safe lock, writes

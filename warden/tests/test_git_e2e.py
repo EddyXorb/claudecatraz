@@ -181,9 +181,12 @@ def _run_e2e(tmp_path, *, actions=None):
     backend_host = f"127.0.0.1:{backend_port}"
     cfg = Config(
         branch_prefixes=("claude/",),
-        allowed_projects=("repo",),
         state_db_path=str(tmp_path / "state.db"),
-        git_endpoints=(GitEndpoint(host=backend_host, type="plain", actions=actions),),
+        git_endpoints=(
+            GitEndpoint(
+                host=backend_host, type="plain", actions=actions, allowed_projects=("repo",)
+            ),
+        ),
         git_credentials={
             Config.normalize_host(backend_host): HostCredentials(read_token="r", write_token="w")
         },

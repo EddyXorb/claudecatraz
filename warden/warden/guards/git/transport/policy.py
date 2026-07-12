@@ -115,7 +115,7 @@ def full_decide(
     intent: GitIntent,
     state: StateView,
     cfg: Config,
-    project_allowed: Optional[Callable[[str], bool]] = None,
+    project_allowed: Optional[Callable[[str, str], bool]] = None,
 ) -> Decision:
     """Compose the kernel gates with this guard's pure decide for callers
     outside Guard.handle (tests, and any offline "what would happen to
@@ -123,7 +123,7 @@ def full_decide(
     this module's slice.
     """
     recognized = recognizers.recognize(intent)
-    d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed, recognized)
+    d = kernel_gates(intent, cfg, project_allowed or cfg.git_project_allowed, recognized)
     if d is None:
         d = decide(intent, state, cfg)
     return d

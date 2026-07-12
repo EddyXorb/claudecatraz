@@ -108,10 +108,9 @@ async def test_reconcile_branches_skips_a_closed_endpoint():
     read credential) — only the open endpoint's branches are listed/counted."""
     open_host, closed_host = "open.example", "closed.example"
     cfg = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=(
-            GitEndpoint(host=open_host, type="gitlab"),
-            GitEndpoint(host=closed_host, type="gitlab"),
+            GitEndpoint(host=open_host, type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host=closed_host, type="gitlab", allowed_projects=("group/proj",)),
         ),
         git_credentials={open_host: HostCredentials(read_token="r", write_token="w")},
     )
@@ -142,8 +141,14 @@ async def test_reconcile_ignores_a_host_with_no_push_action(respx_router):
     endpoint — reconcile only does GETs and is never gated by the action gate."""
     cfg = Config(
         branch_prefixes=("claude/",),
-        allowed_projects=("group/proj",),
-        git_endpoints=(GitEndpoint(host=HOST, type="gitlab", actions=(REPO_READ.id,)),),
+        git_endpoints=(
+            GitEndpoint(
+                host=HOST,
+                type="gitlab",
+                allowed_projects=("group/proj",),
+                actions=(REPO_READ.id,),
+            ),
+        ),
         git_credentials={HOST: HostCredentials(read_token="r", write_token="w")},
     )
     respx_router.route(method="GET", url__regex=r".*/repository/branches.*").mock(

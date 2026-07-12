@@ -25,10 +25,31 @@ def _api_guard(cfg) -> ApiGuard:
 
 
 # --- project_allowed (resource allowlist) ---------------------------------------
-def test_project_allowed_matches_reconciled_numeric_id_alias_only(api_guard):
-    api_guard.project_id_aliases = {"81882161"}
-    assert api_guard.project_allowed("81882161")
-    assert not api_guard.project_allowed("99999999")  # unknown id: default-deny
+def test_project_allowed_matches_reconciled_numeric_id_alias_only(api_guard, cfg):
+    host = cfg.git_endpoints[0].host
+    api_guard.project_id_aliases = {host: {"81882161"}}
+    assert api_guard.project_allowed(host, "81882161")
+    assert not api_guard.project_allowed(host, "99999999")  # unknown id: default-deny
+
+
+def test_project_allowed_numeric_id_alias_is_scoped_per_host():
+    """Host A's resolved numeric id must never authorise host B's project —
+    the alias set is keyed per host, not one flat set shared by every host."""
+    host_a, host_b = "gitlab.example", "other-gitlab.example"
+    cfg = Config(
+        git_endpoints=(
+            GitEndpoint(host=host_a, type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host=host_b, type="gitlab"),
+        ),
+        git_credentials={
+            host_a: HostCredentials(read_token="r", write_token="w"),
+            host_b: HostCredentials(read_token="r", write_token="w"),
+        },
+    )
+    guard = ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
+    guard.project_id_aliases = {host_a: {"111"}}
+    assert guard.project_allowed(host_a, "111")
+    assert not guard.project_allowed(host_b, "111")
 
 
 # --- pagination (the bugfix) ---------------------------------------------------
@@ -64,7 +85,7 @@ async def test_reconcile_mrs_paginates_and_filters_by_namespace_author_independe
     ok, resolved_ids = await reconcile_mrs(cfg, guard.router, guard.mr_state)
 
     assert ok is True
-    assert resolved_ids == {"12345"}
+    assert resolved_ids == {HOST: {"12345"}}
     assert guard.mr_state.open_mrs(HOST) == 2  # both pages, namespace-filtered only
 
 
@@ -92,8 +113,8 @@ async def test_reconcile_populates_counters_and_unlocks_own_view(cfg, respx_rout
     assert view.open_mrs == 1
     # The numeric-id alias was resolved and added to the guard's alias set —
     # Config itself is never mutated.
-    assert guard.project_id_aliases == {"12345"}
-    assert guard.project_allowed("12345")
+    assert guard.project_id_aliases == {HOST: {"12345"}}
+    assert guard.project_allowed(HOST, "12345")
 
 
 async def test_reconcile_failure_keeps_own_view_locked(cfg, respx_router):
@@ -138,10 +159,9 @@ async def test_reconcile_mrs_skips_a_closed_endpoint():
     read credential) — only the open endpoint's MRs are listed/counted."""
     open_host, closed_host = "open.example", "closed.example"
     cfg = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=(
-            GitEndpoint(host=open_host, type="gitlab"),
-            GitEndpoint(host=closed_host, type="gitlab"),
+            GitEndpoint(host=open_host, type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host=closed_host, type="gitlab", allowed_projects=("group/proj",)),
         ),
         git_credentials={open_host: HostCredentials(read_token="r", write_token="w")},
     )
@@ -166,7 +186,7 @@ async def test_reconcile_mrs_skips_a_closed_endpoint():
         ok, resolved_ids = await reconcile_mrs(cfg, router, mr_state)
 
     assert ok is True
-    assert resolved_ids == {"1"}
+    assert resolved_ids == {open_host: {"1"}}
     assert mr_state.open_mrs(open_host) == 1
     assert mr_state.open_mrs(closed_host) == 0
     await router.aclose()

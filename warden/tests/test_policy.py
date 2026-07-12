@@ -22,7 +22,7 @@ SHA = "a" * 40
 # Every intent below carries this Host — host_gate is a real kernel gate, so
 # tests need an actually-open endpoint, not just an empty allowlist.
 HOST = "gitlab.example"
-_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
+_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab", allowed_projects=("group/proj",)),)
 _OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
 
 
@@ -36,7 +36,6 @@ def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Deci
 @pytest.fixture
 def cfg() -> Config:
     return Config(
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -47,7 +46,6 @@ def multi_prefix_cfg() -> Config:
     # The branch namespace is the *union* of all configured prefixes.
     return Config(
         branch_prefixes=("claude/", "bot/"),
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -379,9 +377,13 @@ def test_git_tag_and_branch_delete_denied_by_criticality_even_with_every_action_
     # IRREVERSIBLE actions are compiled-in denies: even a host explicitly
     # listing every action id is still denied, criticality before membership.
     cfg = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=(
-            GitEndpoint(host=HOST, type="gitlab", actions=tuple(sorted(git_actions.by_id))),
+            GitEndpoint(
+                host=HOST,
+                type="gitlab",
+                allowed_projects=("group/proj",),
+                actions=tuple(sorted(git_actions.by_id)),
+            ),
         ),
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -432,7 +434,6 @@ def test_closed_host_denies_reads_and_writes():
     are denied — by `host_gate`, before `write_credential_gate` (or any
     guard-specific decide) ever runs."""
     cfg_closed = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials={},  # no tokens at all for this host -> closed
     )
@@ -468,7 +469,6 @@ def test_read_only_host_denies_writes_allows_reads():
     """A host with a read token but no write token is `read-only`: reads
     pass, writes are denied by the per-host `write_credential_gate`."""
     cfg_ro = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials={HOST: HostCredentials(read_token="r")},
     )

@@ -5,6 +5,8 @@ module, not a shared class.
 
 from __future__ import annotations
 
+from typing import Mapping
+
 from ....core.config import Config
 from ....core.model import TokenKind
 from ....core.transport import (
@@ -36,19 +38,20 @@ async def _list_agent_mrs(upstream: Upstream, cfg: Config, pid: str) -> list[tup
 
 async def reconcile_mrs(
     cfg: Config, router: UpstreamRouter, mr_state: MrState
-) -> tuple[bool, set[str]]:
-    """Rebuild agent_mrs and the numeric-id alias set for every allowed
+) -> tuple[bool, Mapping[str, set[str]]]:
+    """Rebuild agent_mrs and the numeric-id alias map for every allowed
     project, on every currently open configured endpoint.
 
-    Iterates cfg.open_hosts, not cfg.effective_hosts. The alias set is a
-    plain union across hosts. Returns (ok, resolved_ids)."""
-    resolved_ids: set[str] = set()
+    Iterates cfg.open_hosts, not cfg.effective_hosts. resolved_ids is keyed
+    by host, so one host's numeric id never aliases another's project.
+    Returns (ok, resolved_ids)."""
+    resolved_ids: dict[str, set[str]] = {}
 
     async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
         pid = project_id(project)
         numeric_id = await _resolve_project_id(upstream, pid)
         mrs = await _list_agent_mrs(upstream, cfg, pid)
-        resolved_ids.add(numeric_id)
+        resolved_ids.setdefault(host, set()).add(numeric_id)
         mr_state.replace_mrs(host, project, mrs)
 
     ok = await for_each_host_project(cfg, router, cfg.open_hosts, "api", _reconcile_one)

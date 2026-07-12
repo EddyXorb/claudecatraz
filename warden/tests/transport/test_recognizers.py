@@ -31,8 +31,11 @@ def _intent(operation: str, service: str = "git-upload-pack", ref_commands=()) -
 
 def _cfg(actions: tuple[str, ...]) -> Config:
     return Config(
-        allowed_projects=("group/proj",),
-        git_endpoints=(GitEndpoint(host=HOST, type="gitlab", actions=actions),),
+        git_endpoints=(
+            GitEndpoint(
+                host=HOST, type="gitlab", actions=actions, allowed_projects=("group/proj",)
+            ),
+        ),
         git_credentials={HOST: HostCredentials(read_token="r", write_token="w")},
     )
 

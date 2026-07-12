@@ -126,7 +126,7 @@ def full_decide(
     state: StateView,
     cfg: Config,
     effective_actions: Optional[frozenset[str]] = None,
-    project_allowed: Optional[Callable[[str], bool]] = None,
+    project_allowed: Optional[Callable[[str, str], bool]] = None,
 ) -> Decision:
     """Compose kernel gates with guard-specific decide for callers outside Guard.handle.
 
@@ -137,7 +137,7 @@ def full_decide(
         effective_actions = frozenset(cfg.effective_actions(intent.host))
     _, recognized = _recognize(intent)
     d = kernel_gates(
-        intent, cfg, project_allowed or cfg.project_allowed, recognized, effective_actions
+        intent, cfg, project_allowed or cfg.git_project_allowed, recognized, effective_actions
     )
     if d is None:
         d = decide(intent, state, cfg, effective_actions)

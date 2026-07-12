@@ -1,7 +1,7 @@
 """config.py: fail-closed env validation + allowlist matching.
 
 Asserts refusal to start when misconfigured, plus the prefix-confusion
-guard in project_allowed. Policy tunables come from warden.toml only;
+guard in git_project_allowed. Policy tunables come from warden.toml only;
 access is derived per host from which tokens are present."""
 
 from __future__ import annotations
@@ -12,45 +12,54 @@ from warden.core.config import Config, ConfigError, GitEndpoint, GitRules, HostC
 from warden.core.config_load import _parse_token_file, from_env
 from warden.guards.git.actions import DEFAULT as GIT_DEFAULT
 
-
-# --- project_allowed -----------------------------------------------------------
-def test_project_allowed_exact_match_and_git_suffix():
-    cfg = Config(allowed_projects=("group/proj",))
-    assert cfg.project_allowed("group/proj")
-    assert cfg.project_allowed("group/proj.git")  # .git stripped
-    assert cfg.project_allowed("/group/proj/")  # surrounding slashes ignored
+_HOST = "gitlab.example"
 
 
-def test_project_allowed_rejects_prefix_confusion():
+def _project_cfg(*allowed: str) -> Config:
+    return Config(git_endpoints=(GitEndpoint(host=_HOST, type="gitlab", allowed_projects=allowed),))
+
+
+# --- git_project_allowed ---------------------------------------------------------
+def test_git_project_allowed_exact_match_and_git_suffix():
+    cfg = _project_cfg("group/proj")
+    assert cfg.git_project_allowed(_HOST, "group/proj")
+    assert cfg.git_project_allowed(_HOST, "group/proj.git")  # .git stripped
+    assert cfg.git_project_allowed(_HOST, "/group/proj/")  # surrounding slashes ignored
+
+
+def test_git_project_allowed_rejects_prefix_confusion():
     # "group/proj2" must NOT be allowed by an allowlist entry "group/proj".
-    cfg = Config(allowed_projects=("group/proj",))
-    assert not cfg.project_allowed("group/proj2")
-    assert not cfg.project_allowed("other/secret")
+    cfg = _project_cfg("group/proj")
+    assert not cfg.git_project_allowed(_HOST, "group/proj2")
+    assert not cfg.git_project_allowed(_HOST, "other/secret")
 
 
-def test_project_allowed_rejects_subpath():
+def test_git_project_allowed_rejects_subpath():
     # B4: the allowlist names concrete projects, never group/project prefixes —
     # "group/proj/sub" must NOT be allowed by an allowlist entry "group/proj".
-    cfg = Config(allowed_projects=("group/proj",))
-    assert not cfg.project_allowed("group/proj/sub")
+    cfg = _project_cfg("group/proj")
+    assert not cfg.git_project_allowed(_HOST, "group/proj/sub")
 
 
-def test_project_allowed_empty_allowlist_denies_all():
-    assert not Config(allowed_projects=()).project_allowed("group/proj")
+def test_git_project_allowed_empty_allowlist_denies_all():
+    assert not _project_cfg().git_project_allowed(_HOST, "group/proj")
 
 
 # --- from_env: happy path -------------------------------------------------------
 def test_from_env_parses_projects_and_quota_from_toml(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('allowed_projects = ["group/proj", "group/two"]\nmax_open_mrs = 3\n')
+    toml.write_text(
+        "max_open_mrs = 3\n"
+        '[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n'
+        'allowed_projects = ["group/proj", "group/two"]\n'
+    )
     cfg = from_env({}, strict=True, toml_path=str(toml))
-    assert cfg.allowed_projects == ("group/proj", "group/two")
+    assert cfg.endpoint_for("gitlab.example").allowed_projects == ("group/proj", "group/two")
     assert cfg.max_open_mrs == 3
 
 
 def test_from_env_non_strict_allows_partial_config():
     cfg = from_env({}, strict=False)  # tests build partial configs this way
-    assert cfg.allowed_projects == ()
     assert cfg.git_endpoints == ()
 
 
@@ -63,16 +72,14 @@ def test_empty_config_boots_without_aborting():
     *degrade*, not fail-stop) and denies every git operation via `host_gate`."""
     cfg = from_env({}, strict=True)
     assert cfg.git_endpoints == ()
-    assert cfg.allowed_projects == ()
     assert not cfg.host_allowed("gitlab.com")
 
 
 def test_empty_allowlist_boots_and_denies():
     """An empty allowlist does NOT abort: the warden boots (dev-env runs
-    offline) and project_allowed() denies every project."""
+    offline) and git_project_allowed() denies every project."""
     cfg = from_env({}, strict=True)
-    assert cfg.allowed_projects == ()
-    assert not cfg.project_allowed("group/proj")
+    assert not cfg.git_project_allowed("gitlab.com", "group/proj")
 
 
 def test_non_positive_quota_aborts_startup(tmp_path):
@@ -153,6 +160,7 @@ _TOML = (
     "max_open_mrs = 7\n"
     "max_open_branches = 3\n"
     "max_writes_per_hour = 99\n"
+    '[[git.endpoint]]\nhost = "gitlab.example"\ntype = "gitlab"\n'
     'allowed_projects = ["group/a", "group/b"]\n'
 )
 
@@ -163,7 +171,7 @@ def test_tunables_read_from_toml(tmp_path):
     cfg = from_env({}, toml_path=str(toml))
     assert cfg.branch_prefixes == ("claude/",)
     assert (cfg.max_open_mrs, cfg.max_open_branches, cfg.max_writes_per_hour) == (7, 3, 99)
-    assert cfg.allowed_projects == ("group/a", "group/b")
+    assert cfg.endpoint_for("gitlab.example").allowed_projects == ("group/a", "group/b")
 
 
 def test_policy_env_vars_have_no_effect(tmp_path):
@@ -184,12 +192,15 @@ def test_policy_env_vars_have_no_effect(tmp_path):
     )
     assert cfg.branch_prefixes == ("claude/",)  # toml wins, env ignored
     assert cfg.max_open_mrs == 7  # toml wins, env ignored
-    assert cfg.allowed_projects == ("group/a", "group/b")  # toml wins, env ignored
+    assert cfg.endpoint_for("gitlab.example").allowed_projects == (
+        "group/a",
+        "group/b",
+    )  # toml wins, env ignored
 
 
 def test_missing_toml_uses_builtin_defaults(tmp_path):
     cfg = from_env({}, toml_path=str(tmp_path / "absent.toml"))
-    assert cfg.allowed_projects == ()
+    assert cfg.git_endpoints == ()
     assert cfg.max_open_mrs == 5  # built-in default
 
 
