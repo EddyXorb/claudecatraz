@@ -15,7 +15,10 @@ actions = [
 # Domain-default quotas + branch namespace for every endpoint; a host narrows
 # any of these under its own [[git.endpoint]] `rules = { ... }` (see README).
 [git.rules]
-# branch_prefixes = ["claude/"]
+branch_prefixes     = ["claude/"]        # branches pushable only under these prefixes
+max_open_mrs        = 5                   # max simultaneously open MRs
+max_open_branches   = 10                  # max simultaneously existing branches
+max_writes_per_hour = 60                  # max write actions per hour
 
 # Which hosts the agent may reach: one [[git.endpoint]] per host (type =
 # "gitlab"|"plain"). `catraz init` offers to add one; none ships by default (no
