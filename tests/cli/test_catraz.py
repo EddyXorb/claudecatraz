@@ -91,7 +91,9 @@ def test_set_env_values_appends_absent_key(tmp_path: Path) -> None:
 # in warden.toml) ────────────────────────────────────────────────────────
 
 
-def _project(tmp_path: Path, toml_projects: list[str] | None = None, host: str = "gitlab.com") -> None:
+def _project(
+    tmp_path: Path, toml_projects: list[str] | None = None, host: str = "gitlab.com"
+) -> None:
     config = tmp_path / ".catraz" / "config"
     config.mkdir(parents=True, exist_ok=True)
     if toml_projects is not None:

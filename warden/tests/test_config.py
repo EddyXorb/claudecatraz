@@ -698,9 +698,7 @@ def test_stale_top_level_max_quota_aborts_startup(tmp_path):
 def test_stale_top_level_branch_prefixes_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/"]\n')
-    with pytest.raises(
-        ConfigError, match=r"top-level 'branch_prefixes' moved to \[git\.rules\]"
-    ):
+    with pytest.raises(ConfigError, match=r"top-level 'branch_prefixes' moved to \[git\.rules\]"):
         from_env({}, strict=True, toml_path=str(toml))
 
 

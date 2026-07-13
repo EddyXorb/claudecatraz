@@ -17,9 +17,7 @@ from ....core.transport import (
 from .state import BranchState
 
 
-async def _list_agent_branches(
-    upstream: Upstream, cfg: Config, host: str, pid: str
-) -> list[str]:
+async def _list_agent_branches(upstream: Upstream, cfg: Config, host: str, pid: str) -> list[str]:
     branches = await get_paginated(upstream, f"projects/{pid}/repository/branches")
     return [b["name"] for b in branches if cfg.in_branch_namespace(host, b.get("name", ""))]
 

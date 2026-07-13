@@ -241,7 +241,7 @@ def set_endpoint_allowed_projects(path: Path, host: str, values: list[str]) -> N
     target = normalize_host(host)
     serialized = _json.dumps(values)
     key_pat = re.compile(
-        r'^(?P<pre>\s*allowed_projects\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$', re.M
+        r"^(?P<pre>\s*allowed_projects\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.M
     )
     headers = list(_ENDPOINT_HEADER_RE.finditer(text))
     for i, m in enumerate(headers):
@@ -252,7 +252,9 @@ def set_endpoint_allowed_projects(path: Path, host: str, values: list[str]) -> N
         if not host_m or normalize_host(host_m.group(1)) != target:
             continue
         if key_pat.search(block):
-            new_block = key_pat.sub(lambda mm: mm.group("pre") + serialized + mm.group("post"), block)
+            new_block = key_pat.sub(
+                lambda mm: mm.group("pre") + serialized + mm.group("post"), block
+            )
         else:
             new_block = block.rstrip("\n") + f"\nallowed_projects = {serialized}\n"
         path.write_text(text[:block_start] + new_block + text[block_end:], encoding="utf-8")
@@ -271,7 +273,7 @@ def set_git_rules_branch_prefixes(path: Path, values: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     serialized = _json.dumps(values)
     key_pat = re.compile(
-        r'^(?P<pre>\s*branch_prefixes\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$', re.M
+        r"^(?P<pre>\s*branch_prefixes\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.M
     )
     m = _GIT_RULES_HEADER_RE.search(text)
     if not m:
