@@ -114,6 +114,9 @@ services:
     environment:
       - AUTH_MODE=${AUTH_MODE}
       - CLAUDE_CREDENTIALS_MODE=${CLAUDE_CREDENTIALS_MODE:-}
+      # Whose the bind-mount ownership is. On `windows` it is synthetic and the
+      # container's to repair; the posix default leaves the host user's files alone.
+      - CATRAZ_HOST_OS=${CATRAZ_HOST_OS:-posix}
       - AGENT_HOME=/home/dev/agent-home
       # Without this, Claude writes .claude.json beside the home dir instead of
       # inside it, so it would fall outside the persistent bind and be lost.

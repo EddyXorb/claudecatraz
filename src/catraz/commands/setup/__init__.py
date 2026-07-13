@@ -2,13 +2,13 @@
 
 import argparse
 import json
-import os
 import shutil
 from pathlib import Path
 
 from catraz.doctor import _doctor_fix, print_findings, run_doctor
 from catraz.envfile import load_env, set_env_values
 from catraz.errors import CliError, EXIT_CONFIG, EXIT_DOCTOR, EXIT_OK
+from catraz.hostfs import host_uid
 from catraz.ui import Out
 
 from ._secrets import _ensure_secret, _write_secret_value  # noqa: F401
@@ -75,8 +75,11 @@ def _init_seed_env(
         out.info("• created .catraz/.env from .env.example")
     env = load_env(env_path)
     updates: dict[str, str] = {}
-    if env.get("DEV_UID") != str(os.getuid()):
-        updates["DEV_UID"] = str(os.getuid())
+    # Without a host uid to match, the seeded default stands: deriving a value
+    # would only invent a way for DEV_UID to drift between runs.
+    uid = host_uid()
+    if uid is not None and env.get("DEV_UID") != str(uid):
+        updates["DEV_UID"] = str(uid)
     return env, updates
 
 
