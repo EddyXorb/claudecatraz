@@ -19,7 +19,7 @@ branch_prefixes     = ["claude/"]        # branches pushable only under these pr
 max_open_mrs        = 5                   # max simultaneously open MRs
 max_open_branches   = 10                  # max simultaneously existing branches
 max_writes_per_hour = 60                  # max write actions per hour
-max_push_bytes      = 10485760            # max bytes per push (10 MiB)
+max_push_bytes      = 52428800            # max bytes per push (50 MiB)
 
 # Which hosts the agent may reach: one [[git.endpoint]] per host (type =
 # "gitlab"|"plain"). `catraz init` offers to add one; none ships by default (no
