@@ -24,6 +24,10 @@ AGENT_REGISTRY: dict[str, str] = {
     "claude": "claude",
 }
 
+# Profiles shipped by this codebase, not derived from AGENT_REGISTRY — a fork
+# that registers an additional profile there stays out of this set.
+SHIPPED_PROFILES: frozenset[str] = frozenset({"claude"})
+
 DEFAULT_AGENT_PROFILE = "claude"
 
 # Valid values of `.catraz/.env`'s CLAUDE_CREDENTIALS_MODE override, mirroring
