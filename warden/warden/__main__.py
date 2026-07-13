@@ -62,12 +62,12 @@ async def _serve() -> None:
     cfg = from_env()
     configure_logging(cfg.log_path)
 
-    if cfg.git_endpoints and not cfg.allowed_projects:
-        log.warning(
-            "allowed_projects is empty — ALL GitLab operations will be denied "
-            "(R-rules) until a project is added to warden.toml. The dev-env "
-            "still starts for offline work."
-        )
+    for endpoint in cfg.git_endpoints:
+        if not endpoint.allowed_projects:
+            log.warning(
+                "endpoint %s: allowed_projects empty — all ops on this host denied",
+                endpoint.host,
+            )
     state = State(cfg.state_db_path)
     audit = AuditLog(cfg.audit_log_path)
     audit.start()

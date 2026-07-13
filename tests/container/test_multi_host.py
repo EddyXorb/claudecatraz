@@ -40,13 +40,8 @@ HOST_UNLISTED = "unlisted-forge.test"  # never in warden.toml at all
 PROJECT = "acme/demo"
 
 _WARDEN_TOML = f"""\
-# Top-level (global) project allowlist: the request-path project gate for BOTH
-# guards is `cfg.project_allowed` (guards/git/policy.py, core/guard.py) which
-# reads this global list — the per-[[git.endpoint]] `allowed_projects` below is
-# a config surface but is not (yet) what the git/REST project gate checks.
-# Both must name the project for a request to clear the project gate and reach
-# the upstream.
-allowed_projects = ["{PROJECT}"]
+# Each host's project gate checks only its own [[git.endpoint]] allowed_projects
+# — no global allowlist exists.
 
 [git.rules]
 branch_prefixes = ["claude/"]

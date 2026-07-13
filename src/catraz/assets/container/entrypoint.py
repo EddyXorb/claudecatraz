@@ -100,21 +100,19 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
 
 
 def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:
-    """Best-effort `branch_prefixes` (or the scalar `branch_prefix`)
-    read from the mounted warden.toml, for the rendered instructions'
-    example only. A missing/unreadable/malformed file degrades to the
-    `claude/` default rather than crashing the entrypoint before the agent
-    starts."""
+    """Best-effort `[git.rules].branch_prefixes` read from the mounted
+    warden.toml, for the rendered instructions' example only. A missing/
+    unreadable/malformed file degrades to the `claude/` default rather than
+    crashing the entrypoint before the agent starts."""
     try:
         data: dict[str, Any] = tomllib.loads(warden_toml_path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
         return ("claude/",)
-    val = data.get("branch_prefixes")
+    git = data.get("git")
+    rules = git.get("rules") if isinstance(git, dict) else None
+    val = rules.get("branch_prefixes") if isinstance(rules, dict) else None
     if isinstance(val, list) and val and all(isinstance(p, str) for p in val):
         return tuple(val)
-    scalar = data.get("branch_prefix")
-    if isinstance(scalar, str) and scalar:
-        return (scalar,)
     return ("claude/",)
 
 

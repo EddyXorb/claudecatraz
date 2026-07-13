@@ -201,8 +201,9 @@ _CL_HOST = "gitlab.example"
 
 def _content_line_cfg() -> Config:
     return Config(
-        allowed_projects=("group/proj",),
-        git_endpoints=(GitEndpoint(host=_CL_HOST, type="gitlab"),),
+        git_endpoints=(
+            GitEndpoint(host=_CL_HOST, type="gitlab", allowed_projects=("group/proj",)),
+        ),
         git_credentials={_CL_HOST: HostCredentials(read_token="r", write_token="w")},
     )
 
@@ -264,7 +265,7 @@ async def test_push_batch_n_creates_against_quota_of_n_minus_1_rejected(
     # the batch is rejected only because it would exceed max_open_branches.
     host = cfg.git_endpoints[0].host
     bs = BranchState(state.store)
-    for i in range(cfg.max_open_branches - 1):
+    for i in range(cfg.effective_rules(host).max_open_branches - 1):
         bs.add_branch(host, "group/proj", f"claude/existing-{i}")
 
     body = (

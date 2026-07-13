@@ -57,7 +57,12 @@ def action_gate(intent: GitIntent, cfg: Config) -> Optional[Decision]:
 
 
 def check_ref(
-    cmd: RefCommand, state: StateView, cfg: Config, max_open_branches: int, max_writes_per_hour: int
+    cmd: RefCommand,
+    state: StateView,
+    cfg: Config,
+    host: str,
+    max_open_branches: int,
+    max_writes_per_hour: int,
 ) -> Decision:
     """Branch-namespace and quota checks for one ref-command already cleared
     by action_gate — a tag or delete never reaches here.
@@ -65,8 +70,9 @@ def check_ref(
     max_open_branches/max_writes_per_hour are the endpoint's own resolved
     ceilings; stateful quotas are per-endpoint, never a global Config field."""
     ref = cmd.ref.removeprefix("refs/heads/")
-    if not cfg.in_branch_namespace(ref):  # branch namespace
-        return Decision(False, f"branch {ref!r} outside allowed prefixes {cfg.branch_prefixes!r}")
+    if not cfg.in_branch_namespace(host, ref):  # branch namespace
+        prefixes = cfg.effective_rules(host).branch_prefixes
+        return Decision(False, f"branch {ref!r} outside allowed prefixes {prefixes!r}")
     if state.locked:  # Fail-safe
         return Decision(False, "state locked (fail-safe) — reconcile pending")
     if cmd.is_create and state.open_branches >= max_open_branches:  # quota
@@ -84,16 +90,20 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
     """
     if not intent.ref_commands:
         return Decision(False, "no ref commands in push")
-    if intent.push_bytes is not None and intent.push_bytes > cfg.max_push_bytes:
-        return Decision(
-            False,
-            f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({cfg.max_push_bytes})",
-        )
     rules = cfg.effective_rules(intent.host)
     max_open_branches, max_writes_per_hour = rules.max_open_branches, rules.max_writes_per_hour
+    max_push_bytes = rules.max_push_bytes
     assert max_open_branches is not None and max_writes_per_hour is not None, (
         "effective_rules always resolves every field to a concrete built-in default"
     )
+    assert max_push_bytes is not None, (
+        "effective_rules always resolves every field to a concrete built-in default"
+    )
+    if intent.push_bytes is not None and intent.push_bytes > max_push_bytes:
+        return Decision(
+            False,
+            f"push body ({intent.push_bytes} bytes) exceeds max_push_bytes ({max_push_bytes})",
+        )
     pending_branches = 0
     pending_writes = 0
     for cmd in intent.ref_commands:
@@ -102,7 +112,7 @@ def decide(intent: GitIntent, state: StateView, cfg: Config) -> Decision:
             open_branches=state.open_branches + pending_branches,
             writes_last_hour=state.writes_last_hour + pending_writes,
         )
-        d = check_ref(cmd, view, cfg, max_open_branches, max_writes_per_hour)
+        d = check_ref(cmd, view, cfg, intent.host, max_open_branches, max_writes_per_hour)
         if not d.allow:
             return d
         pending_writes += 1
@@ -115,7 +125,7 @@ def full_decide(
     intent: GitIntent,
     state: StateView,
     cfg: Config,
-    project_allowed: Optional[Callable[[str], bool]] = None,
+    project_allowed: Optional[Callable[[str, str], bool]] = None,
 ) -> Decision:
     """Compose the kernel gates with this guard's pure decide for callers
     outside Guard.handle (tests, and any offline "what would happen to
@@ -123,7 +133,7 @@ def full_decide(
     this module's slice.
     """
     recognized = recognizers.recognize(intent)
-    d = kernel_gates(intent, cfg, project_allowed or cfg.project_allowed, recognized)
+    d = kernel_gates(intent, cfg, project_allowed or cfg.git_project_allowed, recognized)
     if d is None:
         d = decide(intent, state, cfg)
     return d

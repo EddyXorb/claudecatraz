@@ -253,8 +253,8 @@ async def for_each_host_project(
     label: str,
     fn: Callable[[Upstream, str, str], Awaitable[None]],
 ) -> bool:
-    """Shared fail-safe reconcile loop: iterate hosts times every allowed
-    project, calling fn(upstream, host, project) for each combination.
+    """Shared fail-safe reconcile loop: iterate hosts times each host's own
+    allowed project, calling fn(upstream, host, project) for each combination.
 
     A combination whose fn raises is logged and skipped, never aborting the
     loop. Returns True only if every combination succeeded; False tells the
@@ -264,7 +264,9 @@ async def for_each_host_project(
     ok = True
     for host in hosts:
         upstream = router.for_host(host)
-        for project in cfg.allowed_projects:
+        endpoint = cfg.endpoint_for(host)
+        projects = endpoint.allowed_projects if endpoint is not None else ()
+        for project in projects:
             try:
                 await fn(upstream, host, project)
             except Exception as exc:  # keep state locked on any failure

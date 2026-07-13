@@ -53,6 +53,6 @@ class MrNamespace:
             return None
         mr = resp.json()
         source = mr.get("source_branch", "") or ""
-        ok = self._cfg.in_branch_namespace(source)
+        ok = self._cfg.in_branch_namespace(canonical, source)
         self._cache[key] = (ok, self._clock() + self._ttl)
         return ok

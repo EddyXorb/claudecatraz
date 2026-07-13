@@ -201,14 +201,20 @@ def cmd_sync(root: Path, args: argparse.Namespace, out: Out) -> int:
 def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.policy import (
         _read_toml_allowed_projects,
+        first_endpoint_host,
         merge_allowed,
-        set_toml_list,
+        set_endpoint_allowed_projects,
         validate_project,
     )
 
     warden_toml = root / ".catraz" / "config" / "warden.toml"
     if not warden_toml.exists():
         raise CliError("not set up — run catraz init", EXIT_CONFIG)
+
+    host = first_endpoint_host(warden_toml)
+    if not host:
+        out.err("no [[git.endpoint]] configured — run catraz init to add one")
+        return EXIT_CONFIG
 
     valid: list[str] = []
     for p in args.projects:
@@ -221,13 +227,13 @@ def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
         out.err("nothing to add")
         return EXIT_CONFIG
 
-    existing = _read_toml_allowed_projects(warden_toml)
+    existing = _read_toml_allowed_projects(warden_toml, host)
     merged = merge_allowed(existing, valid)
     if merged == [x for x in existing if x]:
         out.info("already allowed — nothing to add")
         return EXIT_OK
 
-    set_toml_list(warden_toml, "allowed_projects", merged)
-    out.info(out.green(f"• allowed_projects now: {', '.join(merged)}"))
+    set_endpoint_allowed_projects(warden_toml, host, merged)
+    out.info(out.green(f"• {host}: allowed_projects now: {', '.join(merged)}"))
     out.info("run `catraz reload` to apply to a running stack")
     return EXIT_OK

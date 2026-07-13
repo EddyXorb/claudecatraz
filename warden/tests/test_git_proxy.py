@@ -11,7 +11,7 @@ import httpx
 from warden.app import create_app
 from warden.context import build_context
 from warden.core.audit import AuditLog
-from warden.core.config import Config, GitEndpoint, HostCredentials
+from warden.core.config import Config, GitEndpoint, GitRules, HostCredentials
 from warden.core.state import State
 from warden.guards.git.actions import REPO_BRANCH_CREATE, REPO_BRANCH_PUSH, REPO_READ
 from warden.guards.git.transport.pktline import FLUSH, pkt_line
@@ -138,7 +138,7 @@ def _client_with(cfg: Config) -> httpx.AsyncClient:
 
 
 async def test_push_over_max_push_bytes_rejected(cfg, respx_router):
-    small_cfg = replace(cfg, max_push_bytes=200)
+    small_cfg = replace(cfg, git_rules=GitRules(max_push_bytes=200))
     async with _client_with(small_cfg) as c:
         body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")], pack=b"PACK" + b"\x00" * 500)
         assert len(body) > 200
@@ -148,7 +148,7 @@ async def test_push_over_max_push_bytes_rejected(cfg, respx_router):
 
 
 async def test_push_under_max_push_bytes_is_forwarded(cfg, respx_router):
-    small_cfg = replace(cfg, max_push_bytes=10_000)
+    small_cfg = replace(cfg, git_rules=GitRules(max_push_bytes=10_000))
     route = respx_router.route(method="POST", url__regex=r".*/git-receive-pack$").mock(
         return_value=httpx.Response(
             200, content=pkt_line(b"\x01" + pkt_line(b"unpack ok\n") + FLUSH)
@@ -181,10 +181,10 @@ def _access_client(access: str) -> httpx.AsyncClient:
             "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
         }
     cfg = Config(
-        branch_prefixes=("claude/",),
-        allowed_projects=("group/proj",),
         state_db_path=":memory:",
-        git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),),
+        git_endpoints=(
+            GitEndpoint(host="gitlab.example", type="gitlab", allowed_projects=("group/proj",)),
+        ),
         git_credentials=creds,
     )
     state = State(":memory:")
@@ -297,10 +297,15 @@ async def test_read_only_advertise_upload_pack_passes_through(respx_router):
 
 def _client_with_actions(actions: tuple[str, ...]) -> httpx.AsyncClient:
     cfg = Config(
-        branch_prefixes=("claude/",),
-        allowed_projects=("group/proj",),
         state_db_path=":memory:",
-        git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab", actions=actions),),
+        git_endpoints=(
+            GitEndpoint(
+                host="gitlab.example",
+                type="gitlab",
+                allowed_projects=("group/proj",),
+                actions=actions,
+            ),
+        ),
         git_credentials={
             "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN")
         },

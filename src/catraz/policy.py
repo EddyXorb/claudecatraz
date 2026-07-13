@@ -1,9 +1,9 @@
-"""validate_project, _resolve_allowed_projects, _read_toml_allowed_projects."""
+"""validate_project, _resolve_allowed_projects, set_endpoint_allowed_projects,
+set_git_rules_branch_prefixes."""
 
 import re
 import urllib.parse
 from pathlib import Path
-from typing import cast
 
 
 def validate_project(p: str) -> str | None:
@@ -22,25 +22,48 @@ def validate_project(p: str) -> str | None:
     return None
 
 
-def _resolve_allowed_projects(root: Path) -> tuple[list[str], str]:
-    """Resolve allowed_projects; the single source is warden.toml."""
+def _resolve_allowed_projects(root: Path, host: str) -> tuple[list[str], str]:
+    """Resolve host's allowed_projects; the single source is warden.toml."""
     toml = root / ".catraz" / "config" / "warden.toml"
     if not toml.exists():
         return [], "no warden.toml"
-    return _read_toml_allowed_projects(toml), "warden.toml"
+    return _read_toml_allowed_projects(toml, host), "warden.toml"
 
 
-def _read_toml_allowed_projects(path: Path) -> list[str]:
-    text = path.read_text()
+def _read_toml_allowed_projects(path: Path, host: str) -> list[str]:
+    """allowed_projects on the [[git.endpoint]] matching host, or [] if no
+    such endpoint exists or the key is absent."""
+    import tomllib
+
     try:
-        import tomllib  # py3.11+, read-only — we never write TOML
-
-        return cast(list[str], tomllib.loads(text).get("allowed_projects", []))
-    except ModuleNotFoundError:
-        m = re.search(r"allowed_projects\s*=\s*\[(.*?)\]", text, re.S)
-        if not m:
+        git = tomllib.loads(path.read_text(encoding="utf-8")).get("git", {})
+    except (tomllib.TOMLDecodeError, OSError):
+        return []
+    endpoints = git.get("endpoint", []) if isinstance(git, dict) else []
+    target = normalize_host(host)
+    for endpoint in endpoints if isinstance(endpoints, list) else []:
+        if isinstance(endpoint, dict) and normalize_host(str(endpoint.get("host", ""))) == target:
+            projects = endpoint.get("allowed_projects", [])
+            if isinstance(projects, list):
+                return [p for p in projects if isinstance(p, str)]
             return []
-        return re.findall(r'"([^"]+)"', m.group(1))
+    return []
+
+
+def first_endpoint_host(path: Path) -> str | None:
+    """Host of the first configured [[git.endpoint]], or None if none exists."""
+    import tomllib
+
+    try:
+        git = tomllib.loads(path.read_text(encoding="utf-8")).get("git", {})
+    except (tomllib.TOMLDecodeError, OSError):
+        return None
+    endpoints = git.get("endpoint", []) if isinstance(git, dict) else []
+    for endpoint in endpoints if isinstance(endpoints, list) else []:
+        host = endpoint.get("host") if isinstance(endpoint, dict) else None
+        if isinstance(host, str) and host.strip():
+            return host.strip()
+    return None
 
 
 def _host_of(s: str) -> str:
@@ -203,3 +226,67 @@ def ensure_git_endpoint(path: Path, host: str, endpoint_type: str = "gitlab") ->
             return
     block = f'\n[[git.endpoint]]\nhost = "{host}"\ntype = "{endpoint_type}"\n'
     path.write_text(text.rstrip("\n") + "\n" + block, encoding="utf-8")
+
+
+_ENDPOINT_HEADER_RE = re.compile(r"^\[\[git\.endpoint\]\]\s*$", re.M)
+
+
+def set_endpoint_allowed_projects(path: Path, host: str, values: list[str]) -> None:
+    """Set `allowed_projects` inside the `[[git.endpoint]]` table for *host*,
+    touching only that block and preserving everything else. The endpoint
+    must already exist (see ensure_git_endpoint)."""
+    import json as _json
+
+    text = path.read_text(encoding="utf-8")
+    target = normalize_host(host)
+    serialized = _json.dumps(values)
+    key_pat = re.compile(
+        r"^(?P<pre>\s*allowed_projects\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.M
+    )
+    headers = list(_ENDPOINT_HEADER_RE.finditer(text))
+    for i, m in enumerate(headers):
+        block_start = m.end()
+        block_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        block = text[block_start:block_end]
+        host_m = re.search(r'^\s*host\s*=\s*"([^"]*)"', block, re.M)
+        if not host_m or normalize_host(host_m.group(1)) != target:
+            continue
+        if key_pat.search(block):
+            new_block = key_pat.sub(
+                lambda mm: mm.group("pre") + serialized + mm.group("post"), block
+            )
+        else:
+            new_block = block.rstrip("\n") + f"\nallowed_projects = {serialized}\n"
+        path.write_text(text[:block_start] + new_block + text[block_end:], encoding="utf-8")
+        return
+    raise ValueError(f"no [[git.endpoint]] for host {host!r} in {path}")
+
+
+_GIT_RULES_HEADER_RE = re.compile(r"^\[git\.rules\]\s*$", re.M)
+
+
+def set_git_rules_branch_prefixes(path: Path, values: list[str]) -> None:
+    """Set `branch_prefixes` inside `[git.rules]`, appending the table if
+    absent; preserves everything else in the file."""
+    import json as _json
+
+    text = path.read_text(encoding="utf-8")
+    serialized = _json.dumps(values)
+    key_pat = re.compile(
+        r"^(?P<pre>\s*branch_prefixes\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.M
+    )
+    m = _GIT_RULES_HEADER_RE.search(text)
+    if not m:
+        new_text = text.rstrip("\n") + f"\n\n[git.rules]\nbranch_prefixes = {serialized}\n"
+        path.write_text(new_text, encoding="utf-8")
+        return
+    block_start = m.end()
+    rest = text[block_start:]
+    next_header = re.search(r"^\[", rest, re.M)
+    block_end = block_start + next_header.start() if next_header else len(text)
+    block = text[block_start:block_end]
+    if key_pat.search(block):
+        new_block = key_pat.sub(lambda mm: mm.group("pre") + serialized + mm.group("post"), block)
+    else:
+        new_block = block.rstrip("\n") + f"\nbranch_prefixes = {serialized}\n"
+    path.write_text(text[:block_start] + new_block + text[block_end:], encoding="utf-8")

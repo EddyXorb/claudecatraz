@@ -290,10 +290,20 @@ def _read_git_actions_default(root: Path) -> tuple[str, ...] | None:
     return _parse_actions_list(git.get("actions"))
 
 
+def _parse_projects_list(raw: object) -> tuple[str, ...]:
+    """Best-effort parse of an allowed_projects = [...] TOML value into a
+    tuple of strings; absent or malformed degrades to (), matching the
+    Warden's "missing key = empty allowlist, fail-closed" default."""
+    if not isinstance(raw, list) or not all(isinstance(p, str) for p in raw):
+        return ()
+    return tuple(raw)
+
+
 def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
     """[[git.endpoint]] entries from .catraz/config/warden.toml as {"host",
-    "type", "actions"} dicts. Best-effort: malformed/missing input yields []
-    rather than raising — the Warden is the fail-closed side, doctor only warns."""
+    "type", "actions", "allowed_projects"} dicts. Best-effort: malformed/missing
+    input yields [] rather than raising — the Warden is the fail-closed side,
+    doctor only warns."""
     git = _load_git_table(root)
     if git is None:
         return []
@@ -313,6 +323,7 @@ def _read_git_endpoints(root: Path) -> list[dict[str, Any]]:
                 "host": host.strip(),
                 "type": endpoint_type if isinstance(endpoint_type, str) else "",
                 "actions": _parse_actions_list(raw.get("actions")),
+                "allowed_projects": _parse_projects_list(raw.get("allowed_projects")),
             }
         )
     return endpoints
@@ -517,35 +528,40 @@ def _probe_write_user_read(host: str, base: str, token: str, f: Findings) -> Non
 
 
 def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
-    """Fast pre-check of allowed_projects. Authoritative validation stays the
-    warden reconcile — this just turns the obvious traps loud before start."""
-    if not _read_git_endpoints(root):
+    """Fast per-endpoint pre-check of allowed_projects. Authoritative validation
+    stays the warden reconcile — this just turns the obvious traps loud before
+    start; each host's allowlist is checked in isolation, never merged with
+    another host's."""
+    from catraz.policy import validate_project
+
+    endpoints = _read_git_endpoints(root)
+    if not endpoints:
         f.ok("policy", "no [[git.endpoint]] configured — allowlist not required")
         return
-    from catraz.policy import _resolve_allowed_projects, validate_project
-
-    resolved, source = _resolve_allowed_projects(root)
-    if not resolved:
-        f.warn(
-            "policy",
-            f"allowed_projects empty (source: {source})",
-            "stack still starts (offline work OK); every GitLab op is denied "
-            "until you add a project",
-        )
-        return
-    bad = []
-    for p in resolved:
-        reason = validate_project(p)
-        if reason:
-            bad.append(f"{p!r} ({reason})")
-    if bad:
-        f.bad(
-            "policy",
-            "invalid allowed_projects: " + "; ".join(bad),
-            "each entry must be a full project path, no wildcards/leaf/group-prefix",
-        )
-    else:
-        f.ok("policy", f"{len(resolved)} allowed project(s) [{source}]")
+    for endpoint in endpoints:
+        host = endpoint["host"]
+        resolved = endpoint["allowed_projects"]
+        if not resolved:
+            f.warn(
+                "policy",
+                f"{host}: allowed_projects empty",
+                "stack still starts (offline work OK); every GitLab op is "
+                "denied on this host until you add a project",
+            )
+            continue
+        bad = []
+        for p in resolved:
+            reason = validate_project(p)
+            if reason:
+                bad.append(f"{p!r} ({reason})")
+        if bad:
+            f.bad(
+                "policy",
+                f"{host}: invalid allowed_projects: " + "; ".join(bad),
+                "each entry must be a full project path, no wildcards/leaf/group-prefix",
+            )
+        else:
+            f.ok("policy", f"{host}: {len(resolved)} allowed project(s)")
 
 
 def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:

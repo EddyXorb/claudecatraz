@@ -241,7 +241,9 @@ class GitGuard(Guard[GitIntent]):
         for cmd in intent.ref_commands:
             d = policy.ref_action_gate(cmd, intent.host, self.cfg)
             if d is None:
-                d = policy.check_ref(cmd, state, self.cfg, max_open_branches, max_writes_per_hour)
+                d = policy.check_ref(
+                    cmd, state, self.cfg, intent.host, max_open_branches, max_writes_per_hour
+                )
             per_ref.append(d if not d.allow else decision)
         per_ref = per_ref or [decision]
         return git_reject_response(per_ref, refs or [""], sideband=intent.sideband)

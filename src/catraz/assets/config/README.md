@@ -26,17 +26,11 @@ take effect with the stage-02 containers (Warden, forward-proxy).
 
 ## `warden.toml` reference
 
-Reference for the `warden.toml` keys.
-
-### Top-level keys (the enforced policy)
-
-| Key | Meaning |
-| --- | --- |
-| `branch_prefixes` | A branch may be pushed only if its name starts with one of these prefixes (the allowed namespace is the union of the list). A single prefix may also be given as the scalar `branch_prefix = "claude/"`; set only one of the two forms. |
-| `max_open_mrs` | Max simultaneously open merge requests. |
-| `max_open_branches` | Max simultaneously existing agent branches. |
-| `max_writes_per_hour` | Max write actions per hour. |
-| `allowed_projects` | Concrete project paths (`group/sub/project`) only — **no** wildcards/globs, **no** partial/leaf names, **no** group prefixes. Empty = fail-closed (every GitLab op denied until you add one, or run `catraz allow`). This top-level list is the one the runtime actually enforces. |
+Reference for the `warden.toml` keys. Every git policy knob lives in exactly one
+place: a domain default in `[git.rules]`, an optional per-host override under
+`[[git.endpoint]].rules`, and the project allowlist on the owning
+`[[git.endpoint]]` itself. There is no top-level policy key — a leftover one
+aborts startup, naming its new home.
 
 ### The endpoint model (`[[git.endpoint]]`)
 
@@ -48,14 +42,20 @@ host-gate/router all key off it. Each table configures exactly one host:
 [[git.endpoint]]
 host = "gitlab.com"
 type = "gitlab"
+allowed_projects = ["group/sub/project"]
 ```
+
+* **`allowed_projects`** — concrete project paths (`group/sub/project`) only — **no**
+  wildcards/globs, **no** partial/leaf names, **no** group prefixes. Scoped to this
+  endpoint alone: a project allowed on one host is not automatically allowed on
+  another. Empty (or absent) = fail-closed — every GitLab op on this host is denied
+  until you add one, or run `catraz allow`.
 
 * **`type`** — implemented values: `"gitlab"` (git + REST API, gitlab.com or self-hosted)
   and `"plain"` (git smart-HTTP only, no REST API assumed). `"github"` is reserved for a
   future guard — the Warden refuses to start if it is used.
-* **No endpoint at all = no host is routed or reachable** (real default-deny, not "use the
-  top-level settings as one implicit host"). `catraz init` offers to add one; the shipped
-  template ships none.
+* **No endpoint at all = no host is routed or reachable** (real default-deny). `catraz init`
+  offers to add one; the shipped template ships none.
 * **Tokens are never set here.** They live in the grouped `.catraz/secrets/read_tokens` and
   `write_tokens` files (`<host> <token>` per line). A host's access mode is derived purely
   from which of its tokens are present: a write token but no read token still runs closed
@@ -63,11 +63,6 @@ type = "gitlab"
   only — it never blocks startup or the other endpoints.
 * **Multi-host** is a hand-edit: add one `[[git.endpoint]]` per host plus a token line each.
   The wizard does not loop hosts.
-
-**Known limitation — per-endpoint `allowed_projects` is not yet enforced.** A per-endpoint
-`allowed_projects` is parsed and validated but the runtime authorizes projects only against
-the **top-level** `allowed_projects`. Set the projects at the top level; per-host project
-scoping is a later change.
 
 ### Per-host overrides
 
@@ -88,12 +83,12 @@ scoping is a later change.
 
 ### `[git.rules]` and `[git].actions`
 
-`[git.rules]` holds the same domain-default knobs as the top-level keys
-(`branch_prefixes`, `max_open_branches`, `max_open_mrs`, `max_writes_per_hour`,
-`max_push_bytes`), scoped to the endpoint model. `[git].actions` is the domain-default
-action list. Both are layered **under** the token deck: a write action with no write token
-for a host still runs closed, and `catraz doctor` warns about that mismatch rather than the
-Warden failing.
+`[git.rules]` holds the domain-default git policy knobs — `branch_prefixes`,
+`max_open_branches`, `max_open_mrs`, `max_writes_per_hour`, `max_push_bytes` — that every
+endpoint inherits unless it sets its own `rules = { ... }` override. `[git].actions` is the
+domain-default action list. Both are layered **under** the token deck: a write action with
+no write token for a host still runs closed, and `catraz doctor` warns about that mismatch
+rather than the Warden failing.
 
 The built-in default (`[git].actions`, the twelve "yes" rows below) also lives in code
 (`guards/git/actions.py` `DEFAULT`); the key is a documented starting point, **not** the

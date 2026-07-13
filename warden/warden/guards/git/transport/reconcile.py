@@ -17,9 +17,9 @@ from ....core.transport import (
 from .state import BranchState
 
 
-async def _list_agent_branches(upstream: Upstream, cfg: Config, pid: str) -> list[str]:
+async def _list_agent_branches(upstream: Upstream, cfg: Config, host: str, pid: str) -> list[str]:
     branches = await get_paginated(upstream, f"projects/{pid}/repository/branches")
-    return [b["name"] for b in branches if cfg.in_branch_namespace(b.get("name", ""))]
+    return [b["name"] for b in branches if cfg.in_branch_namespace(host, b.get("name", ""))]
 
 
 async def reconcile_branches(
@@ -33,7 +33,7 @@ async def reconcile_branches(
 
     async def _reconcile_one(upstream: Upstream, host: str, project: str) -> None:
         pid = project_id(project)
-        branches = await _list_agent_branches(upstream, cfg, pid)
+        branches = await _list_agent_branches(upstream, cfg, host, pid)
         branch_state.replace_branches(host, project, branches)
 
     return await for_each_host_project(cfg, router, cfg.open_hosts, "git", _reconcile_one)

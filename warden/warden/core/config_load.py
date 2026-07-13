@@ -32,6 +32,9 @@ _KNOWN_RULE_KEYS = frozenset(
 _IMPLEMENTED_ENDPOINT_TYPES = frozenset({"gitlab", "plain"})
 _RESERVED_ENDPOINT_TYPES = frozenset({"github"})
 
+# All policy lives under [git]; everything else in warden.toml is env, not file.
+_KNOWN_TOP_LEVEL_KEYS = frozenset({"git"})
+
 
 def _secret(env: Mapping[str, str], name: str) -> str:
     """Read a secret from <name>_FILE (compose secret / mounted file) if set, else <name>.
@@ -276,6 +279,17 @@ def _load_toml(path: str) -> dict[str, object]:
         raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
 
 
+def _reject_unknown_top_level_keys(file: Mapping[str, object]) -> None:
+    """Fail-closed on any top-level key outside the git table.
+
+    A stray top-level knob is a typo or a misplaced git setting; denying it
+    keeps a misplaced quota from silently loosening enforcement.
+    """
+    unknown = sorted(set(file) - _KNOWN_TOP_LEVEL_KEYS)
+    if unknown:
+        raise ConfigError(f"warden.toml: unknown top-level key(s) {unknown!r}")
+
+
 def from_env(
     env: Optional[Mapping[str, str]] = None,
     *,
@@ -291,6 +305,7 @@ def from_env(
     """
     env = env if env is not None else os.environ
     file = _load_toml(toml_path or env.get("WARDEN_CONFIG_PATH", DEFAULT_TOML_PATH))
+    _reject_unknown_top_level_keys(file)
 
     def _int(key: str, default: int) -> int:
         raw = env.get(key)
@@ -301,59 +316,10 @@ def from_env(
         except ValueError as exc:
             raise ConfigError(f"{key} must be an integer, got {raw!r}") from exc
 
-    # --- tunables: warden.toml only, no env override ---
-    def _tunable_int(toml_key: str, default: int) -> int:
-        val = file.get(toml_key, default)
-        if not isinstance(val, int) or isinstance(val, bool):
-            raise ConfigError(f"{toml_key} in warden.toml must be an integer, got {val!r}")
-        return val
-
-    def _tunable_branch_prefixes(
-        list_key: str, legacy_scalar_key: str, default: tuple[str, ...]
-    ) -> tuple[str, ...]:
-        """Resolve branch_prefixes — one namespace-list setting, one source.
-
-        warden.toml may set the list form or the scalar form, never
-        both. Emptiness is not rejected here; _validate does that.
-        """
-        has_list = list_key in file
-        has_scalar = legacy_scalar_key in file
-        if has_list and has_scalar:
-            raise ConfigError(
-                f"warden.toml: set only one of {list_key!r} or {legacy_scalar_key!r}, not both"
-            )
-        if has_list:
-            val = file[list_key]
-            if not isinstance(val, list) or not all(isinstance(p, str) for p in val):
-                raise ConfigError(
-                    f"{list_key} in warden.toml must be a list of strings, got {val!r}"
-                )
-            return tuple(val)
-        if has_scalar:
-            val = file[legacy_scalar_key]
-            if not isinstance(val, str):
-                raise ConfigError(
-                    f"{legacy_scalar_key} in warden.toml must be a string, got {val!r}"
-                )
-            return (val,)
-        return default
-
-    def _tunable_projects(toml_key: str) -> tuple[str, ...]:
-        val = file.get(toml_key, [])
-        if not isinstance(val, list) or not all(isinstance(p, str) for p in val):
-            raise ConfigError(f"{toml_key} in warden.toml must be a list of strings, got {val!r}")
-        return tuple(p.strip() for p in val if p.strip())
-
     git_rules, git_actions, git_endpoints = _parse_git(file)
     git_credentials = _resolve_git_endpoint_credentials(env, git_endpoints)
 
     cfg = Config(
-        branch_prefixes=_tunable_branch_prefixes("branch_prefixes", "branch_prefix", ("claude/",)),
-        max_open_mrs=_tunable_int("max_open_mrs", 5),
-        max_open_branches=_tunable_int("max_open_branches", 10),
-        max_writes_per_hour=_tunable_int("max_writes_per_hour", 60),
-        max_push_bytes=_tunable_int("max_push_bytes", 50 * 1024 * 1024),
-        allowed_projects=_tunable_projects("allowed_projects"),
         reconcile_interval_s=_int("RECONCILE_INTERVAL_S", 300),
         state_db_path=env.get("STATE_DB_PATH", "/var/lib/warden/state.db"),
         audit_log_path=env.get("AUDIT_LOG_PATH", "/var/log/warden/audit.jsonl"),
@@ -380,25 +346,51 @@ def _validate(cfg: Config) -> None:
     allowed_projects just means every op is denied until one is added.
     """
     problems: list[str] = []
-
-    for name in ("max_open_mrs", "max_open_branches", "max_writes_per_hour", "max_push_bytes"):
-        if getattr(cfg, name) <= 0:
-            problems.append(f"{name.upper()} must be > 0")
-
+    problems.extend(_quota_problems(cfg))
     problems.extend(_branch_prefixes_problems(cfg))
 
     if problems:
         raise ConfigError("invalid configuration: " + "; ".join(problems))
 
 
-def _branch_prefixes_problems(cfg: Config) -> list[str]:
-    """Fail-closed validation of the branch namespace.
+_QUOTA_KEYS = ("max_open_mrs", "max_open_branches", "max_writes_per_hour", "max_push_bytes")
 
-    An empty list or empty element would make in_branch_namespace accept
-    any branch name ("".startswith("") is always true).
+
+def _quota_problems(cfg: Config) -> list[str]:
+    """Fail-closed validation of every set quota knob.
+
+    A non-positive ceiling in the global default or any endpoint override
+    would deny every write; an unset knob falls back to the built-in.
     """
-    if not cfg.branch_prefixes:
-        return ["BRANCH_PREFIX must be non-empty"]
-    if any(not prefix for prefix in cfg.branch_prefixes):
-        return ["BRANCH_PREFIX entries must be non-empty"]
-    return []
+    sources = [("[git.rules]", cfg.git_rules)]
+    for endpoint in cfg.git_endpoints:
+        sources.append((f"[[git.endpoint]] host={endpoint.host!r} rules", endpoint.rules))
+    problems: list[str] = []
+    for label, rules in sources:
+        for key in _QUOTA_KEYS:
+            val = getattr(rules, key)
+            if val is not None and val <= 0:
+                problems.append(f"{label}.{key} must be > 0")
+    return problems
+
+
+def _branch_prefixes_problems(cfg: Config) -> list[str]:
+    """Fail-closed validation of every enforced branch namespace.
+
+    An empty list or empty element makes in_branch_namespace accept any
+    name ("".startswith("") is always true); the global default and each
+    endpoint override that sets it must be non-empty with no empty element.
+    """
+    sources = [("[git.rules].branch_prefixes", cfg.git_rules.branch_prefixes)]
+    for endpoint in cfg.git_endpoints:
+        label = f"[[git.endpoint]] host={endpoint.host!r} rules.branch_prefixes"
+        sources.append((label, endpoint.rules.branch_prefixes))
+    problems: list[str] = []
+    for label, prefixes in sources:
+        if prefixes is None:
+            continue  # unset falls back to the non-empty built-in default
+        if not prefixes:
+            problems.append(f"{label} must be non-empty")
+        elif any(not prefix for prefix in prefixes):
+            problems.append(f"{label} entries must be non-empty")
+    return problems

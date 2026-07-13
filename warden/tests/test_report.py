@@ -18,7 +18,7 @@ _HOST = "gitlab.example"
 
 
 def _cfg(**kwargs: object) -> Config:
-    return Config(allowed_projects=("group/proj",), **kwargs)  # type: ignore[arg-type]
+    return Config(**kwargs)  # type: ignore[arg-type]
 
 
 def _report(cfg: Config) -> dict:

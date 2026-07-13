@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from warden.core.config import Config, GitEndpoint, HostCredentials
+from warden.core.config import Config, GitEndpoint, GitRules, HostCredentials
 from warden.core.model import Decision, StateView, TokenKind
 from warden.guards.git import actions as git_actions
 from warden.guards.git.gitlab import policy as api_policy
@@ -22,7 +22,7 @@ SHA = "a" * 40
 # Every intent below carries this Host — host_gate is a real kernel gate, so
 # tests need an actually-open endpoint, not just an empty allowlist.
 HOST = "gitlab.example"
-_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab"),)
+_OPEN_ENDPOINT = (GitEndpoint(host=HOST, type="gitlab", allowed_projects=("group/proj",)),)
 _OPEN_CREDENTIALS = {HOST: HostCredentials(read_token="r", write_token="w")}
 
 
@@ -36,7 +36,6 @@ def decide(intent: ApiIntent | GitIntent, state: StateView, cfg: Config) -> Deci
 @pytest.fixture
 def cfg() -> Config:
     return Config(
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -46,8 +45,7 @@ def cfg() -> Config:
 def multi_prefix_cfg() -> Config:
     # The branch namespace is the *union* of all configured prefixes.
     return Config(
-        branch_prefixes=("claude/", "bot/"),
-        allowed_projects=("group/proj",),
+        git_rules=GitRules(branch_prefixes=("claude/", "bot/")),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -254,7 +252,7 @@ def test_default_deny_unknown_write_endpoint(cfg):
 
 # --- quotas ------------------------------------------------------------------
 def test_rate_limit_blocks_writes(cfg):
-    state = StateView(writes_last_hour=cfg.max_writes_per_hour)
+    state = StateView(writes_last_hour=cfg.effective_rules(HOST).max_writes_per_hour)
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
         state,
@@ -264,7 +262,7 @@ def test_rate_limit_blocks_writes(cfg):
 
 
 def test_max_open_mrs_blocks_mr_creation(cfg):
-    state = StateView(open_mrs=cfg.max_open_mrs)
+    state = StateView(open_mrs=cfg.effective_rules(HOST).max_open_mrs)
     d = decide(
         _api("POST", "/projects/group%2Fproj/merge_requests", source_branch="claude/x"),
         state,
@@ -336,7 +334,7 @@ def test_git_atomic_reject_on_one_bad_ref(cfg):
 
 
 def test_git_max_branches_blocks_create(cfg):
-    state = StateView(open_branches=cfg.max_open_branches)
+    state = StateView(open_branches=cfg.effective_rules(HOST).max_open_branches)
     d = decide(_git((ZERO, SHA, "refs/heads/claude/new")), state, cfg)
     assert not d.allow and "max open branches reached" in d.reason
 
@@ -348,7 +346,7 @@ def test_git_locked_state_denies_push(cfg):
 
 
 def test_git_rate_limit_blocks_push(cfg):
-    state = StateView(writes_last_hour=cfg.max_writes_per_hour)
+    state = StateView(writes_last_hour=cfg.effective_rules(HOST).max_writes_per_hour)
     d = decide(_git((ZERO, SHA, "refs/heads/claude/feature")), state, cfg)
     assert not d.allow and "rate limit" in d.reason
 
@@ -356,7 +354,7 @@ def test_git_rate_limit_blocks_push(cfg):
 def test_git_multiref_quota_accounts_within_batch(cfg):
     # max-1 open branches + two creates in one push must reject the batch (not
     # let both pass against the same stale snapshot).
-    state = StateView(open_branches=cfg.max_open_branches - 1)
+    state = StateView(open_branches=cfg.effective_rules(HOST).max_open_branches - 1)
     d = decide(
         _git(
             (ZERO, SHA, "refs/heads/claude/a"),
@@ -379,9 +377,13 @@ def test_git_tag_and_branch_delete_denied_by_criticality_even_with_every_action_
     # IRREVERSIBLE actions are compiled-in denies: even a host explicitly
     # listing every action id is still denied, criticality before membership.
     cfg = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=(
-            GitEndpoint(host=HOST, type="gitlab", actions=tuple(sorted(git_actions.by_id))),
+            GitEndpoint(
+                host=HOST,
+                type="gitlab",
+                allowed_projects=("group/proj",),
+                actions=tuple(sorted(git_actions.by_id)),
+            ),
         ),
         git_credentials=_OPEN_CREDENTIALS,
     )
@@ -432,7 +434,6 @@ def test_closed_host_denies_reads_and_writes():
     are denied — by `host_gate`, before `write_credential_gate` (or any
     guard-specific decide) ever runs."""
     cfg_closed = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials={},  # no tokens at all for this host -> closed
     )
@@ -468,7 +469,6 @@ def test_read_only_host_denies_writes_allows_reads():
     """A host with a read token but no write token is `read-only`: reads
     pass, writes are denied by the per-host `write_credential_gate`."""
     cfg_ro = Config(
-        allowed_projects=("group/proj",),
         git_endpoints=_OPEN_ENDPOINT,
         git_credentials={HOST: HostCredentials(read_token="r")},
     )

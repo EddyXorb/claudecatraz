@@ -1,10 +1,9 @@
 """Init wizard tests: one host prompt (default gitlab.com), grouped host-keyed
-tokens, an auto-synthesised [[git.endpoint]], top-level policy writes, TOML
+tokens, an auto-synthesised [[git.endpoint]], per-endpoint policy writes, TOML
 setter round-trips, and unset_env_keys. Access mode is the presence of a write
 token, never a stored GITLAB_MODE."""
 
 import argparse
-import re
 import shutil
 import stat
 import tomllib
@@ -18,6 +17,9 @@ from catraz.commands.setup._secrets import _read_grouped_token
 from catraz.envfile import load_env, unset_env_keys
 from catraz.policy import (
     _read_toml_allowed_projects,
+    ensure_git_endpoint,
+    set_endpoint_allowed_projects,
+    set_git_rules_branch_prefixes,
     set_toml_list,
     set_toml_scalar,
 )
@@ -349,10 +351,12 @@ class TestInteractiveReadWrite:
         assert _endpoints(root) == {("gitlab.com", "gitlab")}
 
         toml = root / ".catraz" / "config" / "warden.toml"
-        assert _read_toml_allowed_projects(toml) == ["group/my-proj"]
-        text = toml.read_text()
-        assert re.search(r'branch_prefixes\s*=\s*\[\s*"claude/"\s*\]', text)
-        assert not re.search(r"^\s*branch_prefix\s*=", text, re.M)
+        assert _read_toml_allowed_projects(toml, "gitlab.com") == ["group/my-proj"]
+        data = tomllib.loads(toml.read_text())
+        assert data["git"]["rules"]["branch_prefixes"] == ["claude/"]
+        assert "allowed_projects" not in data
+        assert "branch_prefixes" not in data
+        assert "branch_prefix" not in data
 
     def test_enter_on_default_prompts_both_tokens(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -401,9 +405,9 @@ class TestInteractiveReadOnly:
         assert _read_grouped_token(secrets_dir, "read_tokens", "gitlab.com") == "glpat-readtoken"
         assert (secrets_dir / "write_tokens").read_text() == ""
         assert len(calls) == 1, "only the read token should be prompted"
-        assert _read_toml_allowed_projects(root / ".catraz" / "config" / "warden.toml") == [
-            "group/my-proj"
-        ]
+        assert _read_toml_allowed_projects(
+            root / ".catraz" / "config" / "warden.toml", "gitlab.com"
+        ) == ["group/my-proj"]
 
     def test_write_token_not_clobbered_when_existing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -588,73 +592,120 @@ class TestInteractiveCredentialsMode:
         assert load_env(env_path).get("CLAUDE_CREDENTIALS_MODE") == "sync"
 
 
-# TOML setters — must round-trip against the real shipped template
+# Generic TOML setters — top-level scalar/list keys, comment-preserving.
 
 
-class TestTomlSetters:
-    """set_toml_scalar / set_toml_list preserve inline comments and round-trip."""
+class TestGenericTomlSetters:
+    """set_toml_scalar / set_toml_list preserve inline comments and round-trip
+    an arbitrary top-level key; neither is used for allowed_projects or
+    branch_prefixes anymore (see the endpoint/rules-scoped setters below)."""
 
+    def test_set_toml_list_updates_existing_key(self, tmp_path: Path) -> None:
+        toml = tmp_path / "warden.toml"
+        toml.write_text('custom_list = ["a"]          # keep me\n')
+        set_toml_list(toml, "custom_list", ["group/proj-a", "group/proj-b"])
+        text = toml.read_text()
+        assert '["group/proj-a", "group/proj-b"]' in text
+        assert "# keep me" in text
+
+    def test_set_toml_scalar_updates_existing_key(self, tmp_path: Path) -> None:
+        toml = tmp_path / "warden.toml"
+        toml.write_text('custom_scalar = "old"        # keep me\n')
+        set_toml_scalar(toml, "custom_scalar", "new")
+        text = toml.read_text()
+        assert '"new"' in text
+        assert "# keep me" in text
+
+    def test_set_toml_list_appends_when_key_absent(self, tmp_path: Path) -> None:
+        toml = tmp_path / "min.toml"
+        toml.write_text("unrelated = 5\n")
+        set_toml_list(toml, "custom_list", ["group/proj"])
+        assert '["group/proj"]' in toml.read_text()
+
+    def test_set_toml_scalar_appends_when_key_absent(self, tmp_path: Path) -> None:
+        toml = tmp_path / "min.toml"
+        toml.write_text("unrelated = 5\n")
+        set_toml_scalar(toml, "custom_scalar", "ci/")
+        assert '"ci/"' in toml.read_text()
+
+
+# set_endpoint_allowed_projects — must round-trip against the real shipped
+# template and touch only the named endpoint's block.
+
+
+class TestSetEndpointAllowedProjects:
+    def _template_with_endpoints(self, tmp_path: Path, *hosts: str) -> Path:
+        from catraz.paths import asset_root
+
+        shipped = asset_root() / "assets" / "config" / "warden.toml"
+        dst = tmp_path / "warden.toml"
+        shutil.copy2(shipped, dst)
+        for host in hosts:
+            ensure_git_endpoint(dst, host, "gitlab")
+        return dst
+
+    def test_writes_into_named_endpoint(self, tmp_path: Path) -> None:
+        toml = self._template_with_endpoints(tmp_path, "gitlab.com")
+        set_endpoint_allowed_projects(toml, "gitlab.com", ["group/proj-a", "group/proj-b"])
+        assert _read_toml_allowed_projects(toml, "gitlab.com") == ["group/proj-a", "group/proj-b"]
+
+    def test_updates_existing_value(self, tmp_path: Path) -> None:
+        toml = self._template_with_endpoints(tmp_path, "gitlab.com")
+        set_endpoint_allowed_projects(toml, "gitlab.com", ["group/a"])
+        set_endpoint_allowed_projects(toml, "gitlab.com", ["group/b"])
+        assert _read_toml_allowed_projects(toml, "gitlab.com") == ["group/b"]
+
+    def test_does_not_touch_other_endpoints(self, tmp_path: Path) -> None:
+        toml = self._template_with_endpoints(tmp_path, "gitlab.com", "my-gitlab.de")
+        set_endpoint_allowed_projects(toml, "my-gitlab.de", ["acme/other"])
+        set_endpoint_allowed_projects(toml, "gitlab.com", ["group/proj"])
+        assert _read_toml_allowed_projects(toml, "gitlab.com") == ["group/proj"]
+        assert _read_toml_allowed_projects(toml, "my-gitlab.de") == ["acme/other"]
+
+    def test_missing_endpoint_raises(self, tmp_path: Path) -> None:
+        toml = self._template_with_endpoints(tmp_path)
+        with pytest.raises(ValueError):
+            set_endpoint_allowed_projects(toml, "gitlab.com", ["group/proj"])
+
+    def test_never_writes_top_level_key(self, tmp_path: Path) -> None:
+        toml = self._template_with_endpoints(tmp_path, "gitlab.com")
+        set_endpoint_allowed_projects(toml, "gitlab.com", ["group/proj"])
+        assert "allowed_projects" not in tomllib.loads(toml.read_text())
+
+
+# set_git_rules_branch_prefixes — must round-trip against the real shipped
+# template, writing under [git.rules] only.
+
+
+class TestSetGitRulesBranchPrefixes:
     def _copy_template(self, tmp_path: Path) -> Path:
         from catraz.paths import asset_root
 
         shipped = asset_root() / "assets" / "config" / "warden.toml"
         dst = tmp_path / "warden.toml"
-        if shipped.exists():
-            shutil.copy2(shipped, dst)
-        else:
-            dst.write_text(
-                'branch_prefix       = "claude/"          # R2: only branches\n'
-                'allowed_projects    = [""]\n'
-            )
+        shutil.copy2(shipped, dst)
         return dst
 
-    def test_set_toml_list_updates_allowed_projects(self, tmp_path: Path) -> None:
+    def test_writes_under_git_rules(self, tmp_path: Path) -> None:
         toml = self._copy_template(tmp_path)
-        set_toml_list(toml, "allowed_projects", ["group/proj-a", "group/proj-b"])
-        assert _read_toml_allowed_projects(toml) == ["group/proj-a", "group/proj-b"]
+        set_git_rules_branch_prefixes(toml, ["feat/"])
+        data = tomllib.loads(toml.read_text())
+        assert data["git"]["rules"]["branch_prefixes"] == ["feat/"]
+        assert "branch_prefixes" not in data
 
-    def test_set_toml_list_preserves_inline_comment(self, tmp_path: Path) -> None:
+    def test_updates_existing_value(self, tmp_path: Path) -> None:
         toml = self._copy_template(tmp_path)
-        original_text = toml.read_text()
-        set_toml_list(toml, "allowed_projects", ["group/proj"])
-        new_text = toml.read_text()
-        if "# R2:" in original_text:
-            assert "# R2:" in new_text
+        set_git_rules_branch_prefixes(toml, ["claude/"])
+        set_git_rules_branch_prefixes(toml, ["bot/"])
+        data = tomllib.loads(toml.read_text())
+        assert data["git"]["rules"]["branch_prefixes"] == ["bot/"]
 
-    def test_set_toml_scalar_updates_branch_prefix(self, tmp_path: Path) -> None:
-        toml = self._copy_template(tmp_path)
-        set_toml_scalar(toml, "branch_prefix", "feat/")
-        assert '"feat/"' in toml.read_text()
-
-    def test_set_toml_scalar_preserves_comment(self, tmp_path: Path) -> None:
-        toml = self._copy_template(tmp_path)
-        original_text = toml.read_text()
-        set_toml_scalar(toml, "branch_prefix", "feat/")
-        if "# R2:" in original_text:
-            assert "# R2:" in toml.read_text()
-
-    def test_set_toml_list_appends_when_key_absent(self, tmp_path: Path) -> None:
+    def test_creates_table_when_absent(self, tmp_path: Path) -> None:
         toml = tmp_path / "min.toml"
-        toml.write_text("max_open_mrs = 5\n")
-        set_toml_list(toml, "allowed_projects", ["group/proj"])
-        assert _read_toml_allowed_projects(toml) == ["group/proj"]
-
-    def test_set_toml_scalar_appends_when_key_absent(self, tmp_path: Path) -> None:
-        toml = tmp_path / "min.toml"
-        toml.write_text("max_open_mrs = 5\n")
-        set_toml_scalar(toml, "branch_prefix", "ci/")
-        assert '"ci/"' in toml.read_text()
-
-    def test_set_toml_list_matches_shipped_format(self, tmp_path: Path) -> None:
-        toml = self._copy_template(tmp_path)
-        set_toml_list(toml, "allowed_projects", ["mygroup/myproject"])
-        assert _read_toml_allowed_projects(toml) == ["mygroup/myproject"]
-
-    def test_set_toml_list_roundtrip_readable_by_function(self, tmp_path: Path) -> None:
-        toml = self._copy_template(tmp_path)
-        projects = ["a/b", "c/d/e", "x/y"]
-        set_toml_list(toml, "allowed_projects", projects)
-        assert _read_toml_allowed_projects(toml) == projects
+        toml.write_text("[git]\nactions = []\n")
+        set_git_rules_branch_prefixes(toml, ["claude/"])
+        data = tomllib.loads(toml.read_text())
+        assert data["git"]["rules"]["branch_prefixes"] == ["claude/"]
 
 
 # ensure_git_endpoint

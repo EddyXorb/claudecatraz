@@ -31,8 +31,8 @@ def _multi_cfg(cfg: Config) -> Config:
     return replace(
         cfg,
         git_endpoints=(
-            GitEndpoint(host="gitlab.example", type="gitlab"),
-            GitEndpoint(host="my-gitlab.de", type="gitlab"),
+            GitEndpoint(host="gitlab.example", type="gitlab", allowed_projects=("group/proj",)),
+            GitEndpoint(host="my-gitlab.de", type="gitlab", allowed_projects=("group/proj",)),
         ),
         git_credentials={
             "gitlab.example": HostCredentials(read_token="READ-TOKEN", write_token="WRITE-TOKEN"),
@@ -183,15 +183,12 @@ async def test_end_to_end_request_routes_by_host_header_and_denies_unknown_host(
 async def test_reconcile_branches_runs_per_host_with_same_project_path():
     # gitlab.com and my-gitlab.de both list "acme/infra" — this guards against a
     # single reconcile run silently combining or overwriting their branch counts.
-    base = Config(
-        allowed_projects=("acme/infra",),
-        state_db_path=":memory:",
-    )
+    base = Config(state_db_path=":memory:")
     multi = replace(
         base,
         git_endpoints=(
-            GitEndpoint(host="gitlab.com", type="gitlab"),
-            GitEndpoint(host="my-gitlab.de", type="gitlab"),
+            GitEndpoint(host="gitlab.com", type="gitlab", allowed_projects=("acme/infra",)),
+            GitEndpoint(host="my-gitlab.de", type="gitlab", allowed_projects=("acme/infra",)),
         ),
         git_credentials={
             "gitlab.com": HostCredentials(read_token="r", write_token="w"),
@@ -226,7 +223,6 @@ async def test_reconcile_completes_and_unlocks_when_one_of_two_endpoints_is_clos
     returned and `mark_reconciled` was never called — the *whole* guard
     (including the open host) stayed fail-safe-locked forever."""
     cfg = Config(
-        allowed_projects=("group/proj",),
         state_db_path=":memory:",
         git_endpoints=(
             GitEndpoint(host="open.example", type="gitlab", allowed_projects=("group/proj",)),
