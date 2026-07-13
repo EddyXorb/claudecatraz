@@ -684,26 +684,26 @@ def test_git_endpoint_actions_non_list_aborts_startup(tmp_path):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-# --- removed top-level keys: each moved into a git table, a leftover copy
-# aborts startup naming its new home rather than being silently ignored. ---
+# --- unknown top-level keys: policy lives under [git], so a stray top-level
+# key (a misplaced quota, allowlist, or typo) aborts startup fail-closed. ---
 
 
-def test_stale_top_level_max_quota_aborts_startup(tmp_path):
+def test_top_level_quota_key_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text("max_open_mrs = 7\n")
-    with pytest.raises(ConfigError, match=r"top-level 'max_open_mrs' moved to \[git\.rules\]"):
+    with pytest.raises(ConfigError, match=r"unknown top-level key\(s\) \['max_open_mrs'\]"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_stale_top_level_branch_prefixes_aborts_startup(tmp_path):
+def test_top_level_branch_prefixes_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text('branch_prefixes = ["claude/"]\n')
-    with pytest.raises(ConfigError, match=r"top-level 'branch_prefixes' moved to \[git\.rules\]"):
+    with pytest.raises(ConfigError, match=r"unknown top-level key\(s\) \['branch_prefixes'\]"):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_stale_top_level_allowed_projects_aborts_startup(tmp_path):
+def test_top_level_allowed_projects_aborts_startup(tmp_path):
     toml = tmp_path / "warden.toml"
     toml.write_text('allowed_projects = ["group/proj"]\n')
-    with pytest.raises(ConfigError, match=r"top-level 'allowed_projects' moved to .*git\.endpoint"):
+    with pytest.raises(ConfigError, match=r"unknown top-level key\(s\) \['allowed_projects'\]"):
         from_env({}, strict=True, toml_path=str(toml))

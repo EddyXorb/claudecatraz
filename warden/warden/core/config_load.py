@@ -32,18 +32,8 @@ _KNOWN_RULE_KEYS = frozenset(
 _IMPLEMENTED_ENDPOINT_TYPES = frozenset({"gitlab", "plain"})
 _RESERVED_ENDPOINT_TYPES = frozenset({"github"})
 
-# Each removed top-level key maps to the table that owns it now. A leftover
-# key is a startup error, never silently dropped: a stale quota would loosen
-# and a stale allowlist would silently deny.
-_REMOVED_TOP_LEVEL_KEYS = {
-    "branch_prefixes": "[git.rules]",
-    "branch_prefix": "[git.rules]",
-    "max_open_mrs": "[git.rules]",
-    "max_open_branches": "[git.rules]",
-    "max_writes_per_hour": "[git.rules]",
-    "max_push_bytes": "[git.rules]",
-    "allowed_projects": "the owning [[git.endpoint]]",
-}
+# All policy lives under [git]; everything else in warden.toml is env, not file.
+_KNOWN_TOP_LEVEL_KEYS = frozenset({"git"})
 
 
 def _secret(env: Mapping[str, str], name: str) -> str:
@@ -289,16 +279,15 @@ def _load_toml(path: str) -> dict[str, object]:
         raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
 
 
-def _reject_removed_top_level_keys(file: Mapping[str, object]) -> None:
-    """Fail-closed on a top-level key that moved into a git table.
+def _reject_unknown_top_level_keys(file: Mapping[str, object]) -> None:
+    """Fail-closed on any top-level key outside the git table.
 
-    Each git knob has one home; a leftover top-level key names its new one
-    rather than being silently ignored (a stale quota loosens, a stale
-    allowlist denies).
+    A stray top-level knob is a typo or a misplaced git setting; denying it
+    keeps a misplaced quota from silently loosening enforcement.
     """
-    for key, home in _REMOVED_TOP_LEVEL_KEYS.items():
-        if key in file:
-            raise ConfigError(f"warden.toml: top-level {key!r} moved to {home}")
+    unknown = sorted(set(file) - _KNOWN_TOP_LEVEL_KEYS)
+    if unknown:
+        raise ConfigError(f"warden.toml: unknown top-level key(s) {unknown!r}")
 
 
 def from_env(
@@ -316,7 +305,7 @@ def from_env(
     """
     env = env if env is not None else os.environ
     file = _load_toml(toml_path or env.get("WARDEN_CONFIG_PATH", DEFAULT_TOML_PATH))
-    _reject_removed_top_level_keys(file)
+    _reject_unknown_top_level_keys(file)
 
     def _int(key: str, default: int) -> int:
         raw = env.get(key)
