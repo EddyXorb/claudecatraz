@@ -147,7 +147,9 @@ def test_hand_deleted_domain_is_reoffered_not_restored(
 
     monkeypatch.setattr("builtins.input", _input)
     _prompt_egress_offer(root, root / ".catraz", Out(color=False))
-    assert any("allow extra.example.com?" in p for p in prompts), "deleted domain must be re-offered"
+    assert any("allow extra.example.com?" in p for p in prompts), (
+        "deleted domain must be re-offered"
+    )
     assert agent_block(allow.read_text(), "claude") is None
 
 

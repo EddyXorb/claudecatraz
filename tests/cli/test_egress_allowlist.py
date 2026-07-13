@@ -44,7 +44,9 @@ def test_upsert_replace_in_place_is_position_stable() -> None:
     replaced = upsert_agent_block(after_append, "claude", ("other.com", ".bar.com"))
     assert agent_block(replaced, "claude") == ("other.com", ".bar.com")
     # content before and after the block is byte-stable across the replace
-    assert replaced.split("# agent:claude begin")[0] == after_append.split("# agent:claude begin")[0]
+    assert (
+        replaced.split("# agent:claude begin")[0] == after_append.split("# agent:claude begin")[0]
+    )
     assert replaced.split("# agent:claude end")[1] == after_append.split("# agent:claude end")[1]
 
 
