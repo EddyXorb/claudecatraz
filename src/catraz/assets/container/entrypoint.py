@@ -125,7 +125,7 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
     if not content and _env_true("REQUIRE_AGENT_INSTRUCTIONS"):
         sys.exit("error: REQUIRE_AGENT_INSTRUCTIONS is set but rendered instructions are empty")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(content)
+    dest.write_text(content, encoding="utf-8")
 
 
 def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:

@@ -1,6 +1,7 @@
 """Init writes host-keyed grouped tokens into .catraz/secrets/."""
 
 import argparse
+import os
 import stat
 import types
 from pathlib import Path
@@ -12,6 +13,8 @@ from catraz.commands.setup._secrets import _read_grouped_token
 from catraz.doctor import run_doctor, _doctor_fix
 from catraz.envfile import load_env
 from catraz.ui import Out
+
+POSIX = os.name == "posix"
 
 _GROUPED = ("read_tokens", "write_tokens")
 
@@ -59,11 +62,13 @@ def test_cmd_init_creates_grouped_token_files_even_blank(
 
     secrets_dir = root / ".catraz" / "secrets"
     assert secrets_dir.is_dir()
-    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
+    if POSIX:
+        assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
     for filename in _GROUPED:
         p = secrets_dir / filename
         assert p.exists(), f"missing: {p}"
-        assert stat.S_IMODE(p.stat().st_mode) == 0o600
+        if POSIX:
+            assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
     env = load_env(root / ".catraz" / ".env")
     assert "GITLAB_MODE" not in env
@@ -95,7 +100,8 @@ def test_cmd_init_writes_host_keyed_token_via_getpass(
     assert (secrets_dir / "read_tokens").read_text() == "gitlab.com glpat-readtoken\n"
     assert (secrets_dir / "write_tokens").read_text() == "gitlab.com glpat-writetoken\n"
     for filename in _GROUPED:
-        assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
+        if POSIX:
+            assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
 def test_cmd_init_writes_git_endpoint_when_token_given(
@@ -137,7 +143,8 @@ def test_doctor_fix_on_fresh_root_creates_catraz(tmp_path: Path) -> None:
     secrets_dir = root / ".catraz" / "secrets"
     claude_dir = secrets_dir / "claude"
     assert secrets_dir.is_dir()
-    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
+    if POSIX:
+        assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
     # Default (persistent) mode keeps the login in state/<profile>/, so the
     # sync-only credential seed dir must not be scaffolded.
     assert not claude_dir.exists()
@@ -194,11 +201,13 @@ def test_doctor_fix_creates_grouped_files(tmp_path: Path) -> None:
 
     secrets_dir = root / ".catraz" / "secrets"
     assert secrets_dir.is_dir()
-    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
+    if POSIX:
+        assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
     for filename in _GROUPED:
         p = secrets_dir / filename
         assert p.exists(), f"missing: {p}"
-        assert stat.S_IMODE(p.stat().st_mode) == 0o600
+        if POSIX:
+            assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
 
 def test_cmd_init_yes_reads_tokens_from_env(
@@ -216,7 +225,8 @@ def test_cmd_init_yes_reads_tokens_from_env(
     assert _read_grouped_token(secrets_dir, "read_tokens", "gitlab.com") == "glpat-read-from-env"
     assert _read_grouped_token(secrets_dir, "write_tokens", "gitlab.com") == "glpat-write-from-env"
     for filename in _GROUPED:
-        assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
+        if POSIX:
+            assert stat.S_IMODE((secrets_dir / filename).stat().st_mode) == 0o600
 
 
 def test_cmd_init_yes_reads_host_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,10 +288,12 @@ def test_doctor_fix_sync_mode_creates_claude_seed_0700(tmp_path: Path) -> None:
     _doctor_fix(root, env)
 
     secrets_dir = root / ".catraz" / "secrets"
-    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700, "secrets/ must be 0700"
+    if POSIX:
+        assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700, "secrets/ must be 0700"
     claude_dir = secrets_dir / "claude"
     assert claude_dir.is_dir(), "secrets/claude/ must exist in sync mode"
-    assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700, "secrets/claude/ must be 0700"
+    if POSIX:
+        assert stat.S_IMODE(claude_dir.stat().st_mode) == 0o700, "secrets/claude/ must be 0700"
 
 
 def test_doctor_fix_persistent_mode_omits_claude_seed(tmp_path: Path) -> None:

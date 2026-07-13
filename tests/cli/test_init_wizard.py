@@ -4,6 +4,7 @@ setter round-trips, and unset_env_keys. Access mode is the presence of a write
 token, never a stored GITLAB_MODE."""
 
 import argparse
+import os
 import shutil
 import stat
 import tomllib
@@ -24,6 +25,8 @@ from catraz.policy import (
     set_toml_scalar,
 )
 from catraz.ui import Out
+
+POSIX = os.name == "posix"
 
 
 # Fixtures / helpers
@@ -111,7 +114,8 @@ class TestYesNoTokens:
             p = secrets_dir / fname
             assert p.exists()
             assert p.read_text() == ""
-            assert stat.S_IMODE(p.stat().st_mode) == 0o600
+            if POSIX:
+                assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
     def test_no_endpoint_created(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _make_root(tmp_path)

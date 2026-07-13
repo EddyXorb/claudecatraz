@@ -54,7 +54,7 @@ def test_install_writes_rendered_content(
     adapter = ep._load_adapter()
     ep.install_instructions(adapter, _ctx(ep))
     dest = tmp_path / ".claude" / "CLAUDE.md"
-    assert dest.exists() and "http://<host>:8080/api/v4" in dest.read_text()
+    assert dest.exists() and "http://<host>:8080/api/v4" in dest.read_text(encoding="utf-8")
 
 
 def test_install_missing_not_required_is_silent(
