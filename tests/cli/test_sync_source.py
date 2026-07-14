@@ -40,7 +40,7 @@ def test_shell_env_credential_source(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     assert len(adapter.calls) == 1
     source, _home = adapter.calls[0]
-    assert str(source) == "/custom/claude"
+    assert Path(source) == Path("/custom/claude")
 
 
 def test_from_flag_overrides_shell_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,4 +59,4 @@ def test_from_flag_overrides_shell_env(tmp_path: Path, monkeypatch: pytest.Monke
 
     assert len(adapter.calls) == 1
     source, _home = adapter.calls[0]
-    assert str(source) == "/explicit/claude"
+    assert Path(source) == Path("/explicit/claude")

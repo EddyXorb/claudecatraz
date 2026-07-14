@@ -16,6 +16,7 @@ from typing import Any
 
 from catraz.paths import asset_root
 from catraz.errors import CliError, EXIT_CONFIG
+from catraz.hostfs import host_os
 
 
 # Semantic service aliases → compose service names (P1: no raw container names).
@@ -215,6 +216,22 @@ def _warn_fallback(msg: str) -> None:
     print(f"catraz WARNING: {msg}", file=sys.stderr)
 
 
+def _compose_env(root: Path, extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Interpolation environment for every compose call. CATRAZ_ASSETS anchors the
+    build contexts at the extracted asset cache (they must be absolute, since they
+    resolve against --project-directory); CATRAZ_HOST_OS tells the entrypoint whose
+    the bind-mount ownership is."""
+    env = dict(
+        os.environ,
+        PROJECT_DIR=str(root),
+        CATRAZ_ASSETS=str(asset_root() / "assets"),
+        CATRAZ_HOST_OS=host_os(),
+    )
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
 def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bool:
     """Render the effective compose and write .catraz/compose.resolved.yml at mode 0600.
 
@@ -222,9 +239,7 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     Returns True on success, False on failure (caller falls back to _source_cmd).
     """
     write_hosts_fragment(root)  # keep the per-host DNS-alias/no_proxy layer fresh
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
-    if extra_env:
-        env.update(extra_env)
+    env = _compose_env(root, extra_env)
     cmd = [*_source_cmd(root), "--profile", "remote", "config"]
     try:
         r = subprocess.run(cmd, env=env, capture_output=True, text=True)
@@ -283,11 +298,7 @@ def run(
     if print_only:
         print(" ".join(cmd))
         return None
-    # CATRAZ_ASSETS anchors compose build contexts at the extracted asset cache
-    # (contexts must be absolute since they resolve against --project-directory).
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
-    if extra_env:
-        env.update(extra_env)
+    env = _compose_env(root, extra_env)
     if tee is not None:
         # Stream the child's combined output to both our stdout and a durable file.
         # The tee branch never honors check= — fail loud if a future caller forgets.

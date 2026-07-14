@@ -10,7 +10,7 @@ def test_base_cmd_points_at_asset_and_project(
     (tmp_path / ".catraz").mkdir()
     cmd = compose.base_cmd(tmp_path)
     assert "--project-directory" in cmd and str(tmp_path) in cmd
-    assert cmd[cmd.index("-f") + 1].endswith("assets/compose/docker-compose.yml")
+    assert cmd[cmd.index("-f") + 1].endswith(str(Path("assets") / "compose" / "docker-compose.yml"))
 
 
 def test_base_cmd_sets_unique_project_name(tmp_path: Path) -> None:

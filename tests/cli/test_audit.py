@@ -2,7 +2,14 @@ import socket
 import threading
 import urllib.request
 from pathlib import Path
+
+import pytest
+
 from catraz import cli
+
+pytestmark = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"), reason="Unix sockets unavailable on this host"
+)
 
 
 def test_audit_web_forwards_to_uds(tmp_path: Path) -> None:

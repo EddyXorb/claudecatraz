@@ -25,6 +25,8 @@ def _env_true(name: str) -> bool:
 # survive container exit even when the live agent home is a tmpfs (sync mode).
 AGENT_LOG_DIR = Path("/var/log/agent-debug")
 
+WORKSPACE = Path("/workspace")
+
 
 def resolve_log_dir(home: Path) -> Path:
     """Prefer the host-persistent bind when present and writable by the dev
@@ -64,6 +66,33 @@ def cmd_sync(adapter: AgentAdapter, home: Path, source: str | None = None) -> No
 # ── generic per-start setup ───────────────────────────────────────────────────
 
 
+def _chown_tree(top: Path, uid: int, gid: int) -> None:
+    """Re-own everything under `top` living on the same filesystem. Mount points
+    are pruned, so the .catraz tmpfs shadow keeps its root-owned 0700; symlinks
+    are never followed — a link planted in the workspace must not hand its
+    target to the dev user."""
+    os.chown(top, uid, gid)
+    for dirpath, dirnames, filenames in os.walk(top):
+        dirnames[:] = [d for d in dirnames if not os.path.ismount(os.path.join(dirpath, d))]
+        for name in (*dirnames, *filenames):
+            os.chown(os.path.join(dirpath, name), uid, gid, follow_symlinks=False)
+
+
+def heal_workspace_ownership(uid: int, gid: int) -> None:
+    """Windows hosts only, where bind-mount ownership belongs to the container
+    rather than to a host user: files an earlier DEV_UID wrote stay unwritable
+    for this one. The stamp keeps the walk to the starts where the uid really
+    changed. On a POSIX host the files are the host user's — never touch them."""
+    if os.environ.get("CATRAZ_HOST_OS") != "windows" or not WORKSPACE.is_dir():
+        return
+    stamp = AGENT_LOG_DIR / ".workspace-uid"
+    if stamp.is_file() and stamp.read_text().strip() == str(uid):
+        return
+    _chown_tree(WORKSPACE, uid, gid)
+    if AGENT_LOG_DIR.is_dir():
+        stamp.write_text(f"{uid}\n")
+
+
 def drop_to_dev() -> None:
     """If running as root, fix /workspace ownership and re-exec as the dev user via gosu."""
     if os.getuid() != 0:
@@ -75,9 +104,9 @@ def drop_to_dev() -> None:
     except KeyError:
         sys.exit("error: user 'dev' not found in container")
 
-    workspace = Path("/workspace")
-    if workspace.exists():
-        os.chown(workspace, pw.pw_uid, pw.pw_gid)
+    if WORKSPACE.exists():
+        os.chown(WORKSPACE, pw.pw_uid, pw.pw_gid)
+    heal_workspace_ownership(pw.pw_uid, pw.pw_gid)
 
     os.execvp("gosu", ["gosu", "dev", sys.executable] + sys.argv)
 
@@ -96,7 +125,7 @@ def install_instructions(adapter: AgentAdapter, ctx: InstructionContext) -> None
     if not content and _env_true("REQUIRE_AGENT_INSTRUCTIONS"):
         sys.exit("error: REQUIRE_AGENT_INSTRUCTIONS is set but rendered instructions are empty")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(content)
+    dest.write_text(content, encoding="utf-8")
 
 
 def _read_branch_prefixes(warden_toml_path: Path) -> tuple[str, ...]:

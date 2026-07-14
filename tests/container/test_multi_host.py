@@ -22,10 +22,15 @@ from catraz import compose
 
 
 def _docker_available() -> bool:
+    """True only when the daemon actually runs Linux containers — these
+    tests exec into a Linux Warden image, so a Windows-container daemon
+    must skip too."""
     if not shutil.which("docker"):
         return False
-    r = subprocess.run(["docker", "info"], capture_output=True)
-    return r.returncode == 0
+    r = subprocess.run(
+        ["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True
+    )
+    return r.returncode == 0 and r.stdout.strip() == "linux"
 
 
 pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
@@ -100,10 +105,10 @@ def live_stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         [*catraz_cli, "-C", str(root), "init", "-y", "--skip-sync"], env=env, check=False
     )  # exit 3 from doctor tolerated (no credentials yet) -- the scaffold is what we need
 
-    (root / ".catraz" / "config" / "warden.toml").write_text(_WARDEN_TOML)
+    (root / ".catraz" / "config" / "warden.toml").write_text(_WARDEN_TOML, encoding="utf-8")
     secrets = root / ".catraz" / "secrets"
-    (secrets / "read_tokens").write_text(_READ_TOKENS)
-    (secrets / "write_tokens").write_text(_WRITE_TOKENS)
+    (secrets / "read_tokens").write_text(_READ_TOKENS, encoding="utf-8")
+    (secrets / "write_tokens").write_text(_WRITE_TOKENS, encoding="utf-8")
     (secrets / "read_tokens").chmod(0o600)
     (secrets / "write_tokens").chmod(0o600)
 

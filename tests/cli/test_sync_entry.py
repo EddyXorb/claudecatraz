@@ -36,7 +36,7 @@ def test_run_sync_calls_adapter_in_process(tmp_path: Path, monkeypatch: pytest.M
     cli._run_sync(tmp_path, cli.Out(color=False))
     assert len(fake.calls) == 1
     _, home = fake.calls[0]
-    assert str(home).endswith("secrets/claude")
+    assert str(home).endswith(str(Path("secrets") / "claude"))
 
 
 def test_run_sync_raises_when_adapter_missing(

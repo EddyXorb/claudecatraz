@@ -1,6 +1,7 @@
 """P10: non-interactive `catraz run` tees its transcript to .catraz/logs/agent."""
 
 import argparse
+import os
 import shutil
 import sys
 import types
@@ -91,7 +92,9 @@ def test_cmd_run_tty_no_tee(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 # ── compose.run tee streaming ─────────────────────────────────────────────────
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash unavailable")
+@pytest.mark.skipif(
+    os.name != "posix" or shutil.which("bash") is None, reason="tees a POSIX shell subprocess"
+)
 def test_compose_run_tee_writes_file(tmp_path: Path) -> None:
     # prefix=[] is mandatory: an omitted prefix defaults to the docker-compose source cmd.
     log = tmp_path / "out.log"

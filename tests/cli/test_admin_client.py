@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.server
+import socket
 import socketserver
 import threading
 from pathlib import Path
@@ -11,6 +12,10 @@ from typing import Iterator
 import pytest
 
 from catraz.admin_client import AdminUnreachable, admin_socket_path, get_json
+
+pytestmark = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"), reason="Unix sockets unavailable on this host"
+)
 
 UdsFixture = tuple[Path, "_UdsServer"]
 
@@ -27,8 +32,12 @@ def test_get_json_raises_when_socket_missing(tmp_path: Path) -> None:
         get_json(tmp_path, "/policy")
 
 
-class _UdsServer(socketserver.UnixStreamServer):
-    allow_reuse_address = True
+# UnixStreamServer is absent where AF_UNIX is; guard the definition so the module
+# still imports there — the module-wide skip keeps these tests from running.
+if hasattr(socket, "AF_UNIX"):
+
+    class _UdsServer(socketserver.UnixStreamServer):
+        allow_reuse_address = True
 
 
 class _JsonHandler(http.server.BaseHTTPRequestHandler):
