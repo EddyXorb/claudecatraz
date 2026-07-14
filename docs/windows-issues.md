@@ -1,4 +1,4 @@
-# Known bugs
+# Known issues on windows
 
 Open defects, grouped by root cause. Each entry names the source it lives in and
 the tests that prove it.
