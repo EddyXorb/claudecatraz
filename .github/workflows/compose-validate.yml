@@ -86,11 +86,13 @@ jobs:
           # ${VAR} and ${VAR:-default}
           compose_vars = set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)(?::-[^}]*)?\}', compose))
 
-          # PROJECT_DIR and HOST_GITCONFIG are injected by catraz at runtime
-          # (the latter points at the host ~/.gitconfig, else /dev/null) — not
+          # PROJECT_DIR, HOST_GITCONFIG and CATRAZ_HOST_OS are injected by catraz
+          # at runtime (HOST_GITCONFIG points at the host ~/.gitconfig, else
+          # /dev/null; CATRAZ_HOST_OS is derived from the host OS) — not
           # documented .env values.
           compose_vars.discard("PROJECT_DIR")
           compose_vars.discard("HOST_GITCONFIG")
+          compose_vars.discard("CATRAZ_HOST_OS")
 
           # All vars in .env.example, including commented-out stage-02 entries
           example_vars = set()
