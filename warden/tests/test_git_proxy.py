@@ -111,6 +111,21 @@ async def test_upload_pack_denied_for_project_outside_allowlist(client, respx_ro
     assert "not in allowlist" in resp.json()["reason"]
 
 
+async def test_upload_pack_forwards_content_encoding(client, respx_router):
+    # git gzips the fetch body; without the Content-Encoding header upstream
+    # reads gzip bytes as pkt-line and 500s.
+    route = respx_router.route(method="POST", url__regex=r".*/git-upload-pack$").mock(
+        return_value=httpx.Response(200, content=b"fetched-pack")
+    )
+    resp = await client.post(
+        "/git/group/proj.git/git-upload-pack",
+        content=b"gzip-bytes",
+        headers={"content-encoding": "gzip"},
+    )
+    assert resp.status_code == 200
+    assert route.calls.last.request.headers.get("content-encoding") == "gzip"
+
+
 async def test_push_forwards_content_encoding(client, respx_router):
     # gzip stays gzip: the Content-Encoding header is passed upstream untouched.
     body = make_push([(ZERO, SHA1, "refs/heads/claude/feature")])
