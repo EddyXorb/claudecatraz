@@ -39,6 +39,17 @@ class TestCheckPolicy:
         doctor.check_policy(tmp_path, {}, f)
         assert any(i[0] == doctor.BAD and "gitlab.com" in i[2] for i in f.items)
 
+    def test_duplicate_host_is_bad(self, tmp_path: Path) -> None:
+        """Two endpoints for the same host (e.g. a gitlab and a plain twin) is
+        what the warden rejects and Docker's extra_hosts trips on — surface it
+        loud before start, with the reason a plain twin is unnecessary."""
+        _write_endpoints(tmp_path, [("gitlab.com", "gitlab"), ("gitlab.com", "plain")])
+        f = doctor.Findings()
+        doctor.check_policy(tmp_path, {}, f)
+        assert any(
+            i[0] == doctor.BAD and "duplicate" in i[2] and "gitlab.com" in i[2] for i in f.items
+        )
+
     def test_allowlists_are_isolated_per_host(self, tmp_path: Path) -> None:
         """One host's populated allowlist must never mask another host's
         empty one — each endpoint is checked independently."""

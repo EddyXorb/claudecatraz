@@ -53,7 +53,10 @@ allowed_projects = ["group/sub/project"]
 
 * **`type`** — implemented values: `"gitlab"` (git + REST API, gitlab.com or self-hosted)
   and `"plain"` (git smart-HTTP only, no REST API assumed). `"github"` is reserved for a
-  future guard — the Warden refuses to start if it is used.
+  future guard — the Warden refuses to start if it is used. A `"gitlab"` endpoint already
+  carries the git transport, so `git clone`/`fetch`/`push` work through it — a separate
+  `"plain"` endpoint for the *same* host is redundant. `"plain"` is for a host with no REST
+  API. One host = exactly one endpoint; a duplicate host aborts startup.
 * **No endpoint at all = no host is routed or reachable** (real default-deny). `catraz init`
   offers to add one; the shipped template ships none.
 * **Tokens are never set here.** They live in the grouped `.catraz/secrets/read_tokens` and
