@@ -205,6 +205,10 @@ class GitGuard(Guard[GitIntent]):
                     "content-type", "application/x-git-upload-pack-request"
                 ),
                 token=decision.token,
+                # git gzips the upload-pack request body and sets Content-Encoding;
+                # forward it (as receive-pack does) so the upstream can decode the
+                # body instead of choking on gzip bytes (HTTP 500).
+                extra_headers=_forward_encoding(request),
             )
             return stream_upstream(resp)
 

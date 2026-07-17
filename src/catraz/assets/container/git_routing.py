@@ -70,7 +70,7 @@ def configure_git_warden(warden_toml_path: Path | None = None) -> None:
         return
     ssh_user = os.environ.get("GITLAB_SSH_USER", "git")
     for host in hosts:
-        warden_base = f"http://{host}:8080/"
+        warden_base = f"http://{host}:8080/git/"
         key = f"url.{warden_base}.insteadOf"
         rewrites = [
             f"https://{host}/",  # https://<host>/
