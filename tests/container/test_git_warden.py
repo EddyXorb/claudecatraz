@@ -1,6 +1,7 @@
 """configure_git_warden: every configured [[git.endpoint]] host gets its own
-schema-rewrite (https -> http://<host>:8080/), hostname preserved — no
-path-prefix trick, no warden container name.
+rewrite (https -> http://<host>:8080/git/), hostname preserved. The /git/
+prefix is the warden's git-transport mount — a request without it matches no
+route and 404s.
 
 These run against a real temp HOME so `git config --global` actually writes the
 multivar insteadOf entries; we then read them back with `git config --get-all`.
@@ -27,7 +28,7 @@ def _write_warden_toml(path: Path, hosts: list[str]) -> None:
 
 
 def _insteadof_values(home: Path, host: str) -> list[str]:
-    key = f"url.http://{host}:8080/.insteadOf"
+    key = f"url.http://{host}:8080/git/.insteadOf"
     r = subprocess.run(
         ["git", "config", "--global", "--get-all", key],
         env={"HOME": str(home)},
@@ -71,11 +72,12 @@ def test_single_host_all_three_remote_forms_routed(
     }
 
 
-def test_schema_rewrite_keeps_canonical_hostname_no_path_trick(
+def test_rewrite_keeps_canonical_hostname_with_git_mount(
     ep: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Target is exactly http://<host>:8080/ — same hostname, only
-    scheme+port change, no path prefix, no rewrite to a different hostname."""
+    """Target is exactly http://<host>:8080/git/ — same hostname, only
+    scheme+port and the /git/ mount change, never a different hostname or the
+    warden container name."""
     _run(ep, tmp_path, monkeypatch, ["my-gitlab.de"])
     r = subprocess.run(
         ["git", "config", "--global", "--get-regexp", r"^url\..*\.insteadof$"],
@@ -85,7 +87,7 @@ def test_schema_rewrite_keeps_canonical_hostname_no_path_trick(
     )
     assert "gitlab-warden" not in r.stdout
     keys = {line.split()[0] for line in r.stdout.splitlines() if line.strip()}
-    assert keys == {"url.http://my-gitlab.de:8080/.insteadof"}
+    assert keys == {"url.http://my-gitlab.de:8080/git/.insteadof"}
 
 
 def test_multi_host_each_gets_its_own_rewrite(
