@@ -109,6 +109,18 @@ def test_render_hosts_fragment_no_pin_without_resolved_ip(tmp_path: Path) -> Non
     assert "extra_hosts:" not in compose.render_hosts_fragment(["gitlab.com"])
 
 
+def test_render_hosts_fragment_dedupes_repeated_host(tmp_path: Path) -> None:
+    """A host that appears twice (e.g. a gitlab and a plain endpoint for the
+    same host) collapses to one alias/extra_host/no_proxy entry — duplicate
+    extra_hosts is a hard Docker error."""
+    text = compose.render_hosts_fragment(
+        ["gitlab.com", "gitlab.com"], {"gitlab.com": "172.65.251.78"}
+    )
+    assert text.count("- gitlab.com\n") == 1
+    assert text.count('- "gitlab.com:172.65.251.78"') == 1
+    assert "no_proxy=gitlab.com,localhost,127.0.0.1" in text
+
+
 def test_write_hosts_fragment_writes_from_warden_toml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

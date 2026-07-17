@@ -533,14 +533,27 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
     stays the warden reconcile — this just turns the obvious traps loud before
     start; each host's allowlist is checked in isolation, never merged with
     another host's."""
-    from catraz.policy import validate_project
+    from catraz.policy import normalize_host, validate_project
 
     endpoints = _read_git_endpoints(root)
     if not endpoints:
         f.ok("policy", "no [[git.endpoint]] configured — allowlist not required")
         return
+    seen: dict[str, str] = {}
     for endpoint in endpoints:
         host = endpoint["host"]
+        key = normalize_host(host)
+        # The warden rejects a second endpoint for a host it already has; a gitlab
+        # endpoint already carries the git transport, so no plain twin is needed.
+        if key in seen:
+            f.bad(
+                "policy",
+                f"{host}: duplicate [[git.endpoint]] host (already configured as {seen[key]!r})",
+                "one endpoint per host — a gitlab endpoint already handles plain git "
+                "(clone/fetch/push), so a separate plain endpoint for it is redundant",
+            )
+            continue
+        seen[key] = host
         resolved = endpoint["allowed_projects"]
         if not resolved:
             f.warn(
