@@ -1,11 +1,11 @@
-"""The REST-API guard's own quota table: agent_mrs, in the same SQLite
-file as core state via the shared store, never a second connection.
-Keyed by (host, project, iid) with a per-endpoint open_mrs count.
+"""The open-MR quota table every forge REST guard shares: agent_mrs, in
+the same SQLite file as core state via the shared store. Keyed by (host,
+project, iid); hosts are type-disjoint, so forges never share a row.
 """
 
 from __future__ import annotations
 
-from ....core.state import StateStore
+from ...core.state import StateStore
 
 _MR_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_mrs (

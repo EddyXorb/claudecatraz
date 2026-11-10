@@ -6,6 +6,7 @@ every other guard keeps serving off its own fresh counts.
 from __future__ import annotations
 
 import httpx
+from git_wire import INFO_REFS, advertisement_response
 
 from warden.context import build_context
 from warden.core.audit import AuditLog
@@ -27,8 +28,8 @@ def _api(ctx):
 
 
 def _mock_branches_ok(router):
-    router.route(method="GET", url__regex=r".*/repository/branches.*").mock(
-        return_value=httpx.Response(200, json=[{"name": "claude/a"}])
+    router.route(method="GET", url__regex=INFO_REFS).mock(
+        return_value=advertisement_response("claude/a")
     )
 
 

@@ -93,6 +93,35 @@ def capabilities(head: bytes) -> set[str]:
     return {c.decode() for c in caps.split(b" ") if c}
 
 
+_SERVICE_LINE = b"# service=git-upload-pack"
+
+
+def advertised_branches(body: bytes) -> list[str]:
+    """Branch names from a protocol-v0 upload-pack ref advertisement.
+
+    Raises ValueError on anything that is not one — an HTML login page
+    with status 200 must fail the reconcile, never read as "no branches"."""
+    lines: list[bytes] = []
+    i, n = 0, len(body)
+    while i < n:
+        length = int(body[i : i + 4], 16) if i + 4 <= n else -1
+        if length == 0:
+            i += 4
+            continue
+        if length < 4 or i + length > n:
+            raise ValueError("malformed pkt-line in ref advertisement")
+        lines.append(body[i + 4 : i + length].split(b"\x00", 1)[0].rstrip(b"\n"))
+        i += length
+    if not lines or lines[0] != _SERVICE_LINE:
+        raise ValueError("not an upload-pack ref advertisement")
+    names = []
+    for line in lines[1:]:
+        _, _, ref = line.partition(b" ")
+        if ref.startswith(b"refs/heads/"):
+            names.append(ref[len(b"refs/heads/") :].decode())
+    return names
+
+
 def _find_command_end(buf: bytes | bytearray) -> Optional[int]:
     """Index just past the flush-pkt that ends the command section, or None.
 

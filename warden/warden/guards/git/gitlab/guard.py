@@ -22,6 +22,8 @@ from ....core.state import State
 from ....core.transport import UpstreamRouter, stream_upstream
 from ....errors import deny_json
 from .. import actions as git_actions
+from ..endpoints import composes
+from ..mr_state import MrState
 from . import actions as gitlab_actions
 from .intent import ApiIntent
 from .mr_namespace import MrNamespace
@@ -29,7 +31,6 @@ from .parsing import extract_fields, iid_from_path, project_from_path, raw_query
 from .policy import decide
 from .recognizers import CATALOG, RestRecognizer, ScopeKind, match_request
 from .reconcile import reconcile_mrs
-from .state import MrState
 
 _DEFAULT_ACTION_IDS: frozenset[str] = frozenset(a.id for a in git_actions.DEFAULT)
 
@@ -110,6 +111,9 @@ class ApiGuard(Guard[ApiIntent]):
         Reachable before the kernel's host_gate has run, same as state_view.
         """
         return self._effective_by_host.get(self.cfg.normalize_host(host), frozenset())
+
+    def serves_host(self, host: str) -> bool:
+        return composes(self.cfg, host, "gitlab")
 
     def project_allowed(self, host: str, project: str) -> bool:
         """Check if project is allowed on host by path or numeric id.

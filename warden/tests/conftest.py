@@ -12,6 +12,7 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
+from warden.guards.git.endpoints import upstream_layout
 from warden.guards.git.gitlab.guard import ApiGuard
 
 UPSTREAM = "https://gitlab.example"
@@ -38,7 +39,7 @@ def state() -> State:
 
 @pytest.fixture
 def api_guard(cfg, state) -> ApiGuard:
-    return ApiGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg))
+    return ApiGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg, upstream_layout))
 
 
 @pytest.fixture

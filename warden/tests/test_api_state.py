@@ -5,7 +5,7 @@ here would directly mis-gate writes.
 from __future__ import annotations
 
 from warden.core.state import State
-from warden.guards.git.gitlab.state import MrState
+from warden.guards.git.mr_state import MrState
 
 
 def _mr_state() -> MrState:
