@@ -6,6 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
+from catraz import live_config
 from catraz.doctor import _doctor_fix, print_findings, run_doctor
 from catraz.envfile import load_env, set_env_values
 from catraz.errors import CliError, EXIT_CONFIG, EXIT_DOCTOR, EXIT_OK
@@ -233,7 +234,22 @@ def cmd_allow(root: Path, args: argparse.Namespace, out: Out) -> int:
         out.info("already allowed — nothing to add")
         return EXIT_OK
 
+    running = live_config.warden_running(root)
     set_endpoint_allowed_projects(warden_toml, host, merged)
     out.info(out.green(f"• {host}: allowed_projects now: {', '.join(merged)}"))
-    out.info("run `catraz reload` to apply to a running stack")
+    _confirm_live_apply(root, out, running)
     return EXIT_OK
+
+
+def _confirm_live_apply(root: Path, out: Out, running: bool) -> None:
+    """Tell the user whether the running warden took the edit."""
+    if not running:
+        out.info("• applies when the warden next starts")
+        return
+    state = live_config.wait_settled(root, "gitlab-warden").state
+    if state == live_config.APPLIED:
+        out.info(out.green("• applied to the running warden"))
+    elif state == live_config.PENDING:
+        out.warn("the running warden has not confirmed the change yet — check `catraz status`")
+    else:
+        live_config.report(root, out, ["gitlab-warden"])
