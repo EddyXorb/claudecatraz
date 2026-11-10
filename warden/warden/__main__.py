@@ -83,6 +83,10 @@ async def _serve() -> None:
 
 
 def main() -> None:
+    if sys.argv[1:] == ["supervise"]:
+        from .supervise import main as supervise_main
+
+        sys.exit(supervise_main())
     try:
         asyncio.run(_serve())
     except (ConfigError, SchemaError) as exc:
