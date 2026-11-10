@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from catraz import image, compose as compose_mod
+from catraz import agent_image, image, compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
 
@@ -82,7 +82,7 @@ def test_start_remote_daemon_brings_up_remote_profile(
         return "catraz-base:test"
 
     monkeypatch.setattr(image, "resolve_base", _mock_resolve)
-    monkeypatch.setattr(image, "resolve_claude_code_version", lambda root: "cc:test")
+    monkeypatch.setattr(agent_image, "ensure", lambda root, out, base: "agent:test")
     # The post-up reporting steps drive their own compose calls / polling; stub
     # them so this test isolates the daemon bring-up command itself.
     monkeypatch.setattr(run_cmd, "_print_remote_command", lambda *a, **k: None)
@@ -98,7 +98,7 @@ def test_start_remote_daemon_brings_up_remote_profile(
     monkeypatch.setattr(run_cmd, "compose_run", _mock_compose_run)
     rc = run_cmd.cmd_run(tmp_path, typing.cast(argparse.Namespace, _ns(["claude-remote"])), _out())
     assert rc == 0
-    assert compose_calls == [["--profile", "remote", "up", "-d", "--build", "--quiet-build"]]
+    assert compose_calls == [["--profile", "remote", "up", "-d"]]
     assert resolve_calls  # base image resolved
 
 
@@ -130,6 +130,7 @@ def _mock_oneoff(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[s
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "_ensure_infra", lambda *a, **k: None)
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
+    monkeypatch.setattr(agent_image, "ensure", lambda root, out, base: "agent:test")
     monkeypatch.setattr(
         compose_mod, "prepare", lambda root, *, render, extra_env=None: ["docker", "compose"]
     )

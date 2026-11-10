@@ -131,6 +131,7 @@ forges, databases, …) — without touching the sandbox or the security kernel.
 | `catraz audit --web` | Open the read-only GitLab decision viewer |
 | `catraz status` / `ps` | Health, URLs, quota snapshot / list active agent containers |
 | `catraz reload` | Rebuild + restart infra whose `.catraz` config changed (`--force` for all) |
+| `catraz build` | Rebuild the agent image now; new Claude Code releases otherwise build in the background and apply on the next start |
 | `catraz allow <path>…` | Append GitLab project(s) to the Warden allowlist |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
 | `catraz stop` | Stop the stack |

@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from catraz import image, compose as compose_mod
+from catraz import agent_image, image, compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
 
@@ -41,6 +41,7 @@ def _mock_cmd_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "_ensure_infra", lambda *a, **k: None)
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
+    monkeypatch.setattr(agent_image, "ensure", lambda root, out, base: "agent:test")
     monkeypatch.setattr(
         compose_mod,
         "prepare",

@@ -87,21 +87,10 @@ services:
     # brings up warden+squid only. `docker compose run claude-dev-env` (catraz local)
     # activates the service despite the profile.
     profiles: ["remote"]
-    build:
-      context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}
-      # Per-agent-profile layer (§05.3): AGENT_PROFILE selects which
-      # `assets/agents/<profile>/layer.Dockerfile` gets built — the ONE
-      # adapter this image will carry (§06.2: no runtime adapter choice).
-      dockerfile: agents/${AGENT_PROFILE:-claude}/layer.Dockerfile
-      args:
-        # Default to empty so a profile-less `up`/`down` (which interpolates this service
-        # but never builds it) does not warn "BASE_IMAGE is not set". The agent is the only
-        # consumer of the base (the agent layer: FROM ${BASE_IMAGE}); catraz run / up --remote
-        # always inject the resolved value via extra_env, overriding this default.
-        BASE_IMAGE: ${BASE_IMAGE:-}
-        NODE_VERSION: ${NODE_VERSION:-22}
-        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
-        DEV_UID: ${DEV_UID:-1000}
+    # Built and tagged by catraz itself, never by compose and never pulled; the
+    # default only keeps a profile-less up/down (which never runs the agent) quiet.
+    image: ${AGENT_IMAGE:-catraz-agent-unset}
+    pull_policy: never
     # ONLY agent-net (internal) -> no direct internet/DNS route. Research/Build
     # traffic runs exclusively through the Forward-Proxy (02-network-isolation.md).
     networks: [agent-net]
