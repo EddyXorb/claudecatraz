@@ -789,12 +789,13 @@ MOUNT_TARGETS: dict[str, list[tuple[str, str]]] = {
         ("state/warden/db", "/var/lib/warden"),
         ("logs/warden", "/var/log/warden"),
         ("state/warden/run", "/run/warden"),
-        ("config/warden.toml", "/etc/warden/warden.toml"),
+        ("config", "/etc/warden/config"),
+        ("secrets/read_tokens", "/run/secrets/read_tokens"),
+        ("secrets/write_tokens", "/run/secrets/write_tokens"),
     ],
     "forward-proxy": [
         ("logs/squid", "/var/log/squid"),
-        ("config/squid.conf", "/etc/squid/squid.conf"),
-        ("config/allowlist.txt", "/etc/squid/allowlist.txt"),
+        ("config", "/etc/catraz/config"),
     ],
 }
 

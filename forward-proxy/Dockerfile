@@ -29,8 +29,13 @@ RUN mkdir -p /etc/squid/ssl \
  && chmod 0400 /etc/squid/ssl/bump.key /etc/squid/ssl/bump.pem \
  && chown proxy:proxy /etc/squid/ssl/bump.key /etc/squid/ssl/bump.crt /etc/squid/ssl/bump.pem
 
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# squid reads its config through these links into the mounted config
+# directory; a directory mount (unlike a file mount) sees rename-saves.
+RUN ln -sf /etc/catraz/config/squid.conf /etc/squid/squid.conf \
+ && ln -sf /etc/catraz/config/allowlist.txt /etc/squid/allowlist.txt
+
+COPY docker-entrypoint.sh squid-supervise.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/squid-supervise.sh
 
 EXPOSE 3128
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

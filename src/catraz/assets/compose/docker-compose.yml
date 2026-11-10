@@ -29,6 +29,10 @@ services:
       # The host-side CLI path (.catraz/state/warden/run/admin.sock in observe.py/doctor.py)
       # mirrors it by contract (bind-mount: host .catraz/state/warden/run → container /run/warden).
       - ADMIN_UDS=/run/warden/admin.sock
+      # The supervisor (PID 1) re-validates these inputs on every change and
+      # replaces the warden process; its verdict lands in the status file.
+      - WARDEN_CONFIG_PATH=/etc/warden/config/warden.toml
+      - CONFIG_STATUS_FILE=/run/warden/config-status
       # Non-secret policy — SOURCE OF TRUTH is config/warden.toml exclusively
       # ([git.rules] + [[git.endpoint]], §3.5): no env overrides left here.
     volumes:
@@ -36,7 +40,9 @@ services:
       # without Docker tools (W12). DEV_UID controls ownership so the host user can read.
       - ${PROJECT_DIR}/.catraz/state/warden/db:/var/lib/warden
       - ${PROJECT_DIR}/.catraz/logs/warden:/var/log/warden
-      - ${PROJECT_DIR}/.catraz/config/warden.toml:/etc/warden/warden.toml:ro
+      # Directory, not file, mount: a file mount pins the inode, so an editor's
+      # rename-save would stay invisible to the running supervisor.
+      - ${PROJECT_DIR}/.catraz/config:/etc/warden/config:ro
       - ${PROJECT_DIR}/.catraz/state/warden/run:/run/warden   # Socket directory (file is created at runtime)
     networks: [agent-net, egress-net]
     healthcheck:
@@ -61,8 +67,9 @@ services:
     networks: [agent-net, egress-net]
     volumes:
       # host-editable config, read-only (central config/ folder, README §11):
-      - ${PROJECT_DIR}/.catraz/config/squid.conf:/etc/squid/squid.conf:ro
-      - ${PROJECT_DIR}/.catraz/config/allowlist.txt:/etc/squid/allowlist.txt:ro
+      # Whole directory (rename-safe); the image links /etc/squid/squid.conf and
+      # /etc/squid/allowlist.txt into it. Edits apply live, see squid-supervise.sh.
+      - ${PROJECT_DIR}/.catraz/config:/etc/catraz/config:ro
       - ${PROJECT_DIR}/.catraz/logs/squid:/var/log/squid   # Bind-mount: egress audit (access.log)
     read_only: true
     tmpfs:
