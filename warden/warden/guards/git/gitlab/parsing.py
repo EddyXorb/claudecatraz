@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, unquote
 
 from starlette.requests import Request
 
+from ....core.path_template import decode_unreserved
 from .recognizers import Location, RestRecognizer
 
 _PROJECT_RE = re.compile(r"/projects/([^/]+)")
@@ -28,7 +29,7 @@ def raw_rest_path(request: Request) -> str:
     full = full.split("?", 1)[0]
     if full.startswith(_API_PREFIX):
         full = full[len(_API_PREFIX) :]
-    return full or "/"
+    return decode_unreserved(full) or "/"
 
 
 def raw_query(request: Request) -> str:

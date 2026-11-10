@@ -332,3 +332,23 @@ def test_mr_pipeline_trigger_denied_when_ci_trigger_disabled():
 async def test_pipeline_delete_is_unmodelled_and_denied(client, respx_router):
     resp = await client.delete(f"/api/v4/projects/{PROJ}/pipelines/9")
     assert resp.status_code == 403 and "no recognized action" in resp.json()["reason"]
+
+
+# --- dot segments: the upstream client collapses them, so they never match ---
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("PUT", "/projects/group%2Fproj/issues/.."),  # would become a project edit
+        ("PUT", "/projects/group%2Fproj/merge_requests/%2e%2e"),
+        ("GET", "/projects/group%2Fproj/../other%2Fproj/repository/tree"),
+        ("GET", "/projects/group%2Fproj/repository/files/..%2F..%2Fx"),
+    ],
+)
+def test_dot_segment_paths_are_never_recognized(method, path):
+    from warden.guards.git.gitlab.intent import ApiIntent
+    from warden.guards.git.gitlab.recognizers import match_request
+
+    intent = ApiIntent(_project="group/proj", _method=method, path=path, _host="gitlab.example")
+    assert match_request(intent) is None
