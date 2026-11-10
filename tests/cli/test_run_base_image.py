@@ -1,11 +1,11 @@
-"""B2: cmd_run always resolves BASE_IMAGE before calling compose.prepare()."""
+"""cmd_run resolves the agent image before calling compose.prepare()."""
 
 import argparse
 import typing
 import types
 from pathlib import Path
 import pytest
-from catraz import image, compose as compose_mod
+from catraz import agent_image, image, compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
 
@@ -24,7 +24,7 @@ def _mock_cmd_run(
     monkeypatch.setattr(run_cmd, "assert_invariants", lambda *a, **k: None)
     monkeypatch.setattr(run_cmd, "_ensure_infra", lambda *a, **k: None)
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
-    monkeypatch.setattr(image, "resolve_claude_code_version", lambda root: "cc:test")
+    monkeypatch.setattr(agent_image, "ensure", lambda root, out, base: f"agent-on-{base}")
     # Host gitconfig is environment-dependent; pin it off so extra_env is deterministic.
     monkeypatch.setattr(run_cmd, "_host_gitconfig_env", lambda: {})
 
@@ -49,20 +49,17 @@ def _mock_cmd_run(
     return prepare_calls, compose_calls
 
 
-def test_cmd_run_passes_base_image_to_prepare(
+def test_cmd_run_passes_agent_image_to_prepare(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """cmd_run passes BASE_IMAGE via extra_env to compose.prepare, not compose_run."""
+    """The ensured agent image (built on the resolved base) reaches compose.prepare."""
     prepare_calls, _ = _mock_cmd_run(monkeypatch, tmp_path)
     args = typing.cast(argparse.Namespace, types.SimpleNamespace(claude_args=[]))
     monkeypatch.chdir(tmp_path)
     rc = run_cmd.cmd_run(tmp_path, args, Out(color=False))
     assert rc == 0
     assert len(prepare_calls) == 1
-    assert prepare_calls[0]["extra_env"] == {
-        "BASE_IMAGE": "catraz-base:test",
-        "CLAUDE_CODE_VERSION": "cc:test",
-    }
+    assert prepare_calls[0]["extra_env"] == {"AGENT_IMAGE": "agent-on-catraz-base:test"}
     assert prepare_calls[0]["render"] is True
 
 

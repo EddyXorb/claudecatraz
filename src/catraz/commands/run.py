@@ -15,7 +15,7 @@ from catraz.compose import (
     assert_real_dirs,
     assert_invariants,
 )
-from catraz import image, compose
+from catraz import agent_image, image, compose
 from catraz.ui import Out
 from catraz.commands.stack import (
     _row_ready,
@@ -29,9 +29,8 @@ MODES = ("claude", "claude-remote", "shell")
 
 
 def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list[str]:
-    # --build self-heals CLI/image skew (near-instant no-op via layer cache when
-    # unchanged); --quiet-build hides its progress dump but keeps infra status lines.
-    args = ["run", "--rm", "--no-deps", "--build", "--quiet-build"]
+    # No --build: catraz builds the agent image itself (agent_image.ensure).
+    args = ["run", "--rm", "--no-deps"]
     if not tty:
         args.append("-T")
     args += [
@@ -91,14 +90,16 @@ def _host_gitconfig_env() -> dict[str, str]:
     return {"HOST_GITCONFIG": str(p)} if p.exists() else {}
 
 
+def _agent_env(root: Path, out: Out) -> dict[str, str]:
+    """Compose env for the agent service; may build the image in the foreground."""
+    base = image.resolve_base(root)
+    return {"AGENT_IMAGE": agent_image.ensure(root, out, base), **_host_gitconfig_env()}
+
+
 def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
     """Shared ephemeral one-off path for `claude` (sub=run) and `shell` (sub=exec)."""
     assert_real_dirs(root)
-    extra_env = {
-        "BASE_IMAGE": image.resolve_base(root),
-        "CLAUDE_CODE_VERSION": image.resolve_claude_code_version(root),
-        **_host_gitconfig_env(),
-    }
+    extra_env = _agent_env(root, out)
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     _ensure_infra(root, out, prefix=prefix)
@@ -133,22 +134,11 @@ def _start_remote_daemon(root: Path, args: argparse.Namespace, out: Out) -> int:
         return EXIT_DOCTOR
     print()
     _auto_sync_if_needed(root, out)
-    extra_env = {
-        "BASE_IMAGE": image.resolve_base(root),
-        "CLAUDE_CODE_VERSION": image.resolve_claude_code_version(root),
-        **_host_gitconfig_env(),
-    }
+    extra_env = _agent_env(root, out)
     prefix = compose.prepare(root, render=True, extra_env=extra_env)
     assert_invariants(root, prefix=prefix)
     out.info("• starting the agent daemon…")
-    # --build self-heals CLI/image skew, same as the one-off path (_oneoff_args) —
-    # near-instant no-op via layer cache when the image is already current.
-    r = compose_run(
-        root,
-        ["--profile", "remote", "up", "-d", "--build", "--quiet-build"],
-        prefix=prefix,
-        check=False,
-    )
+    r = compose_run(root, ["--profile", "remote", "up", "-d"], prefix=prefix, check=False)
     if r and r.returncode == 0:
         _print_remote_command(root, out, prefix=prefix)
         if not _agent_survived_startup(root, out, prefix=prefix):

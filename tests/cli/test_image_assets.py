@@ -1,3 +1,5 @@
+import re
+
 from catraz.paths import asset_root
 
 
@@ -41,3 +43,24 @@ def test_claude_agent_manifest_present() -> None:
         "domains",
     ):
         assert field in manifest, f"agent.toml missing field: {field}"
+
+
+def test_claude_version_arg_only_busts_the_npm_layer() -> None:
+    """CLAUDE_CODE_VERSION is declared after the apt/NodeSource RUN, so a version
+    bump keeps that toolchain layer cached."""
+    ar = asset_root() / "assets"
+    lines = (ar / "agents/claude/layer.Dockerfile").read_text().splitlines()
+    arg = lines.index("ARG CLAUDE_CODE_VERSION=latest")
+    apt = next(i for i, ln in enumerate(lines) if ln.startswith("RUN apt-get update"))
+    assert apt < arg
+    assert lines[arg + 1].startswith("RUN npm install -g @anthropic-ai/claude-code@")
+
+
+def test_compose_agent_service_never_builds_or_pulls() -> None:
+    text = (asset_root() / "assets/compose/docker-compose.yml").read_text()
+    block = text[text.index("\n  claude-dev-env:\n") + 1 :].splitlines()
+    end = next(i for i, ln in enumerate(block[1:], 1) if re.match(r"^ {0,2}\S", ln))
+    keys = [ln.strip() for ln in block[:end] if re.match(r"^    \S", ln)]
+    assert "image: ${AGENT_IMAGE:-catraz-agent-unset}" in keys
+    assert "pull_policy: never" in keys
+    assert not any(k.startswith("build:") for k in keys)
