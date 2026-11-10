@@ -8,10 +8,11 @@
 FROM debian:bookworm-slim
 
 # Debian package `squid-openssl` == Squid built with `--with-openssl` (ssl_bump available).
-# `squidclient` for diagnostics, `openssl` for the init certificate.
+# `squidclient` for diagnostics, `openssl` for the init certificate, `python3` for
+# the config supervisor (squid_supervise.py).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      squid-openssl squidclient openssl ca-certificates \
+      squid-openssl squidclient openssl ca-certificates python3 \
  && rm -rf /var/lib/apt/lists/*
 
 # Squid runs as `proxy`. So that the bind-mounted audit log is readable on the host
@@ -34,8 +35,8 @@ RUN mkdir -p /etc/squid/ssl \
 RUN ln -sf /etc/catraz/config/squid.conf /etc/squid/squid.conf \
  && ln -sf /etc/catraz/config/allowlist.txt /etc/squid/allowlist.txt
 
-COPY docker-entrypoint.sh squid-supervise.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/squid-supervise.sh
+COPY docker-entrypoint.sh squid_supervise.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3128
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

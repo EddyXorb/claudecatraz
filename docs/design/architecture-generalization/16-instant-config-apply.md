@@ -67,7 +67,8 @@ process and watches that service's inputs:
   A child that exits with the config-abort code (2) puts the supervisor into
   the same deny-all state; any other exit ends the supervisor with that code, so
   compose's `restart: on-failure` semantics stay as they are.
-* **forward-proxy** — `squid-supervise.sh` (POSIX sh; the image has no Python).
+* **forward-proxy** — `squid_supervise.py`, the same state machine as the
+  warden's, standalone because the image does not carry the warden package.
   Same fingerprint/debounce loop over `squid.conf` + `allowlist.txt`;
   validates with `squid -k parse`; valid → `SIGHUP` (squid's native reconfigure:
   listeners and ACL files are re-read, established tunnels are kept); invalid →

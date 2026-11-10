@@ -21,4 +21,4 @@ rm -rf "$SSL_DB"
 chown -R proxy:proxy "$SSL_DB"
 
 # Runs squid in the foreground and applies config edits without a restart.
-exec /usr/local/bin/squid-supervise.sh
+exec python3 /usr/local/bin/squid_supervise.py

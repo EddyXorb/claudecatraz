@@ -68,7 +68,7 @@ services:
     volumes:
       # host-editable config, read-only (central config/ folder, README §11):
       # Whole directory (rename-safe); the image links /etc/squid/squid.conf and
-      # /etc/squid/allowlist.txt into it. Edits apply live, see squid-supervise.sh.
+      # /etc/squid/allowlist.txt into it. Edits apply live, see squid_supervise.py.
       - ${PROJECT_DIR}/.catraz/config:/etc/catraz/config:ro
       - ${PROJECT_DIR}/.catraz/logs/squid:/var/log/squid   # Bind-mount: egress audit (access.log)
     read_only: true
