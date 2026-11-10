@@ -29,8 +29,7 @@ _KNOWN_RULE_KEYS = frozenset(
         "max_push_bytes",
     }
 )
-_IMPLEMENTED_ENDPOINT_TYPES = frozenset({"gitlab", "plain"})
-_RESERVED_ENDPOINT_TYPES = frozenset({"github"})
+_IMPLEMENTED_ENDPOINT_TYPES = frozenset({"gitlab", "github", "plain"})
 
 # All policy lives under [git]; everything else in warden.toml is env, not file.
 _KNOWN_TOP_LEVEL_KEYS = frozenset({"git"})
@@ -115,11 +114,6 @@ def _parse_endpoint(raw: object, index: int) -> GitEndpoint:
     host = host.strip()
 
     endpoint_type = raw.get("type")
-    if endpoint_type in _RESERVED_ENDPOINT_TYPES:
-        raise ConfigError(
-            f"warden.toml [[git.endpoint]] host={host!r}: type {endpoint_type!r} is not "
-            "implemented yet"
-        )
     if not isinstance(endpoint_type, str) or endpoint_type not in _IMPLEMENTED_ENDPOINT_TYPES:
         raise ConfigError(
             f"warden.toml [[git.endpoint]] host={host!r}: unknown type {endpoint_type!r}, "

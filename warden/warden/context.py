@@ -17,6 +17,7 @@ from .core.guard import Guard
 from .core.state import State
 from .core.transport import UpstreamRouter
 from .guards.git.endpoints import upstream_layout
+from .guards.git.github.guard import GithubGuard
 from .guards.git.gitlab.guard import ApiGuard
 from .guards.git.transport.guard import GitGuard
 
@@ -65,5 +66,6 @@ def build_context(
     guards: list[Guard[Any]] = [
         GitGuard(cfg, state, audit, router),
         ApiGuard(cfg, state, audit, router),
+        GithubGuard(cfg, state, audit, router),
     ]
     return AppContext(cfg=cfg, state=state, audit=audit, router=router, guards=guards)

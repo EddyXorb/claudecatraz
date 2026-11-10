@@ -107,6 +107,12 @@ class Upstream:
         assert api_base is not None, "endpoint has no REST base (type has no API surface)"
         return f"{api_base}/{path.lstrip('/')}"
 
+    def rest_path_of(self, url: str) -> Optional[str]:
+        """url relative to this endpoint's REST base, or None when it lies
+        anywhere else — a pagination link must never carry a token off-host."""
+        prefix = f"{self._layout.api_base}/"
+        return url[len(prefix) :] if self._layout.api_base and url.startswith(prefix) else None
+
     async def get_json(self, path: str, token: TokenKind) -> httpx.Response:
         return await self._client.get(self.rest_url(path), headers=self._rest_auth(token))
 

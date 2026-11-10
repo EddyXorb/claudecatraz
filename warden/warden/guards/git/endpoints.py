@@ -13,6 +13,7 @@ from ...core.actions import Action
 from ...core.config import Config, GitEndpoint
 from ...core.endpoints import EndpointType
 from ...core.transport import UpstreamLayout
+from .github import actions as github_actions
 from .gitlab import actions as gitlab_actions
 from .transport import actions as transport_actions
 
@@ -31,6 +32,7 @@ class GitEndpointType:
 _SUPPORTED_BY_GUARD: Mapping[str, frozenset[Action]] = {
     "transport": transport_actions.SUPPORTED,
     "gitlab": gitlab_actions.SUPPORTED,
+    "github": github_actions.SUPPORTED,
 }
 
 
@@ -62,6 +64,21 @@ def _plain_layout(host: str) -> UpstreamLayout:
     )
 
 
+def _github_layout(host: str) -> UpstreamLayout:
+    """github.com and GHE.com data-residency hosts serve REST on an api.
+    subdomain; GitHub Enterprise Server serves it under /api/v3."""
+    bare = Config.normalize_host(host)
+    hosted = bare == "github.com" or bare.endswith(".ghe.com")
+    host = host.strip().lower().rstrip(".")  # GitHub's Link URLs are lower-case
+    return UpstreamLayout(
+        git_base=f"https://{host}",
+        api_base=f"https://api.{host}" if hosted else f"https://{host}/api/v3",
+        rest_auth_header="Authorization",
+        rest_auth_scheme="Bearer ",
+        git_user="x-access-token",
+    )
+
+
 def _endpoint_type(
     name: str, guards: tuple[str, ...], layout: Callable[[str], UpstreamLayout]
 ) -> GitEndpointType:
@@ -75,6 +92,7 @@ def _endpoint_type(
 ENDPOINT_TYPES: Mapping[str, GitEndpointType] = {
     "plain": _endpoint_type("plain", ("transport",), _plain_layout),
     "gitlab": _endpoint_type("gitlab", ("transport", "gitlab"), _gitlab_layout),
+    "github": _endpoint_type("github", ("transport", "github"), _github_layout),
 }
 
 

@@ -34,6 +34,7 @@ def state() -> State:
     # Unlock the quota view for tests — locks are per guard now, so unlock both.
     st.mark_reconciled("git")
     st.mark_reconciled("api")
+    st.mark_reconciled("github")
     return st
 
 
