@@ -23,6 +23,7 @@ from catraz import image as _image_mod  # noqa: F401 (kept for tests that import
 from catraz.commands import setup, stack, observe
 from catraz.commands import run as run_cmd
 from catraz.commands import reload as reload_cmd
+from catraz.commands import build as build_cmd
 
 # ── re-exports (importable from catraz.cli by tests) ─────
 # `X as X` marks these as explicit re-exports so mypy --strict allows cli.* access.
@@ -153,6 +154,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional mode (claude|claude-remote|shell), then its args",
     )
 
+    pb = sub.add_parser(
+        "build",
+        parents=[_g()],
+        help="rebuild the agent image now (latest or pinned claude-code)",
+    )
+    pb.add_argument("--no-cache", action="store_true", help="ignore the docker layer cache")
+    # The detached version-check worker that `run` spawns; not a user entry point.
+    pb.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
+
     sub.add_parser("status", parents=[_g()], help="health per service, URLs, quota snapshot")
 
     sub.add_parser("ps", parents=[_g()], help="list active agent containers for this repo")
@@ -217,6 +227,7 @@ HANDLERS = {
     "ps": observe.cmd_ps,
     "reload": reload_cmd.cmd_reload,
     "run": run_cmd.cmd_run,
+    "build": build_cmd.cmd_build,
     "logs": observe.cmd_logs,
     "audit": observe.cmd_audit,
     "sync": setup.cmd_sync,

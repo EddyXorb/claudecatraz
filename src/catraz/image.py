@@ -9,21 +9,26 @@ from catraz.errors import CliError, EXIT_DOCKER
 _CLAUDE_CODE_LATEST_URL = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
 
 
-def resolve_claude_code_version(root: Path) -> str:
-    """Concrete claude-code version for the image build arg. A pinned
-    CLAUDE_CODE_VERSION is used verbatim; "latest" (or unset) is resolved to the
-    currently published version so a new release changes the build arg and busts
-    the Docker layer cache — a bare `@latest` string never would, so the image
-    would keep the stale CLI. Falls back to "latest" when the registry is
-    unreachable (the build still works; it just reuses the cached layer)."""
+def pinned_claude_code_version(root: Path) -> str | None:
+    """CLAUDE_CODE_VERSION from .catraz/.env, or None when unset or "latest"."""
     configured = load_env(root / ".catraz/.env").get("CLAUDE_CODE_VERSION", "").strip()
-    if configured and configured != "latest":
-        return configured
+    return configured if configured and configured != "latest" else None
+
+
+def published_claude_code_version() -> str | None:
+    """Currently published claude-code version, or None when the registry is unreachable."""
     try:
         with urllib.request.urlopen(_CLAUDE_CODE_LATEST_URL, timeout=5) as resp:
-            return str(json.load(resp)["version"]) or "latest"
+            return str(json.load(resp)["version"]) or None
     except (OSError, ValueError, KeyError):
-        return "latest"
+        return None
+
+
+def resolve_claude_code_version(root: Path) -> str:
+    """Concrete claude-code version for the image build arg: the pinned one, else the
+    published one, so a new release changes the build arg and busts the layer cache.
+    Falls back to "latest" when the registry is unreachable (the build still works)."""
+    return pinned_claude_code_version(root) or published_claude_code_version() or "latest"
 
 
 def _image_exists(tag: str) -> bool:

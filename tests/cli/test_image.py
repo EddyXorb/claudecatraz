@@ -162,3 +162,14 @@ def test_base_context_default_is_dockerfile_dir(
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
     image.resolve_base(tmp_path)
     assert str(df.parent.resolve()) in seen["cmd"]
+
+
+def test_pinned_and_published_versions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mk_env(tmp_path, "CLAUDE_CODE_VERSION= latest \n")
+    assert image.pinned_claude_code_version(tmp_path) is None
+    (tmp_path / ".catraz/.env").write_text("CLAUDE_CODE_VERSION=2.0.0\n")
+    assert image.pinned_claude_code_version(tmp_path) == "2.0.0"
+    monkeypatch.setattr(
+        "catraz.image.urllib.request.urlopen", lambda *a, **k: _FakeResp('{"nope": 1}')
+    )
+    assert image.published_claude_code_version() is None
