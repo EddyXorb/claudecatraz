@@ -1,8 +1,8 @@
 """The GitLab REST recognizer catalog: method + path template -> action set.
 
 Matched first-match-wins, most specific row first; read.project is the
-catch-all last row. An unrecognised field value yields an empty action
-set, which is always a deny."""
+catch-all last row. An unrecognised field value or a query string on a
+write yields an empty action set, which is always a deny."""
 
 from __future__ import annotations
 
@@ -157,7 +157,14 @@ class RestRecognizer(Recognizer[ApiIntent]):
         )
 
     def __call__(self, intent: ApiIntent) -> Optional[frozenset[Action]]:
-        return self.action_fn(intent) if self.matches(intent) else None
+        """A write with a query string recognizes to nothing: GitLab merges
+        query parameters into the body, so a state_event there would act
+        unseen by the decision."""
+        if not self.matches(intent):
+            return None
+        if intent.needs_write and intent.raw_query:
+            return frozenset()
+        return self.action_fn(intent)
 
 
 def match_request(intent: ApiIntent) -> Optional[RestRecognizer]:

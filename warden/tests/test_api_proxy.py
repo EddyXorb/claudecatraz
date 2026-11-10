@@ -365,14 +365,13 @@ def test_needs_source_lookup_false_for_entry_with_no_namespace_scope():
 
 
 async def test_body_field_sent_only_as_query_is_not_used_for_the_decision(client, respx_router):
-    # source_branch is a body-declared decision field; sending it only as a
-    # query parameter must not satisfy the branch-namespace check.
+    # Any query string on a write denies before field extraction matters.
     resp = await client.post(
         f"/api/v4/projects/{PROJ}/merge_requests?source_branch=claude/x",
         json={"target_branch": "main"},
     )
     assert resp.status_code == 403
-    assert "outside allowed prefixes" in resp.json()["reason"]
+    assert "no recognized action" in resp.json()["reason"]
 
 
 # --- audit marks non-default-activated catalog entries -------------------------

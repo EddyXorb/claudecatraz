@@ -25,7 +25,7 @@ async def test_merge_alias_when_pipeline_succeeds_blocked(client, respx_router):
     resp = await client.put(
         f"/api/v4/projects/{PROJ}/merge_requests/7/merge?merge_when_pipeline_succeeds=true"
     )
-    assert resp.status_code == 403 and "irreversible" in resp.json()["reason"]
+    assert resp.status_code == 403 and "no recognized action" in resp.json()["reason"]
 
 
 async def test_merge_via_state_event_blocked(client, respx_router):
@@ -162,17 +162,33 @@ async def test_state_event_casing_variant_denied(client, respx_router, value):
     assert resp.status_code == 403 and "no recognized action" in resp.json()["reason"]
 
 
-async def test_state_event_in_query_string_is_not_read_declared_location_wins(client, respx_router):
-    # decision_fields declares state_event as BODY-only; a query-string value
-    # must be invisible, so this falls through as a plain edit and is forwarded.
-    respx_router.route(method="GET", url__regex=r".*/merge_requests/7$").mock(
-        return_value=httpx.Response(200, json={"source_branch": "claude/x"})
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("PUT", "/merge_requests/7?state_event=merge"),
+        ("PUT", "/merge_requests/7?state_event=close"),
+        ("POST", "/merge_requests?source_branch=main&target_branch=prod"),
+        ("POST", "/merge_requests/7/notes?body=x"),
+        ("POST", "/pipeline?ref=main"),
+    ],
+)
+async def test_write_with_query_string_is_denied_without_upstream_call(
+    client, respx_router, method, path
+):
+    # GitLab merges query parameters into the request params, so a field
+    # there would act without ever being decided on.
+    resp = await client.request(method, f"/api/v4/projects/{PROJ}{path}", json={})
+    assert resp.status_code == 403
+    assert "no recognized action" in resp.json()["reason"]
+    assert not respx_router.calls
+
+
+async def test_read_with_query_string_is_still_forwarded(client, respx_router):
+    route = respx_router.route(method="GET", url__regex=r".*/merge_requests\?state=opened$").mock(
+        return_value=httpx.Response(200, json=[])
     )
-    respx_router.route(method="PUT", url__regex=r".*/merge_requests/7\?state_event=merge$").mock(
-        return_value=httpx.Response(200, json={"iid": 7})
-    )
-    resp = await client.put(f"/api/v4/projects/{PROJ}/merge_requests/7?state_event=merge", json={})
-    assert resp.status_code == 200
+    resp = await client.get(f"/api/v4/projects/{PROJ}/merge_requests?state=opened")
+    assert resp.status_code == 200 and route.called
 
 
 # --- search scope fuzz: unknown/missing/content scopes all deny --------------
