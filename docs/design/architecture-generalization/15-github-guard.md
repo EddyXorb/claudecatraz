@@ -39,14 +39,13 @@ Verified by probe tests before any change:
 6. **Decision fields are read from the body only, but GitLab merges query
    parameters into its params.** `PUT …/merge_requests/7?state_event=merge`
    recognizes as `project.mr.edit` (DEFAULT) and is forwarded with the write
-   token. A redteam test asserts this forwarding as intended. Not changed here
-   — see §6.
+   token.
 7. **The open-MR counter only moves at reconcile.** Nothing records a created
    MR, so between reconciles `max_open_mrs` is bounded only by the hourly rate
    limit; reopening (`project.mr.close`) never checks the ceiling at all.
 
-(1)–(5) are fixed here (§4); (6) and (7) are GitLab-only behaviour changes
-proposed in §6.
+(1)–(6) are fixed here (§4; a GitLab write with a query string recognizes to
+nothing); (7) is a GitLab-only behaviour change proposed in §6.
 
 ## 2. What GitHub changes, and how the model absorbs it
 
@@ -148,7 +147,8 @@ counting only fork-safe agent PRs.
 | 01 | Upstream layouts per type, injected into `UpstreamRouter`; forge-specific pagination leaves core. |
 | 02 | One path-template compiler (with digit-only placeholders and the dot-segment rule) for both REST guards; the open-MR table moves to the git namespace. |
 | 03 | GitHub guard: actions, intent, catalog, PR lookup, policy, reconcile, routes; `type = "github"` accepted. |
-| 04 | Operator surface: config README, agent instructions (`/api/v3`). |
+| 04 | GitLab writes with a query string are denied (finding 6). |
+| 05 | Operator surface: config README, agent instructions (`/api/v3`). |
 
 ## 5. Known limits
 
@@ -170,9 +170,6 @@ counting only fork-safe agent PRs.
 
 ## 6. Proposed GitLab follow-ups (not part of this change)
 
-* Deny every GitLab write that carries a query string, or read decision fields
-  from the query as well and deny on conflict (finding 6) — and flip the
-  redteam test that asserts the forwarding.
 * Count an allowed MR create towards `open_mrs` until the next reconcile, and
   give reopen the MR ceiling (finding 7).
 * Scope `pipeline.retry`/`pipeline.cancel`/`job.*` to pipelines of agent

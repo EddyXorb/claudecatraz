@@ -51,12 +51,18 @@ allowed_projects = ["group/sub/project"]
   another. Empty (or absent) = fail-closed — every GitLab op on this host is denied
   until you add one, or run `catraz allow`.
 
-* **`type`** — implemented values: `"gitlab"` (git + REST API, gitlab.com or self-hosted)
-  and `"plain"` (git smart-HTTP only, no REST API assumed). `"github"` is reserved for a
-  future guard — the Warden refuses to start if it is used. A `"gitlab"` endpoint already
-  carries the git transport, so `git clone`/`fetch`/`push` work through it — a separate
-  `"plain"` endpoint for the *same* host is redundant. `"plain"` is for a host with no REST
-  API. One host = exactly one endpoint; a duplicate host aborts startup.
+* **`type`** — `"gitlab"` (git + GitLab REST API, gitlab.com or self-hosted),
+  `"github"` (git + GitHub REST API: `github.com`, a `*.ghe.com` host, or GitHub Enterprise
+  Server) and `"plain"` (git smart-HTTP only, no REST API assumed). A forge endpoint
+  already carries the git transport, so `git clone`/`fetch`/`push` work through it — a
+  separate `"plain"` endpoint for the *same* host is redundant. One host = exactly one
+  endpoint; a duplicate host aborts startup. Both forge types share the same `actions`
+  ids: a GitHub pull request is a `project.mr.*`, a workflow run a `project.ci.trigger`.
+  On GitHub, `allowed_projects` are `owner/repo`, matched exactly (case included).
+* **GitHub Actions run code from the agent's branches** with whatever secrets the
+  repository exposes to them. Keep secrets behind protected environments, set the
+  default `GITHUB_TOKEN` permissions to read-only, and give the write token no
+  workflow-file permission.
 * **No endpoint at all = no host is routed or reachable** (real default-deny). `catraz init`
   offers to add one; the shipped template ships none.
 * **Tokens are never set here.** They live in the grouped `.catraz/secrets/read_tokens` and

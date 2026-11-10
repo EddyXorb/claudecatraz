@@ -138,6 +138,35 @@ curl -sS -X POST "__FORGE_REST_BASE__/projects/<id>/pipeline" \
 #   PUT …/merge_requests/<iid>/merge        (also state_event=merge on the edit above)
 ```
 
+For a host of type `github` (see `warden.toml`) the Warden speaks the GitHub REST API
+instead, at `http://<host>:8080/api/v3` (e.g. `http://github.com:8080/api/v3`); the
+project is `/repos/<owner>/<repo>`. Bodies must be JSON objects, and writes carry no query
+string. GraphQL is denied, so `gh pr create` and other `gh` porcelain do not work — use
+`curl` or `gh api` against that base:
+
+```bash
+GH="http://<host>:8080/api/v3/repos/<owner>/<repo>"
+# Create PR (head may also be "<owner>:<branch>" with the repository's own owner)
+curl -sS -X POST "$GH/pulls" -H "Content-Type: application/json" \
+  -d '{"head":"__BRANCH_PREFIX_EXAMPLE__my-branch","base":"main","title":"...","body":"..."}'
+# Top-level PR comment (pull requests are issues on GitHub)
+curl -sS -X POST "$GH/issues/<number>/comments" -d '{"body":"looks good"}'
+# Inline review comment / reply
+curl -sS -X POST "$GH/pulls/<number>/comments" \
+  -d '{"body":"this can overflow","commit_id":"<sha>","path":"src/main.rs","line":12,"side":"RIGHT"}'
+curl -sS -X POST "$GH/pulls/<number>/comments/<comment_id>/replies" -d '{"body":"fixed"}'
+# Edit or close a PR ("state":"closed")
+curl -sS -X PATCH "$GH/pulls/<number>" -d '{"title":"Refactor X","state":"closed"}'
+# Run a workflow that declares workflow_dispatch, on your branch
+curl -sS -X POST "$GH/actions/workflows/<workflow file or id>/dispatches" \
+  -d '{"ref":"__BRANCH_PREFIX_EXAMPLE__my-branch"}'
+# Re-run / cancel a run of your branch
+curl -sS -X POST "$GH/actions/runs/<run_id>/rerun"
+```
+
+Merging, approving or requesting changes in a review, and acting on pull requests whose
+head is not a `__BRANCH_PREFIX_EXAMPLE__*` branch of the repository itself are denied.
+
 These are **every** write endpoint the Warden permits — anything else (e.g. creating
 branches/tags directly, editing project settings) is default-denied. You may create MRs
 and trigger CI only for `__BRANCH_PREFIX_EXAMPLE__*` branches (R2/R3), and comment/discuss/edit only on MRs
