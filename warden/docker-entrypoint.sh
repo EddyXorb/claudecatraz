@@ -7,4 +7,5 @@ set -e
 # non-root service can write to them with a read-only root filesystem.
 chown -R warden:warden /var/lib/warden /var/log/warden /run/warden 2>/dev/null || true
 
-exec gosu warden python -m warden "$@"
+# The supervisor applies config edits by replacing the warden process.
+exec gosu warden python -m warden supervise

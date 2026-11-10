@@ -10,7 +10,13 @@ from catraz import doctor
 def _mkdirs(root: Path) -> None:
     for rel in ("state/warden/db", "logs/warden", "state/warden/run", "logs/squid"):
         (root / ".catraz" / rel).mkdir(parents=True)
-    for rel in ("config/warden.toml", "config/squid.conf", "config/allowlist.txt"):
+    for rel in (
+        "config/warden.toml",
+        "config/squid.conf",
+        "config/allowlist.txt",
+        "secrets/read_tokens",
+        "secrets/write_tokens",
+    ):
         p = root / ".catraz" / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.touch()

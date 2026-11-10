@@ -140,6 +140,31 @@ def write_hosts_fragment(root: Path) -> Path:
     return path
 
 
+def routed_hosts(root: Path) -> set[str] | None:
+    """Hosts aliased in the last rendered compose.hosts.yml, None if absent."""
+    try:
+        text = _hosts_fragment_path(root).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    hosts: set[str] = set()
+    in_aliases = False
+    for line in text.splitlines():
+        if line.strip() == "aliases:":
+            in_aliases = True
+        elif in_aliases and line.startswith("          - "):
+            hosts.add(line.strip()[2:])
+        else:
+            in_aliases = False
+    return hosts
+
+
+def endpoint_routing_changed(root: Path) -> bool:
+    """True when warden.toml's endpoint hosts differ from the rendered aliases;
+    those live in container definitions and need a recreate."""
+    routed = routed_hosts(root)
+    return routed is not None and routed != set(_git_endpoint_hosts(root))
+
+
 def _credentials_mode(root: Path) -> str:
     """Effective credentials mode ("sync"|"persistent"): `.catraz/.env`'s
     CLAUDE_CREDENTIALS_MODE overrides the active profile's manifest default.

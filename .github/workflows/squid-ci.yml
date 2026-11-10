@@ -91,8 +91,7 @@ jobs:
           mkdir -p /tmp/squid-logs
           docker run -d --name squid-ci \
             -p 3128:3128 \
-            -v "$PWD/src/catraz/assets/config/squid.conf:/etc/squid/squid.conf:ro" \
-            -v "$PWD/src/catraz/assets/config/allowlist.txt:/etc/squid/allowlist.txt:ro" \
+            -v "$PWD/src/catraz/assets/config:/etc/catraz/config:ro" \
             -v "/tmp/squid-logs:/var/log/squid" \
             --tmpfs /var/spool/squid \
             --tmpfs /var/run \
