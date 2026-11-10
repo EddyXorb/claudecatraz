@@ -47,6 +47,8 @@ _ALLOWED_FIELDS = {
     # Which of those action ids reach beyond the shipped DEFAULT set — a
     # deployment's config had to explicitly enable them.
     "enabled_via",
+    # Whether an issue number named a pull request or an issue.
+    "issue_kind",
 }
 
 

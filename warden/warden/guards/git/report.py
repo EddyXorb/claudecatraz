@@ -13,6 +13,7 @@ from ...core.config import Config
 from ...core.guard import Guard
 from . import actions as git_actions
 from .endpoints import ENDPOINT_TYPES
+from .github.guard import GithubGuard
 from .gitlab.guard import ApiGuard
 from .transport.guard import GitGuard
 
@@ -22,6 +23,7 @@ _DEFAULT_IDS: frozenset[str] = frozenset(a.id for a in git_actions.DEFAULT)
 _GUARD_CLASS_BY_COMPOSITION_NAME: Mapping[str, type[Guard[Any]]] = {
     "transport": GitGuard,
     "gitlab": ApiGuard,
+    "github": GithubGuard,
 }
 
 

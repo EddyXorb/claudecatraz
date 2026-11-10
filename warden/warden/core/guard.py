@@ -49,6 +49,14 @@ def host_gate(host: str, cfg: Config) -> Optional[Decision]:
     return None
 
 
+def served_gate(host: str, guard: str, serves_host: Callable[[str], bool]) -> Optional[Decision]:
+    """Deny a host whose endpoint type is not composed of this guard — a REST
+    guard must never forward a foreign forge's request shape upstream."""
+    if not serves_host(host):
+        return Decision(False, f"host {host!r} is not served by the {guard} guard")
+    return None
+
+
 def project_gate(
     project: str, host: str, project_allowed: Callable[[str, str], bool]
 ) -> Optional[Decision]:
@@ -94,14 +102,17 @@ def kernel_gates(
     project_allowed: Callable[[str, str], bool],
     recognized: frozenset[Action],
     effective_actions: Optional[frozenset[str]] = None,
+    served: Optional[tuple[str, Callable[[str], bool]]] = None,
 ) -> Optional[Decision]:
     """The guard-agnostic deny gates, in kernel order.
 
     recognized is this intent's whole action set. An unmatched or
     empty-recognized write denies right here; a read falls through
-    unchanged to the guard's own decide.
+    unchanged to the guard's own decide. served is (guard name, serves_host).
     """
     denied = host_gate(intent.host, cfg)
+    if denied is None and served is not None:
+        denied = served_gate(intent.host, *served)
     if denied is None and intent.needs_write:
         denied = write_credential_gate(intent.host, cfg)
     if denied is None:
@@ -198,6 +209,11 @@ class Guard(ABC, Generic[IntentT]):
         """
         return self.cfg.git_project_allowed(host, project)
 
+    def serves_host(self, host: str) -> bool:
+        """Whether host's endpoint type is composed of this guard. Default:
+        every host — right for a guard every endpoint type composes."""
+        return True
+
     def state_view(self, host: str) -> StateView:
         """Quota snapshot hook. Default: this guard's own core-only view (no
         domain state), locked until this guard reconciled. A guard backed by
@@ -233,7 +249,13 @@ class Guard(ABC, Generic[IntentT]):
 
         recognized = first_recognized(self.recognizers, intent) or frozenset[Action]()
 
-        decision = kernel_gates(intent, self.cfg, self.project_allowed, recognized)
+        decision = kernel_gates(
+            intent,
+            self.cfg,
+            self.project_allowed,
+            recognized,
+            served=(self.name, self.serves_host),
+        )
         if decision is None:
             intent = await self.enrich(intent)
             decision = self.decide(intent, view, self.cfg)

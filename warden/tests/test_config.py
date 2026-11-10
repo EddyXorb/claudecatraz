@@ -519,13 +519,16 @@ def test_git_endpoint_unknown_type_aborts_startup(tmp_path):
         from_env({}, strict=True, toml_path=str(toml))
 
 
-def test_git_endpoint_github_type_is_reserved_not_implemented(tmp_path):
-    """`type = "github"` is a recognised but not-yet-implemented type — a clear,
-    distinct error, not silent acceptance of an unguarded forge."""
+def test_git_endpoint_github_type_is_accepted(tmp_path):
     toml = tmp_path / "warden.toml"
-    toml.write_text('[[git.endpoint]]\nhost = "github.com"\ntype = "github"\n')
-    with pytest.raises(ConfigError, match="not implemented"):
-        from_env({}, strict=True, toml_path=str(toml))
+    toml.write_text(
+        '[[git.endpoint]]\nhost = "github.com"\ntype = "github"\n'
+        'allowed_projects = ["octo/repo"]\nactions = ["project.mr.create", "repo.branch.push"]\n'
+    )
+    cfg = from_env({}, strict=True, toml_path=str(toml))
+    endpoint = cfg.endpoint_for("github.com")
+    assert endpoint is not None and endpoint.type == "github"
+    assert endpoint.actions == ("project.mr.create", "repo.branch.push")
 
 
 def test_git_rules_unknown_key_aborts_startup(tmp_path):

@@ -9,6 +9,7 @@ from dataclasses import replace
 
 import httpx
 import respx
+from git_wire import advertisement_response
 
 from warden.app import create_app
 from warden.context import build_context
@@ -17,7 +18,8 @@ from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.guard import host_gate
 from warden.core.model import Decision
 from warden.core.state import State
-from warden.core.transport import UpstreamRouter, base_urls
+from warden.core.transport import UpstreamRouter
+from warden.guards.git.endpoints import upstream_layout
 from warden.guards.git.transport.guard import GitGuard
 
 PROJ = "group%2Fproj"
@@ -41,33 +43,35 @@ def _multi_cfg(cfg: Config) -> Config:
     )
 
 
-# --- base_urls (core/transport.py) ----------------------------------------------
+# --- upstream layouts (guards/git/endpoints.py) ---------------------------------
 
 
-def test_base_urls_gitlab_type_has_git_and_api_base():
-    git_base, api_base = base_urls(GitEndpoint(host="gitlab.example", type="gitlab"))
-    assert git_base == "https://gitlab.example"
-    assert api_base == "https://gitlab.example/api/v4"
+def test_gitlab_layout_has_git_and_api_base_and_private_token():
+    layout = upstream_layout(GitEndpoint(host="gitlab.example", type="gitlab"))
+    assert layout.git_base == "https://gitlab.example"
+    assert layout.api_base == "https://gitlab.example/api/v4"
+    assert (layout.rest_auth_header, layout.rest_auth_scheme) == ("PRIVATE-TOKEN", "")
+    assert layout.git_user == "oauth2"
 
 
-def test_base_urls_plain_type_has_no_api_base():
-    git_base, api_base = base_urls(GitEndpoint(host="my-git-server.example", type="plain"))
-    assert git_base == "https://my-git-server.example"
-    assert api_base is None
+def test_plain_layout_has_no_api_base():
+    layout = upstream_layout(GitEndpoint(host="my-git-server.example", type="plain"))
+    assert layout.git_base == "https://my-git-server.example"
+    assert layout.api_base is None
 
 
-def test_base_urls_unsupported_type_raises():
+def test_unknown_type_has_no_layout():
     import pytest
 
-    with pytest.raises(ValueError):
-        base_urls(GitEndpoint(host="x.example", type="bogus"))
+    with pytest.raises(KeyError):
+        upstream_layout(GitEndpoint(host="x.example", type="bogus"))
 
 
 # --- UpstreamRouter (core/transport.py) -----------------------------------------
 
 
 def test_router_resolves_each_configured_host_to_its_own_upstream(cfg):
-    router = UpstreamRouter(_multi_cfg(cfg))
+    router = UpstreamRouter(_multi_cfg(cfg), upstream_layout)
     primary = router.resolve("gitlab.example")
     other = router.resolve("MY-GITLAB.DE:443")  # case- and port-insensitive
     assert primary is not None and other is not None
@@ -77,7 +81,7 @@ def test_router_resolves_each_configured_host_to_its_own_upstream(cfg):
 
 
 def test_router_denies_unknown_host(cfg):
-    router = UpstreamRouter(_multi_cfg(cfg))
+    router = UpstreamRouter(_multi_cfg(cfg), upstream_layout)
     assert router.resolve("evil.example") is None
 
 
@@ -86,13 +90,13 @@ def test_router_denies_a_closed_endpoint_host():
     Upstream at all — `resolve` returns None exactly like an unknown host."""
     cfg = Config(git_endpoints=(GitEndpoint(host="gitlab.example", type="gitlab"),))
     assert cfg.access_mode("gitlab.example") == "closed"
-    router = UpstreamRouter(cfg)
+    router = UpstreamRouter(cfg, upstream_layout)
     assert router.resolve("gitlab.example") is None
 
 
 def test_router_empty_endpoint_list_resolves_nothing(cfg):
     empty = replace(cfg, git_endpoints=(), git_credentials={})
-    router = UpstreamRouter(empty)
+    router = UpstreamRouter(empty, upstream_layout)
     assert router.resolve("gitlab.example") is None
     assert router.resolve("anything.example") is None
     assert router.resolve("") is None
@@ -100,7 +104,7 @@ def test_router_empty_endpoint_list_resolves_nothing(cfg):
 
 def test_router_for_host_matches_effective_hosts(cfg):
     multi = _multi_cfg(cfg)
-    router = UpstreamRouter(multi)
+    router = UpstreamRouter(multi, upstream_layout)
     for host in multi.effective_hosts:
         assert router.for_host(host) is not None
 
@@ -196,15 +200,15 @@ async def test_reconcile_branches_runs_per_host_with_same_project_path():
         },
     )
     state = State(":memory:")
-    guard = GitGuard(multi, state, AuditLog("-"), UpstreamRouter(multi))
+    guard = GitGuard(multi, state, AuditLog("-"), UpstreamRouter(multi, upstream_layout))
 
     with respx.mock(assert_all_called=False) as router:
-        router.route(
-            method="GET", url__regex=r"https://gitlab\.com/api/v4/projects/.*branches.*"
-        ).mock(return_value=httpx.Response(200, json=[{"name": "claude/a"}]))
-        router.route(
-            method="GET", url__regex=r"https://my-gitlab\.de/api/v4/projects/.*branches.*"
-        ).mock(return_value=httpx.Response(200, json=[{"name": "claude/b"}, {"name": "claude/c"}]))
+        router.route(method="GET", url__regex=r"https://gitlab\.com/.*\.git/info/refs.*").mock(
+            return_value=advertisement_response("claude/a")
+        )
+        router.route(method="GET", url__regex=r"https://my-gitlab\.de/.*\.git/info/refs.*").mock(
+            return_value=advertisement_response("claude/b", "claude/c")
+        )
         ok = await guard.reconcile()
 
     assert ok is True
@@ -231,12 +235,12 @@ async def test_reconcile_completes_and_unlocks_when_one_of_two_endpoints_is_clos
         git_credentials={"open.example": HostCredentials(read_token="r", write_token="w")},
     )
     state = State(":memory:")
-    guard = GitGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg))
+    guard = GitGuard(cfg, state, AuditLog("-"), UpstreamRouter(cfg, upstream_layout))
 
     with respx.mock(assert_all_called=False) as router:
-        router.route(
-            method="GET", url__regex=r"https://open\.example/api/v4/projects/.*branches.*"
-        ).mock(return_value=httpx.Response(200, json=[{"name": "claude/a"}]))
+        router.route(method="GET", url__regex=r"https://open\.example/.*\.git/info/refs.*").mock(
+            return_value=advertisement_response("claude/a")
+        )
         ok = await guard.reconcile()
 
     assert ok is True

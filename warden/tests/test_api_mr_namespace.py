@@ -6,6 +6,7 @@ from __future__ import annotations
 import httpx
 
 from warden.core.transport import UpstreamRouter
+from warden.guards.git.endpoints import upstream_layout
 from warden.guards.git.gitlab.mr_namespace import MrNamespace
 
 HOST = "gitlab.example"  # matches the `cfg` fixture's `[[git.endpoint]]` host (conftest.py)
@@ -13,7 +14,7 @@ HOST = "gitlab.example"  # matches the `cfg` fixture's `[[git.endpoint]]` host (
 
 def _mr_namespace(cfg, *, clock=None) -> MrNamespace:
     kwargs = {"clock": clock} if clock else {}
-    return MrNamespace(UpstreamRouter(cfg), cfg, **kwargs)
+    return MrNamespace(UpstreamRouter(cfg, upstream_layout), cfg, **kwargs)
 
 
 async def test_source_in_namespace_true_when_prefixed_regardless_of_author(cfg, respx_router):

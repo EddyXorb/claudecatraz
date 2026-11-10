@@ -1,8 +1,8 @@
 """The GitLab REST recognizer catalog: method + path template -> action set.
 
 Matched first-match-wins, most specific row first; read.project is the
-catch-all last row. An unrecognised field value yields an empty action
-set, which is always a deny."""
+catch-all last row. An unrecognised field value or a query string on a
+write yields an empty action set, which is always a deny."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Callable, Mapping, Optional
 
 from ....core.actions import Action
+from ....core.path_template import compile_template, has_dot_segment
 from ....core.recognizer import Recognizer
 from .. import actions as git_actions
 from .intent import ApiIntent
@@ -107,30 +108,6 @@ def _search_scope(intent: ApiIntent) -> frozenset[Action]:
     return frozenset({action}) if action is not None else frozenset()
 
 
-def _compile(template: str) -> re.Pattern[str]:
-    """Compile a REST path template into a fullmatch-ready regex.
-
-    {name} is one path segment. {rest} requires further characters after
-    that slash; {/rest} makes that same tail optional.
-    """
-    optional_tail = template.endswith("{/rest}")
-    if optional_tail:
-        template = template[: -len("{/rest}")]
-
-    segments = []
-    for seg in template.split("/"):
-        if seg == "{rest}":
-            segments.append(".+")
-        elif seg.startswith("{") and seg.endswith("}"):
-            segments.append("[^/]+")
-        else:
-            segments.append(re.escape(seg))
-    pattern = "/".join(segments)
-    if optional_tail:
-        pattern += "(?:/.+)?"
-    return re.compile(pattern)
-
-
 def _methods(*methods: str) -> frozenset[str]:
     return frozenset(methods)
 
@@ -165,19 +142,29 @@ class RestRecognizer(Recognizer[ApiIntent]):
 
     @functools.cached_property
     def regex(self) -> re.Pattern[str]:
-        return _compile(self.template)
+        return compile_template(self.template)
 
     def matches(self, intent: ApiIntent) -> bool:
         """Method/path test only, kept independent of __call__ so callers
         that need this specific row (not just its recognized actions —
         policy.decide_scope, ApiGuard.parse/enrich/record/audit_fields) can
-        find it via match_request without recomputing action_fn."""
+        find it via match_request without recomputing action_fn. A dot
+        segment never matches."""
+        if has_dot_segment(intent.path):
+            return False
         return intent.method.upper() in self.methods and bool(
             self.regex.fullmatch(intent.path.rstrip("/"))
         )
 
     def __call__(self, intent: ApiIntent) -> Optional[frozenset[Action]]:
-        return self.action_fn(intent) if self.matches(intent) else None
+        """A write with a query string recognizes to nothing: GitLab merges
+        query parameters into the body, so a state_event there would act
+        unseen by the decision."""
+        if not self.matches(intent):
+            return None
+        if intent.needs_write and intent.raw_query:
+            return frozenset()
+        return self.action_fn(intent)
 
 
 def match_request(intent: ApiIntent) -> Optional[RestRecognizer]:

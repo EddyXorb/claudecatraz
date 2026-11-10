@@ -1,15 +1,16 @@
 """Forge-neutral httpx transport: token injection and project mapping.
 
-Read- vs. write-token chosen per Decision. REST uses PRIVATE-TOKEN header;
-git Smart-HTTP uses HTTP-Basic oauth2:<token>. Shared by the git transport
-guard and the GitLab REST-API guard so neither depends on the other.
+Read- vs. write-token chosen per Decision; where each surface lives and how
+it authenticates comes from an UpstreamLayout the composition root supplies
+per endpoint, so no forge is named here.
 """
 
 from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Sequence
+from dataclasses import dataclass
+from typing import AsyncIterator, Awaitable, Callable, Optional, Sequence
 from urllib.parse import quote
 
 import httpx
@@ -28,6 +29,10 @@ _DROP_REQUEST_HEADERS = {
     "content-length",
     "connection",
     "accept-encoding",
+    # The decision is made on the wire method; an upstream must never see another.
+    "x-http-method-override",
+    "x-http-method",
+    "x-method-override",
 }
 # content-encoding is dropped: the warden hands the client an already-decoded
 # body, so a stale "gzip" header would make the client try to gunzip plain data.
@@ -39,18 +44,22 @@ def project_id(project: str) -> str:
     return quote(normalize_project(project), safe="")
 
 
-def base_urls(endpoint: GitEndpoint) -> tuple[str, Optional[str]]:
-    """Base URLs derived from endpoint.host + endpoint.type: every host is
-    explicit, and its URL form follows straight from its declared type.
+@dataclass(frozen=True)
+class UpstreamLayout:
+    """Where one endpoint's git and REST surfaces live and how each authenticates.
 
-    Returns (git_base, api_base); api_base is None for a type with no
-    REST surface (plain). github is reserved until its guard exists.
-    """
-    if endpoint.type == "gitlab":
-        return f"https://{endpoint.host}", f"https://{endpoint.host}/api/v4"
-    if endpoint.type == "plain":
-        return f"https://{endpoint.host}", None
-    raise ValueError(f"base_urls: unsupported endpoint type {endpoint.type!r}")
+    api_base is None for a type with no REST surface. The REST token goes
+    into rest_auth_header as rest_auth_scheme + token; git uses HTTP-Basic
+    git_user:token."""
+
+    git_base: str
+    api_base: Optional[str]
+    rest_auth_header: str
+    rest_auth_scheme: str
+    git_user: str
+
+
+LayoutFor = Callable[[GitEndpoint], UpstreamLayout]
 
 
 class Upstream:
@@ -63,14 +72,12 @@ class Upstream:
     def __init__(
         self,
         *,
-        git_base: str,
-        api_base: Optional[str],
+        layout: UpstreamLayout,
         read_token: str,
         write_token: str,
         client: Optional[httpx.AsyncClient] = None,
     ) -> None:
-        self._git_base = git_base
-        self._api_base = api_base
+        self._layout = layout
         self._read_token = read_token
         self._write_token = write_token
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
@@ -79,12 +86,15 @@ class Upstream:
         await self._client.aclose()
 
     # --- token headers ---------------------------------------------------------
-    def _rest_token(self, token: TokenKind) -> str:
+    def _secret(self, token: TokenKind) -> str:
         return self._read_token if token == TokenKind.READ else self._write_token
 
+    def _rest_auth(self, token: TokenKind) -> dict[str, str]:
+        layout = self._layout
+        return {layout.rest_auth_header: layout.rest_auth_scheme + self._secret(token)}
+
     def _git_auth_header(self, token: TokenKind) -> str:
-        secret = self._rest_token(token)
-        raw = f"oauth2:{secret}".encode()
+        raw = f"{self._layout.git_user}:{self._secret(token)}".encode()
         return "Basic " + base64.b64encode(raw).decode()
 
     @staticmethod
@@ -93,15 +103,18 @@ class Upstream:
 
     # --- REST ------------------------------------------------------------------
     def rest_url(self, path: str) -> str:
-        assert self._api_base is not None, "endpoint has no REST base (type has no API surface)"
-        return f"{self._api_base}/{path.lstrip('/')}"
+        api_base = self._layout.api_base
+        assert api_base is not None, "endpoint has no REST base (type has no API surface)"
+        return f"{api_base}/{path.lstrip('/')}"
+
+    def rest_path_of(self, url: str) -> Optional[str]:
+        """url relative to this endpoint's REST base, or None when it lies
+        anywhere else — a pagination link must never carry a token off-host."""
+        prefix = f"{self._layout.api_base}/"
+        return url[len(prefix) :] if self._layout.api_base and url.startswith(prefix) else None
 
     async def get_json(self, path: str, token: TokenKind) -> httpx.Response:
-        resp = await self._client.get(
-            self.rest_url(path),
-            headers={"PRIVATE-TOKEN": self._rest_token(token)},
-        )
-        return resp
+        return await self._client.get(self.rest_url(path), headers=self._rest_auth(token))
 
     async def open_rest(
         self,
@@ -114,7 +127,7 @@ class Upstream:
     ) -> httpx.Response:
         """Send a REST request and return a *streamed* response (caller closes)."""
         req_headers = self._clean_headers(headers, _DROP_REQUEST_HEADERS)
-        req_headers["PRIVATE-TOKEN"] = self._rest_token(token)
+        req_headers.update(self._rest_auth(token))
         req = self._client.build_request(
             method, self.rest_url(path), headers=req_headers, content=content
         )
@@ -123,7 +136,7 @@ class Upstream:
     # --- git Smart-HTTP --------------------------------------------------------
     def git_url(self, project: str, suffix: str) -> str:
         project = normalize_project(project)
-        return f"{self._git_base}/{project}.git/{suffix.lstrip('/')}"
+        return f"{self._layout.git_base}/{project}.git/{suffix.lstrip('/')}"
 
     async def git_get(
         self, project: str, suffix: str, *, params: dict[str, str], token: TokenKind
@@ -168,19 +181,19 @@ class UpstreamRouter:
     for an unknown or closed host (default-deny).
     """
 
-    def __init__(self, cfg: Config, *, client: Optional[httpx.AsyncClient] = None) -> None:
+    def __init__(
+        self, cfg: Config, layout_for: LayoutFor, *, client: Optional[httpx.AsyncClient] = None
+    ) -> None:
         self._cfg = cfg
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
         self._by_host: dict[str, Upstream] = {}
         for endpoint in cfg.git_endpoints:
             if cfg.access_mode(endpoint.host) == "closed":
                 continue
-            git_base, api_base = base_urls(endpoint)
             normalized = cfg.normalize_host(endpoint.host)
             creds = cfg.git_credentials.get(normalized, HostCredentials())
             self._by_host[normalized] = Upstream(
-                git_base=git_base,
-                api_base=api_base,
+                layout=layout_for(endpoint),
                 read_token=creds.read_token,
                 write_token=creds.write_token,
                 client=self._client,
@@ -225,25 +238,6 @@ def stream_upstream(resp: httpx.Response) -> StreamingResponse:
         headers=Upstream.response_headers(resp),
         media_type=resp.headers.get("content-type"),
     )
-
-
-async def get_paginated(upstream: Upstream, path: str) -> list[Any]:
-    """Fetch every page of a GitLab-shaped list endpoint.
-
-    Without this a project with >100 agent branches/MRs would only count
-    the first page, undercount the quota, and wrongly allow further writes.
-    Follows the X-Next-Page header until it is empty.
-    """
-    items: list[Any] = []
-    page = 1
-    while page:
-        sep = "&" if "?" in path else "?"
-        resp = await upstream.get_json(f"{path}{sep}per_page=100&page={page}", TokenKind.READ)
-        resp.raise_for_status()
-        items.extend(resp.json())
-        nxt = resp.headers.get("x-next-page", "")
-        page = int(nxt) if nxt else 0
-    return items
 
 
 async def for_each_host_project(

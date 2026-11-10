@@ -16,7 +16,7 @@ from warden.core.state import (
     SchemaError,
     State,
 )
-from warden.guards.git.gitlab.state import MrState
+from warden.guards.git.mr_state import MrState
 from warden.guards.git.transport.state import BranchState
 
 

@@ -12,6 +12,7 @@ from warden.core.audit import AuditLog
 from warden.core.config import Config, GitEndpoint, HostCredentials
 from warden.core.state import State
 from warden.core.transport import UpstreamRouter
+from warden.guards.git.endpoints import upstream_layout
 from warden.guards.git.gitlab.guard import ApiGuard
 from warden.guards.git.gitlab.reconcile import reconcile_mrs
 
@@ -21,7 +22,7 @@ HOST = "gitlab.example"
 def _api_guard(cfg) -> ApiGuard:
     """A guard on its own fresh (never-reconciled) state, so the lock/reconcile
     tests below see the real starting condition."""
-    return ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
+    return ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg, upstream_layout))
 
 
 # --- project_allowed (resource allowlist) ---------------------------------------
@@ -46,7 +47,7 @@ def test_project_allowed_numeric_id_alias_is_scoped_per_host():
             host_b: HostCredentials(read_token="r", write_token="w"),
         },
     )
-    guard = ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg))
+    guard = ApiGuard(cfg, State(":memory:"), AuditLog("-"), UpstreamRouter(cfg, upstream_layout))
     guard.project_id_aliases = {host_a: {"111"}}
     assert guard.project_allowed(host_a, "111")
     assert not guard.project_allowed(host_b, "111")
@@ -166,7 +167,7 @@ async def test_reconcile_mrs_skips_a_closed_endpoint():
         git_credentials={open_host: HostCredentials(read_token="r", write_token="w")},
     )
     assert cfg.access_mode(closed_host) == "closed"
-    router = UpstreamRouter(cfg)
+    router = UpstreamRouter(cfg, upstream_layout)
     mr_state = _api_guard(cfg).mr_state
 
     # No mock for closed.example — any call to it would raise
