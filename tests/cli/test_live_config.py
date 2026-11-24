@@ -193,38 +193,6 @@ def test_warden_running_true_with_listener(tmp_path: Path) -> None:
 # ── compose: endpoint routing ─────────────────────────────────────────────────
 
 
-def _endpoints(root: Path, *hosts: str) -> None:
-    body = "".join(f'[[git.endpoint]]\nhost = "{h}"\ntype = "gitlab"\n' for h in hosts)
-    (root / ".catraz/config/warden.toml").write_text(body)
-
-
-def test_routed_hosts_parses_fragment(tmp_path: Path) -> None:
-    _seed(tmp_path)
-    (tmp_path / ".catraz/compose.hosts.yml").write_text(
-        compose.render_hosts_fragment(["a.example", "b.example"], {"a.example": "1.2.3.4"})
-    )
-    assert compose.routed_hosts(tmp_path) == {"a.example", "b.example"}
-
-
-def test_routed_hosts_empty_and_missing(tmp_path: Path) -> None:
-    _seed(tmp_path)
-    assert compose.routed_hosts(tmp_path) is None
-    (tmp_path / ".catraz/compose.hosts.yml").write_text(compose.render_hosts_fragment([]))
-    assert compose.routed_hosts(tmp_path) == set()
-
-
-def test_endpoint_routing_changed(tmp_path: Path) -> None:
-    _seed(tmp_path)
-    assert compose.endpoint_routing_changed(tmp_path) is False  # nothing rendered yet
-    _endpoints(tmp_path, "a.example")
-    (tmp_path / ".catraz/compose.hosts.yml").write_text(
-        compose.render_hosts_fragment(["a.example"])
-    )
-    assert compose.endpoint_routing_changed(tmp_path) is False
-    _endpoints(tmp_path, "a.example", "b.example")
-    assert compose.endpoint_routing_changed(tmp_path) is True
-
-
 # ── reload staleness ──────────────────────────────────────────────────────────
 
 LONG_AGO = datetime.datetime(2000, 1, 1, tzinfo=UTC)
@@ -235,61 +203,55 @@ def test_applied_live_is_not_stale_despite_newer_mtime(tmp_path: Path) -> None:
     _write_status(tmp_path, WARDEN, "applied")
     _write_status(tmp_path, PROXY, "applied")
     _age(tmp_path, WARDEN, 0)
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
-    assert reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO, PROXY: LONG_AGO}) == {}
+    assert reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO, PROXY: LONG_AGO}, set()) == {}
 
 
 def test_rejected_is_not_stale(tmp_path: Path) -> None:
     """A recreate would hit the same invalid file; reload reports, not rebuilds."""
     _seed(tmp_path)
     _write_status(tmp_path, WARDEN, "rejected", detail="x")
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
-    assert reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO}) == {}
+    assert reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO}, set()) == {}
 
 
 def test_out_of_sync_is_stale(tmp_path: Path) -> None:
     _seed(tmp_path)
     _write_status(tmp_path, WARDEN, "applied", fp="0" * 64)
     _age(tmp_path, WARDEN, 60)
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
-    stale = reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO})
+    stale = reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO}, set())
     assert stale == {WARDEN: [reload_cmd.OUT_OF_SYNC_MARKER]}
 
 
-def test_env_change_is_stale_even_when_applied(tmp_path: Path) -> None:
+@pytest.mark.parametrize("drifted", [{PROXY}, None])
+def test_compose_drift_is_stale_even_when_applied(tmp_path: Path, drifted: set[str] | None) -> None:
+    """An unknown drift (None) is treated as drifted."""
     _seed(tmp_path)
     _write_status(tmp_path, PROXY, "applied")
-    stale = reload_cmd.stale_services(tmp_path, {PROXY: LONG_AGO})
-    assert stale == {PROXY: [tmp_path / ".catraz/.env"]}
+    stale = reload_cmd.stale_services(tmp_path, {PROXY: LONG_AGO}, drifted)
+    assert stale == {PROXY: [reload_cmd.COMPOSE_CONFIG_MARKER]}
 
 
 def test_unknown_falls_back_to_mtime_including_secrets(tmp_path: Path) -> None:
     _seed(tmp_path)
     start = datetime.datetime.now(UTC) - datetime.timedelta(seconds=30)
     _age(tmp_path, WARDEN, 60)
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
     (tmp_path / ".catraz/secrets/write_tokens").write_text("example.com w\n")
-    stale = reload_cmd.stale_services(tmp_path, {WARDEN: start})
+    stale = reload_cmd.stale_services(tmp_path, {WARDEN: start}, set())
     assert stale == {WARDEN: [tmp_path / ".catraz/secrets/write_tokens"]}
 
 
-def test_endpoint_host_change_is_stale(tmp_path: Path) -> None:
-    _seed(tmp_path)
-    _endpoints(tmp_path, "a.example")
-    (tmp_path / ".catraz/compose.hosts.yml").write_text(compose.render_hosts_fragment([]))
-    _write_status(tmp_path, WARDEN, "applied")
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
-    stale = reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO})
-    assert stale == {WARDEN: [reload_cmd.ENDPOINT_HOSTS_MARKER]}
-
-
 def _reload(
-    monkeypatch: pytest.MonkeyPatch, root: Path, rows: list[dict[str, str]]
+    monkeypatch: pytest.MonkeyPatch,
+    root: Path,
+    rows: list[dict[str, str]],
+    drifted: set[str] | None = None,
+    agent_routing_stale: bool = False,
 ) -> tuple[int, list[list[str]]]:
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: LONG_AGO)
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: drifted or set())
+    monkeypatch.setattr(compose, "agent_routing_stale", lambda *a: agent_routing_stale)
 
     def _run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
         calls.append(args)
@@ -305,24 +267,32 @@ def test_cmd_reload_reports_rejected_without_recreate(
 ) -> None:
     _seed(tmp_path)
     _write_status(tmp_path, WARDEN, "rejected", detail="bad quota")
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
     rc, calls = _reload(monkeypatch, tmp_path, [{"Service": WARDEN, "Name": "w"}])
     assert rc == EXIT_OK and calls == []
     assert "bad quota" in capsys.readouterr().err
 
 
-def test_cmd_reload_endpoint_change_warns_agent(
+def test_cmd_reload_recreates_drifted_and_warns_stale_agent_routing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _seed(tmp_path)
-    _endpoints(tmp_path, "a.example")
-    (tmp_path / ".catraz/compose.hosts.yml").write_text(compose.render_hosts_fragment([]))
     _write_status(tmp_path, WARDEN, "applied")
-    os.utime(tmp_path / ".catraz/.env", (0, 0))
     rows = [{"Service": WARDEN, "Name": "w"}, {"Service": "claude-dev-env", "Name": "a"}]
-    rc, calls = _reload(monkeypatch, tmp_path, rows)
+    rc, calls = _reload(monkeypatch, tmp_path, rows, {WARDEN}, agent_routing_stale=True)
     assert rc == EXIT_OK
     assert calls == [["up", "-d", "--force-recreate", "--build", WARDEN]]
+    assert "restart the agent" in capsys.readouterr().err
+
+
+def test_cmd_reload_warns_stale_agent_routing_without_recreate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The agent keeps its routing across infra recreates, so the hint stands alone."""
+    _seed(tmp_path)
+    _write_status(tmp_path, WARDEN, "applied")
+    rows = [{"Service": WARDEN, "Name": "w"}, {"Service": "claude-dev-env", "Name": "a"}]
+    rc, calls = _reload(monkeypatch, tmp_path, rows, agent_routing_stale=True)
+    assert rc == EXIT_OK and calls == []
     assert "restart the agent" in capsys.readouterr().err
 
 

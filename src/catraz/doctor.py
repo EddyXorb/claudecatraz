@@ -14,7 +14,7 @@ from catraz.envfile import load_env
 from catraz.compose import run as compose_run, compose_ps
 from catraz.errors import CliError
 from catraz import paths
-from catraz import image
+from catraz import compose, image
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
@@ -811,24 +811,6 @@ MOUNT_TARGETS: dict[str, list[tuple[str, str]]] = {
 }
 
 
-def _container_mount_targets(name: str) -> set[str] | None:
-    """Mount destinations of container `name`, or None if it cannot be inspected."""
-    r = subprocess.run(
-        ["docker", "inspect", "--format", "{{json .Mounts}}", name],
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        return None
-    try:
-        mounts = json.loads(r.stdout)
-    except ValueError:
-        return None
-    if not isinstance(mounts, list):
-        return None
-    return {m["Destination"] for m in mounts if isinstance(m, dict) and "Destination" in m}
-
-
 def _container_inode(name: str, path: str) -> int | None:
     """Inode of `path` inside container `name`, or None if unreachable."""
     r = subprocess.run(
@@ -845,11 +827,9 @@ def _container_inode(name: str, path: str) -> int | None:
 
 
 def check_mounts(root: Path, f: Findings) -> None:
-    """A host path deleted and recreated at the same location while its
-    container keeps running orphans the bind mount: the container keeps
-    seeing the old, unlinked file or directory. Compares each mount's
-    host-side inode against the inode the running container sees; a
-    mismatch flags the mount as stale."""
+    """Flags infra containers created from an older compose config, and bind
+    mounts orphaned by a host path recreated while the container kept running:
+    the container then still sees the old, unlinked inode."""
     if not which("docker"):
         f.warn("mounts", "cannot verify bind mounts (docker missing)")
         return
@@ -858,22 +838,23 @@ def check_mounts(root: Path, f: Findings) -> None:
     if not running:
         f.ok("mounts", "stack not running — nothing to verify")
         return
+    drifted = compose.drifted_services(root, rows, prefix=compose.prepare(root, render=True))
+    if drifted is None:
+        f.warn("mounts", "could not compare the running containers with the compose config")
     for service, targets in MOUNT_TARGETS.items():
         name = running.get(service)
         if not name:
             continue
-        mounted = _container_mount_targets(name)
+        if drifted and service in drifted:
+            f.bad(
+                "mounts",
+                f"{service}: container was created from an older compose config",
+                "catraz reload",
+            )
+            continue
         for rel, container_path in targets:
             host_path = root / ".catraz" / rel
             if not host_path.exists():
-                continue
-            if mounted is not None and container_path not in mounted:
-                f.bad(
-                    "mounts",
-                    f"{service}: {rel} is not mounted at {container_path} — the "
-                    "container predates the current compose wiring",
-                    "catraz reload --force",
-                )
                 continue
             container_inode = _container_inode(name, container_path)
             if container_inode is None:

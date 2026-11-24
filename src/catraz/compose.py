@@ -140,31 +140,6 @@ def write_hosts_fragment(root: Path) -> Path:
     return path
 
 
-def routed_hosts(root: Path) -> set[str] | None:
-    """Hosts aliased in the last rendered compose.hosts.yml, None if absent."""
-    try:
-        text = _hosts_fragment_path(root).read_text(encoding="utf-8")
-    except OSError:
-        return None
-    hosts: set[str] = set()
-    in_aliases = False
-    for line in text.splitlines():
-        if line.strip() == "aliases:":
-            in_aliases = True
-        elif in_aliases and line.startswith("          - "):
-            hosts.add(line.strip()[2:])
-        else:
-            in_aliases = False
-    return hosts
-
-
-def endpoint_routing_changed(root: Path) -> bool:
-    """True when warden.toml's endpoint hosts differ from the rendered aliases;
-    those live in container definitions and need a recreate."""
-    routed = routed_hosts(root)
-    return routed is not None and routed != set(_git_endpoint_hosts(root))
-
-
 def _credentials_mode(root: Path) -> str:
     """Effective credentials mode ("sync"|"persistent"): `.catraz/.env`'s
     CLAUDE_CREDENTIALS_MODE overrides the active profile's manifest default.
@@ -396,6 +371,46 @@ def container_started_at(
     if r.returncode != 0 or not r.stdout.strip():
         return None
     return _parse_docker_time(r.stdout)
+
+
+INFRA_SERVICES = ("forward-proxy", "gitlab-warden")
+CONFIG_HASH_LABEL = "com.docker.compose.config-hash"
+
+
+def drifted_services(
+    root: Path, rows: list[dict[str, str]], *, prefix: list[str]
+) -> set[str] | None:
+    """Running infra services whose container was created from another compose
+    config than `prefix` renders — exactly what a plain `up` would recreate.
+    None when either side of the comparison cannot be read."""
+    names = {r["Service"]: r["Name"] for r in rows if r.get("Service") in INFRA_SERVICES}
+    if not names:
+        return set()
+    r = run(root, ["config", "--hash", ",".join(names)], prefix=prefix, capture=True, check=False)
+    fmt = '{{index .Config.Labels "' + CONFIG_HASH_LABEL + '"}}'
+    labels = subprocess.run(
+        ["docker", "inspect", "--format", fmt, *names.values()], capture_output=True, text=True
+    )
+    if r is None or r.returncode != 0 or labels.returncode != 0:
+        return None
+    wanted = dict(line.split(None, 1) for line in r.stdout.splitlines() if " " in line)
+    running = dict(zip(names, labels.stdout.splitlines()))
+    return {s for s in names if wanted.get(s, "").strip() != running.get(s, "").strip()}
+
+
+def agent_routing_stale(root: Path, name: str) -> bool:
+    """True when the running agent's no_proxy lists other git-endpoint hosts than
+    warden.toml; the agent keeps its start-time routing until restarted."""
+    r = subprocess.run(
+        ["docker", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", name],
+        capture_output=True,
+        text=True,
+    )
+    for line in r.stdout.splitlines() if r.returncode == 0 else []:
+        if line.startswith("no_proxy="):
+            routed = set(line.split("=", 1)[1].split(",")) - {"localhost", "127.0.0.1"}
+            return routed != set(_git_endpoint_hosts(root))
+    return False
 
 
 def resolve_service(name: str) -> str:
