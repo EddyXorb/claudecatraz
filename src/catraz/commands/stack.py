@@ -6,10 +6,11 @@ import argparse
 import time
 from pathlib import Path
 
-from catraz.errors import EXIT_OK, EXIT_GENERAL
-from catraz.compose import run as compose_run, compose_ps, _rc
-from catraz.doctor import run_doctor, print_findings, SECURITY_SECTIONS
 from catraz import compose, live_config, reconcile
+from catraz.compose import _rc, compose_ps
+from catraz.compose import run as compose_run
+from catraz.doctor import SECURITY_SECTIONS, print_findings, run_doctor
+from catraz.errors import EXIT_GENERAL, EXIT_OK
 from catraz.ui import Out
 
 

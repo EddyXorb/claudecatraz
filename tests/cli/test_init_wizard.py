@@ -25,7 +25,6 @@ from catraz.policy import (
 )
 from catraz.ui import Out
 
-
 # Fixtures / helpers
 
 

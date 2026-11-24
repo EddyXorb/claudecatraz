@@ -7,11 +7,10 @@ from pathlib import Path
 import pytest
 
 from catraz.commands import setup
-from catraz.commands.setup._from import load_inherited, stage_inherited, _ENV_ALLOWLIST
+from catraz.commands.setup._from import _ENV_ALLOWLIST, load_inherited, stage_inherited
 from catraz.commands.setup._secrets import _read_grouped_token
 from catraz.envfile import load_env
 from catraz.ui import Out
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

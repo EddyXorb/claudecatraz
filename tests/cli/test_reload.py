@@ -9,8 +9,8 @@ import pytest
 
 from catraz import compose
 from catraz.commands import reload as reload_cmd
-from catraz.ui import Out
 from catraz.errors import EXIT_OK
+from catraz.ui import Out
 
 
 def _out() -> Out:

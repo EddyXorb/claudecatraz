@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from catraz.envfile import load_env
-from catraz.errors import CliError, EXIT_CONFIG
+from catraz.errors import EXIT_CONFIG, CliError
 
 # Curated .env keys that are portable across hosts (no DEV_UID, no WARDEN_*).
 # The git host lives in warden.toml (inherited as a config file), not .env.

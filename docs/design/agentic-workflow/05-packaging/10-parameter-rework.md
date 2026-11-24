@@ -53,7 +53,7 @@ the given command (default `bash`) as the `dev` user **without** launching claud
 **`entrypoint.py`** — add an `exec` subcommand:
 ```python
 def cmd_exec(cmd: list[str]) -> None:
-    drop_to_dev()                       # chowns /workspace + re-execs as dev (as in start/run)
+    drop_to_dev()  # chowns /workspace + re-execs as dev (as in start/run)
     argv = cmd or ["bash"]
     os.execvp(argv[0], argv)
 ```
@@ -63,11 +63,13 @@ side-effect-free. It **does** call `drop_to_dev()`, which (as for `start`/`run`)
 `/workspace` to `dev` and re-execs, so the shell lands as `dev` in a writable workspace even on a
 cold one-off. In `main()`:
 ```python
-ex = sub.add_parser("exec"); ex.add_argument("rest", nargs=argparse.REMAINDER)
+ex = sub.add_parser("exec")
+ex.add_argument("rest", nargs=argparse.REMAINDER)
 ...
 if args.command == "exec":
     rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
-    cmd_exec(rest); return
+    cmd_exec(rest)
+    return
 ```
 
 **`src/catraz/commands/run.py`** — generalize the one-off builder (single, final signature) and
@@ -77,16 +79,28 @@ def _oneoff_args(relpath: str, tty: bool, sub: str, sub_args: list[str]) -> list
     args = ["run", "--rm", "--no-deps"]
     if not tty:
         args.append("-T")
-    args += ["--workdir", f"/workspace/{relpath}".rstrip("/"),
-             "claude-dev-env", sub, "--", *sub_args]
+    args += [
+        "--workdir",
+        f"/workspace/{relpath}".rstrip("/"),
+        "claude-dev-env",
+        sub,
+        "--",
+        *sub_args,
+    ]
     return args
 
+
 def cmd_shell(root, args, out):
-    assert_real_dirs(root); auth.write_auth_fragment(root); assert_invariants(root)
+    assert_real_dirs(root)
+    auth.write_auth_fragment(root)
+    assert_invariants(root)
     _ensure_infra(root, out)
-    relpath = str(Path.cwd().resolve().relative_to(root)); relpath = "" if relpath == "." else relpath
+    relpath = str(Path.cwd().resolve().relative_to(root))
+    relpath = "" if relpath == "." else relpath
     tty = sys.stdin.isatty()
-    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd      # may be empty → entrypoint runs bash
+    cmd = (
+        args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    )  # may be empty → entrypoint runs bash
     run_args = _oneoff_args(relpath, tty, "exec", cmd)
     extra_env = {"BASE_IMAGE": image.resolve_base(root)}
     r = compose_run(root, run_args, check=False, extra_env=extra_env)
@@ -111,14 +125,18 @@ HANDLERS["shell"] = run_cmd.cmd_shell
 **Tests** `tests/cli/test_shell.py` (no Docker) — assert by tail position, not substring search:
 ```python
 from catraz.commands import run as run_cmd
+
+
 def test_shell_oneoff_default_bash():
     a = run_cmd._oneoff_args("", tty=False, sub="exec", sub_args=[])
-    assert a[:4] == ["run","--rm","--no-deps","-T"]
-    assert a[-3:] == ["claude-dev-env","exec","--"]    # empty → entrypoint defaults to bash
+    assert a[:4] == ["run", "--rm", "--no-deps", "-T"]
+    assert a[-3:] == ["claude-dev-env", "exec", "--"]  # empty → entrypoint defaults to bash
+
+
 def test_shell_oneoff_passthrough():
-    a = run_cmd._oneoff_args("src", tty=True, sub="exec", sub_args=["ls","-la"])
+    a = run_cmd._oneoff_args("src", tty=True, sub="exec", sub_args=["ls", "-la"])
     assert "-T" not in a and "/workspace/src" in a
-    assert a[-5:] == ["claude-dev-env","exec","--","ls","-la"]
+    assert a[-5:] == ["claude-dev-env", "exec", "--", "ls", "-la"]
 ```
 `tests/container/test_exec_mode.py` (path-loaded entrypoint, like the existing entrypoint tests):
 monkeypatch `ep.os.execvp` + `ep.drop_to_dev`; assert `cmd_exec([])` execs `bash` and
@@ -140,6 +158,8 @@ security/operational invariant: a non-bypass mode hangs the headless daemon, and
 override would be a free DoS — so it is intentionally *not* exposed). In `entrypoint.py`:
 ```python
 import shlex
+
+
 def cmd_start(claude_home: Path) -> None:
     drop_to_dev()
     mode = os.environ.get("AUTH_MODE") or "subscription"
@@ -150,9 +170,20 @@ def cmd_start(claude_home: Path) -> None:
     spawn = os.environ.get("CLAUDE_RC_SPAWN") or "same-dir"
     debug = os.environ.get("CLAUDE_RC_DEBUG_FILE") or str(claude_home / "rc-debug.log")
     extra = shlex.split(os.environ.get("CLAUDE_RC_EXTRA_ARGS") or "")
-    os.execvp("claude", ["claude", "remote-control",
-                         "--permission-mode", "bypassPermissions",   # keep-fixed (headless)
-                         "--spawn", spawn, "--debug-file", debug, *extra])
+    os.execvp(
+        "claude",
+        [
+            "claude",
+            "remote-control",
+            "--permission-mode",
+            "bypassPermissions",  # keep-fixed (headless)
+            "--spawn",
+            spawn,
+            "--debug-file",
+            debug,
+            *extra,
+        ],
+    )
 ```
 - `or` (not `get(…, default)`) so an empty string falls back to the default.
 - With nothing set, argv is byte-identical to today (regression-guarded by test).
@@ -210,8 +241,11 @@ never surfaces it.
   def check_gitlab(env, f):
       url = (env.get("GITLAB_URL") or "").strip()
       if not url:
-          f.warn("tokens", "GITLAB_URL unset — defaulting to https://gitlab.com",
-                 "set GITLAB_URL in .catraz/.env for self-hosted GitLab")
+          f.warn(
+              "tokens",
+              "GITLAB_URL unset — defaulting to https://gitlab.com",
+              "set GITLAB_URL in .catraz/.env for self-hosted GitLab",
+          )
       else:
           f.ok("tokens", f"GitLab endpoint: {url}")
   ```
@@ -243,9 +277,7 @@ container entrypoint (`entrypoint.py:29`) honors `os.environ` first. So a user e
 
 **Solution:** match the entrypoint's precedence (`import os` is already present):
 ```python
-src = (source
-       or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
-       or env.get("CLAUDE_CREDENTIAL_SOURCE"))
+src = source or os.environ.get("CLAUDE_CREDENTIAL_SOURCE") or env.get("CLAUDE_CREDENTIAL_SOURCE")
 ```
 (`--from` > shell env > `.env` value > entrypoint default `~/.claude`.) This also flows through the
 auto-sync path (`_auto_sync_if_needed` → `_run_sync` with `source=None`) with no extra change.
@@ -266,9 +298,11 @@ Restricted-home / CI environments cannot relocate it and `$XDG_CACHE_HOME` is ig
 **Solution — precedence `CATRAZ_CACHE_DIR` > `$XDG_CACHE_HOME` > `~/.cache`:**
 ```python
 def _cache_root() -> Path:
-    base = (os.environ.get("CATRAZ_CACHE_DIR")
-            or os.environ.get("XDG_CACHE_HOME")
-            or str(Path.home() / ".cache"))
+    base = (
+        os.environ.get("CATRAZ_CACHE_DIR")
+        or os.environ.get("XDG_CACHE_HOME")
+        or str(Path.home() / ".cache")
+    )
     return Path(base).expanduser() / "catraz" / __version__
 ```
 `asset_root()` uses `_cache_root()` for `dst`. With neither env var set this is byte-identical to

@@ -210,22 +210,25 @@ liefern die Teile über ein Protokoll:
 ```python
 # core/model.py — was jeder geparste Intent dem Kernel zeigt (F3):
 class Intent(Protocol):
-    writes: bool     # vom PARSER abgeleitet, nie von der Decision
-    project: str     # für die Ressourcen-Allowlist (M6)
-    method: str      # Audit-Verb
+    writes: bool  # vom PARSER abgeleitet, nie von der Decision
+    project: str  # für die Ressourcen-Allowlist (M6)
+    method: str  # Audit-Verb
+
 
 # guard-spezifische Ausprägungen (bei ihren Guards, nicht im Kernel):
 #   guards/git/intent.GitPushIntent        (ref_commands, head/rest-Stream; writes ≡ True)
 #   guards/gitlab_api/intent.ApiIntent     (method/path/fields/endpoint/mr_owner_ok;
 #                                           writes = Methode ∉ {GET, HEAD, OPTIONS})
 
+
 # core/guard.py — der Kernel besitzt die Pipeline, Guards liefern die Teile:
 class Guard(Protocol[IntentT]):
-    name: str                                        # Audit-Namespace ("git"/"api")
-    async def parse(self, request) -> IntentT: ...   # Transport → Intent
-    async def enrich(self, intent) -> IntentT: ...   # unreine Lookups (z. B. MR-Owner)
+    name: str  # Audit-Namespace ("git"/"api")
+
+    async def parse(self, request) -> IntentT: ...  # Transport → Intent
+    async def enrich(self, intent) -> IntentT: ...  # unreine Lookups (z. B. MR-Owner)
     def capability_gate(self, intent, cfg) -> Decision | None: ...  # §03.4, pur
-    def decide(self, intent, state, cfg) -> Decision: ...           # pur, default-deny
+    def decide(self, intent, state, cfg) -> Decision: ...  # pur, default-deny
     def record(self, intent, decision) -> None: ...  # Quota-Verbuchung VOR forward
     async def forward(self, request, intent, decision) -> Response: ...
     def deny_response(self, intent, decision, state) -> Response: ...  # git: per-Ref-Reject

@@ -12,43 +12,13 @@ import sys
 from pathlib import Path
 
 from catraz import __version__, reconcile
-from catraz.errors import (
-    CliError,
-    EXIT_OK,
-    EXIT_GENERAL,
-)
-from catraz.doctor import DOCTOR_SECTIONS
-from catraz.ui import Out as Out  # also re-exported for tests that access cli.Out
-from catraz import image as _image_mod  # noqa: F401 (kept for tests that import catraz.image)
-from catraz.commands import setup, stack, observe
-from catraz.commands import run as run_cmd
-from catraz.commands import reload as reload_cmd
 from catraz.commands import build as build_cmd
-
-# ── re-exports (importable from catraz.cli by tests) ─────
-# `X as X` marks these as explicit re-exports so mypy --strict allows cli.* access.
-from catraz.errors import CliError as CliError  # noqa: F811 (already imported above, explicit re-export)
-from catraz.commands.setup import (
-    _ensure_gitignore as _ensure_gitignore,
-    _run_sync as _run_sync,
-)  # noqa: F401
-from catraz.commands.run import _oneoff_args as _oneoff_args  # noqa: F401
-from catraz.commands.observe import _UdsProxy as _UdsProxy  # noqa: F401
-
-# Compose helpers re-exported for tests that access them via cli.*
-from catraz.compose import run as compose_run  # noqa: F401
-from catraz.compose import compose_ps as compose_ps  # noqa: F401
-from catraz.compose import (
-    assert_real_dirs as assert_real_dirs,
-    assert_invariants as assert_invariants,
-)  # noqa: F401
-from catraz.doctor import run_doctor as run_doctor, print_findings as print_findings  # noqa: F401
-from catraz import auth as auth  # noqa: F401
-from catraz.commands.stack import (
-    _wait_healthy as _wait_healthy,
-    _print_urls as _print_urls,
-)  # noqa: F401
-
+from catraz.commands import observe, setup, stack
+from catraz.commands import reload as reload_cmd
+from catraz.commands import run as run_cmd
+from catraz.doctor import DOCTOR_SECTIONS
+from catraz.errors import EXIT_GENERAL, EXIT_OK, CliError
+from catraz.ui import Out
 
 # ── commands that stay in cli.py (< 7 lines, no module worth making) ────────────
 
@@ -314,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command not in NO_RECONCILE:
         try:
             reconcile.trigger(root, out)
-        except Exception as e:  # best effort: never block the command itself
+        except Exception as e:  # noqa: BLE001 — best effort: never block the command itself
             out.warn(f"background reconcile skipped: {e}")
     try:
         return HANDLERS[args.command](root, args, out)

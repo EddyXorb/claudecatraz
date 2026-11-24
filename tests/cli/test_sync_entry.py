@@ -5,10 +5,13 @@ container). See tests/container/test_sync.py for the adapter-level
 
 from pathlib import Path
 from typing import Any
+
 import pytest
-from catraz import cli
+
+from catraz.commands import setup
 from catraz.commands.setup import _sync as setup_sync
 from catraz.errors import CliError
+from catraz.ui import Out
 
 
 def _seed(tmp_path: Path) -> None:
@@ -33,7 +36,7 @@ def test_run_sync_calls_adapter_in_process(tmp_path: Path, monkeypatch: pytest.M
     _seed(tmp_path)
     fake = _FakeAdapter()
     monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: fake)
-    cli._run_sync(tmp_path, cli.Out(color=False))
+    setup._run_sync(tmp_path, Out(color=False))
     assert len(fake.calls) == 1
     _, home = fake.calls[0]
     assert str(home).endswith("secrets/claude")
@@ -49,7 +52,7 @@ def test_run_sync_raises_when_adapter_missing(
 
     monkeypatch.setattr(setup_sync, "load_adapter_module", boom)
     with pytest.raises(CliError):
-        cli._run_sync(tmp_path, cli.Out(color=False))
+        setup._run_sync(tmp_path, Out(color=False))
 
 
 def test_run_sync_propagates_adapter_failure_as_clierror(
@@ -66,5 +69,5 @@ def test_run_sync_propagates_adapter_failure_as_clierror(
 
     monkeypatch.setattr(setup_sync, "load_adapter_module", lambda profile: _FailingAdapter())
     with pytest.raises(CliError) as ei:
-        cli._run_sync(tmp_path, cli.Out(color=False))
+        setup._run_sync(tmp_path, Out(color=False))
     assert "no host credential found" in str(ei.value)

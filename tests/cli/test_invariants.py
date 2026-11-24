@@ -8,11 +8,11 @@ import json
 import types
 from pathlib import Path
 from typing import Any
+
 import pytest
 
 from catraz import compose
 from catraz.errors import CliError
-
 
 GOOD = {
     "networks": {"agent-net": {"internal": True}},

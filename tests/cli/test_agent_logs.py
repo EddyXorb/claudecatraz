@@ -9,10 +9,10 @@ from typing import Any, cast
 
 import pytest
 
-from catraz import agent_image, image, compose as compose_mod
+from catraz import agent_image, image
+from catraz import compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
-
 
 # ── _prune_agent_logs ─────────────────────────────────────────────────────────
 

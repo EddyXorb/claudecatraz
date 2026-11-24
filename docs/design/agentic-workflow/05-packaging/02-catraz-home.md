@@ -94,21 +94,30 @@ ohne Trailer.
   from pathlib import Path
   from catraz.paths import asset_root
 
+
   def base_cmd(root: Path) -> list[str]:
       ar = asset_root()
-      cmd = ["docker", "compose",
-             "-f", str(ar / "assets/compose/docker-compose.yml"),
-             "--project-directory", str(root),
-             "--env-file", str(root / ".catraz/.env")]
+      cmd = [
+          "docker",
+          "compose",
+          "-f",
+          str(ar / "assets/compose/docker-compose.yml"),
+          "--project-directory",
+          str(root),
+          "--env-file",
+          str(root / ".catraz/.env"),
+      ]
       override = root / ".catraz/compose.override.yml"
       if override.exists():
           cmd += ["-f", str(override)]
       return cmd
 
+
   def run(root: Path, args, capture=False, check=True, print_only=False):
       cmd = [*base_cmd(root), *args]
       if print_only:
-          print(" ".join(cmd)); return None
+          print(" ".join(cmd))
+          return None
       env = dict(os.environ, PROJECT_DIR=str(root))
       try:
           return subprocess.run(cmd, env=env, check=check, capture_output=capture, text=True)
@@ -127,11 +136,13 @@ ohne Trailer.
 from pathlib import Path
 from catraz import compose
 
+
 def test_base_cmd_points_at_asset_and_project(tmp_path, monkeypatch):
     (tmp_path / ".catraz").mkdir()
     cmd = compose.base_cmd(tmp_path)
     assert "--project-directory" in cmd and str(tmp_path) in cmd
     assert cmd[cmd.index("-f") + 1].endswith("assets/compose/docker-compose.yml")
+
 
 def test_base_cmd_includes_override_when_present(tmp_path):
     (tmp_path / ".catraz").mkdir()
@@ -146,27 +157,31 @@ def test_base_cmd_includes_override_when_present(tmp_path):
 **`src/catraz/paths.py`** ergänzen:
 ```python
 import os
-from catraz.cli import CliError, EXIT_CONFIG   # or move CliError to a small errors.py to avoid cycle
+from catraz.cli import CliError, EXIT_CONFIG  # or move CliError to a small errors.py to avoid cycle
+
 
 def find_root(explicit: str | None = None) -> Path:
     if explicit:
         root = Path(explicit).resolve()
         if not (root / ".catraz").is_dir():
             raise CliError(f"no .catraz in {root}", EXIT_CONFIG)
-        _assert_no_nested(root); return root
+        _assert_no_nested(root)
+        return root
     here = Path.cwd().resolve()
     for d in (here, *here.parents):
         if (d / ".catraz").is_dir():
-            _assert_no_nested(d); return d
+            _assert_no_nested(d)
+            return d
     raise CliError("no .catraz found (run `catraz init`)", EXIT_CONFIG)
+
 
 def _assert_no_nested(root: Path) -> None:
     top = root / ".catraz"
     for dirpath, dirnames, _ in os.walk(root):
         if ".catraz" in dirnames and Path(dirpath) / ".catraz" != top:
-            raise CliError(f"nested .catraz at {Path(dirpath)/'.catraz'} — refuse", EXIT_CONFIG)
-        dirnames[:] = [d for d in dirnames
-                       if Path(dirpath) / d not in (top, root / ".git")]
+            raise CliError(f"nested .catraz at {Path(dirpath) / '.catraz'} — refuse", EXIT_CONFIG)
+        dirnames[:] = [d for d in dirnames if Path(dirpath) / d not in (top, root / ".git")]
+
 
 def claude_home(root: Path) -> Path:
     return root / ".catraz" / "claude"
@@ -185,16 +200,22 @@ def claude_home(root: Path) -> Path:
 **Tests `tests/cli/test_paths.py`** ergänzen:
 ```python
 def test_find_root_walks_up(tmp_path, monkeypatch):
-    (tmp_path / ".catraz").mkdir(); sub = tmp_path / "a" / "b"; sub.mkdir(parents=True)
+    (tmp_path / ".catraz").mkdir()
+    sub = tmp_path / "a" / "b"
+    sub.mkdir(parents=True)
     monkeypatch.chdir(sub)
     from catraz import paths
+
     assert paths.find_root() == tmp_path
+
 
 def test_nested_catraz_refused(tmp_path):
     (tmp_path / ".catraz").mkdir()
-    (tmp_path / "inner").mkdir(); (tmp_path / "inner" / ".catraz").mkdir()
+    (tmp_path / "inner").mkdir()
+    (tmp_path / "inner" / ".catraz").mkdir()
     from catraz import paths, errors
     import pytest
+
     with pytest.raises(errors.CliError):
         paths.find_root(str(tmp_path))
 ```
@@ -221,12 +242,20 @@ arbeitet auf `Path(args.dir or Path.cwd())` als root.
 **Neuer Befehl `catraz migrate`** (`cli.cmd_migrate`):
 ```python
 def cmd_migrate(root, args, out):
-    cat = root / ".catraz"; cat.mkdir(exist_ok=True)
-    moves = {"config":"config","state":"state","logs":"logs","claude":"claude",".env":".env"}
+    cat = root / ".catraz"
+    cat.mkdir(exist_ok=True)
+    moves = {
+        "config": "config",
+        "state": "state",
+        "logs": "logs",
+        "claude": "claude",
+        ".env": ".env",
+    }
     for src_name, dst_name in moves.items():
-        src = root / src_name; dst = cat / dst_name
+        src = root / src_name
+        dst = cat / dst_name
         if src.exists() and not dst.exists():
-            src.rename(dst)               # atomic move, same filesystem
+            src.rename(dst)  # atomic move, same filesystem
     # fail-closed: kein Alt-Layout-Secret darf unter root verbleiben
     leftovers = [n for n in ("claude", "state", ".env") if (root / n).exists()]
     if leftovers:
@@ -244,8 +273,10 @@ or run `catraz migrate`")` ab. Prüfung in `find_root` nach dem `.catraz`-Fund e
 **Tests `tests/cli/test_init_migrate.py`:**
 ```python
 def test_migrate_moves_and_gitignores(tmp_path):
-    (tmp_path / "claude").mkdir(); (tmp_path / ".env").write_text("DEV_UID=1000\n")
+    (tmp_path / "claude").mkdir()
+    (tmp_path / ".env").write_text("DEV_UID=1000\n")
     from catraz import cli
+
     rc = cli.cmd_migrate(tmp_path, None, cli.Out(color=False))
     assert rc == 0
     assert (tmp_path / ".catraz/claude").is_dir() and (tmp_path / ".catraz/.env").exists()
@@ -285,33 +316,45 @@ chown -R warden:warden /var/lib/warden /var/log/warden /run/warden 2>/dev/null |
 **`src/catraz/cli.py`** — `AUDIT_URL`-Konstante entfernen; neuer Befehl `catraz audit`
 (Imports oben in `cli.py` ergänzen: `contextlib, socket, socketserver, threading, webbrowser`):
 ```python
-
 class _UdsProxy(socketserver.BaseRequestHandler):
-    sock_path = ""           # per-instance via type(...)
+    sock_path = ""  # per-instance via type(...)
+
     def handle(self):
         with socket.socket(socket.AF_UNIX) as up:
             up.connect(self.sock_path)
+
             def fwd(a, b):
                 try:
-                    while (d := a.recv(65536)): b.sendall(d)
-                except OSError: pass
+                    while d := a.recv(65536):
+                        b.sendall(d)
+                except OSError:
+                    pass
                 finally:
-                    with contextlib.suppress(OSError): b.shutdown(socket.SHUT_WR)
-            t = threading.Thread(target=fwd, args=(self.request, up), daemon=True); t.start()
-            fwd(up, self.request); t.join()
+                    with contextlib.suppress(OSError):
+                        b.shutdown(socket.SHUT_WR)
+
+            t = threading.Thread(target=fwd, args=(self.request, up), daemon=True)
+            t.start()
+            fwd(up, self.request)
+            t.join()
+
 
 def cmd_audit(root, args, out):
     sock = root / ".catraz/run/warden/admin.sock"
     if not args.web:
-        return _tail_audit(root, args, out)            # bestehender JSONL-Tail
+        return _tail_audit(root, args, out)  # bestehender JSONL-Tail
     if not sock.exists():
-        out.err("audit socket not found — run `catraz up` first"); return EXIT_GENERAL
+        out.err("audit socket not found — run `catraz up` first")
+        return EXIT_GENERAL
     handler = type("H", (_UdsProxy,), {"sock_path": str(sock)})
-    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)   # ephemerer Port
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)  # ephemerer Port
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
-    out.info(f"audit viewer: {url}  (Ctrl-C to stop)"); webbrowser.open(url)
-    try: srv.serve_forever()
-    except KeyboardInterrupt: srv.shutdown()
+    out.info(f"audit viewer: {url}  (Ctrl-C to stop)")
+    webbrowser.open(url)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        srv.shutdown()
     return EXIT_OK
 ```
 Parser: `pa = sub.add_parser("audit", parents=[_g()]); pa.add_argument("--web", action="store_true");
@@ -325,20 +368,30 @@ In `main` dispatchen. **`_print_urls`**: die alte `172.31.0.2:9090`-Zeile ersetz
 import socket, threading, urllib.request
 from catraz import cli
 
+
 def test_audit_web_forwards_to_uds(tmp_path):
-    sockdir = tmp_path/".catraz/run/warden"; sockdir.mkdir(parents=True)
-    sp = sockdir/"admin.sock"
-    srv = socket.socket(socket.AF_UNIX); srv.bind(str(sp)); srv.listen()
+    sockdir = tmp_path / ".catraz/run/warden"
+    sockdir.mkdir(parents=True)
+    sp = sockdir / "admin.sock"
+    srv = socket.socket(socket.AF_UNIX)
+    srv.bind(str(sp))
+    srv.listen()
+
     def serve():
-        c,_ = srv.accept()
-        c.recv(1024); c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"); c.close()
+        c, _ = srv.accept()
+        c.recv(1024)
+        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        c.close()
+
     threading.Thread(target=serve, daemon=True).start()
     import socketserver
-    h = type("H",(cli._UdsProxy,),{"sock_path":str(sp)})
-    fwd = socketserver.ThreadingTCPServer(("127.0.0.1",0), h)
+
+    h = type("H", (cli._UdsProxy,), {"sock_path": str(sp)})
+    fwd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), h)
     threading.Thread(target=fwd.serve_forever, daemon=True).start()
     body = urllib.request.urlopen(f"http://127.0.0.1:{fwd.server_address[1]}/").read()
-    assert body == b"ok"; fwd.shutdown()
+    assert body == b"ok"
+    fwd.shutdown()
 ```
 
 `commit: "feat(warden): serve admin over unix socket; catraz audit --web forwarder"`

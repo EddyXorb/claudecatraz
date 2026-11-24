@@ -9,26 +9,26 @@ from pathlib import Path
 from catraz import live_config
 from catraz.doctor import _doctor_fix, print_findings, run_doctor
 from catraz.envfile import load_env, set_env_values
-from catraz.errors import CliError, EXIT_CONFIG, EXIT_DOCTOR, EXIT_OK
+from catraz.errors import EXIT_CONFIG, EXIT_DOCTOR, EXIT_OK, CliError
 from catraz.ui import Out
 
-from ._secrets import _ensure_secret, _write_secret_value  # noqa: F401
-from ._sync import _auto_sync_if_needed, _ensure_gitignore, _run_sync  # noqa: F401
+from ._secrets import _ensure_secret, _write_secret_value
+from ._sync import _auto_sync_if_needed, _ensure_gitignore, _run_sync
 from ._wizard_interactive import _wizard_interactive
-from ._wizard_yes import _wizard_yes  # noqa: F401
+from ._wizard_yes import _wizard_yes
 
 __all__ = [
+    "_auto_sync_if_needed",
+    "_ensure_gitignore",
+    "_ensure_secret",
+    "_run_sync",
+    "_wizard_interactive",
+    "_wizard_yes",
+    "_write_secret_value",
+    "cmd_allow",
     "cmd_doctor",
     "cmd_init",
     "cmd_sync",
-    "cmd_allow",
-    "_auto_sync_if_needed",
-    "_ensure_gitignore",
-    "_run_sync",
-    "_ensure_secret",
-    "_write_secret_value",
-    "_wizard_interactive",
-    "_wizard_yes",
 ]
 
 
@@ -83,6 +83,7 @@ def _init_seed_env(
 
 def _init_sync_credentials(root: Path, env_path: Path, args: argparse.Namespace, out: Out) -> None:
     from catraz.paths import claude_home
+
     from ._sync import _credentials_mode
 
     auth_mode = load_env(env_path).get("AUTH_MODE", "subscription")
@@ -128,6 +129,7 @@ def _init_preflight(root: Path, out: Out) -> int:
 
 def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
     from catraz.paths import asset_root
+
     from ._from import load_inherited, stage_inherited
 
     out.head("catraz init — let's get the stack ready\n")

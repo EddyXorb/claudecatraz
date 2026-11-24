@@ -18,12 +18,13 @@ Kein Framework, sondern eine dünne Schicht, die A5 erzwingt (Template-Method im
 ```python
 # warden/core/guard.py — der Kernel besitzt die Pipeline, Guards liefern die Teile.
 class Guard(Protocol):
-    name: str                          # "git", "gitlab_api", "postgres" — Audit-Namespace (A7)
-    def routes(self) -> list[Route]: ...            # Transport-Anbindung
-    async def parse(self, request) -> Intent: ...   # Transport → geparste Absicht
-    async def enrich(self, intent) -> Intent: ...   # unreine Lookups, die Checks deklariert haben
-    def decide(self, intent, state, policy) -> Decision: ...   # PUR (A4), default-deny (A1)
-    def record(self, intent, state) -> None: ...    # Quota-Verbuchung VOR forward (Kernel ruft!)
+    name: str  # "git", "gitlab_api", "postgres" — Audit-Namespace (A7)
+
+    def routes(self) -> list[Route]: ...  # Transport-Anbindung
+    async def parse(self, request) -> Intent: ...  # Transport → geparste Absicht
+    async def enrich(self, intent) -> Intent: ...  # unreine Lookups, die Checks deklariert haben
+    def decide(self, intent, state, policy) -> Decision: ...  # PUR (A4), default-deny (A1)
+    def record(self, intent, state) -> None: ...  # Quota-Verbuchung VOR forward (Kernel ruft!)
     async def forward(self, request, intent, decision) -> Response: ...  # Credential-Injektion
 ```
 

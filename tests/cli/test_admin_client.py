@@ -5,8 +5,8 @@ from __future__ import annotations
 import http.server
 import socketserver
 import threading
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 
@@ -38,7 +38,7 @@ class _JsonHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a: object) -> None:  # silence test output
         pass
 
-    def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
+    def do_GET(self) -> None:
         self.send_response(self.status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(self.body)))

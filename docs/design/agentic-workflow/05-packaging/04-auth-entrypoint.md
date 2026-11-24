@@ -60,15 +60,19 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
 """
 
+
 def auth_mode(root: Path) -> str:
     mode = load_env(root / ".catraz/.env").get("AUTH_MODE", "subscription")
     if mode not in ("subscription", "api_key"):
         raise CliError(f"AUTH_MODE must be subscription|api_key, got {mode!r}", EXIT_CONFIG)
     return mode
 
+
 def write_auth_fragment(root: Path) -> Path:
     frag = root / ".catraz/.auth.compose.yml"
-    frag.write_text(SUBSCRIPTION_FRAGMENT if auth_mode(root) == "subscription" else API_KEY_FRAGMENT)
+    frag.write_text(
+        SUBSCRIPTION_FRAGMENT if auth_mode(root) == "subscription" else API_KEY_FRAGMENT
+    )
     return frag
 ```
 
@@ -86,18 +90,28 @@ User-Override:
 def check_auth(root, env, f):
     mode = env.get("AUTH_MODE", "")
     if mode not in ("subscription", "api_key"):
-        f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env"); return
+        f.bad("auth", "AUTH_MODE must be subscription|api_key", "set it in .catraz/.env")
+        return
     cred = paths.claude_home(root) / ".credentials.json"
     has_key = bool(env.get("ANTHROPIC_API_KEY"))
     if mode == "subscription":
-        if has_key: f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
-        if not cred.exists(): f.bad("auth", "no .credentials.json", "run `catraz sync`")
-        else: f.ok("auth", "subscription credential present")
+        if has_key:
+            f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
+        if not cred.exists():
+            f.bad("auth", "no .credentials.json", "run `catraz sync`")
+        else:
+            f.ok("auth", "subscription credential present")
     else:
-        if not has_key: f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty", "set it")
-        if cred.exists(): f.bad("auth", "api_key mode but .credentials.json present (ambiguous)",
-                                "remove .catraz/claude/.credentials.json")
-        if has_key and not cred.exists(): f.ok("auth", "api_key set")
+        if not has_key:
+            f.bad("auth", "api_key mode but ANTHROPIC_API_KEY empty", "set it")
+        if cred.exists():
+            f.bad(
+                "auth",
+                "api_key mode but .credentials.json present (ambiguous)",
+                "remove .catraz/claude/.credentials.json",
+            )
+        if has_key and not cred.exists():
+            f.ok("auth", "api_key set")
 ```
 `"auth"` zu `DOCTOR_SECTIONS` **und** `SECURITY_SECTIONS` hinzufügen; in `run_doctor`
 dispatchen.
@@ -108,30 +122,40 @@ from catraz import auth, doctor
 from catraz.errors import CliError
 import pytest
 
+
 def _mk(tmp_path, env):
-    (tmp_path/".catraz").mkdir(); (tmp_path/".catraz/.env").write_text(env)
-    (tmp_path/".catraz/claude").mkdir()
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/.env").write_text(env)
+    (tmp_path / ".catraz/claude").mkdir()
     return tmp_path
+
 
 def test_mode_invalid(tmp_path):
     _mk(tmp_path, "AUTH_MODE=both\n")
-    with pytest.raises(CliError): auth.auth_mode(tmp_path)
+    with pytest.raises(CliError):
+        auth.auth_mode(tmp_path)
+
 
 def test_fragment_subscription(tmp_path):
-    _mk(tmp_path, "AUTH_MODE=subscription\n"); auth.write_auth_fragment(tmp_path)
-    assert ".credentials.json" in (tmp_path/".catraz/.auth.compose.yml").read_text()
+    _mk(tmp_path, "AUTH_MODE=subscription\n")
+    auth.write_auth_fragment(tmp_path)
+    assert ".credentials.json" in (tmp_path / ".catraz/.auth.compose.yml").read_text()
+
 
 def test_fragment_api_key(tmp_path):
-    _mk(tmp_path, "AUTH_MODE=api_key\n"); auth.write_auth_fragment(tmp_path)
-    assert "ANTHROPIC_API_KEY" in (tmp_path/".catraz/.auth.compose.yml").read_text()
+    _mk(tmp_path, "AUTH_MODE=api_key\n")
+    auth.write_auth_fragment(tmp_path)
+    assert "ANTHROPIC_API_KEY" in (tmp_path / ".catraz/.auth.compose.yml").read_text()
+
 
 def test_doctor_auth_xor(tmp_path):
     root = _mk(tmp_path, "")
     f = doctor.Findings()
-    doctor.check_auth(root, {"AUTH_MODE":"api_key","ANTHROPIC_API_KEY":"x"}, f)
-    (root/".catraz/claude/.credentials.json").write_text("{}")
-    f2 = doctor.Findings(); doctor.check_auth(root, {"AUTH_MODE":"api_key","ANTHROPIC_API_KEY":"x"}, f2)
-    assert any(i[0]==doctor.BAD for i in f2.items)   # cred present in api_key → bad
+    doctor.check_auth(root, {"AUTH_MODE": "api_key", "ANTHROPIC_API_KEY": "x"}, f)
+    (root / ".catraz/claude/.credentials.json").write_text("{}")
+    f2 = doctor.Findings()
+    doctor.check_auth(root, {"AUTH_MODE": "api_key", "ANTHROPIC_API_KEY": "x"}, f2)
+    assert any(i[0] == doctor.BAD for i in f2.items)  # cred present in api_key → bad
 ```
 
 `commit: "feat(auth): AUTH_MODE XOR, auth compose fragment, doctor auth check"`
@@ -149,7 +173,9 @@ def build_home(home: Path, mode: str) -> None:
     if mode == "subscription":
         src = ro / ".credentials.json"
         if not src.exists():
-            sys.exit("error: subscription mode but no .credentials.json mounted (run `catraz sync`)")
+            sys.exit(
+                "error: subscription mode but no .credentials.json mounted (run `catraz sync`)"
+            )
         shutil.copy2(src, home / ".credentials.json")
     # .claude.json lives at the HOME ROOT (sibling of ~/.claude), NOT inside the tmpfs dir.
     if mode == "subscription" and (ro / ".claude.json").exists():
@@ -161,7 +187,8 @@ def build_home(home: Path, mode: str) -> None:
     data.setdefault("projects", {}).setdefault("/workspace", {})["hasTrustDialogAccepted"] = True
     (Path.home() / ".claude.json").write_text(json.dumps(data, indent=2))
     (home / "settings.json").write_text(
-        json.dumps({"theme": "dark", "hasCompletedOnboarding": True}, indent=2))
+        json.dumps({"theme": "dark", "hasCompletedOnboarding": True}, indent=2)
+    )
     agent_md = Path("/opt/claude-dev-env/AGENT.md")
     if agent_md.exists():
         shutil.copy2(agent_md, home / "CLAUDE.md")
@@ -174,8 +201,19 @@ def cmd_start(claude_home: Path) -> None:
         sys.exit("error: api_key mode but ANTHROPIC_API_KEY unset")
     build_home(claude_home, mode)
     configure_git_warden()
-    os.execvp("claude", ["claude", "remote-control", "--permission-mode", "bypassPermissions",
-                         "--spawn", "same-dir", "--debug-file", str(claude_home / "rc-debug.log")])
+    os.execvp(
+        "claude",
+        [
+            "claude",
+            "remote-control",
+            "--permission-mode",
+            "bypassPermissions",
+            "--spawn",
+            "same-dir",
+            "--debug-file",
+            str(claude_home / "rc-debug.log"),
+        ],
+    )
 ```
 - Den Symlink-Trick (`target.symlink_to(stored)`) **ersatzlos entfernen**.
 - `configure_git_warden`, `drop_to_dev`, `read_json` unverändert lassen.
@@ -184,22 +222,27 @@ def cmd_start(claude_home: Path) -> None:
 **Tests `tests/container/test_build_home.py`** (Pfad-Loader wie in Doc 01):
 ```python
 def test_build_home_subscription(ep, tmp_path, monkeypatch):
-    home = tmp_path / ".claude"; (home/".ro").mkdir(parents=True)
-    (home/".ro"/".credentials.json").write_text("{}")
-    (home/".ro"/".claude.json").write_text('{"organizationUuid":"org"}')
+    home = tmp_path / ".claude"
+    (home / ".ro").mkdir(parents=True)
+    (home / ".ro" / ".credentials.json").write_text("{}")
+    (home / ".ro" / ".claude.json").write_text('{"organizationUuid":"org"}')
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     ep.build_home(home, "subscription")
-    assert (home/".credentials.json").exists()
-    import json; cj = json.loads((tmp_path/".claude.json").read_text())
+    assert (home / ".credentials.json").exists()
+    import json
+
+    cj = json.loads((tmp_path / ".claude.json").read_text())
     assert cj["organizationUuid"] == "org" and cj["bypassPermissionsModeAccepted"] is True
-    assert (home/"settings.json").exists()
+    assert (home / "settings.json").exists()
+
 
 def test_build_home_api_key_synthesizes(ep, tmp_path, monkeypatch):
-    home = tmp_path / ".claude"; home.mkdir()
+    home = tmp_path / ".claude"
+    home.mkdir()
     monkeypatch.setattr(ep.Path, "home", staticmethod(lambda: tmp_path))
     ep.build_home(home, "api_key")
-    assert not (home/".credentials.json").exists()
-    assert (tmp_path/".claude.json").exists()
+    assert not (home / ".credentials.json").exists()
+    assert (tmp_path / ".claude.json").exists()
 ```
 (`ep`-Fixture = per Pfad geladenes Entrypoint-Modul; in `tests/container/conftest.py`.)
 
@@ -210,20 +253,22 @@ def test_build_home_api_key_synthesizes(ep, tmp_path, monkeypatch):
 **Entrypoint `cmd_sync`** (Quelle konfigurierbar; `.claude.json` immer vorhanden danach):
 ```python
 def cmd_sync(claude_home: Path, source: str | None = None) -> None:
-    src_dir = Path(source or os.environ.get("CLAUDE_CREDENTIAL_SOURCE")
-                   or str(Path.home() / ".claude")).expanduser()
+    src_dir = Path(
+        source or os.environ.get("CLAUDE_CREDENTIAL_SOURCE") or str(Path.home() / ".claude")
+    ).expanduser()
     cred = src_dir / ".credentials.json"
     if not cred.exists():
         sys.exit(f"error: {cred} not found — authenticate with `claude` on the host first")
     claude_home.mkdir(parents=True, exist_ok=True)
     shutil.copy2(cred, claude_home / ".credentials.json")
-    host_cj = src_dir.parent / ".claude.json"          # ~/.claude.json sits next to ~/.claude/
+    host_cj = src_dir.parent / ".claude.json"  # ~/.claude.json sits next to ~/.claude/
     dst_cj = claude_home / ".claude.json"
     if host_cj.exists():
         shutil.copy2(host_cj, dst_cj)
     elif not dst_cj.exists():
-        dst_cj.write_text(json.dumps(
-            {"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2))
+        dst_cj.write_text(
+            json.dumps({"hasCompletedOnboarding": True, "lastOnboardingVersion": "1.0"}, indent=2)
+        )
     print(f"Credentials synced into {claude_home}")
 ```
 `entrypoint.main`: `sync`-Subparser bekommt `--from`/`source`-Arg, das an `cmd_sync` geht.
@@ -243,12 +288,13 @@ fehlt, einmal `_run_sync` versuchen; bleibt sie fehlend → `EXIT_DOCTOR` mit kl
 **Tests `tests/container/test_sync.py`:**
 ```python
 def test_sync_materializes_claude_json(ep, tmp_path):
-    src = tmp_path/"src"/".claude"; src.mkdir(parents=True)
-    (src/".credentials.json").write_text("{}")                 # no host ~/.claude.json
-    home = tmp_path/"dst"
+    src = tmp_path / "src" / ".claude"
+    src.mkdir(parents=True)
+    (src / ".credentials.json").write_text("{}")  # no host ~/.claude.json
+    home = tmp_path / "dst"
     ep.cmd_sync(home, source=str(src))
-    assert (home/".credentials.json").exists()
-    assert (home/".claude.json").exists()                      # synthesized default
+    assert (home / ".credentials.json").exists()
+    assert (home / ".claude.json").exists()  # synthesized default
 ```
 
 `commit: "feat(auth): always provision .claude.json; configurable sync source; auto-sync"`

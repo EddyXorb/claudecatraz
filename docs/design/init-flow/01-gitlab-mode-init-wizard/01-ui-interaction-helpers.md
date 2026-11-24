@@ -46,8 +46,8 @@ only fallback they promise — roast iter-2 #5.)
        self.info(prompt)
        for i, (_v, label) in enumerate(options):
            mark = "*" if i == default else " "
-           self.info(f"   {mark} {i+1}) {label}")
-       for _ in range(3):                       # bounded: 3 tries, then take default
+           self.info(f"   {mark} {i + 1}) {label}")
+       for _ in range(3):  # bounded: 3 tries, then take default
            raw = self.ask(f"choose 1-{len(options)}", str(default + 1))
            try:
                idx = int(raw) - 1
@@ -56,13 +56,14 @@ only fallback they promise — roast iter-2 #5.)
            if 0 <= idx < len(options):
                return options[idx][0]
            self.warn(f"enter a number 1-{len(options)}")
-       return options[default][0]               # give up gracefully on junk/EOF
+       return options[default][0]  # give up gracefully on junk/EOF
    ```
 
 3. **`secret`** — masked entry, no default echo, optional "keep existing":
    ```python
    def secret(self, prompt, *, current=""):
        import getpass
+
        if current:
            self.info(f"  {prompt} — already set ({mask(current)}); Enter to keep.")
        try:

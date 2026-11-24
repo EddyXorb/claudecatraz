@@ -6,11 +6,11 @@ No Docker — monkeypatches compose.subprocess.run.
 import stat
 from pathlib import Path
 from typing import Any
+
 import pytest
 
 from catraz import compose
 from catraz.paths import asset_root
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

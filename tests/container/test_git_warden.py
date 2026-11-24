@@ -34,6 +34,7 @@ def _insteadof_values(home: Path, host: str) -> list[str]:
         env={"HOME": str(home)},
         capture_output=True,
         text=True,
+        check=False,
     )
     return r.stdout.split() if r.returncode == 0 else []
 
@@ -84,6 +85,7 @@ def test_rewrite_keeps_canonical_hostname_with_git_mount(
         env={"HOME": str(tmp_path)},
         capture_output=True,
         text=True,
+        check=False,
     )
     assert "gitlab-warden" not in r.stdout
     keys = {line.split()[0] for line in r.stdout.splitlines() if line.strip()}

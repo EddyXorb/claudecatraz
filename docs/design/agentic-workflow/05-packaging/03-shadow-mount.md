@@ -15,19 +15,35 @@
   `shutil.which("docker")` fehlt):
   ```python
   import shutil, subprocess, textwrap, pytest
+
   pytestmark = pytest.mark.skipif(not shutil.which("docker"), reason="needs docker")
 
-  def _run(cmd): return subprocess.run(cmd, capture_output=True, text=True)
+
+  def _run(cmd):
+      return subprocess.run(cmd, capture_output=True, text=True)
+
 
   def test_t2_tmpfs_overdeck_ordering(tmp_path):
       """tmpfs over a bind subpath masks host content deterministically."""
-      (tmp_path / ".catraz").mkdir(); (tmp_path / ".catraz/secret").write_text("TOP")
-      r = _run(["docker","run","--rm",
-                "-v", f"{tmp_path}:/workspace",
-                "--tmpfs","/workspace/.catraz",
-                "alpine","sh","-c","ls -A /workspace/.catraz | wc -l"])
+      (tmp_path / ".catraz").mkdir()
+      (tmp_path / ".catraz/secret").write_text("TOP")
+      r = _run(
+          [
+              "docker",
+              "run",
+              "--rm",
+              "-v",
+              f"{tmp_path}:/workspace",
+              "--tmpfs",
+              "/workspace/.catraz",
+              "alpine",
+              "sh",
+              "-c",
+              "ls -A /workspace/.catraz | wc -l",
+          ]
+      )
       assert r.returncode == 0
-      assert r.stdout.strip() == "0"          # .catraz appears EMPTY to the container
+      assert r.stdout.strip() == "0"  # .catraz appears EMPTY to the container
   ```
 - Schlägt T2 fehl, ist Doc 03 blockiert (Fallback Pre-Start-Mount — separat zu entscheiden).
 
@@ -67,16 +83,19 @@ tmpfs verändert Host-`.catraz` nicht; T4 `umount /workspace/.catraz` als `dev`�
 import json
 from catraz.errors import CliError, EXIT_CONFIG
 
+
 def assert_real_dirs(root) -> None:
     for p in (root, root / ".catraz"):
         if p.is_symlink():
             raise CliError(f"{p} is a symlink — bind source must be a real dir", EXIT_CONFIG)
+
 
 def _env_keys(agent) -> set[str]:
     env = agent.get("environment") or {}
     if isinstance(env, list):
         return {e.split("=", 1)[0] for e in env}
     return set(env.keys())
+
 
 def assert_invariants(root) -> None:
     r = run(root, ["config", "--format", "json"], capture=True, check=False)
@@ -106,30 +125,55 @@ from catraz import compose
 from catraz.errors import CliError
 import pytest
 
-GOOD = {"networks":{"agent-net":{"internal":True}},
-        "services":{"claude-dev-env":{"environment":{},"volumes":[
-            {"type":"tmpfs","target":"/workspace/.catraz"}]}}}
+GOOD = {
+    "networks": {"agent-net": {"internal": True}},
+    "services": {
+        "claude-dev-env": {
+            "environment": {},
+            "volumes": [{"type": "tmpfs", "target": "/workspace/.catraz"}],
+        }
+    },
+}
+
 
 def _patch(monkeypatch, cfg):
-    monkeypatch.setattr(compose, "run",
-        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps(cfg)))
+    monkeypatch.setattr(
+        compose, "run", lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps(cfg))
+    )
+
 
 def test_invariants_pass(monkeypatch, tmp_path):
-    _patch(monkeypatch, GOOD); compose.assert_invariants(tmp_path)   # no raise
+    _patch(monkeypatch, GOOD)
+    compose.assert_invariants(tmp_path)  # no raise
 
-@pytest.mark.parametrize("mut", [
-    lambda c: c["networks"]["agent-net"].__setitem__("internal", False),
-    lambda c: c["services"]["claude-dev-env"]["environment"].__setitem__("GITLAB_WRITE_TOKEN","x"),
-    lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
-    lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
-])
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda c: c["networks"]["agent-net"].__setitem__("internal", False),
+        lambda c: c["services"]["claude-dev-env"]["environment"].__setitem__(
+            "GITLAB_WRITE_TOKEN", "x"
+        ),
+        lambda c: c["services"]["claude-dev-env"].__setitem__("privileged", True),
+        lambda c: c["services"]["claude-dev-env"].__setitem__("volumes", []),
+    ],
+)
 def test_invariants_fail(monkeypatch, tmp_path, mut):
-    import copy; bad = copy.deepcopy(GOOD); mut(bad); _patch(monkeypatch, bad)
-    with pytest.raises(CliError): compose.assert_invariants(tmp_path)
+    import copy
+
+    bad = copy.deepcopy(GOOD)
+    mut(bad)
+    _patch(monkeypatch, bad)
+    with pytest.raises(CliError):
+        compose.assert_invariants(tmp_path)
+
 
 def test_symlink_guard(tmp_path):
-    (tmp_path/".catraz").mkdir(); link = tmp_path/"l"; link.symlink_to(tmp_path)
-    with pytest.raises(CliError): compose.assert_real_dirs(link)
+    (tmp_path / ".catraz").mkdir()
+    link = tmp_path / "l"
+    link.symlink_to(tmp_path)
+    with pytest.raises(CliError):
+        compose.assert_real_dirs(link)
 ```
 
 `commit: "feat(compose): symlink guard + resolved-compose trust-boundary invariants"`

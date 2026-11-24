@@ -1,16 +1,16 @@
 """P4: catraz ps — list active agent containers (incl. hidden run --rm one-offs)."""
 
 import argparse
-import typing
 import types
+import typing
 from pathlib import Path
 
 import pytest
 
 from catraz import compose
 from catraz.commands import observe
-from catraz.ui import Out
 from catraz.errors import EXIT_OK
+from catraz.ui import Out
 
 
 def _out() -> Out:

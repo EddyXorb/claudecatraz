@@ -1,11 +1,14 @@
 """cmd_run resolves the agent image before calling compose.prepare()."""
 
 import argparse
-import typing
 import types
+import typing
 from pathlib import Path
+
 import pytest
-from catraz import agent_image, image, compose as compose_mod
+
+from catraz import agent_image, image
+from catraz import compose as compose_mod
 from catraz.commands import run as run_cmd
 from catraz.ui import Out
 
@@ -26,7 +29,7 @@ def _mock_cmd_run(
     monkeypatch.setattr(image, "resolve_base", lambda root: "catraz-base:test")
     monkeypatch.setattr(agent_image, "ensure", lambda root, out, base: f"agent-on-{base}")
     # Host gitconfig is environment-dependent; pin it off so extra_env is deterministic.
-    monkeypatch.setattr(run_cmd, "_host_gitconfig_env", lambda: {})
+    monkeypatch.setattr(run_cmd, "_host_gitconfig_env", dict)
 
     def fake_prepare(root: object, *, render: object, extra_env: object = None) -> list[str]:
         prepare_calls.append({"render": render, "extra_env": extra_env})

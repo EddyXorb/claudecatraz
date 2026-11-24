@@ -3,12 +3,12 @@ validation, .env round-tripping, allowed_projects precedence, and service
 aliases — the parts that don't need Docker."""
 
 from pathlib import Path
+
 import pytest
 
 from catraz import envfile, policy
 from catraz.compose import resolve_service
 from catraz.errors import CliError
-
 
 # ── validate_project ────────────────────────────────────────────────────────────
 

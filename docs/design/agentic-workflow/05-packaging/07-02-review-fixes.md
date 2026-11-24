@@ -55,6 +55,8 @@ PROJECT_DIR=./workspace
 (funktioniert in Wheel **und** Zero-Install; `_repo_root()` ist im Wheel `None` → `TypeError`):
 ```python
 from catraz import paths
+
+
 def test_env_example_has_no_dead_mount_vars(tmp_path, monkeypatch):
     monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
     txt = (paths.asset_root() / "assets" / ".env.example").read_text()
@@ -78,9 +80,12 @@ Korrekt ist der Pfad, über den alle anderen Assets schon aufgelöst werden:
 ```python
 # lokaler Import in _run_sync (wie die übrigen paths-Importe in cli.py, z. B. Zeile 89/236):
 from catraz.paths import asset_root
+
 entry = asset_root() / "assets" / "container" / "entrypoint.py"
 if not entry.exists():
-    raise CliError("entrypoint.py asset not found (corrupt cache? remove ~/.cache/catraz)", EXIT_GENERAL)
+    raise CliError(
+        "entrypoint.py asset not found (corrupt cache? remove ~/.cache/catraz)", EXIT_GENERAL
+    )
 ```
 - **Import-Stil festlegen:** `_run_sync` importiert `asset_root` **lokal** (nicht modul-global) —
   konsistent mit den bestehenden lokalen `from catraz.paths import claude_home`-Importen in
@@ -94,21 +99,30 @@ import pytest
 from catraz import cli, paths
 from catraz.errors import CliError
 
+
 def _seed(tmp_path):
     (tmp_path / ".catraz").mkdir()
     (tmp_path / ".catraz/.env").write_text("AUTH_MODE=subscription\n")
+
 
 def test_run_sync_uses_asset_entrypoint(tmp_path, monkeypatch):
     _seed(tmp_path)
     fake_assets = tmp_path / "cache"
     entry = fake_assets / "assets/container/entrypoint.py"
-    entry.parent.mkdir(parents=True); entry.write_text("# tool")
-    monkeypatch.setattr(paths, "asset_root", lambda: fake_assets)   # local import → this is the live symbol
+    entry.parent.mkdir(parents=True)
+    entry.write_text("# tool")
+    monkeypatch.setattr(
+        paths, "asset_root", lambda: fake_assets
+    )  # local import → this is the live symbol
     seen = {}
-    monkeypatch.setattr(cli.subprocess, "run",
-                        lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0),
+    )
     cli._run_sync(tmp_path, cli.Out(color=False))
     assert str(entry) in seen["cmd"]
+
 
 def test_run_sync_raises_when_asset_missing(tmp_path, monkeypatch):
     _seed(tmp_path)
@@ -141,6 +155,7 @@ Umbau in `asset_root()`:
 ```python
 _IGNORE = shutil.ignore_patterns(".venv", "__pycache__", "*.pyc", ".git", "*.egg-info")
 
+
 def _source_signature(*roots: Path) -> str:
     newest = 0.0
     for r in roots:
@@ -157,31 +172,35 @@ def _source_signature(*roots: Path) -> str:
                     pass
     return repr(newest)
 
+
 def asset_root() -> Path:
     dst = Path.home() / ".cache" / "catraz" / __version__
     marker = dst / ".extracted"
     repo = _repo_root()
-    sig = _source_signature(repo / "src/catraz/assets", repo / "warden",
-                            repo / "forward-proxy") if repo else ""
+    sig = (
+        _source_signature(repo / "src/catraz/assets", repo / "warden", repo / "forward-proxy")
+        if repo
+        else ""
+    )
     if marker.exists():
-        if repo is None:                       # installed wheel: version-keyed, trust marker
+        if repo is None:  # installed wheel: version-keyed, trust marker
             return dst
-        if marker.read_text() == sig:          # zero-install: source unchanged
+        if marker.read_text() == sig:  # zero-install: source unchanged
             return dst
-        shutil.rmtree(dst / "assets", ignore_errors=True)   # stale dev cache → rebuild clean
+        shutil.rmtree(dst / "assets", ignore_errors=True)  # stale dev cache → rebuild clean
     (dst / "assets").mkdir(parents=True, exist_ok=True)
     pkg_assets = ir.files("catraz") / "assets"
-    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():   # installed wheel
+    if pkg_assets.is_dir() and (pkg_assets / "warden").is_dir():  # installed wheel
         with ir.as_file(pkg_assets) as src:
             shutil.copytree(src, dst / "assets", dirs_exist_ok=True)
-    else:                                       # zero-install source tree
+    else:  # zero-install source tree
         assert repo, "cannot locate assets"
-        shutil.copytree(repo / "src/catraz/assets", dst / "assets",
-                        dirs_exist_ok=True, ignore=_IGNORE)
+        shutil.copytree(
+            repo / "src/catraz/assets", dst / "assets", dirs_exist_ok=True, ignore=_IGNORE
+        )
         for ctx in ("warden", "forward-proxy"):
-            shutil.copytree(repo / ctx, dst / "assets" / ctx,
-                            dirs_exist_ok=True, ignore=_IGNORE)
-    marker.write_text(sig)                      # store the signature we just extracted
+            shutil.copytree(repo / ctx, dst / "assets" / ctx, dirs_exist_ok=True, ignore=_IGNORE)
+    marker.write_text(sig)  # store the signature we just extracted
     return dst
 ```
 - Die `if marker.exists(): return dst`-Frühausstieg-Logik wird **ersetzt** (nicht nur ergänzt):
@@ -195,6 +214,8 @@ def asset_root() -> Path:
 über den **Marker-Inhalt** (Signatur) nachweisen, nicht über dessen mtime:
 ```python
 import os
+
+
 def test_asset_cache_refreshes_on_source_change(tmp_path, monkeypatch):
     monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
     root = paths.asset_root()
@@ -202,18 +223,19 @@ def test_asset_cache_refreshes_on_source_change(tmp_path, monkeypatch):
     src = paths._repo_root() / "src/catraz/assets/compose/docker-compose.yml"
     orig = src.stat().st_mtime
     try:
-        os.utime(src, (orig + 1000, orig + 1000))     # source "changed" → newer mtime
-        paths.asset_root()                              # second resolution must re-extract
+        os.utime(src, (orig + 1000, orig + 1000))  # source "changed" → newer mtime
+        paths.asset_root()  # second resolution must re-extract
         sig2 = (root / ".extracted").read_text()
-        assert sig2 != sig1                             # signature changed → cache rebuilt
+        assert sig2 != sig1  # signature changed → cache rebuilt
     finally:
-        os.utime(src, (orig, orig))                     # leave the working tree mtimes intact
+        os.utime(src, (orig, orig))  # leave the working tree mtimes intact
+
 
 def test_asset_cache_stable_without_change(tmp_path, monkeypatch):
     monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
     sig1 = (paths.asset_root() / ".extracted").read_text()
     sig2 = (paths.asset_root() / ".extracted").read_text()
-    assert sig1 == sig2                                 # no churn when source is unchanged
+    assert sig1 == sig2  # no churn when source is unchanged
 ```
 > Der zweite Test ist die Regression gegen Blocker 1 (Junk-Churn): liefe der Scan über `.pyc`,
 > würde ein dazwischen erzeugtes `entrypoint.cpython-*.pyc` die Signatur ändern und den Test
@@ -233,11 +255,11 @@ def _build_base(dockerfile: Path, context: Path | None = None) -> str:
     ctx = context or dockerfile.parent
     tag = f"catraz-base:{hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]}"
     if not _image_exists(tag):
-        r = subprocess.run(["docker", "build", "-t", tag,
-                            "-f", str(dockerfile), str(ctx)])
+        r = subprocess.run(["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx)])
         if r.returncode:
             raise CliError(f"base build failed (Dockerfile {dockerfile})", EXIT_DOCKER)
     return tag
+
 
 def resolve_base(root: Path) -> str:
     env = load_env(root / ".catraz/.env")
@@ -270,27 +292,42 @@ def resolve_base(root: Path) -> str:
 import types
 from catraz import image
 
+
 def _seed(tmp_path, env):
-    (tmp_path/".catraz").mkdir(); (tmp_path/".catraz/.env").write_text(env)
+    (tmp_path / ".catraz").mkdir()
+    (tmp_path / ".catraz/.env").write_text(env)
+
 
 def test_base_context_overrides_build_dir(tmp_path, monkeypatch):
-    df = tmp_path/"docker"/"Dockerfile.base"; df.parent.mkdir(parents=True); df.write_text("FROM scratch\n")
-    (tmp_path/"ctxroot").mkdir()
+    df = tmp_path / "docker" / "Dockerfile.base"
+    df.parent.mkdir(parents=True)
+    df.write_text("FROM scratch\n")
+    (tmp_path / "ctxroot").mkdir()
     _seed(tmp_path, "BASE_DOCKERFILE=./docker/Dockerfile.base\nBASE_CONTEXT=./ctxroot\n")
     seen = {}
+
     def fake_run(cmd, **k):
-        seen["cmd"] = cmd; return types.SimpleNamespace(returncode=0)
+        seen["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0)
+
     monkeypatch.setattr(image.subprocess, "run", fake_run)
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
     image.resolve_base(tmp_path)
-    assert str((tmp_path/"ctxroot").resolve()) in seen["cmd"]
+    assert str((tmp_path / "ctxroot").resolve()) in seen["cmd"]
     assert str(df.resolve()) in seen["cmd"]
 
+
 def test_base_context_default_is_dockerfile_dir(tmp_path, monkeypatch):
-    df = tmp_path/"docker"/"Dockerfile.base"; df.parent.mkdir(parents=True); df.write_text("FROM scratch\n")
+    df = tmp_path / "docker" / "Dockerfile.base"
+    df.parent.mkdir(parents=True)
+    df.write_text("FROM scratch\n")
     _seed(tmp_path, "BASE_DOCKERFILE=./docker/Dockerfile.base\n")
     seen = {}
-    monkeypatch.setattr(image.subprocess, "run", lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        image.subprocess,
+        "run",
+        lambda cmd, **k: seen.update(cmd=cmd) or types.SimpleNamespace(returncode=0),
+    )
     monkeypatch.setattr(image, "_image_exists", lambda t: False)
     image.resolve_base(tmp_path)
     assert str(df.parent.resolve()) in seen["cmd"]
@@ -317,13 +354,15 @@ ein tmpfs kopiert — in-Session refreshte/rotierte Tokens überleben keinen Con
 ```python
 def test_doctor_auth_warns_about_refresh_persistence(tmp_path):
     from catraz import doctor
-    (tmp_path/".catraz/claude").mkdir(parents=True)
-    (tmp_path/".catraz/claude/.credentials.json").write_text("{}")
+
+    (tmp_path / ".catraz/claude").mkdir(parents=True)
+    (tmp_path / ".catraz/claude/.credentials.json").write_text("{}")
     f = doctor.Findings()
     doctor.check_auth(tmp_path, {"AUTH_MODE": "subscription"}, f)
     # tie the assertion to the auth SECTION so a misplaced warn elsewhere can't pass it
-    assert any(i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower()
-               for i in f.items)
+    assert any(
+        i[0] == doctor.WARN and i[1] == "auth" and "persist" in i[2].lower() for i in f.items
+    )
 ```
 
 `commit: "docs(auth): document subscription token-refresh non-persistence (B7)"`
@@ -430,7 +469,7 @@ T8 entfernen**; nur **T1/T3/T4** (live-stack-Fixture) bleiben `@slow`. Danach ga
 - Danach ein vollständiges `.catraz/.env` schreiben (Reihenfolge: **nach** `init`, damit es nicht
   überschrieben wird):
   ```python
-  (root/".catraz/.env").write_text(
+  (root / ".catraz/.env").write_text(
       "AUTH_MODE=api_key\n"
       "ANTHROPIC_API_KEY=" + os.environ.get("ANTHROPIC_API_KEY", "sk-ci-dummy") + "\n"
       "GITLAB_READ_TOKEN=ci-dummy\n"

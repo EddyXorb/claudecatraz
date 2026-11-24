@@ -3,8 +3,9 @@ import json
 import subprocess
 import urllib.request
 from pathlib import Path
+
 from catraz.envfile import load_env
-from catraz.errors import CliError, EXIT_DOCKER
+from catraz.errors import EXIT_DOCKER, CliError
 
 _CLAUDE_CODE_LATEST_URL = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
 
@@ -32,14 +33,21 @@ def resolve_claude_code_version(root: Path) -> str:
 
 
 def _image_exists(tag: str) -> bool:
-    return subprocess.run(["docker", "image", "inspect", tag], capture_output=True).returncode == 0
+    return (
+        subprocess.run(
+            ["docker", "image", "inspect", tag], capture_output=True, check=False
+        ).returncode
+        == 0
+    )
 
 
 def _build_base(dockerfile: Path, context: Path | None = None) -> str:
     ctx = context or dockerfile.parent
     tag = f"catraz-base:{hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]}"
     if not _image_exists(tag):
-        r = subprocess.run(["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx)])
+        r = subprocess.run(
+            ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx)], check=False
+        )
         if r.returncode:
             raise CliError(
                 f"base build failed (Dockerfile {dockerfile}). "

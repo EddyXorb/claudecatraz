@@ -1,6 +1,7 @@
 from pathlib import Path
+
 from catraz.envfile import load_env
-from catraz.errors import CliError, EXIT_CONFIG
+from catraz.errors import EXIT_CONFIG, CliError
 
 
 def auth_mode(root: Path) -> str:

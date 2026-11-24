@@ -60,9 +60,10 @@ machinery are removed without a compatibility layer.
 
 ```python
 class Criticality(IntEnum):
-    READ = 0          # no state change
-    WRITE = 1         # reversible state change (create, edit, comment, close)
+    READ = 0  # no state change
+    WRITE = 1  # reversible state change (create, edit, comment, close)
     IRREVERSIBLE = 2  # merge, tag creation/deletion, branch deletion
+
 
 @dataclass(frozen=True)
 class Action:
@@ -94,6 +95,7 @@ A recognizer answers "what would this request do" as a set of actions:
 ```python
 class Recognizer(ABC, Generic[IntentT]):
     id: str
+
     def matches(self, intent: IntentT) -> bool: ...
     def recognize(self, intent: IntentT) -> frozenset[Action]: ...
 ```

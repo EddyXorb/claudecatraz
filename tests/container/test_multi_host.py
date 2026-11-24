@@ -13,8 +13,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
 
 import pytest
 
@@ -24,7 +25,7 @@ from catraz import compose
 def _docker_available() -> bool:
     if not shutil.which("docker"):
         return False
-    r = subprocess.run(["docker", "info"], capture_output=True)
+    r = subprocess.run(["docker", "info"], capture_output=True, check=False)
     return r.returncode == 0
 
 

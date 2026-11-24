@@ -1,8 +1,9 @@
 """Regression: catraz prune was removed (P9)."""
 
 import pytest
+
 import catraz.image
-from catraz.cli import build_parser, HANDLERS
+from catraz.cli import HANDLERS, build_parser
 
 
 def test_prune_not_in_handlers() -> None:

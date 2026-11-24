@@ -41,8 +41,8 @@ shared "resolve settings" step so both produce the same `.env`/toml/secret write
    `_read_toml_allowed_projects`; do not invent a new module (roast iter-1 #8)).
    Add:
    ```python
-   def set_toml_scalar(path, key, value): ...   # branch_prefix = "claude/"
-   def set_toml_list(path, key, values): ...     # allowed_projects = ["g/p", ...]
+   def set_toml_scalar(path, key, value): ...  # branch_prefix = "claude/"
+   def set_toml_list(path, key, values): ...  # allowed_projects = ["g/p", ...]
    ```
    Implementation must match the **actual shipped `warden.toml`**, not an idealized
    one (roast iter-1 #6):
@@ -65,10 +65,14 @@ shared "resolve settings" step so both produce the same `.env`/toml/secret write
    ```python
    auth_mode = env.get("AUTH_MODE") or "subscription"
    if not args.yes and (args.force or "AUTH_MODE" not in env):
-       auth_mode = out.choice("Claude auth mode?",
-           [("subscription","subscription — import host ~/.claude (default)"),
-            ("api_key","api_key — dedicated Anthropic API key")],
-           default=0 if auth_mode=="subscription" else 1)
+       auth_mode = out.choice(
+           "Claude auth mode?",
+           [
+               ("subscription", "subscription — import host ~/.claude (default)"),
+               ("api_key", "api_key — dedicated Anthropic API key"),
+           ],
+           default=0 if auth_mode == "subscription" else 1,
+       )
    updates["AUTH_MODE"] = auth_mode
    ```
 
@@ -76,14 +80,17 @@ shared "resolve settings" step so both produce the same `.env`/toml/secret write
    ```python
    cur_mode = env.get("GITLAB_MODE") or "read-write"
    if args.yes:
-       mode = _yes_gitlab_mode(env)          # see step 7
+       mode = _yes_gitlab_mode(env)  # see step 7
    else:
        mode = out.choice(
-         "GitLab integration?",
-         [("read-write","read-write — read + push (needs read & write tokens)"),
-          ("read-only","read-only — read only (needs a read token)"),
-          ("off","off — no GitLab (the agent can't talk to GitLab)")],
-         default={"read-write":0,"read-only":1,"off":2}[cur_mode])
+           "GitLab integration?",
+           [
+               ("read-write", "read-write — read + push (needs read & write tokens)"),
+               ("read-only", "read-only — read only (needs a read token)"),
+               ("off", "off — no GitLab (the agent can't talk to GitLab)"),
+           ],
+           default={"read-write": 0, "read-only": 1, "off": 2}[cur_mode],
+       )
    updates["GITLAB_MODE"] = mode
    ```
 

@@ -102,8 +102,13 @@ Cache-Schlüssel, der im Zero-Install-Fall den Quell-Mtime/Hash einbezieht (oder
 Der wörtlich vorgegebene Mock in Doc 05 §5.2 ist:
 
 ```python
-monkeypatch.setattr(image.subprocess, "run",
-    lambda cmd, **k: seen.setdefault("tag", cmd[cmd.index("-t")+1]) or type("R",(),{"returncode":0})())
+monkeypatch.setattr(
+    image.subprocess,
+    "run",
+    lambda cmd, **k: (
+        seen.setdefault("tag", cmd[cmd.index("-t") + 1]) or type("R", (), {"returncode": 0})()
+    ),
+)
 ```
 
 `dict.setdefault` **gibt den gerade gespeicherten Tag-String zurück** (truthy) → das `or`

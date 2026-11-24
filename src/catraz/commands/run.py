@@ -8,22 +8,24 @@ import sys
 import time
 from pathlib import Path
 
-from catraz.errors import CliError, EXIT_GENERAL, EXIT_DOCTOR
-from catraz.compose import (
-    run as compose_run,
-    compose_ps,
-    assert_real_dirs,
-    assert_invariants,
-)
-from catraz import agent_image, image, compose, live_config, reconcile
-from catraz.ui import Out
+from catraz import agent_image, compose, image, live_config, reconcile
+from catraz.commands.setup import _auto_sync_if_needed
 from catraz.commands.stack import (
+    _print_urls,
     _row_ready,
     _security_preflight,
     _wait_healthy,
-    _print_urls,
 )
-from catraz.commands.setup import _auto_sync_if_needed
+from catraz.compose import (
+    assert_invariants,
+    assert_real_dirs,
+    compose_ps,
+)
+from catraz.compose import (
+    run as compose_run,
+)
+from catraz.errors import EXIT_DOCTOR, EXIT_GENERAL, CliError
+from catraz.ui import Out
 
 MODES = ("claude", "claude-remote", "shell")
 
@@ -120,7 +122,9 @@ def _run_oneoff(root: Path, out: Out, sub: str, raw: list[str]) -> int:
         # output to a durable per-run transcript; %f microseconds avoid same-second clobber.
         log_dir = root / ".catraz/logs/agent"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / (datetime.datetime.now().strftime("%Y%m%dT%H%M%S_%f") + ".log")
+        log_path = log_dir / (
+            datetime.datetime.now().astimezone().strftime("%Y%m%dT%H%M%S_%f") + ".log"
+        )
         _prune_agent_logs(log_dir)
         r = compose_run(root, run_args, prefix=prefix, check=False, tee=log_path)
     else:

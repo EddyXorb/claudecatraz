@@ -1,5 +1,7 @@
 """Tests for Out.ask / Out.choice / Out.secret interaction helpers."""
 
+from typing import ClassVar
+
 import pytest
 
 from catraz.ui import Out
@@ -51,7 +53,7 @@ class TestAsk:
 
 
 class TestChoice:
-    OPTIONS = [
+    OPTIONS: ClassVar[list[tuple[str, str]]] = [
         ("off", "No GitLab"),
         ("read-only", "Read only"),
         ("read-write", "Read + write"),

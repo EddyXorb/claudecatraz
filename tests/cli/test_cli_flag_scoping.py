@@ -4,6 +4,7 @@ All assertions go through build_parser().parse_args() — NOT SimpleNamespace
 hand-builds — so that argparse scoping regressions are actually caught."""
 
 import argparse
+
 import pytest
 
 from catraz.cli import build_parser
