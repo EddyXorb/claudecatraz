@@ -8,7 +8,6 @@ container that cannot see the files on disk. `--force` rebuilds regardless."""
 from __future__ import annotations
 
 import argparse
-import datetime
 from pathlib import Path
 
 from catraz import compose, live_config
@@ -20,38 +19,17 @@ COMPOSE_CONFIG_MARKER = "<compose config changed>"
 OUT_OF_SYNC_MARKER = "<running config out of sync>"
 
 
-def _newer_than(paths: list[Path], start: datetime.datetime) -> list[Path]:
-    changed = []
-    for p in paths:
-        if not p.exists():
-            continue
-        mtime = datetime.datetime.fromtimestamp(p.stat().st_mtime, tz=datetime.timezone.utc)
-        if mtime > start:
-            changed.append(p)
-    return changed
-
-
 def stale_services(
-    root: Path, started_at: dict[str, datetime.datetime | None], drifted: set[str] | None
-) -> dict[str, list[Path | str]]:
-    """Map of stale service → reasons (changed Paths or `<…>` markers).
-
-    A None start time or an unknown drift (None) counts as stale. A service whose
-    supervisor reports the on-disk config (applied or rejected) is never stale
-    for that config. Up-to-date services are omitted."""
-    stale: dict[str, list[Path | str]] = {}
-    for service, start in started_at.items():
-        if start is None:
-            stale[service] = ["<unknown start>"]
-            continue
-        reasons: list[Path | str] = []
-        if drifted is None or service in drifted:
-            reasons.append(COMPOSE_CONFIG_MARKER)
-        state = live_config.live_state(root, service).state
-        if state == live_config.OUT_OF_SYNC:
+    root: Path, running: list[str], drifted: set[str] | None
+) -> dict[str, list[str]]:
+    """Map of stale running infra service → reasons; an unknown drift (None)
+    counts as drifted. A rejected config is not stale: a recreate would hit the
+    same invalid file."""
+    stale: dict[str, list[str]] = {}
+    for service in running:
+        reasons = [COMPOSE_CONFIG_MARKER] if drifted is None or service in drifted else []
+        if live_config.live_state(root, service).state == live_config.OUT_OF_SYNC:
             reasons.append(OUT_OF_SYNC_MARKER)
-        elif state == live_config.UNKNOWN:
-            reasons.extend(_newer_than(live_config.input_paths(root, service), start))
         if reasons:
             stale[service] = reasons
     return stale
@@ -84,22 +62,15 @@ def cmd_reload(root: Path, args: argparse.Namespace, out: Out) -> int:
         targets = sorted(compose.INFRA_SERVICES)
         out.info(f"• --force: rebuilding {', '.join(targets)}")
     else:
-        infra_rows = [r for r in rows if r.get("Service") in compose.INFRA_SERVICES]
-        live_config.report(root, out, sorted(r["Service"] for r in infra_rows))
-        started_at = {
-            r["Service"]: compose.container_started_at(root, r["Name"], prefix=prefix)
-            for r in infra_rows
-        }
-        stale = stale_services(
-            root, started_at, compose.drifted_services(root, rows, prefix=prefix)
-        )
+        running = sorted(r["Service"] for r in rows if r.get("Service") in compose.INFRA_SERVICES)
+        live_config.report(root, out, running)
+        stale = stale_services(root, running, compose.drifted_services(root, rows, prefix=prefix))
         if not stale:
             out.info(out.green("• config is up to date — edits apply live, nothing to recreate"))
             return EXIT_OK
-        for service in sorted(stale):
-            names = ", ".join(p.name if isinstance(p, Path) else p for p in stale[service])
-            out.warn(f"{service}: needs a recreate ({names})")
-        targets = sorted(stale)
+        for service, reasons in stale.items():
+            out.warn(f"{service}: needs a recreate ({', '.join(reasons)})")
+        targets = list(stale)
 
     if agent:
         out.info(

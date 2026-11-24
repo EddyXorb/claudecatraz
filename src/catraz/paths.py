@@ -25,7 +25,9 @@ def _repo_root() -> Path | None:
     return cand if (cand / "pyproject.toml").exists() else None
 
 
-_IGNORE = shutil.ignore_patterns(".venv", "__pycache__", "*.pyc", ".git", "*.egg-info")
+_IGNORE = shutil.ignore_patterns(
+    ".venv", "__pycache__", "*.pyc", ".git", "*.egg-info", ".mypy_cache", ".pytest_cache"
+)
 
 
 def _source_signature(*roots: Path) -> str:

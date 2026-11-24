@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import json
 import os
@@ -214,6 +213,29 @@ def _resolved_cmd(root: Path) -> list[str]:
     ]
 
 
+# Build context per label variable in docker-compose.yml.
+BUILD_CONTEXTS = {"CATRAZ_WARDEN_BUILD_HASH": "warden", "CATRAZ_PROXY_BUILD_HASH": "forward-proxy"}
+
+
+def _context_hash(context: Path) -> str:
+    h = hashlib.sha256()
+    for p in sorted(context.rglob("*")):
+        if p.is_file():
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            h.update(f"{p.relative_to(context)}\0{digest}\n".encode())
+    return h.hexdigest()
+
+
+def _compose_env(root: Path, extra_env: dict[str, str] | None) -> dict[str, str]:
+    """CATRAZ_ASSETS anchors build contexts at the extracted asset cache (absolute,
+    since they resolve against --project-directory); the context hashes make an
+    outdated image part of the service config hash."""
+    assets = asset_root() / "assets"
+    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(assets))
+    env.update({var: _context_hash(assets / ctx) for var, ctx in BUILD_CONTEXTS.items()})
+    return {**env, **(extra_env or {})}
+
+
 def _warn_fallback(msg: str) -> None:
     print(f"catraz WARNING: {msg}", file=sys.stderr)
 
@@ -225,12 +247,9 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     Returns True on success, False on failure (caller falls back to _source_cmd).
     """
     write_hosts_fragment(root)  # keep the per-host DNS-alias/no_proxy layer fresh
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
-    if extra_env:
-        env.update(extra_env)
     cmd = [*_source_cmd(root), "--profile", "remote", "config"]
     try:
-        r = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        r = subprocess.run(cmd, env=_compose_env(root, extra_env), capture_output=True, text=True)
     except FileNotFoundError:
         return False
     if r.returncode != 0:
@@ -286,11 +305,7 @@ def run(
     if print_only:
         print(" ".join(cmd))
         return None
-    # CATRAZ_ASSETS anchors compose build contexts at the extracted asset cache
-    # (contexts must be absolute since they resolve against --project-directory).
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(asset_root() / "assets"))
-    if extra_env:
-        env.update(extra_env)
+    env = _compose_env(root, extra_env)
     if tee is not None:
         # Stream the child's combined output to both our stdout and a durable file.
         # The tee branch never honors check= — fail loud if a future caller forgets.
@@ -336,41 +351,6 @@ def compose_ps(
     except json.JSONDecodeError:
         rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
     return rows
-
-
-def _parse_docker_time(s: str) -> datetime.datetime | None:
-    """Parse a docker `StartedAt` timestamp into an aware datetime, or None.
-
-    Python 3.11+ `fromisoformat` accepts arbitrary fractional-second digits (it
-    truncates 9-digit nanoseconds to micros) and we normalize a trailing `Z` to an
-    explicit UTC offset. requires-python >=3.11, so no manual digit-stripping needed.
-    """
-    s = s.strip().replace("Z", "+00:00")
-    try:
-        return datetime.datetime.fromisoformat(s)
-    except ValueError:
-        return None
-
-
-def container_started_at(
-    root: Path, name_or_id: str, *, prefix: list[str] | None = None
-) -> datetime.datetime | None:
-    """Container start time via `docker inspect`, or None if unreadable/unparseable.
-
-    Pass the `Name`/`ID` already carried by `compose ps --format json` rows — no
-    separate `ps -q` per service. None means "couldn't read it" (caller treats a
-    running-but-unknown service as stale, never as up-to-date)."""
-    try:
-        r = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.StartedAt}}", name_or_id],
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        return None
-    if r.returncode != 0 or not r.stdout.strip():
-        return None
-    return _parse_docker_time(r.stdout)
 
 
 INFRA_SERVICES = ("forward-proxy", "gitlab-warden")
