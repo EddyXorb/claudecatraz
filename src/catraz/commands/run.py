@@ -15,7 +15,7 @@ from catraz.compose import (
     assert_real_dirs,
     assert_invariants,
 )
-from catraz import agent_image, image, compose, live_config
+from catraz import agent_image, image, compose, live_config, reconcile
 from catraz.ui import Out
 from catraz.commands.stack import (
     _row_ready,
@@ -70,7 +70,8 @@ def _ensure_infra(root: Path, out: Out, prefix: list[str] | None = None) -> None
     _auto_sync_if_needed(root, out)
     out.warn("catraz: sandbox active (warden+squid) — protects network/git, NOT your files")
     # --build keeps infra images in step with the CLI's compose wiring.
-    compose_run(root, ["up", "-d", "--build", "--quiet-build"], prefix=prefix, check=False)
+    with reconcile.infra_lock(root):
+        compose_run(root, ["up", "-d", "--build", "--quiet-build"], prefix=prefix, check=False)
 
 
 def cmd_run(root: Path, args: argparse.Namespace, out: Out) -> int:

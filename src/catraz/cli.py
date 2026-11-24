@@ -11,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from catraz import __version__
+from catraz import __version__, reconcile
 from catraz.errors import (
     CliError,
     EXIT_OK,
@@ -175,6 +175,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="rebuild + (re)start all infra even if not stale or not running",
     )
+    # The detached background worker spawned by reconcile.trigger.
+    pr.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     pr.add_argument(
         "--print",
         "--dry-run",
@@ -234,6 +236,9 @@ HANDLERS = {
     "allow": setup.cmd_allow,
     "version": cmd_version,
 }
+# reload/stop/run manage infra themselves; doctor only diagnoses; build's
+# background form is itself a detached worker.
+NO_RECONCILE = {"reload", "stop", "down", "run", "doctor", "build", "version"}
 
 
 def _split_run(raw: list[str]) -> tuple[list[str], list[str] | None]:
@@ -306,6 +311,11 @@ def main(argv: list[str] | None = None) -> int:
         out.err(str(e))
         return e.code
 
+    if args.command not in NO_RECONCILE:
+        try:
+            reconcile.trigger(root, out)
+        except Exception as e:  # best effort: never block the command itself
+            out.warn(f"background reconcile skipped: {e}")
     try:
         return HANDLERS[args.command](root, args, out)
     except CliError as e:
