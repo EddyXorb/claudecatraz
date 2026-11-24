@@ -12,13 +12,13 @@ import pytest
 
 
 def _secrets(ep: Any, **overrides: Any) -> Any:
-    base = dict(
-        auth_mode="subscription",
-        subscription_ro_dir=None,
-        api_key_file=None,
-        api_key_env_fallback="",
-        remote=True,
-    )
+    base = {
+        "auth_mode": "subscription",
+        "subscription_ro_dir": None,
+        "api_key_file": None,
+        "api_key_env_fallback": "",
+        "remote": True,
+    }
     base.update(overrides)
     return ep.Secrets(**base)
 

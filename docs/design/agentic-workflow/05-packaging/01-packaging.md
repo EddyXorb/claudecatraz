@@ -40,6 +40,7 @@ __version__ = "0.2.0"
 **Neu `src/catraz/paths.py`:**
 ```python
 """Asset + project-root resolution."""
+
 import importlib.resources as ir
 import shutil
 from pathlib import Path
@@ -82,6 +83,7 @@ nicht löschen):** *(siehe 1.2)*
 **Tests `tests/cli/test_paths.py`:**
 ```python
 from catraz import paths, __version__
+
 
 def test_asset_root_extracts(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -127,8 +129,10 @@ wörtlich übernehmen (gleiche Signaturen/Logik), nur Imports anpassen.
 #!/usr/bin/env python3
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from catraz.cli import main
+
 sys.exit(main())
 ```
 `chmod +x catraz`.
@@ -172,11 +176,13 @@ import importlib.util
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
+
 def test_entrypoint_imports():
     p = Path(__file__).resolve().parents[2] / "src/catraz/assets/container/entrypoint.py"
     loader = SourceFileLoader("entrypoint", str(p))
     spec = importlib.util.spec_from_loader("entrypoint", loader)
-    mod = importlib.util.module_from_spec(spec); loader.exec_module(mod)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
     assert hasattr(mod, "cmd_start") and hasattr(mod, "cmd_sync")
 ```
 

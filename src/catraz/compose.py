@@ -13,9 +13,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from catraz.errors import EXIT_CONFIG, CliError
 from catraz.paths import asset_root
-from catraz.errors import CliError, EXIT_CONFIG
-
 
 # Semantic service aliases → compose service names (P1: no raw container names).
 SERVICES = {
@@ -258,7 +257,9 @@ def generate_resolved(root: Path, extra_env: dict[str, str] | None = None) -> bo
     write_hosts_fragment(root)  # keep the per-host DNS-alias/no_proxy layer fresh
     cmd = [*_source_cmd(root), "--profile", "remote", "config"]
     try:
-        r = subprocess.run(cmd, env=_compose_env(root, extra_env), capture_output=True, text=True)
+        r = subprocess.run(
+            cmd, env=_compose_env(root, extra_env), capture_output=True, text=True, check=False
+        )
     except FileNotFoundError:
         return False
     if r.returncode != 0:
@@ -307,7 +308,7 @@ def run(
     extra_env: dict[str, str] | None = None,
     tee: Path | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
-    from catraz.errors import CliError, EXIT_DOCKER
+    from catraz.errors import EXIT_DOCKER, CliError
 
     _prefix = prefix if prefix is not None else _source_cmd(root)
     cmd = [*_prefix, *args]
@@ -378,7 +379,10 @@ def drifted_services(
     r = run(root, ["config", "--hash", ",".join(names)], prefix=prefix, capture=True, check=False)
     fmt = '{{index .Config.Labels "' + CONFIG_HASH_LABEL + '"}}'
     labels = subprocess.run(
-        ["docker", "inspect", "--format", fmt, *names.values()], capture_output=True, text=True
+        ["docker", "inspect", "--format", fmt, *names.values()],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if r is None or r.returncode != 0 or labels.returncode != 0:
         return None
@@ -394,6 +398,7 @@ def agent_routing_stale(root: Path, name: str) -> bool:
         ["docker", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", name],
         capture_output=True,
         text=True,
+        check=False,
     )
     for line in r.stdout.splitlines() if r.returncode == 0 else []:
         if line.startswith("no_proxy="):
@@ -403,7 +408,7 @@ def agent_routing_stale(root: Path, name: str) -> bool:
 
 
 def resolve_service(name: str) -> str:
-    from catraz.errors import CliError, EXIT_CONFIG
+    from catraz.errors import EXIT_CONFIG, CliError
 
     if name in SERVICES:
         return SERVICES[name]
@@ -417,7 +422,7 @@ def _rc(r: subprocess.CompletedProcess[str] | None) -> int:
 
     Used by cmd_down and cmd_logs only. cmd_run propagates claude's own exit
     code directly (2, 130, 137, …) — do NOT route cmd_run through _rc."""
-    from catraz.errors import EXIT_OK, EXIT_GENERAL
+    from catraz.errors import EXIT_GENERAL, EXIT_OK
 
     return EXIT_OK if r and r.returncode == 0 else EXIT_GENERAL
 

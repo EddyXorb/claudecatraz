@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_contract import InstructionContext, Secrets, read_toml  # noqa: E402
+from agent_contract import InstructionContext, Secrets, read_toml
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "agent.toml"
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "AGENT.md.tmpl"
@@ -48,7 +48,7 @@ def _effective_credentials_mode(manifest: _Manifest) -> str:
 def _read_json(p: Path) -> dict[str, Any]:
     try:
         return cast(dict[str, Any], json.loads(p.read_text()))
-    except Exception:
+    except (OSError, ValueError):
         return {}
 
 

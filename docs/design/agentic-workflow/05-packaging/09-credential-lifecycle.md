@@ -75,8 +75,7 @@ Auffrischen soll das **nicht** erscheinen → optionales Schlucken via `capture_
 ```python
 def _run_sync(root, out, source=None, force=False, quiet=False):
     ...
-    r = subprocess.run(cmd, cwd=root, env=dict(os.environ),
-                       capture_output=quiet, text=True)
+    r = subprocess.run(cmd, cwd=root, env=dict(os.environ), capture_output=quiet, text=True)
     if r.returncode != 0:
         raise CliError("credential sync failed", EXIT_GENERAL)
 ```
@@ -98,13 +97,14 @@ def _auto_sync_if_needed(root, out):
     tmpfs token — only keeps the seed as fresh as the host.
     """
     from catraz.paths import claude_home
+
     if load_env(root / ".catraz" / ".env").get("AUTH_MODE", "subscription") != "subscription":
         return
     had = (claude_home(root) / ".credentials.json").exists()
     if not had:
         out.info("• subscription credential missing — attempting sync…")
     try:
-        _run_sync(root, out, quiet=had)          # refresh of an existing seed is silent
+        _run_sync(root, out, quiet=had)  # refresh of an existing seed is silent
     except CliError as e:
         # Missing seed + failed sync is a real problem (auth fails closed downstream).
         # Refreshing an existing seed is best-effort: a briefly-unreachable host must not

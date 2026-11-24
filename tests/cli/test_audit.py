@@ -2,7 +2,8 @@ import socket
 import threading
 import urllib.request
 from pathlib import Path
-from catraz import cli
+
+from catraz.commands import observe
 
 
 def test_audit_web_forwards_to_uds(tmp_path: Path) -> None:
@@ -22,7 +23,7 @@ def test_audit_web_forwards_to_uds(tmp_path: Path) -> None:
     threading.Thread(target=serve, daemon=True).start()
     import socketserver
 
-    h = type("H", (cli._UdsProxy,), {"sock_path": str(sp)})
+    h = type("H", (observe._UdsProxy,), {"sock_path": str(sp)})
     fwd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), h)
     threading.Thread(target=fwd.serve_forever, daemon=True).start()
     body = urllib.request.urlopen(f"http://127.0.0.1:{fwd.server_address[1]}/").read()

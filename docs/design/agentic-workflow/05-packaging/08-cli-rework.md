@@ -92,10 +92,12 @@ def add_global(parser):
     """Truly global flags — repeated on top parser and every subparser so they work
     before *or* after the subcommand. Command-specific flags (--dry-run, --yes) live
     on their own subparser instead, so they appear only where they actually act."""
-    parser.add_argument("-C", "--dir", default=argparse.SUPPRESS,
-                        help="project root (default: dir with .catraz/)")
-    parser.add_argument("--no-color", action="store_true", default=argparse.SUPPRESS,
-                        help="disable ANSI colors")
+    parser.add_argument(
+        "-C", "--dir", default=argparse.SUPPRESS, help="project root (default: dir with .catraz/)"
+    )
+    parser.add_argument(
+        "--no-color", action="store_true", default=argparse.SUPPRESS, help="disable ANSI colors"
+    )
 ```
 
 `--print/--dry-run` und `-y/--yes` werden hier **gestrichen**.
@@ -105,8 +107,13 @@ def add_global(parser):
 Identische Deklaration (gleicher `dest="print_only"`, gleiche Aliase), nur verschoben:
 
 ```python
-pu.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
-                help="show the compose command without running it")
+pu.add_argument(
+    "--print",
+    "--dry-run",
+    dest="print_only",
+    action="store_true",
+    help="show the compose command without running it",
+)
 # … und an pdn analog
 ```
 
@@ -115,8 +122,12 @@ pu.add_argument("--print", "--dry-run", dest="print_only", action="store_true",
 ### 3.3 `-y/--yes` an `init`
 
 ```python
-pi.add_argument("-y", "--yes", action="store_true",
-                help="non-interactive; keep existing .env values, skip prompts")
+pi.add_argument(
+    "-y",
+    "--yes",
+    action="store_true",
+    help="non-interactive; keep existing .env values, skip prompts",
+)
 ```
 
 ### 3.4 `main()` — Normalisierung bleibt unverändert tragfähig
@@ -125,7 +136,7 @@ pi.add_argument("-y", "--yes", action="store_true",
 
 ```python
 args.print_only = getattr(args, "print_only", False)
-args.yes        = getattr(args, "yes", False)
+args.yes = getattr(args, "yes", False)
 ```
 
 Das `getattr(..., False)` ist genau der Mechanismus, der weiterhin trägt: Commands
@@ -144,9 +155,13 @@ nicht deklarieren). `args.dir`/`args.no_color` bleiben wie gehabt.
 **Beide** stale „versions"-Plurale fixen — Subcommand-Hilfe *und* `-V`-Flag:
 
 ```python
-p.add_argument("-V", "--version", action="store_true", help="show version and exit")  # war: "versions"
+p.add_argument(
+    "-V", "--version", action="store_true", help="show version and exit"
+)  # war: "versions"
 ...
-sub.add_parser("version", parents=[_g()], help="show CLI version")                     # war: "CLI + component versions"
+sub.add_parser(
+    "version", parents=[_g()], help="show CLI version"
+)  # war: "CLI + component versions"
 ```
 
 ### 3.6 `add_global`-Docstring entrümpeln (Finding 6)
@@ -285,8 +300,10 @@ build, up) **entfällt** im Dry-Run:
 ```python
 def cmd_up(root, args, out):
     up_args = (["--profile", "remote"] if args.remote else []) + ["up", "-d"]
-    if args.build: up_args.append("--build")
-    if args.pull:  up_args.append("--pull=always")
+    if args.build:
+        up_args.append("--build")
+    if args.pull:
+        up_args.append("--pull=always")
     # Fragment ist Teil JEDES echten up (base_cmd hängt -f an, wenn es existiert) →
     # ein fideler --print muss es widerspiegeln. Schreiben ist auch im Dry-Run benign.
     (root / ".catraz").mkdir(exist_ok=True)
@@ -440,10 +457,17 @@ eine Tabelle mit **uniformer** Signatur `(root, args, out)` (deshalb B4):
 
 ```python
 HANDLERS = {
-    "init": setup.cmd_init, "doctor": setup.cmd_doctor,
-    "up": stack.cmd_up, "down": stack.cmd_down, "status": stack.cmd_status,
-    "run": run.cmd_run, "logs": observe.cmd_logs, "audit": observe.cmd_audit,
-    "sync": setup.cmd_sync, "prune": cmd_prune, "version": cmd_version,  # prune/version: lokal
+    "init": setup.cmd_init,
+    "doctor": setup.cmd_doctor,
+    "up": stack.cmd_up,
+    "down": stack.cmd_down,
+    "status": stack.cmd_status,
+    "run": run.cmd_run,
+    "logs": observe.cmd_logs,
+    "audit": observe.cmd_audit,
+    "sync": setup.cmd_sync,
+    "prune": cmd_prune,
+    "version": cmd_version,  # prune/version: lokal
 }
 ```
 

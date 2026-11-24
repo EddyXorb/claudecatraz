@@ -5,16 +5,17 @@ namespace prefix and Warden REST base into the packaged template."""
 
 from pathlib import Path
 from typing import Any
+
 import pytest
 
 
 def _ctx(ep: Any, **overrides: Any) -> Any:
-    base = dict(
+    base = {
         # A generic per-host rule, not one concrete URL; never names the Warden container.
-        forge_rest_base="http://<host>:8080/api/v4",
-        branch_prefixes=("claude/",),
-        warden_toml_path=Path("/etc/catraz/warden.toml"),
-    )
+        "forge_rest_base": "http://<host>:8080/api/v4",
+        "branch_prefixes": ("claude/",),
+        "warden_toml_path": Path("/etc/catraz/warden.toml"),
+    }
     base.update(overrides)
     return ep.InstructionContext(**base)
 

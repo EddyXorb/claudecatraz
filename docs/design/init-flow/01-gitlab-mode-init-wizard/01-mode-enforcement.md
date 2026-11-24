@@ -36,9 +36,13 @@ guard. We must gate the *token use* at every one of these sites.
 1. Add `gitlab_mode: str = "read-write"` to the `Config` dataclass, plus:
    ```python
    @property
-   def gitlab_enabled(self) -> bool: return self.gitlab_mode != "off"
+   def gitlab_enabled(self) -> bool:
+       return self.gitlab_mode != "off"
+
+
    @property
-   def writes_enabled(self) -> bool: return self.gitlab_mode == "read-write"
+   def writes_enabled(self) -> bool:
+       return self.gitlab_mode == "read-write"
    ```
 2. In `from_env`, set `gitlab_mode=(env.get("GITLAB_MODE") or "read-write").strip()`.
 3. Rewrite `_validate(cfg)` to branch on mode (keep the

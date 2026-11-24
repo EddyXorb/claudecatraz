@@ -1,8 +1,10 @@
 from pathlib import Path
-from catraz import auth, doctor
-from catraz.paths import asset_root
-from catraz.errors import CliError
+
 import pytest
+
+from catraz import auth, doctor
+from catraz.errors import CliError
+from catraz.paths import asset_root
 
 
 def _mk(tmp_path: Path, env: str) -> Path:

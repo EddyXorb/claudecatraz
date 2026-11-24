@@ -5,7 +5,7 @@ from pathlib import Path
 
 from catraz.agents import effective_credentials_mode, load_adapter_module, resolve_agent_profile
 from catraz.envfile import load_env
-from catraz.errors import CliError, EXIT_GENERAL
+from catraz.errors import EXIT_GENERAL, CliError
 from catraz.paths import claude_home
 from catraz.ui import Out
 

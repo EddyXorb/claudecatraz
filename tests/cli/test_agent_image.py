@@ -16,7 +16,7 @@ import pytest
 from catraz import agent_image, cli, image
 from catraz.agent_image import Pointer
 from catraz.commands import build as build_cmd
-from catraz.errors import CliError, EXIT_DOCKER, EXIT_GENERAL, EXIT_OK
+from catraz.errors import EXIT_DOCKER, EXIT_GENERAL, EXIT_OK, CliError
 from catraz.ui import Out
 
 

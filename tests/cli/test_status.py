@@ -4,10 +4,12 @@ import argparse
 import types
 from pathlib import Path
 from typing import cast
+
 import pytest
+
 from catraz.commands import stack
+from catraz.errors import EXIT_GENERAL, EXIT_OK
 from catraz.ui import Out
-from catraz.errors import EXIT_OK, EXIT_GENERAL
 
 
 def _out() -> Out:

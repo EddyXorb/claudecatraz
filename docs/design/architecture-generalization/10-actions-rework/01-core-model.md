@@ -18,6 +18,7 @@ made-up ids like `"x.y"`).
       WRITE = 1
       IRREVERSIBLE = 2
 
+
   @dataclass(frozen=True)
   class Action:
       id: str
@@ -30,8 +31,10 @@ made-up ids like `"x.y"`).
   ```python
   IntentT = TypeVar("IntentT", bound=Intent)
 
+
   class Recognizer(ABC, Generic[IntentT]):
       id: str
+
       @abstractmethod
       def matches(self, intent: IntentT) -> bool: ...
       @abstractmethod
@@ -50,8 +53,8 @@ made-up ids like `"x.y"`).
   ```python
   @dataclass(frozen=True)
   class EndpointType:
-      name: str                      # the toml `type` value, e.g. "gitlab"
-      guards: tuple[str, ...]        # guard names composing this type
+      name: str  # the toml `type` value, e.g. "gitlab"
+      guards: tuple[str, ...]  # guard names composing this type
   ```
   Keep `guards` as names (strings), not classes — core must not import guard
   packages. Resolution from name to instance happens at assembly (step 04).

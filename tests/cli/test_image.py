@@ -1,8 +1,10 @@
 import subprocess
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
+
 import pytest
+
 from catraz import image
 
 
@@ -51,10 +53,10 @@ class _FakeResp:
     def __init__(self, body: str) -> None:
         self._body = body
 
-    def __enter__(self) -> "_FakeResp":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *a: Any) -> None:
+    def __exit__(self, *a: object) -> None:
         return None
 
     def read(self) -> bytes:

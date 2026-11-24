@@ -8,15 +8,16 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
+
 import pytest
 
 
 def _docker_available() -> bool:
     if not shutil.which("docker"):
         return False
-    r = subprocess.run(["docker", "info"], capture_output=True)
+    r = subprocess.run(["docker", "info"], capture_output=True, check=False)
     return r.returncode == 0
 
 
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.skipif(not _docker_available(), reason="needs docker")
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
 # ── T2 — baseline: tmpfs ordering guarantee (gating test) ────────────────────

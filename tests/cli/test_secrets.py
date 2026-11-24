@@ -9,7 +9,7 @@ import pytest
 
 from catraz.commands import setup
 from catraz.commands.setup._secrets import _read_grouped_token
-from catraz.doctor import run_doctor, _doctor_fix
+from catraz.doctor import _doctor_fix, run_doctor
 from catraz.envfile import load_env
 from catraz.ui import Out
 

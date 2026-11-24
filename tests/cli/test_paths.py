@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
+
 import pytest
-from catraz import paths, __version__
+
+from catraz import __version__, paths
 
 
 def test_asset_root_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,7 +38,7 @@ def test_nested_catraz_refused(tmp_path: Path) -> None:
     (tmp_path / ".catraz").mkdir()
     (tmp_path / "inner").mkdir()
     (tmp_path / "inner" / ".catraz").mkdir()
-    from catraz import paths, errors
+    from catraz import errors, paths
 
     with pytest.raises(errors.CliError):
         paths.find_root(str(tmp_path))

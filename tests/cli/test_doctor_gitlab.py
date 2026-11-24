@@ -6,7 +6,6 @@ import pytest
 
 from catraz import doctor
 
-
 # check_policy — the allowlist pre-check keys off configured endpoints now
 # ("no endpoint configured" replaces the old GITLAB_MODE=off short-circuit);
 # each endpoint's own allowed_projects is checked in isolation.

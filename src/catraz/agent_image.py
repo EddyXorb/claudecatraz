@@ -21,7 +21,7 @@ from catraz import background, image
 from catraz.agents import resolve_agent_profile
 from catraz.compose import project_name
 from catraz.envfile import load_env
-from catraz.errors import CliError, EXIT_DOCKER, EXIT_GENERAL, EXIT_OK
+from catraz.errors import EXIT_DOCKER, EXIT_GENERAL, EXIT_OK, CliError
 from catraz.paths import asset_root
 from catraz.ui import Out
 
@@ -158,7 +158,7 @@ def _release_lock(root: Path) -> None:
 
 def _image_exists(tag: str) -> bool:
     try:
-        r = subprocess.run(["docker", "image", "inspect", tag], capture_output=True)
+        r = subprocess.run(["docker", "image", "inspect", tag], capture_output=True, check=False)
     except FileNotFoundError:
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
     return r.returncode == 0
@@ -184,10 +184,12 @@ def _docker_build(
     cmd.append(str(spec.context))
     try:
         if log is None:
-            return subprocess.run(cmd).returncode == 0
+            return subprocess.run(cmd, check=False).returncode == 0
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "w") as f:
-            r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT)
+            r = subprocess.run(
+                cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, check=False
+            )
         return r.returncode == 0
     except FileNotFoundError:
         raise CliError("`docker` not found on PATH", EXIT_DOCKER)
@@ -200,10 +202,11 @@ def _prune(root: Path, keep: str) -> None:
             ["docker", "image", "ls", repository(root), "--format", "{{.Repository}}:{{.Tag}}"],
             capture_output=True,
             text=True,
+            check=False,
         )
         for ref in r.stdout.split():
             if ref != keep:
-                subprocess.run(["docker", "image", "rm", ref], capture_output=True)
+                subprocess.run(["docker", "image", "rm", ref], capture_output=True, check=False)
     except FileNotFoundError:
         pass
 
@@ -284,7 +287,7 @@ def spawn_refresh(root: Path) -> None:
 
 
 def _say(msg: str) -> None:
-    print(f"{datetime.datetime.now().isoformat(timespec='seconds')} {msg}", flush=True)
+    print(f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} {msg}", flush=True)
 
 
 def refresh(root: Path) -> int:

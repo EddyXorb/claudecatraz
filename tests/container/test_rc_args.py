@@ -4,6 +4,7 @@ adapter staged by path via the `claude_adapter` fixture."""
 
 from pathlib import Path
 from typing import Any
+
 import pytest
 
 
@@ -50,13 +51,13 @@ def test_permission_mode_always_hardcoded(
 
 
 def _secrets(claude_adapter: Any, **overrides: Any) -> Any:
-    base = dict(
-        auth_mode="api_key",
-        subscription_ro_dir=None,
-        api_key_file=None,
-        api_key_env_fallback="",
-        remote=False,
-    )
+    base = {
+        "auth_mode": "api_key",
+        "subscription_ro_dir": None,
+        "api_key_file": None,
+        "api_key_env_fallback": "",
+        "remote": False,
+    }
     base.update(overrides)
     return claude_adapter.Secrets(**base)
 

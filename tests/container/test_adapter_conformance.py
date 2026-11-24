@@ -61,13 +61,13 @@ def adapter(profile: str, tmp_path_factory: pytest.TempPathFactory) -> Any:
 
 
 def _secrets_for(adapter: Any, **overrides: Any) -> Any:
-    base = dict(
-        auth_mode="api_key",
-        subscription_ro_dir=None,
-        api_key_file=None,
-        api_key_env_fallback="dummy-key",
-        remote=False,
-    )
+    base = {
+        "auth_mode": "api_key",
+        "subscription_ro_dir": None,
+        "api_key_file": None,
+        "api_key_env_fallback": "dummy-key",
+        "remote": False,
+    }
     base.update(overrides)
     return adapter.Secrets(**base)
 

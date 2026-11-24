@@ -1,6 +1,8 @@
-import pytest
 from pathlib import Path
 from typing import cast
+
+import pytest
+
 from catraz import paths
 from catraz.commands import setup
 from catraz.commands.setup import _sync as setup_sync
@@ -136,7 +138,7 @@ class TestPersistentModeSkipsSync:
         """Shadows the module-level autouse `_sync_mode` fixture (same name,
         class scope wins) for this class only — these tests are specifically
         about the unpinned, shipped default, not the sync-mode pin."""
-        return None
+        return
 
     def test_auto_sync_is_noop_for_persistent_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

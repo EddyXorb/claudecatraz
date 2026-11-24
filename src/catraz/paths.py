@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from catraz import __version__
-from catraz.errors import CliError, EXIT_CONFIG
+from catraz.errors import EXIT_CONFIG, CliError
 
 
 def _cache_root() -> Path:
@@ -54,7 +54,7 @@ def _installed_sig() -> str:
 
         record = distribution("catraz").read_text("RECORD") or ""
         return repr(hash(record))
-    except Exception:
+    except (ImportError, OSError):  # PackageNotFoundError is an ImportError
         return ""
 
 

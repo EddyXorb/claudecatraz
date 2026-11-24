@@ -10,11 +10,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, cast
 
+from catraz import compose, image, paths
+from catraz.compose import compose_ps
+from catraz.compose import run as compose_run
 from catraz.envfile import load_env
-from catraz.compose import run as compose_run, compose_ps
 from catraz.errors import CliError
-from catraz import paths
-from catraz import compose, image
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
@@ -136,6 +136,7 @@ def check_docker(f: Findings) -> None:
         ["docker", "version", "--format", "{{.Server.Version}}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if r.returncode != 0:
         f.bad(
@@ -156,7 +157,9 @@ def check_docker(f: Findings) -> None:
                 "docker",
                 f"Docker Engine {r.stdout.strip()} (≥ {MIN_ENGINE[0]}.{MIN_ENGINE[1]} ✔)",
             )
-    r = subprocess.run(["docker", "compose", "version", "--short"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["docker", "compose", "version", "--short"], capture_output=True, text=True, check=False
+    )
     if r.returncode != 0:
         f.bad("docker", "Compose v2 missing", "install the `docker compose` plugin")
     else:
@@ -797,7 +800,10 @@ def _bind_mounts(name: str) -> list[tuple[str, str]] | None:
     """(host source, container destination) per bind mount of container `name`,
     compose secrets included; None if it cannot be inspected."""
     r = subprocess.run(
-        ["docker", "inspect", "--format", "{{json .Mounts}}", name], capture_output=True, text=True
+        ["docker", "inspect", "--format", "{{json .Mounts}}", name],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     try:
         mounts = json.loads(r.stdout) if r.returncode == 0 else None
@@ -814,6 +820,7 @@ def _container_inode(name: str, path: str) -> int | None:
         ["docker", "exec", name, "stat", "-c", "%i", path],
         capture_output=True,
         text=True,
+        check=False,
     )
     if r.returncode != 0:
         return None
@@ -945,6 +952,7 @@ def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
         ["docker", "run", "--rm", base, "sh", "-c", "command -v apt-get"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if contract.returncode != 0:
         f.bad("base", "base lacks apt-get", "base contract: Debian/Ubuntu")
@@ -954,6 +962,7 @@ def check_base(root: Path, env: dict[str, str], f: Findings) -> None:
         ["docker", "run", "--rm", base, "find", "/", "-perm", "/6000", "-type", "f"],
         capture_output=True,
         text=True,
+        check=False,
     )
     extra = [ln for ln in setuid.stdout.split() if ln]
     if extra:

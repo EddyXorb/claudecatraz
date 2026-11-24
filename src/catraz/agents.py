@@ -15,7 +15,7 @@ from types import ModuleType
 from typing import Any
 
 from catraz.envfile import load_env
-from catraz.errors import CliError, EXIT_CONFIG
+from catraz.errors import EXIT_CONFIG, CliError
 from catraz.paths import asset_root
 
 # name -> asset subdirectory under assets/agents/. Adding a profile is a code

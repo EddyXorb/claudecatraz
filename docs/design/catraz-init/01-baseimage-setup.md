@@ -63,8 +63,8 @@ def _prompt_base_image(
     choice = out.choice(
         "\nBase image for the container?",
         [
-            ("bundled",    "bundled — built-in cpp/rust/python toolchain (default)"),
-            ("image",      "custom image — a ready-made Docker image tag"),
+            ("bundled", "bundled — built-in cpp/rust/python toolchain (default)"),
+            ("image", "custom image — a ready-made Docker image tag"),
             ("dockerfile", "Dockerfile — build from a local Dockerfile"),
         ],
         default=0,
@@ -78,15 +78,21 @@ def _prompt_base_image(
             # Remove stale Dockerfile keys from .env (set_env_values cannot delete keys)
             unset_env_keys(env_path, ["BASE_DOCKERFILE", "BASE_CONTEXT"])
     elif choice == "dockerfile":
-        df = out.ask("Dockerfile path (relative to project)", env.get("BASE_DOCKERFILE", "./Dockerfile"))
+        df = out.ask(
+            "Dockerfile path (relative to project)", env.get("BASE_DOCKERFILE", "./Dockerfile")
+        )
         if df:
             df_abs = (root / df).resolve()
             if not df_abs.exists():
-                out.warn(f"Dockerfile not found at {df_abs} — run `catraz run` after placing it there.")
+                out.warn(
+                    f"Dockerfile not found at {df_abs} — run `catraz run` after placing it there."
+                )
             updates["BASE_DOCKERFILE"] = df
             # Remove stale BASE_IMAGE key from .env
             unset_env_keys(env_path, ["BASE_IMAGE"])
-            ctx = out.ask("Build context directory (Enter for Dockerfile's dir)", env.get("BASE_CONTEXT", ""))
+            ctx = out.ask(
+                "Build context directory (Enter for Dockerfile's dir)", env.get("BASE_CONTEXT", "")
+            )
             if ctx:
                 updates["BASE_CONTEXT"] = ctx
 ```
@@ -121,7 +127,9 @@ Nach dem `gitlab_url`-Block:
 
 ```python
 base_image = (os.environ.get("BASE_IMAGE", "").strip() or env.get("BASE_IMAGE", "")).strip()
-base_dockerfile = (os.environ.get("BASE_DOCKERFILE", "").strip() or env.get("BASE_DOCKERFILE", "")).strip()
+base_dockerfile = (
+    os.environ.get("BASE_DOCKERFILE", "").strip() or env.get("BASE_DOCKERFILE", "")
+).strip()
 base_context = (os.environ.get("BASE_CONTEXT", "").strip() or env.get("BASE_CONTEXT", "")).strip()
 if base_image:
     updates["BASE_IMAGE"] = base_image

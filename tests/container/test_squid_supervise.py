@@ -9,9 +9,9 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import Callable, Iterator, Optional
 
 import pytest
 
@@ -183,11 +183,11 @@ def test_image_and_compose_wiring() -> None:
 class FakeChild:
     def __init__(self, stubborn: bool = False) -> None:
         self.signals: list[int] = []
-        self.rc: Optional[int] = None
+        self.rc: int | None = None
         self.stubborn = stubborn
         self.killed = False
 
-    def poll(self) -> Optional[int]:
+    def poll(self) -> int | None:
         return self.rc
 
     def send_signal(self, sig: int) -> None:
@@ -195,7 +195,7 @@ class FakeChild:
         if sig == signal.SIGTERM and not self.stubborn:
             self.rc = 0
 
-    def wait(self, timeout: Optional[float] = None) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         if self.rc is None and timeout is not None:
             raise subprocess.TimeoutExpired("squid", timeout)
         return self.rc if self.rc is not None else -9
@@ -212,7 +212,7 @@ class Rig:
         self.status = d / "status"
         self.conf.write_text("http_port 3128\n")
         self.allow.write_text(".example.com\n")
-        self.reason: Optional[str] = None
+        self.reason: str | None = None
         self.children: list[FakeChild] = []
         self.sup = sup_mod.Supervisor(
             [self.conf, self.allow],
@@ -371,7 +371,7 @@ def test_status_write_failure_is_not_fatal(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"), [(None, 1.0), ("0.25", 0.25), ("0", 1.0), ("-1", 1.0), ("x", 1.0)]
 )
-def test_poll_interval(raw: Optional[str], expected: float) -> None:
+def test_poll_interval(raw: str | None, expected: float) -> None:
     env = {} if raw is None else {"CONFIG_POLL_S": raw}
     assert sup_mod.poll_interval(env) == expected
 

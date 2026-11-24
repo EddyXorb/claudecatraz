@@ -96,8 +96,7 @@ def _project_from_remote_url(url: str, gitlab_url: str = "https://gitlab.com") -
     if host != target_host:
         return None
     path = path.strip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
+    path = path.removesuffix(".git")
     path = path.strip("/")
     if not path or validate_project(path):
         return None
@@ -134,7 +133,7 @@ def _discover_gitlab_projects(root: Path, gitlab_url: str) -> list[str]:
     for d in candidates:
         try:
             r = subprocess.run(
-                ["git", "-C", str(d), "remote", "-v"], capture_output=True, text=True
+                ["git", "-C", str(d), "remote", "-v"], capture_output=True, text=True, check=False
             )
         except FileNotFoundError:
             return found  # no git binary — nothing to discover
@@ -159,7 +158,7 @@ def set_toml_scalar(path: Path, key: str, value: str) -> None:
     serialized = _json.dumps(value)
     pat = re.compile(
         rf'^(?P<pre>\s*{re.escape(key)}\s*=\s*)(?P<val>"[^"]*"|\[[^\]]*\])(?P<post>\s*(#.*)?)$',
-        re.M,
+        re.MULTILINE,
     )
     if pat.search(text):
         new_text = pat.sub(lambda m: m.group("pre") + serialized + m.group("post"), text)
@@ -177,7 +176,7 @@ def set_toml_list(path: Path, key: str, values: list[str]) -> None:
     serialized = _json.dumps(values)
     pat = re.compile(
         rf'^(?P<pre>\s*{re.escape(key)}\s*=\s*)(?P<val>"[^"]*"|\[[^\]]*\])(?P<post>\s*(#.*)?)$',
-        re.M,
+        re.MULTILINE,
     )
     if pat.search(text):
         new_text = pat.sub(lambda m: m.group("pre") + serialized + m.group("post"), text)
@@ -192,7 +191,7 @@ def remove_toml_key(path: Path, key: str) -> None:
     text = path.read_text(encoding="utf-8")
     pat = re.compile(
         rf'^\s*{re.escape(key)}\s*=\s*("[^"]*"|\[[^\]]*\])\s*(#.*)?\n?',
-        re.M,
+        re.MULTILINE,
     )
     new_text = pat.sub("", text)
     if new_text != text:
@@ -228,7 +227,7 @@ def ensure_git_endpoint(path: Path, host: str, endpoint_type: str = "gitlab") ->
     path.write_text(text.rstrip("\n") + "\n" + block, encoding="utf-8")
 
 
-_ENDPOINT_HEADER_RE = re.compile(r"^\[\[git\.endpoint\]\]\s*$", re.M)
+_ENDPOINT_HEADER_RE = re.compile(r"^\[\[git\.endpoint\]\]\s*$", re.MULTILINE)
 
 
 def set_endpoint_allowed_projects(path: Path, host: str, values: list[str]) -> None:
@@ -241,14 +240,14 @@ def set_endpoint_allowed_projects(path: Path, host: str, values: list[str]) -> N
     target = normalize_host(host)
     serialized = _json.dumps(values)
     key_pat = re.compile(
-        r"^(?P<pre>\s*allowed_projects\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.M
+        r"^(?P<pre>\s*allowed_projects\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.MULTILINE
     )
     headers = list(_ENDPOINT_HEADER_RE.finditer(text))
     for i, m in enumerate(headers):
         block_start = m.end()
         block_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
         block = text[block_start:block_end]
-        host_m = re.search(r'^\s*host\s*=\s*"([^"]*)"', block, re.M)
+        host_m = re.search(r'^\s*host\s*=\s*"([^"]*)"', block, re.MULTILINE)
         if not host_m or normalize_host(host_m.group(1)) != target:
             continue
         if key_pat.search(block):
@@ -262,7 +261,7 @@ def set_endpoint_allowed_projects(path: Path, host: str, values: list[str]) -> N
     raise ValueError(f"no [[git.endpoint]] for host {host!r} in {path}")
 
 
-_GIT_RULES_HEADER_RE = re.compile(r"^\[git\.rules\]\s*$", re.M)
+_GIT_RULES_HEADER_RE = re.compile(r"^\[git\.rules\]\s*$", re.MULTILINE)
 
 
 def set_git_rules_branch_prefixes(path: Path, values: list[str]) -> None:
@@ -273,7 +272,7 @@ def set_git_rules_branch_prefixes(path: Path, values: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     serialized = _json.dumps(values)
     key_pat = re.compile(
-        r"^(?P<pre>\s*branch_prefixes\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.M
+        r"^(?P<pre>\s*branch_prefixes\s*=\s*)(?P<val>\[[^\]]*\])(?P<post>\s*(#.*)?)$", re.MULTILINE
     )
     m = _GIT_RULES_HEADER_RE.search(text)
     if not m:
@@ -282,7 +281,7 @@ def set_git_rules_branch_prefixes(path: Path, values: list[str]) -> None:
         return
     block_start = m.end()
     rest = text[block_start:]
-    next_header = re.search(r"^\[", rest, re.M)
+    next_header = re.search(r"^\[", rest, re.MULTILINE)
     block_end = block_start + next_header.start() if next_header else len(text)
     block = text[block_start:block_end]
     if key_pat.search(block):

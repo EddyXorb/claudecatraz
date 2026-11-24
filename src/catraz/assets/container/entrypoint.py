@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_contract import AgentAdapter, InstructionContext, Secrets  # noqa: E402
-from git_routing import configure_git_warden, install_host_gitconfig  # noqa: E402
+from agent_contract import AgentAdapter, InstructionContext, Secrets
+from git_routing import configure_git_warden, install_host_gitconfig
 
 
 def _env_true(name: str) -> bool:

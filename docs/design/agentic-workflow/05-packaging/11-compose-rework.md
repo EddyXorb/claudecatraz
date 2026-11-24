@@ -220,13 +220,22 @@ invocation the user cannot reproduce with plain `docker compose`.
           return _source_cmd(root)
       if (root / ".catraz/compose.resolved.yml").exists():
           return _resolved_cmd(root)
-      return _source_cmd(root)          # read-only before first up → layered, no side effects
+      return _source_cmd(root)  # read-only before first up → layered, no side effects
+
 
   def _resolved_cmd(root):
       # keep --project-directory for parity (S3); --project-name == baked name:, so ps/down/
       # --remove-orphans all key on the same project.
-      return ["docker","compose","-f",str(root/".catraz/compose.resolved.yml"),
-              "--project-directory",str(root),"--project-name",project_name(root)]
+      return [
+          "docker",
+          "compose",
+          "-f",
+          str(root / ".catraz/compose.resolved.yml"),
+          "--project-directory",
+          str(root),
+          "--project-name",
+          project_name(root),
+      ]
   ```
 - **`run()`/`compose_ps`/`assert_invariants` take the prefix** (the threaded list) instead of calling a
   global `base_cmd`. `assert_invariants` therefore validates **exactly the artifact that will run** —

@@ -11,9 +11,10 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from catraz.errors import EXIT_OK, EXIT_GENERAL
-from catraz.compose import run as compose_run, resolve_service, _rc
 from catraz import compose
+from catraz.compose import _rc, resolve_service
+from catraz.compose import run as compose_run
+from catraz.errors import EXIT_GENERAL, EXIT_OK
 from catraz.ui import Out
 
 
@@ -26,7 +27,7 @@ def _tail_files(d: Path, glob: str, label: str, args: argparse.Namespace, out: O
     if args.follow:
         cmd.append("-f")
     cmd += ["-n", str(args.tail), *map(str, files)]
-    subprocess.run(cmd)
+    subprocess.run(cmd, check=False)
     return EXIT_OK
 
 

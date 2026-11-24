@@ -13,17 +13,18 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Callable, Mapping, Optional, Protocol, Sequence
+from typing import Protocol
 
 DEFAULT_WATCH = "/etc/squid/squid.conf /etc/squid/allowlist.txt"
 STOP_TIMEOUT_S = 10.0
 
 
 class Child(Protocol):
-    def poll(self) -> Optional[int]: ...
+    def poll(self) -> int | None: ...
     def send_signal(self, sig: int) -> None: ...
-    def wait(self, timeout: Optional[float] = None) -> int: ...
+    def wait(self, timeout: float | None = None) -> int: ...
     def kill(self) -> None: ...
 
 
@@ -52,7 +53,7 @@ def parse_reason(output: str) -> str:
     return picked[-1] if picked else "squid -k parse failed"
 
 
-def write_status(path: Optional[Path], state: str, fp: str, detail: str = "") -> None:
+def write_status(path: Path | None, state: str, fp: str, detail: str = "") -> None:
     """Atomically replace the status file; a write failure is logged, not fatal."""
     if path is None:
         return
@@ -72,7 +73,7 @@ class Squid:
         self.binary = binary
         self.conf = conf
 
-    def check(self) -> Optional[str]:
+    def check(self) -> str | None:
         """None when `squid -k parse` accepts the config, else the reason."""
         try:
             r = subprocess.run(
@@ -80,6 +81,7 @@ class Squid:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                check=False,
             )
         except OSError as exc:
             return str(exc)
@@ -96,9 +98,9 @@ class Supervisor:
         self,
         watch: Sequence[Path],
         *,
-        check: Callable[[], Optional[str]],
+        check: Callable[[], str | None],
         spawn: Callable[[], Child],
-        status_path: Optional[Path] = None,
+        status_path: Path | None = None,
         stop_timeout_s: float = STOP_TIMEOUT_S,
     ) -> None:
         self.watch = list(watch)
@@ -106,7 +108,7 @@ class Supervisor:
         self.spawn = spawn
         self.status_path = status_path
         self.stop_timeout_s = stop_timeout_s
-        self.child: Optional[Child] = None
+        self.child: Child | None = None
         self.applied_fp = ""
         self.pending_fp = ""
 
@@ -141,7 +143,7 @@ class Supervisor:
     def start(self) -> None:
         self.apply(fingerprint(self.watch))
 
-    def tick(self) -> Optional[int]:
+    def tick(self) -> int | None:
         """One poll. Returns an exit code when the supervisor must end."""
         if self.child is not None:
             rc = self.child.poll()
@@ -189,7 +191,7 @@ def poll_interval(env: Mapping[str, str]) -> float:
     return poll_s if poll_s > 0 else 1.0
 
 
-def main(env: Optional[Mapping[str, str]] = None) -> int:
+def main(env: Mapping[str, str] | None = None) -> int:
     env = env if env is not None else dict(os.environ)
     squid = Squid(env.get("SQUID_BIN") or "squid", env.get("SQUID_CONF") or "/etc/squid/squid.conf")
     watch = [Path(p) for p in (env.get("SQUID_WATCH") or DEFAULT_WATCH).split()]

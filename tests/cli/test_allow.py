@@ -11,8 +11,8 @@ import pytest
 
 from catraz import policy
 from catraz.commands import setup
+from catraz.errors import EXIT_CONFIG, EXIT_OK, CliError
 from catraz.ui import Out
-from catraz.errors import EXIT_OK, EXIT_CONFIG, CliError
 
 
 def _out() -> Out:
