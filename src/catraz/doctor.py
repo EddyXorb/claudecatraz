@@ -793,22 +793,19 @@ def check_net(root: Path, f: Findings) -> None:
         f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
 
 
-# Bind mounts a running infra container reads/writes at a fixed path —
-# (host path relative to .catraz, container-absolute path) pairs.
-MOUNT_TARGETS: dict[str, list[tuple[str, str]]] = {
-    "gitlab-warden": [
-        ("state/warden/db", "/var/lib/warden"),
-        ("logs/warden", "/var/log/warden"),
-        ("state/warden/run", "/run/warden"),
-        ("config", "/etc/warden/config"),
-        ("secrets/read_tokens", "/run/secrets/read_tokens"),
-        ("secrets/write_tokens", "/run/secrets/write_tokens"),
-    ],
-    "forward-proxy": [
-        ("logs/squid", "/var/log/squid"),
-        ("config", "/etc/catraz/config"),
-    ],
-}
+def _bind_mounts(name: str) -> list[tuple[str, str]] | None:
+    """(host source, container destination) per bind mount of container `name`,
+    compose secrets included; None if it cannot be inspected."""
+    r = subprocess.run(
+        ["docker", "inspect", "--format", "{{json .Mounts}}", name], capture_output=True, text=True
+    )
+    try:
+        mounts = json.loads(r.stdout) if r.returncode == 0 else None
+    except ValueError:
+        return None
+    if not isinstance(mounts, list):
+        return None
+    return [(m["Source"], m["Destination"]) for m in mounts if m.get("Type") == "bind"]
 
 
 def _container_inode(name: str, path: str) -> int | None:
@@ -841,7 +838,7 @@ def check_mounts(root: Path, f: Findings) -> None:
     drifted = compose.drifted_services(root, rows, prefix=compose.prepare(root, render=True))
     if drifted is None:
         f.warn("mounts", "could not compare the running containers with the compose config")
-    for service, targets in MOUNT_TARGETS.items():
+    for service in compose.INFRA_SERVICES:
         name = running.get(service)
         if not name:
             continue
@@ -852,23 +849,27 @@ def check_mounts(root: Path, f: Findings) -> None:
                 "catraz reload",
             )
             continue
-        for rel, container_path in targets:
-            host_path = root / ".catraz" / rel
+        mounts = _bind_mounts(name)
+        if mounts is None:
+            f.warn("mounts", f"{service}: could not inspect its mounts")
+            continue
+        for source, target in mounts:
+            host_path = Path(source)
             if not host_path.exists():
                 continue
-            container_inode = _container_inode(name, container_path)
+            shown = host_path.relative_to(root) if host_path.is_relative_to(root) else host_path
+            container_inode = _container_inode(name, target)
             if container_inode is None:
-                f.warn("mounts", f"{service}: could not stat {container_path} in container")
-                continue
-            if host_path.stat().st_ino != container_inode:
+                f.warn("mounts", f"{service}: could not stat {target} in container")
+            elif host_path.stat().st_ino != container_inode:
                 f.bad(
                     "mounts",
-                    f"{service}: {rel} bind mount is stale (host path was "
+                    f"{service}: {shown} bind mount is stale (host path was "
                     "recreated while the container kept running)",
                     "catraz reload --force",
                 )
             else:
-                f.ok("mounts", f"{service}: {rel} bind mount intact")
+                f.ok("mounts", f"{service}: {shown} bind mount intact")
 
 
 def _read_secret_file(root: Path, filename: str) -> str:
