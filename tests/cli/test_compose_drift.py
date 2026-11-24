@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from catraz import compose
+from catraz.paths import asset_root
 
 ROWS = [
     {"Service": "gitlab-warden", "Name": "w"},
@@ -99,3 +100,27 @@ def test_agent_routing_unreadable_is_not_stale(
     _endpoints(tmp_path, "a.example")
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: R(1))
     assert compose.agent_routing_stale(tmp_path, "a") is False
+
+
+def test_build_context_change_changes_compose_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edited Dockerfile must reach the rendered config, or drift misses it."""
+    for ctx in compose.BUILD_CONTEXTS.values():
+        (tmp_path / "assets" / ctx).mkdir(parents=True)
+        (tmp_path / "assets" / ctx / "Dockerfile").write_text("FROM a\n")
+    monkeypatch.setattr(compose, "asset_root", lambda: tmp_path)
+    before = compose._compose_env(tmp_path, None)
+    (tmp_path / "assets/forward-proxy/Dockerfile").write_text("FROM b\n")
+    after = compose._compose_env(tmp_path, {"X": "1"})
+    assert before["CATRAZ_WARDEN_BUILD_HASH"] == after["CATRAZ_WARDEN_BUILD_HASH"]
+    assert before["CATRAZ_PROXY_BUILD_HASH"] != after["CATRAZ_PROXY_BUILD_HASH"]
+    assert after["X"] == "1"
+
+
+def test_every_build_input_is_in_a_service_label() -> None:
+    """Compose drops `build` from the config hash, so build args must ride along."""
+    text = (asset_root() / "assets/compose/docker-compose.yml").read_text()
+    assert text.count("DEV_UID: ${DEV_UID:-1000}") == len(compose.BUILD_CONTEXTS)
+    for var in compose.BUILD_CONTEXTS:
+        assert f"catraz.build-hash: ${{{var}:-}}-uid${{DEV_UID:-1000}}" in text

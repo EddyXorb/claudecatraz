@@ -66,7 +66,7 @@ _LIVE_LABELS = {
     live_config.PENDING: "change pending (picked up within seconds)",
     live_config.REJECTED: "REJECTED — denying all traffic",
     live_config.OUT_OF_SYNC: "out of sync — run catraz reload",
-    live_config.UNKNOWN: "no live status (image predates live apply — catraz reload --force)",
+    live_config.UNKNOWN: "no live status (outdated image — catraz reload)",
 }
 
 

@@ -17,6 +17,10 @@ services:
       dockerfile: Dockerfile
       args:
         DEV_UID: ${DEV_UID:-1000}
+    labels:
+      # Build context hash + build args: compose leaves `build` out of the config
+      # hash, so an image built from other inputs must change it through this label.
+      catraz.build-hash: ${CATRAZ_WARDEN_BUILD_HASH:-}-uid${DEV_UID:-1000}
     secrets: [read_tokens, write_tokens]
     environment:
       # Tokens arrive via compose secrets (file-based, /run/secrets/…) — not env
@@ -64,6 +68,8 @@ services:
       context: ${CATRAZ_ASSETS:?CATRAZ_ASSETS unset — run via the catraz CLI}/forward-proxy   # Squid with OpenSSL/ssl_bump support
       args:
         DEV_UID: ${DEV_UID:-1000}               # Audit log readable on host (README §11.6)
+    labels:
+      catraz.build-hash: ${CATRAZ_PROXY_BUILD_HASH:-}-uid${DEV_UID:-1000}
     networks: [agent-net, egress-net]
     volumes:
       # host-editable config, read-only (central config/ folder, README §11):

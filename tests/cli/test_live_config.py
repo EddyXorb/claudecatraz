@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime
 import os
 import socket
 import time
@@ -20,7 +19,6 @@ from catraz.commands import setup, stack
 from catraz.errors import EXIT_GENERAL, EXIT_OK
 from catraz.ui import Out
 
-UTC = datetime.timezone.utc
 # Shared with the warden supervisor's test: files b"a", b"b", missing.
 KNOWN_VECTOR = "833d05d3c2e7c8c503cea30a28bbf06de844a3176923399f5424cf222fbbfbd8"
 WARDEN = "gitlab-warden"
@@ -195,29 +193,27 @@ def test_warden_running_true_with_listener(tmp_path: Path) -> None:
 
 # ── reload staleness ──────────────────────────────────────────────────────────
 
-LONG_AGO = datetime.datetime(2000, 1, 1, tzinfo=UTC)
 
-
-def test_applied_live_is_not_stale_despite_newer_mtime(tmp_path: Path) -> None:
+def test_applied_live_is_not_stale(tmp_path: Path) -> None:
     _seed(tmp_path)
     _write_status(tmp_path, WARDEN, "applied")
     _write_status(tmp_path, PROXY, "applied")
     _age(tmp_path, WARDEN, 0)
-    assert reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO, PROXY: LONG_AGO}, set()) == {}
+    assert reload_cmd.stale_services(tmp_path, [WARDEN, PROXY], set()) == {}
 
 
 def test_rejected_is_not_stale(tmp_path: Path) -> None:
     """A recreate would hit the same invalid file; reload reports, not rebuilds."""
     _seed(tmp_path)
     _write_status(tmp_path, WARDEN, "rejected", detail="x")
-    assert reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO}, set()) == {}
+    assert reload_cmd.stale_services(tmp_path, [WARDEN], set()) == {}
 
 
 def test_out_of_sync_is_stale(tmp_path: Path) -> None:
     _seed(tmp_path)
     _write_status(tmp_path, WARDEN, "applied", fp="0" * 64)
     _age(tmp_path, WARDEN, 60)
-    stale = reload_cmd.stale_services(tmp_path, {WARDEN: LONG_AGO}, set())
+    stale = reload_cmd.stale_services(tmp_path, [WARDEN], set())
     assert stale == {WARDEN: [reload_cmd.OUT_OF_SYNC_MARKER]}
 
 
@@ -226,17 +222,8 @@ def test_compose_drift_is_stale_even_when_applied(tmp_path: Path, drifted: set[s
     """An unknown drift (None) is treated as drifted."""
     _seed(tmp_path)
     _write_status(tmp_path, PROXY, "applied")
-    stale = reload_cmd.stale_services(tmp_path, {PROXY: LONG_AGO}, drifted)
+    stale = reload_cmd.stale_services(tmp_path, [PROXY], drifted)
     assert stale == {PROXY: [reload_cmd.COMPOSE_CONFIG_MARKER]}
-
-
-def test_unknown_falls_back_to_mtime_including_secrets(tmp_path: Path) -> None:
-    _seed(tmp_path)
-    start = datetime.datetime.now(UTC) - datetime.timedelta(seconds=30)
-    _age(tmp_path, WARDEN, 60)
-    (tmp_path / ".catraz/secrets/write_tokens").write_text("example.com w\n")
-    stale = reload_cmd.stale_services(tmp_path, {WARDEN: start}, set())
-    assert stale == {WARDEN: [tmp_path / ".catraz/secrets/write_tokens"]}
 
 
 def _reload(
@@ -249,7 +236,6 @@ def _reload(
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
-    monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: LONG_AGO)
     monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: drifted or set())
     monkeypatch.setattr(compose, "agent_routing_stale", lambda *a: agent_routing_stale)
 
