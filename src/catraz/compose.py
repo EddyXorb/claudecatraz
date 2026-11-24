@@ -358,7 +358,7 @@ CONFIG_HASH_LABEL = "com.docker.compose.config-hash"
 
 
 def drifted_services(
-    root: Path, rows: list[dict[str, str]], *, prefix: list[str]
+    root: Path, rows: list[dict[str, str]], *, prefix: list[str] | None
 ) -> set[str] | None:
     """Running infra services whose container was created from another compose
     config than `prefix` renders — exactly what a plain `up` would recreate.
