@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import http.client
 import json
-import socket
 from pathlib import Path
 from typing import Any
+
+from catraz import hostfs
 
 
 class AdminUnreachable(RuntimeError):
@@ -23,7 +24,7 @@ class _UdsHTTPConnection(http.client.HTTPConnection):
         self._sock_path = sock_path
 
     def connect(self) -> None:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock = hostfs.unix_socket()
         sock.settimeout(self.timeout)
         sock.connect(self._sock_path)
         self.sock = sock

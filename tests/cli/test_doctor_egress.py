@@ -17,7 +17,7 @@ def _make_root(tmp_path: Path, allowlist_text: str | None) -> Path:
     root = tmp_path / "proj"
     (root / ".catraz" / "config").mkdir(parents=True)
     if allowlist_text is not None:
-        (root / ".catraz" / "config" / "allowlist.txt").write_text(allowlist_text)
+        (root / ".catraz" / "config" / "allowlist.txt").write_text(allowlist_text, encoding="utf-8")
     return root
 
 

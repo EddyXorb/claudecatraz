@@ -11,7 +11,8 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from catraz import compose
+from catraz import compose, hostfs
+from catraz.admin_client import admin_socket_path
 from catraz.compose import _rc, resolve_service
 from catraz.compose import run as compose_run
 from catraz.errors import EXIT_GENERAL, EXIT_OK
@@ -39,7 +40,7 @@ class _UdsProxy(socketserver.BaseRequestHandler):
     sock_path = ""  # per-instance via type(...)
 
     def handle(self) -> None:
-        with socket.socket(socket.AF_UNIX) as up:
+        with hostfs.unix_socket() as up:
             up.connect(self.sock_path)
 
             def fwd(a: socket.socket, b: socket.socket) -> None:
@@ -98,9 +99,12 @@ def cmd_ps(root: Path, args: argparse.Namespace, out: Out) -> int:
 
 
 def cmd_audit(root: Path, args: argparse.Namespace, out: Out) -> int:
-    sock = root / ".catraz/state/warden/run/admin.sock"
+    sock = admin_socket_path(root)
     if not args.web:
         return _tail_audit(root, args, out)  # existing JSONL tail
+    if not hostfs.HAS_UNIX_SOCKETS:
+        out.err("audit --web needs Unix sockets, which this host lacks; use `catraz audit`")
+        return EXIT_GENERAL
     if not sock.exists():
         out.err("audit socket not found — run `catraz run` first")
         return EXIT_GENERAL
