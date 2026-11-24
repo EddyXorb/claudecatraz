@@ -280,6 +280,18 @@ class TestYesScaffold:
         setup.cmd_init(root, _yes_args(), Out(color=False))
         assert (root / ".catraz" / "config" / "README.md").exists()
 
+    def test_init_places_secrets_readme_without_overwriting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_root(tmp_path)
+        _patch_common(monkeypatch)
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        readme = root / ".catraz" / "secrets" / "README.md"
+        assert "read_tokens" in readme.read_text(encoding="utf-8")
+        readme.write_text("mine\n")
+        setup.cmd_init(root, _yes_args(), Out(color=False))
+        assert readme.read_text() == "mine\n"
+
     def test_reinit_does_not_duplicate_endpoint(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

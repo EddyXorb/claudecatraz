@@ -144,7 +144,7 @@ Everything lives under **`.catraz/`**, one source of truth per setting:
 
 | Where | Holds |
 | ----- | ----- |
-| `.catraz/secrets/` (0600) | GitLab tokens (`gitlab_read_token`, `gitlab_write_token`), optional API key |
+| `.catraz/secrets/` (0600) | Git tokens per host (`read_tokens`, `write_tokens`), optional API key — see `.catraz/secrets/README.md` |
 | `.catraz/.env` | Non-secret wiring — `AUTH_MODE`, `GITLAB_URL`, `GITLAB_MODE`, base image, `DEV_UID` |
 | `.catraz/config/warden.toml` | Non-secret policy — branch prefixes, quotas, allowed projects |
 

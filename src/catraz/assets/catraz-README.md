@@ -8,8 +8,8 @@ Everything that defines one catraz sandbox lives here, in three tiers.
   Claude Code on top. Must be Debian/Ubuntu-based.
 - `config/warden.toml` — GitLab policy (allowed projects, limits)
 - `config/squid.conf`, `config/allowlist.txt` — egress-proxy rules
-- `secrets/` — your credentials (GitLab tokens, Anthropic key, Claude login).
-  Mode 0700, never commit.
+- `secrets/` — your credentials (git tokens per host, Anthropic key, Claude
+  login). Mode 0700, never commit. `secrets/README.md` explains each file.
 
 ## Output — read, don't edit
 - `compose.resolved.yml` — the complete docker-compose catraz actually runs,

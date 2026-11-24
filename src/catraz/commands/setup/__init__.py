@@ -171,6 +171,10 @@ def cmd_init(root: Path, args: argparse.Namespace, out: Out) -> int:
 
     secrets_dir = cat / "secrets"
     secrets_dir.mkdir(mode=0o700, exist_ok=True)
+    secrets_readme = secrets_dir / "README.md"
+    if not secrets_readme.exists():
+        shutil.copy2(assets / "secrets-README.md", secrets_readme)
+        out.info("• created .catraz/secrets/README.md (how to edit credentials)")
     warden_toml = cat / "config" / "warden.toml"
 
     if args.yes:
