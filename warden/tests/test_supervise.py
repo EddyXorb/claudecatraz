@@ -86,8 +86,8 @@ def test_fingerprint_unset_input_is_dash(tmp_path: Path) -> None:
 
 
 def test_config_inputs_order_and_defaults() -> None:
-    paths = supervise.config_inputs({"READ_TOKENS_FILE": "/r"})
-    assert paths == [Path(supervise.DEFAULT_TOML_PATH), Path("/r"), None]
+    paths = supervise.config_inputs({"READ_TOKENS_FILE": "/r", "UPSTREAM_HOSTS_FILE": "/u"})
+    assert paths == [Path(supervise.DEFAULT_TOML_PATH), Path("/r"), None, Path("/u")]
 
 
 def test_start_valid_spawns_and_reports_applied(setup) -> None:

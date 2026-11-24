@@ -72,6 +72,7 @@ def test_input_order_matches_supervisors() -> None:
         "config/warden.toml",
         "secrets/read_tokens",
         "secrets/write_tokens",
+        "state/warden/run/upstream_hosts",
     )
     assert live_config.INPUTS[PROXY] == ("config/squid.conf", "config/allowlist.txt")
 

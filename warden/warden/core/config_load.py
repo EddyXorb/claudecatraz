@@ -10,6 +10,7 @@ fail-stop) rather than aborting startup.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import tomllib
@@ -196,27 +197,27 @@ def _parse_git(
     return git_rules, git_actions, tuple(endpoints)
 
 
-def _parse_token_file(env: Mapping[str, str], name: str) -> dict[str, str]:
-    """Parse a grouped <host> <token> secrets file into a host -> token map.
+def _parse_host_file(env: Mapping[str, str], name: str, value: str = "token") -> dict[str, str]:
+    """Parse a grouped <host> <value> file into a host -> value map.
 
     Blank lines and # comments are skipped; a duplicate host aborts startup.
     """
     content = _secret(env, name)
     if not content:
         return {}
-    tokens: dict[str, str] = {}
+    entries: dict[str, str] = {}
     for line in content.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         parts = stripped.split(None, 1)
         if len(parts) != 2:
-            raise ConfigError(f"{name}_FILE: malformed line {line!r}, expected '<host> <token>'")
+            raise ConfigError(f"{name}_FILE: malformed line {line!r}, expected '<host> <{value}>'")
         host = Config.normalize_host(parts[0])
-        if host in tokens:
+        if host in entries:
             raise ConfigError(f"{name}_FILE: duplicate host {host!r}")
-        tokens[host] = parts[1]
-    return tokens
+        entries[host] = parts[1]
+    return entries
 
 
 def _resolve_git_endpoint_credentials(
@@ -224,8 +225,8 @@ def _resolve_git_endpoint_credentials(
 ) -> dict[str, HostCredentials]:
     """Resolve each endpoint's read/write tokens from the grouped
     read_tokens/write_tokens files, keyed by normalised host."""
-    read_tokens = _parse_token_file(env, "READ_TOKENS")
-    write_tokens = _parse_token_file(env, "WRITE_TOKENS")
+    read_tokens = _parse_host_file(env, "READ_TOKENS")
+    write_tokens = _parse_host_file(env, "WRITE_TOKENS")
     creds: dict[str, HostCredentials] = {}
     for endpoint in git_endpoints:
         host = Config.normalize_host(endpoint.host)
@@ -233,6 +234,22 @@ def _resolve_git_endpoint_credentials(
             read_token=read_tokens.get(host, ""), write_token=write_tokens.get(host, "")
         )
     return creds
+
+
+def _parse_upstream_addresses(env: Mapping[str, str]) -> dict[str, str]:
+    """Real upstream IP per aliased endpoint host, which the warden itself would
+    resolve to its own alias. A missing file pins nothing, leaving those hosts
+    unreachable rather than misrouted."""
+    path = env.get("UPSTREAM_HOSTS_FILE")
+    if not path or not Path(path).exists():
+        return {}
+    addresses = _parse_host_file(env, "UPSTREAM_HOSTS", "ip")
+    for host, ip in addresses.items():
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError as exc:
+            raise ConfigError(f"UPSTREAM_HOSTS_FILE: {ip!r} for {host!r} is not an IP") from exc
+    return addresses
 
 
 def _warn_closed_endpoints(cfg: Config) -> None:
@@ -324,6 +341,7 @@ def from_env(
         git_actions=git_actions,
         git_endpoints=git_endpoints,
         git_credentials=git_credentials,
+        upstream_addresses=_parse_upstream_addresses(env),
     )
     _warn_closed_endpoints(cfg)
 

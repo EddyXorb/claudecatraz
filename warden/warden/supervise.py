@@ -35,11 +35,11 @@ class Child(Protocol):
 
 
 def config_inputs(env: Mapping[str, str]) -> list[Optional[Path]]:
-    """warden.toml, read_tokens, write_tokens — fixed order, None when unset.
-    The host CLI fingerprints the same three files in the same order."""
+    """warden.toml, read_tokens, write_tokens, upstream_hosts — fixed order,
+    None when unset. The host CLI fingerprints the same files in the same order."""
     toml = env.get("WARDEN_CONFIG_PATH") or DEFAULT_TOML_PATH
     paths: list[Optional[Path]] = [Path(toml)]
-    for name in ("READ_TOKENS_FILE", "WRITE_TOKENS_FILE"):
+    for name in ("READ_TOKENS_FILE", "WRITE_TOKENS_FILE", "UPSTREAM_HOSTS_FILE"):
         value = env.get(name)
         paths.append(Path(value) if value else None)
     return paths

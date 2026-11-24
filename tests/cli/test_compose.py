@@ -97,41 +97,51 @@ def test_render_hosts_fragment_empty_hosts_is_valid_shape(tmp_path: Path) -> Non
     assert "no_proxy=localhost,127.0.0.1" in text
 
 
-def test_render_hosts_fragment_pins_resolved_ip_on_warden(tmp_path: Path) -> None:
-    text = compose.render_hosts_fragment(["gitlab.com"], {"gitlab.com": "172.65.251.78"})
-    assert "extra_hosts:" in text
-    assert '- "gitlab.com:172.65.251.78"' in text
-    # The agent-facing alias is untouched — the pin only shadows the warden's lookup.
-    assert "- gitlab.com" in text
-
-
-def test_render_hosts_fragment_no_pin_without_resolved_ip(tmp_path: Path) -> None:
-    assert "extra_hosts:" not in compose.render_hosts_fragment(["gitlab.com"])
+def test_render_hosts_fragment_carries_no_ip(tmp_path: Path) -> None:
+    """Upstream IPs live in a file the warden reloads, never in the compose
+    config, so a changed DNS answer cannot change the config hash."""
+    assert "extra_hosts" not in compose.render_hosts_fragment(["gitlab.com"])
 
 
 def test_render_hosts_fragment_dedupes_repeated_host(tmp_path: Path) -> None:
-    """A host that appears twice (e.g. a gitlab and a plain endpoint for the
-    same host) collapses to one alias/extra_host/no_proxy entry — duplicate
-    extra_hosts is a hard Docker error."""
-    text = compose.render_hosts_fragment(
-        ["gitlab.com", "gitlab.com"], {"gitlab.com": "172.65.251.78"}
-    )
+    """Duplicate aliases are a hard Docker error."""
+    text = compose.render_hosts_fragment(["gitlab.com", "gitlab.com"])
     assert text.count("- gitlab.com\n") == 1
-    assert text.count('- "gitlab.com:172.65.251.78"') == 1
     assert "no_proxy=gitlab.com,localhost,127.0.0.1" in text
 
 
-def test_write_hosts_fragment_writes_from_warden_toml(
+def test_write_hosts_fragment_writes_aliases_and_upstream_pins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".catraz").mkdir()
-    _write_endpoints(tmp_path, ["gitlab.com"])
+    _write_endpoints(tmp_path, ["gitlab.com", "github.com"])
     monkeypatch.setattr(compose, "_resolve_host_ipv4", lambda host: "203.0.113.7")
     path = compose.write_hosts_fragment(tmp_path)
     assert path == tmp_path / ".catraz" / "compose.hosts.yml"
-    text = path.read_text()
-    assert "- gitlab.com" in text
-    assert '- "gitlab.com:203.0.113.7"' in text  # real IP pinned for the warden
+    assert "- gitlab.com" in path.read_text()
+    pins = compose.upstream_hosts_path(tmp_path).read_text()
+    assert pins == "gitlab.com 203.0.113.7\ngithub.com 203.0.113.7\n"
+
+
+def test_upstream_pin_keeps_last_known_ip_when_lookup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compose, "_resolve_host_ipv4", lambda host: "203.0.113.7")
+    compose.write_upstream_hosts(tmp_path, ["gitlab.com"])
+    monkeypatch.setattr(compose, "_resolve_host_ipv4", lambda host: None)
+    compose.write_upstream_hosts(tmp_path, ["gitlab.com", "new.example"])
+    assert compose.upstream_hosts_path(tmp_path).read_text() == "gitlab.com 203.0.113.7\n"
+
+
+def test_unchanged_upstream_pins_leave_the_file_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compose, "_resolve_host_ipv4", lambda host: "203.0.113.7")
+    compose.write_upstream_hosts(tmp_path, ["gitlab.com"])
+    path = compose.upstream_hosts_path(tmp_path)
+    before = path.stat().st_ino
+    compose.write_upstream_hosts(tmp_path, ["gitlab.com"])
+    assert path.stat().st_ino == before
 
 
 def test_source_cmd_includes_hosts_fragment_when_present(tmp_path: Path) -> None:

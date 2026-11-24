@@ -109,6 +109,8 @@ class Config:
     git_endpoints: tuple[GitEndpoint, ...] = ()
     # Per-endpoint tokens resolved from secret files, keyed by normalised host.
     git_credentials: Mapping[str, HostCredentials] = field(default_factory=dict)
+    # Pinned upstream IP per normalised host, for hosts aliased to the warden.
+    upstream_addresses: Mapping[str, str] = field(default_factory=dict)
 
     def in_branch_namespace(self, host: str, name: str) -> bool:
         """True iff name starts with any of host's effective branch prefixes.

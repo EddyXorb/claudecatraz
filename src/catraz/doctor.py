@@ -228,7 +228,7 @@ def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
 def _parse_grouped_tokens(text: str) -> dict[str, str]:
     """Parse a grouped read_tokens/write_tokens file into host -> token.
 
-    Same splitting rule as the Warden's _parse_token_file: split on the first
+    Same splitting rule as the Warden's _parse_host_file: split on the first
     run of whitespace; #-comments and blank lines are skipped. A malformed line
     is skipped rather than raising."""
     tokens: dict[str, str] = {}
