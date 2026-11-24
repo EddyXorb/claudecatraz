@@ -17,6 +17,10 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "forward-proxy" / "squid_supervise.py"
 
+# The supervisor is PID 1 of the Linux proxy container and drives squid with
+# POSIX signals; on a Windows host os.kill(SIGTERM) would end pytest itself.
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX signals only")
+
 
 def _load() -> ModuleType:
     spec = importlib.util.spec_from_file_location("squid_supervise", SCRIPT)

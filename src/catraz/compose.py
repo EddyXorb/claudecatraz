@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from catraz.errors import EXIT_CONFIG, CliError
+from catraz.hostfs import host_os
 from catraz.paths import asset_root
 
 # Semantic service aliases → compose service names (P1: no raw container names).
@@ -237,9 +238,12 @@ def _context_hash(context: Path) -> str:
 def _compose_env(root: Path, extra_env: dict[str, str] | None) -> dict[str, str]:
     """CATRAZ_ASSETS anchors build contexts at the extracted asset cache (absolute,
     since they resolve against --project-directory); the context hashes make an
-    outdated image part of the service config hash."""
+    outdated image part of the service config hash; CATRAZ_HOST_OS tells the
+    entrypoint whose the bind-mount ownership is."""
     assets = asset_root() / "assets"
-    env = dict(os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(assets))
+    env = dict(
+        os.environ, PROJECT_DIR=str(root), CATRAZ_ASSETS=str(assets), CATRAZ_HOST_OS=host_os()
+    )
     env.update({var: _context_hash(assets / ctx) for var, ctx in BUILD_CONTEXTS.items()})
     return {**env, **(extra_env or {})}
 

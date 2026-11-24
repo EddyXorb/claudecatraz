@@ -1,6 +1,7 @@
 name: cli CI
 
-# The catraz CLI: smoke-check it imports/runs and its unit tests pass.
+# The catraz CLI: smoke-check it imports/runs and its unit tests pass, on both a
+# Linux and a Windows host (Docker Desktop's platform for the host-side CLI).
 on:
   push:
     paths:
@@ -21,7 +22,11 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -29,18 +34,32 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Lint (ruff)
+        if: runner.os == 'Linux'
         run: uv run ruff check .
 
       - name: Format-Check (ruff)
+        if: runner.os == 'Linux'
         run: uv run ruff format --check .
 
       - name: Smoke (help + version)
+        if: runner.os == 'Linux'
         run: |
           ./catraz --help
           ./catraz --version
           ./catraz run --help
 
+      # No shell wrapper on Windows: drive the console-script entry point instead.
+      - name: Smoke (help + version)
+        if: runner.os == 'Windows'
+        run: |
+          uv run catraz --help
+          uv run catraz --version
+          uv run catraz run --help
+
+      # typeshed hides os.chown/getuid/pwd/AF_UNIX on win32, so mypy reports
+      # errors against Linux-only code — it stays a Linux gate.
       - name: Type-check (mypy --strict)
+        if: runner.os == 'Linux'
         run: uv run mypy
 
       - name: Unit tests

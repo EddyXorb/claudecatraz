@@ -87,9 +87,9 @@ jobs:
           compose_vars = set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)(?::-[^}]*)?\}', compose))
 
           # Injected by catraz at runtime (host ~/.gitconfig or /dev/null, the agent
-          # image catraz built, infra build-context hashes) — not .env values.
+          # image catraz built, infra build-context hashes, the host OS) — not .env values.
           compose_vars -= {
-              "PROJECT_DIR", "HOST_GITCONFIG", "AGENT_IMAGE",
+              "PROJECT_DIR", "HOST_GITCONFIG", "AGENT_IMAGE", "CATRAZ_HOST_OS",
               "CATRAZ_WARDEN_BUILD_HASH", "CATRAZ_PROXY_BUILD_HASH",
           }
 

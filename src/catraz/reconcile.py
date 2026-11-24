@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from catraz import __version__, background, compose, live_config, paths
+from catraz.admin_client import admin_socket_path
 from catraz.ui import Out
 
 LOCK_STALE_S = 15 * 60
@@ -63,7 +64,7 @@ def inputs_fingerprint(root: Path) -> str:
 
 
 def _stack_up(root: Path) -> bool:
-    return (root / ".catraz" / "state" / "warden" / "run" / "admin.sock").exists()
+    return admin_socket_path(root).exists()
 
 
 def trigger(root: Path, out: Out) -> None:
