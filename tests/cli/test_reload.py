@@ -64,7 +64,7 @@ def test_stale_services_changed_file_listed(tmp_path: Path) -> None:
     start = datetime.datetime.now(UTC)
     later = (start + datetime.timedelta(seconds=2)).timestamp()
     os.utime(tmp_path / ".catraz" / "config" / "warden.toml", (later, later))
-    stale = reload_cmd.stale_services(tmp_path, {"gitlab-warden": start})
+    stale = reload_cmd.stale_services(tmp_path, {"gitlab-warden": start}, set())
     assert "gitlab-warden" in stale
 
 
@@ -72,14 +72,14 @@ def test_stale_services_untouched_not_listed(tmp_path: Path) -> None:
     """Start time in the future, file untouched → not stale."""
     _seed(tmp_path)
     start = datetime.datetime.now(UTC) + datetime.timedelta(seconds=30)
-    stale = reload_cmd.stale_services(tmp_path, {"gitlab-warden": start})
+    stale = reload_cmd.stale_services(tmp_path, {"gitlab-warden": start}, set())
     assert "gitlab-warden" not in stale
 
 
 def test_stale_services_none_start_listed(tmp_path: Path) -> None:
     """A present service with unknown (None) start time → stale, not skipped."""
     _seed(tmp_path)
-    stale = reload_cmd.stale_services(tmp_path, {"gitlab-warden": None})
+    stale = reload_cmd.stale_services(tmp_path, {"gitlab-warden": None}, set())
     assert "gitlab-warden" in stale
     assert stale["gitlab-warden"] == ["<unknown start>"]
 
@@ -97,6 +97,7 @@ def test_cmd_reload_up_to_date_no_up_call(monkeypatch: pytest.MonkeyPatch, tmp_p
     future = datetime.datetime.now(UTC) + datetime.timedelta(hours=1)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: set())
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: future)
     monkeypatch.setattr(compose, "run", lambda root, args, **kw: calls.append(args))
@@ -114,6 +115,7 @@ def test_cmd_reload_stale_force_recreates(monkeypatch: pytest.MonkeyPatch, tmp_p
     old = datetime.datetime(2000, 1, 1, tzinfo=UTC)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: set())
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: old)
 
@@ -134,6 +136,7 @@ def test_cmd_reload_not_running(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     _seed(tmp_path)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: set())
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: [])
     monkeypatch.setattr(compose, "run", lambda root, args, **kw: calls.append(args))
     rc = reload_cmd.cmd_reload(
@@ -150,6 +153,7 @@ def test_cmd_reload_force_not_running_rebuilds(
     _seed(tmp_path)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: set())
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: [])
 
     def _mock_compose_run(root: Path, args: typing.Any, **kw: typing.Any) -> types.SimpleNamespace:
@@ -178,6 +182,7 @@ def test_cmd_reload_force_running_not_stale(
     future = datetime.datetime.now(UTC) + datetime.timedelta(hours=1)
     calls: list[list[str]] = []
     monkeypatch.setattr(compose, "prepare", lambda *a, **kw: ["docker", "compose"])
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: set())
     monkeypatch.setattr(reload_cmd, "compose_ps", lambda *a, **kw: rows)
     monkeypatch.setattr(compose, "container_started_at", lambda root, name, **kw: future)
 

@@ -14,7 +14,7 @@ from catraz.envfile import load_env
 from catraz.compose import run as compose_run, compose_ps
 from catraz.errors import CliError
 from catraz import paths
-from catraz import image
+from catraz import compose, image
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
@@ -179,7 +179,7 @@ def check_compose(root: Path, env: dict[str, str], f: Findings) -> None:
     config: it's unconditional (no profile gate), so its absence means someone
     edited it out; `agent` depends_on `gitlab-warden`, so the stack would fail closed."""
     if not which("docker"):
-        f.warn("compose", "cannot confirm services (docker missing)")
+        f.warn("compose", "cannot confirm services (docker missing)", "install Docker + Compose v2")
         return
     r = compose_run(root, ["config", "--services"], capture=True, check=False)
     services = r.stdout.split() if r and r.returncode == 0 else []
@@ -374,6 +374,8 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
             "tokens",
             f"token for host {host!r} matches no [[git.endpoint]] in warden.toml "
             "— probably a typo, the Warden ignores it",
+            "spell the host in .catraz/secrets/read_tokens / write_tokens exactly as "
+            "the endpoint's `host` in .catraz/config/warden.toml",
         )
 
     for endpoint in endpoints:
@@ -381,7 +383,11 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
         has_read = host in read_tokens
         has_write = host in write_tokens
         if not has_read and not has_write:
-            f.warn("tokens", f"endpoint {host!r} has no token — it will run closed")
+            f.warn(
+                "tokens",
+                f"endpoint {host!r} has no token — it will run closed",
+                f"add a line `{host} <token>` to .catraz/secrets/read_tokens",
+            )
             continue
         if has_write and not has_read:
             # Least-privilege: a write token is never used as a read fallback, so
@@ -389,8 +395,8 @@ def check_tokens(root: Path, env: dict[str, str], f: Findings) -> None:
             f.warn(
                 "tokens",
                 f"endpoint {host!r} has a write token but no read token — it will "
-                "run closed (least privilege: add a read-scoped token to "
-                "read_tokens for this host)",
+                "run closed (a write token is never used for reads)",
+                f"add a line `{host} <read-scoped token>` to .catraz/secrets/read_tokens",
             )
             continue
         f.ok(
@@ -558,9 +564,10 @@ def check_policy(root: Path, env: dict[str, str], f: Findings) -> None:
         if not resolved:
             f.warn(
                 "policy",
-                f"{host}: allowed_projects empty",
-                "stack still starts (offline work OK); every GitLab op is "
-                "denied on this host until you add a project",
+                f"{host}: allowed_projects empty — stack still starts, but every "
+                "GitLab op on this host is denied",
+                f"add full project paths to the {host!r} endpoint's allowed_projects "
+                "in .catraz/config/warden.toml",
             )
             continue
         bad = []
@@ -595,7 +602,11 @@ def check_egress(root: Path, env: dict[str, str], f: Findings) -> None:
     )
     entries = classify_domains(text, baseline)
     if not entries:
-        f.warn("egress", "no domains allowed — the agent cannot reach any network host")
+        f.warn(
+            "egress",
+            "no domains allowed — the agent cannot reach any network host",
+            "add domains to .catraz/config/allowlist.txt (one per line)",
+        )
         return
     for entry in entries:
         f.ok("egress", f"{entry.entry} [{entry.provenance}]")
@@ -816,11 +827,9 @@ def _container_inode(name: str, path: str) -> int | None:
 
 
 def check_mounts(root: Path, f: Findings) -> None:
-    """A host path deleted and recreated at the same location while its
-    container keeps running orphans the bind mount: the container keeps
-    seeing the old, unlinked file or directory. Compares each mount's
-    host-side inode against the inode the running container sees; a
-    mismatch flags the mount as stale."""
+    """Flags infra containers created from an older compose config, and bind
+    mounts orphaned by a host path recreated while the container kept running:
+    the container then still sees the old, unlinked inode."""
     if not which("docker"):
         f.warn("mounts", "cannot verify bind mounts (docker missing)")
         return
@@ -829,9 +838,19 @@ def check_mounts(root: Path, f: Findings) -> None:
     if not running:
         f.ok("mounts", "stack not running — nothing to verify")
         return
+    drifted = compose.drifted_services(root, rows, prefix=compose.prepare(root, render=True))
+    if drifted is None:
+        f.warn("mounts", "could not compare the running containers with the compose config")
     for service, targets in MOUNT_TARGETS.items():
         name = running.get(service)
         if not name:
+            continue
+        if drifted and service in drifted:
+            f.bad(
+                "mounts",
+                f"{service}: container was created from an older compose config",
+                "catraz reload",
+            )
             continue
         for rel, container_path in targets:
             host_path = root / ".catraz" / rel
@@ -875,7 +894,12 @@ def check_auth(root: Path, env: dict[str, str], f: Findings) -> None:
     api_key = _read_secret_file(root, "anthropic_api_key") or env.get("ANTHROPIC_API_KEY", "")
     if mode == "subscription":
         if api_key:
-            f.bad("auth", "subscription mode but ANTHROPIC_API_KEY set", "unset it")
+            f.bad(
+                "auth",
+                "subscription mode but ANTHROPIC_API_KEY set",
+                "empty .catraz/secrets/anthropic_api_key and drop ANTHROPIC_API_KEY "
+                "from .catraz/.env",
+            )
         if effective_credentials_mode(root, env) == "persistent":
             # Persistent home keeps the login inside the container
             # (.catraz/state/<profile>/); the `agent` section validates it and

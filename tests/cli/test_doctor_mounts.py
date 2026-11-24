@@ -4,7 +4,13 @@ from typing import Any
 
 import pytest
 
-from catraz import doctor
+from catraz import compose, doctor
+
+
+@pytest.fixture(autouse=True)
+def _no_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(compose, "prepare", lambda root, **kw: ["docker", "compose"])
+    monkeypatch.setattr(compose, "drifted_services", lambda root, rows, **kw: set())
 
 
 def _mkdirs(root: Path) -> None:
@@ -94,3 +100,44 @@ def test_check_mounts_docker_missing_warns(tmp_path: Path, monkeypatch: pytest.M
     f = doctor.Findings()
     doctor.check_mounts(tmp_path, f)
     assert any(i[0] == doctor.WARN for i in f.items)
+
+
+def test_check_mounts_drifted_container_is_bad_with_reload_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mkdirs(tmp_path)
+    monkeypatch.setattr(doctor, "which", lambda c: True)
+    monkeypatch.setattr(
+        doctor,
+        "compose_ps",
+        lambda root: [{"Service": "forward-proxy", "Name": "proxy-1"}],
+    )
+    monkeypatch.setattr(compose, "drifted_services", lambda root, rows, **kw: {"forward-proxy"})
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: pytest.fail("no stat on drift"))
+    f = doctor.Findings()
+    doctor.check_mounts(tmp_path, f)
+    assert [(i[0], i[3]) for i in f.items] == [(doctor.BAD, "catraz reload")]
+
+
+def test_check_mounts_unknown_drift_warns_and_still_checks_inodes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mkdirs(tmp_path)
+    monkeypatch.setattr(doctor, "which", lambda c: True)
+    monkeypatch.setattr(
+        doctor,
+        "compose_ps",
+        lambda root: [{"Service": "forward-proxy", "Name": "proxy-1"}],
+    )
+    monkeypatch.setattr(compose, "drifted_services", lambda root, rows, **kw: None)
+
+    class R:
+        def __init__(s: Any, rc: int, out: str = "") -> None:
+            s.returncode, s.stdout = rc, out
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: R(1))
+    f = doctor.Findings()
+    doctor.check_mounts(tmp_path, f)
+    warns = [i for i in f.items if i[0] == doctor.WARN]
+    assert len(warns) == 1 + len(doctor.MOUNT_TARGETS["forward-proxy"])
+    assert all(i[3] is None for i in warns)
