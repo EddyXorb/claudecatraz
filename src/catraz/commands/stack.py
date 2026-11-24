@@ -9,7 +9,7 @@ from pathlib import Path
 from catraz.errors import EXIT_OK, EXIT_GENERAL
 from catraz.compose import run as compose_run, compose_ps, _rc
 from catraz.doctor import run_doctor, print_findings, SECURITY_SECTIONS
-from catraz import compose, live_config
+from catraz import compose, live_config, reconcile
 from catraz.ui import Out
 
 
@@ -104,8 +104,12 @@ def cmd_down(root: Path, args: argparse.Namespace, out: Out) -> int:
         compose_run(root, down_args, print_only=True)
         return EXIT_OK
     out.info("• stopping the stack…")
-    prefix = compose.prepare(root, render=True)
-    r = compose_run(root, down_args, prefix=prefix, check=False)
+    with reconcile.infra_lock(root) as held:
+        if not held:
+            out.err("a background reconcile still holds the infra lock — retry shortly")
+            return EXIT_GENERAL
+        prefix = compose.prepare(root, render=True)
+        r = compose_run(root, down_args, prefix=prefix, check=False)
     return _rc(r)
 
 

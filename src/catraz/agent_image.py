@@ -12,13 +12,12 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from catraz import image
+from catraz import background, image
 from catraz.agents import resolve_agent_profile
 from catraz.compose import project_name
 from catraz.envfile import load_env
@@ -146,36 +145,15 @@ def _write_pointer(root: Path, ptr: Pointer) -> None:
 
 def lock_info(root: Path) -> dict[str, Any] | None:
     """Body of a live build lock, or None when absent or stale."""
-    p = _lock_path(root)
-    try:
-        age = time.time() - p.stat().st_mtime
-    except OSError:
-        return None
-    if age > LOCK_STALE_SECONDS:
-        return None
-    return _read_json(p) or {}
+    return background.lock_body(_lock_path(root), LOCK_STALE_SECONDS)
 
 
 def _acquire_lock(root: Path) -> bool:
-    """O_EXCL create (portable, no fcntl); a stale lock is broken once."""
-    p = _lock_path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(2):
-        try:
-            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            if lock_info(root) is not None:
-                return False
-            p.unlink(missing_ok=True)
-            continue
-        with os.fdopen(fd, "w") as f:
-            json.dump({"pid": os.getpid(), "started": time.time()}, f)
-        return True
-    return False
+    return background.acquire(_lock_path(root), LOCK_STALE_SECONDS)
 
 
 def _release_lock(root: Path) -> None:
-    _lock_path(root).unlink(missing_ok=True)
+    background.release(_lock_path(root))
 
 
 def _image_exists(tag: str) -> bool:
@@ -302,28 +280,7 @@ def ensure(root: Path, out: Out, base: str) -> str:
 
 
 def spawn_refresh(root: Path) -> None:
-    """Start the background worker fully detached: own session/process group, no
-    terminal, output to a log. Best effort — the next start simply tries again."""
-    log = _log_dir(root) / "image-refresh.log"
-    pkg_parent = str(Path(__file__).resolve().parents[1])
-    pythonpath = os.pathsep.join(p for p in (pkg_parent, os.environ.get("PYTHONPATH")) if p)
-    env = dict(os.environ, PYTHONPATH=pythonpath)
-    cmd = [sys.executable, "-m", "catraz.cli", "build", "--background", "-C", str(root)]
-    kw: dict[str, Any] = {}
-    if os.name == "nt":
-        kw["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        )
-    else:
-        kw["start_new_session"] = True
-    try:
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with open(log, "w") as f:
-            subprocess.Popen(
-                cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, env=env, **kw
-            )
-    except OSError:
-        pass
+    background.spawn(root, ["build", "--background"], _log_dir(root) / "image-refresh.log")
 
 
 def _say(msg: str) -> None:
