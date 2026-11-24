@@ -18,8 +18,9 @@ services:
       args:
         DEV_UID: ${DEV_UID:-1000}
     labels:
-      # Content hash of the build context: an outdated image changes the config hash.
-      catraz.build-hash: ${CATRAZ_WARDEN_BUILD_HASH:-}
+      # Build context hash + build args: compose leaves `build` out of the config
+      # hash, so an image built from other inputs must change it through this label.
+      catraz.build-hash: ${CATRAZ_WARDEN_BUILD_HASH:-}-uid${DEV_UID:-1000}
     secrets: [read_tokens, write_tokens]
     environment:
       # Tokens arrive via compose secrets (file-based, /run/secrets/…) — not env
@@ -68,7 +69,7 @@ services:
       args:
         DEV_UID: ${DEV_UID:-1000}               # Audit log readable on host (README §11.6)
     labels:
-      catraz.build-hash: ${CATRAZ_PROXY_BUILD_HASH:-}
+      catraz.build-hash: ${CATRAZ_PROXY_BUILD_HASH:-}-uid${DEV_UID:-1000}
     networks: [agent-net, egress-net]
     volumes:
       # host-editable config, read-only (central config/ folder, README §11):

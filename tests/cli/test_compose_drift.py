@@ -118,7 +118,9 @@ def test_build_context_change_changes_compose_env(
     assert after["X"] == "1"
 
 
-def test_every_build_hash_is_a_service_label() -> None:
+def test_every_build_input_is_in_a_service_label() -> None:
+    """Compose drops `build` from the config hash, so build args must ride along."""
     text = (asset_root() / "assets/compose/docker-compose.yml").read_text()
+    assert text.count("DEV_UID: ${DEV_UID:-1000}") == len(compose.BUILD_CONTEXTS)
     for var in compose.BUILD_CONTEXTS:
-        assert f"catraz.build-hash: ${{{var}:-}}" in text
+        assert f"catraz.build-hash: ${{{var}:-}}-uid${{DEV_UID:-1000}}" in text
