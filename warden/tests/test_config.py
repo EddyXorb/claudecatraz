@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from warden.core.config import Config, ConfigError, GitEndpoint, GitRules, HostCredentials
-from warden.core.config_load import _parse_token_file, from_env
+from warden.core.config_load import _parse_host_file, from_env
 from warden.guards.git.actions import DEFAULT as GIT_DEFAULT
 
 _HOST = "gitlab.example"
@@ -213,34 +213,34 @@ def test_invalid_toml_type_aborts(tmp_path):
 # is derived from token presence, never a declared mode. ---
 
 
-def test_parse_token_file_splits_host_and_token(tmp_path):
+def test_parse_host_file_splits_host_and_token(tmp_path):
     f = tmp_path / "read_tokens"
     f.write_text("gitlab.com   glpat-abc\nmy-gitlab.de\tglpat-def\n")
-    tokens = _parse_token_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
+    tokens = _parse_host_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
     assert tokens == {"gitlab.com": "glpat-abc", "my-gitlab.de": "glpat-def"}
 
 
-def test_parse_token_file_skips_comments_and_blank_lines(tmp_path):
+def test_parse_host_file_skips_comments_and_blank_lines(tmp_path):
     f = tmp_path / "read_tokens"
     f.write_text("# comment\n\ngitlab.com glpat-abc\n   \n# another\n")
-    tokens = _parse_token_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
+    tokens = _parse_host_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
     assert tokens == {"gitlab.com": "glpat-abc"}
 
 
-def test_parse_token_file_normalizes_host():
-    tokens = _parse_token_file({"READ_TOKENS": "GitLab.COM:443 glpat-abc\n"}, "READ_TOKENS")
+def test_parse_host_file_normalizes_host():
+    tokens = _parse_host_file({"READ_TOKENS": "GitLab.COM:443 glpat-abc\n"}, "READ_TOKENS")
     assert tokens == {"gitlab.com": "glpat-abc"}
 
 
-def test_parse_token_file_duplicate_host_aborts(tmp_path):
+def test_parse_host_file_duplicate_host_aborts(tmp_path):
     f = tmp_path / "read_tokens"
     f.write_text("gitlab.com glpat-abc\nGitLab.com glpat-def\n")
     with pytest.raises(ConfigError, match="duplicate host"):
-        _parse_token_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
+        _parse_host_file({"READ_TOKENS_FILE": str(f)}, "READ_TOKENS")
 
 
-def test_parse_token_file_absent_yields_empty():
-    assert _parse_token_file({}, "READ_TOKENS") == {}
+def test_parse_host_file_absent_yields_empty():
+    assert _parse_host_file({}, "READ_TOKENS") == {}
 
 
 def test_read_tokens_file_missing_raises(tmp_path):
@@ -710,3 +710,26 @@ def test_top_level_allowed_projects_aborts_startup(tmp_path):
     toml.write_text('allowed_projects = ["group/proj"]\n')
     with pytest.raises(ConfigError, match=r"unknown top-level key\(s\) \['allowed_projects'\]"):
         from_env({}, strict=True, toml_path=str(toml))
+
+
+def test_upstream_addresses_parsed_and_normalized(tmp_path):
+    f = tmp_path / "upstream_hosts"
+    f.write_text("GitLab.com 172.65.251.78\n# comment\ngithub.com 2001:db8::1\n")
+    cfg = from_env({"UPSTREAM_HOSTS_FILE": str(f)}, strict=False)
+    assert cfg.upstream_addresses == {"gitlab.com": "172.65.251.78", "github.com": "2001:db8::1"}
+
+
+def test_upstream_addresses_missing_file_pins_nothing(tmp_path):
+    cfg = from_env({"UPSTREAM_HOSTS_FILE": str(tmp_path / "absent")}, strict=False)
+    assert cfg.upstream_addresses == {}
+
+
+@pytest.mark.parametrize(
+    "line", ["gitlab.com not-an-ip", "gitlab.com", "a.com 1.2.3.4\nA.com 1.2.3.5"]
+)
+def test_upstream_addresses_malformed_file_aborts(tmp_path, line):
+    """A bad pin must reject the config, never silently route elsewhere."""
+    f = tmp_path / "upstream_hosts"
+    f.write_text(line + "\n")
+    with pytest.raises(ConfigError, match="UPSTREAM_HOSTS_FILE"):
+        from_env({"UPSTREAM_HOSTS_FILE": str(f)}, strict=False)

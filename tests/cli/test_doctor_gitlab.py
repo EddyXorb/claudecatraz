@@ -103,7 +103,7 @@ def _write_endpoints(
 
 
 class TestParseGroupedTokens:
-    """Same splitting rule as the Warden's Step 02 `_parse_token_file`."""
+    """Same splitting rule as the Warden's `_parse_host_file`."""
 
     def test_splits_on_first_whitespace(self) -> None:
         tokens = doctor._parse_grouped_tokens("gitlab.internal:8443  glpat-abc\n")

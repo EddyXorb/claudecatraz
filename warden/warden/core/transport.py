@@ -10,9 +10,10 @@ from __future__ import annotations
 import base64
 import logging
 from dataclasses import dataclass
-from typing import AsyncIterator, Awaitable, Callable, Optional, Sequence
+from typing import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import quote
 
+import httpcore
 import httpx
 from starlette.responses import StreamingResponse
 
@@ -173,6 +174,46 @@ class Upstream:
         return {k: v for k, v in resp.headers.items() if k.lower() not in _DROP_RESPONSE_HEADERS}
 
 
+class _PinnedBackend(httpcore.AsyncNetworkBackend):
+    """Connects pinned hosts to their fixed address; TLS still verifies the
+    hostname, since httpcore passes the origin host as server_hostname."""
+
+    def __init__(self, addresses: Mapping[str, str], inner: httpcore.AsyncNetworkBackend) -> None:
+        self._addresses = addresses
+        self._inner = inner
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: Optional[float] = None,
+        local_address: Optional[str] = None,
+        socket_options: Optional[Iterable[httpcore.SOCKET_OPTION]] = None,
+    ) -> httpcore.AsyncNetworkStream:
+        address = self._addresses.get(Config.normalize_host(host), host)
+        return await self._inner.connect_tcp(address, port, timeout, local_address, socket_options)
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: Optional[float] = None,
+        socket_options: Optional[Iterable[httpcore.SOCKET_OPTION]] = None,
+    ) -> httpcore.AsyncNetworkStream:
+        return await self._inner.connect_unix_socket(path, timeout, socket_options)
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+def upstream_client(addresses: Mapping[str, str]) -> httpx.AsyncClient:
+    """The shared upstream client, connecting pinned hosts to their address."""
+    transport = httpx.AsyncHTTPTransport()
+    # httpx exposes no network-backend option; its pool is the only seam.
+    pool = transport._pool
+    pool._network_backend = _PinnedBackend(addresses, pool._network_backend)
+    return httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(30.0, read=300.0))
+
+
 class UpstreamRouter:
     """Host to Upstream resolution, shared by the git and REST-API guards
     so neither re-derives its own routing. One shared httpx.AsyncClient
@@ -185,7 +226,7 @@ class UpstreamRouter:
         self, cfg: Config, layout_for: LayoutFor, *, client: Optional[httpx.AsyncClient] = None
     ) -> None:
         self._cfg = cfg
-        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
+        self._client = client or upstream_client(cfg.upstream_addresses)
         self._by_host: dict[str, Upstream] = {}
         for endpoint in cfg.git_endpoints:
             if cfg.access_mode(endpoint.host) == "closed":

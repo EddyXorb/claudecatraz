@@ -18,7 +18,12 @@ from catraz.ui import Out
 
 # Order matters: it must match the supervisor's own input order.
 INPUTS: dict[str, tuple[str, ...]] = {
-    "gitlab-warden": ("config/warden.toml", "secrets/read_tokens", "secrets/write_tokens"),
+    "gitlab-warden": (
+        "config/warden.toml",
+        "secrets/read_tokens",
+        "secrets/write_tokens",
+        "state/warden/run/upstream_hosts",
+    ),
     "forward-proxy": ("config/squid.conf", "config/allowlist.txt"),
 }
 STATUS_FILES = {

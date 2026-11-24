@@ -36,6 +36,8 @@ services:
       # The supervisor (PID 1) re-validates these inputs on every change and
       # replaces the warden process; its verdict lands in the status file.
       - WARDEN_CONFIG_PATH=/etc/warden/config/warden.toml
+      # Real IP per aliased endpoint host, written by catraz on every render.
+      - UPSTREAM_HOSTS_FILE=/run/warden/upstream_hosts
       - CONFIG_STATUS_FILE=/run/warden/config-status
       # Non-secret policy — SOURCE OF TRUTH is config/warden.toml exclusively
       # ([git.rules] + [[git.endpoint]], §3.5): no env overrides left here.
