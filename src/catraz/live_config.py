@@ -8,12 +8,13 @@ not-yet-picked-up and out-of-sync apart exactly, without asking docker.
 from __future__ import annotations
 
 import hashlib
-import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from catraz import hostfs
+from catraz.admin_client import admin_socket_path
 from catraz.ui import Out
 
 # Order matters: it must match the supervisor's own input order.
@@ -110,15 +111,12 @@ def report(root: Path, out: Out, services: list[str] | None = None) -> bool:
 
 def warden_running(root: Path) -> bool:
     """True when a warden answers on its host-side admin socket."""
-    sock_path = root / ".catraz" / "state" / "warden" / "run" / "admin.sock"
-    s = socket.socket(socket.AF_UNIX)
     try:
-        s.settimeout(1.0)
-        s.connect(str(sock_path))
+        with hostfs.unix_socket() as s:
+            s.settimeout(1.0)
+            s.connect(str(admin_socket_path(root)))
     except OSError:
         return False
-    finally:
-        s.close()
     return True
 
 

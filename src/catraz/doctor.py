@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from catraz import compose, image, paths
+from catraz.admin_client import AdminUnreachable, admin_socket_path
 from catraz.compose import compose_ps
 from catraz.compose import run as compose_run
 from catraz.envfile import load_env
 from catraz.errors import CliError
+from catraz.hostfs import host_uid
 
 OK, WARN, BAD = "ok", "warn", "bad"
 
@@ -206,6 +208,13 @@ def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
     f.ok("env", ".env present")
 
     dev_uid = env.get("DEV_UID", "")
+    posix = host_uid() is not None
+    if not posix:
+        f.warn(
+            "env",
+            "no host uid — bind-mount ownership and file modes are synthetic here",
+            "secrets/ rests on the filesystem ACL alone; the 0600 modes do not apply",
+        )
     write_dirs = [root / ".catraz" / "state", root / ".catraz" / "logs"]
     for d in write_dirs:
         if not d.exists():
@@ -215,7 +224,9 @@ def check_env(root: Path, env: dict[str, str], f: Findings) -> None:
                 "run `catraz init` or `catraz doctor --fix`",
             )
             continue
-        if dev_uid.isdigit():
+        if not posix:
+            f.ok("env", f"{d.name}/ present")
+        elif dev_uid.isdigit():
             owner = d.stat().st_uid
             if owner != int(dev_uid):
                 f.bad(
@@ -620,7 +631,6 @@ def check_endpoints(root: Path, env: dict[str, str], f: Findings) -> None:
     each configured [[git.endpoint]]. Fetched from the running warden's /policy
     admin route, so this section needs the stack up (unlike
     check_action_coherence, which does a static, host-side parse of warden.toml)."""
-    from catraz.admin_client import AdminUnreachable
     from catraz.endpoints import fetch_policy_report
 
     if not _read_git_endpoints(root):
@@ -754,7 +764,9 @@ def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
             )
             return
         mode = state_dir.stat().st_mode & 0o777
-        if mode != 0o700:
+        if host_uid() is None:
+            f.ok("agent", f"{state_dir} present")  # modes are synthetic — check_env warns
+        elif mode != 0o700:
             f.bad(
                 "agent",
                 f"{state_dir} has mode {oct(mode)}, expected 0700",
@@ -773,7 +785,9 @@ def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
 
     home = claude_home(root)
     creds = home / ".credentials.json"
-    if home.exists() and home.stat().st_uid == 0 and os.getuid() != 0:
+    uid = host_uid()
+    # Where st_uid is synthetic (always 0) this says nothing — skip rather than guess.
+    if uid is not None and uid != 0 and home.exists() and home.stat().st_uid == 0:
         f.bad(
             "agent",
             f"{home} owned by root (Docker auto-created it)",
@@ -789,8 +803,7 @@ def check_agent(root: Path, env: dict[str, str], f: Findings) -> None:
 def check_net(root: Path, f: Findings) -> None:
     # Admin/audit is reachable over a per-project unix socket under
     # .catraz/state/warden/run/. The socket file only exists while the stack runs.
-    sock = root / ".catraz" / "state" / "warden" / "run" / "admin.sock"
-    if sock.exists():
+    if admin_socket_path(root).exists():
         f.ok("net", "admin socket present (stack up)")
     else:
         f.ok("net", "admin socket absent (stack down — start with `catraz run`)")
@@ -864,7 +877,9 @@ def check_mounts(root: Path, f: Findings) -> None:
             host_path = Path(source)
             if not host_path.exists():
                 continue
-            shown = host_path.relative_to(root) if host_path.is_relative_to(root) else host_path
+            shown = (
+                host_path.relative_to(root) if host_path.is_relative_to(root) else host_path
+            ).as_posix()
             container_inode = _container_inode(name, target)
             if container_inode is None:
                 f.warn("mounts", f"{service}: could not stat {target} in container")
@@ -1067,7 +1082,9 @@ def _doctor_fix(root: Path, env: dict[str, str]) -> None:
         if not p.exists():
             p.write_text("")
             p.chmod(0o600)
-    if dev_uid.isdigit():
+    # Without a host uid there is no ownership to repair: the mounts carry
+    # synthetic ownership and os.chown does not exist on such a host.
+    if dev_uid.isdigit() and host_uid() is not None:
         for d in ["state", "logs"]:
             try:
                 _chown_r(cat / d, int(dev_uid))
