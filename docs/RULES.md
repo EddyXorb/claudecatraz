@@ -38,7 +38,8 @@ comments, `.env`, and operator docs — not just Python docstrings.
 
 - Fail closed: unknown ids, unknown field values, unmatched requests →
   deny / `ConfigError`. Allowlists of known-safe, never blocklists.
-- Effective config is built once at startup — no runtime reload.
+- Effective config is built once per process at startup — no in-process
+  reload; a config change is applied by replacing the process.
 - Never widen behavior in a refactor; intentional widenings are named in a
   design doc first.
 

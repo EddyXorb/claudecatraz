@@ -168,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("ps", parents=[_g()], help="list active agent containers for this repo")
 
     pr = sub.add_parser(
-        "reload", parents=[_g()], help="restart services whose .catraz config changed"
+        "reload", parents=[_g()], help="recreate infra for config that cannot apply live"
     )
     pr.add_argument(
         "--force",

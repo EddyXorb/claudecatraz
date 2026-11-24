@@ -20,5 +20,5 @@ rm -rf "$SSL_DB"
 "$CERTGEN" -c -s "$SSL_DB" -M 4MB
 chown -R proxy:proxy "$SSL_DB"
 
-# -N: no daemon fork (foreground for Docker/PID 1); -d1: logs to stderr.
-exec squid -N -d1 -f /etc/squid/squid.conf
+# Runs squid in the foreground and applies config edits without a restart.
+exec python3 /usr/local/bin/squid_supervise.py

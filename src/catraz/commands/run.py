@@ -15,7 +15,7 @@ from catraz.compose import (
     assert_real_dirs,
     assert_invariants,
 )
-from catraz import agent_image, image, compose
+from catraz import agent_image, image, compose, live_config
 from catraz.ui import Out
 from catraz.commands.stack import (
     _row_ready,
@@ -55,7 +55,9 @@ def _prune_agent_logs(log_dir: Path, keep: int = 50) -> None:
 
 def _ensure_infra(root: Path, out: Out, prefix: list[str] | None = None) -> None:
     """Lazy infra: if warden+squid are already healthy, return fast; otherwise run the
-    security preflight + auto-sync, warn about the trust boundary, and start infra only."""
+    security preflight + auto-sync, warn about the trust boundary, and start infra only.
+    A config an infra supervisor rejected is reported first: it denies all traffic."""
+    live_config.report(root, out)
     rows = compose_ps(root, prefix=prefix)
     healthy = {r.get("Service") for r in rows if _row_ready(r)}
     if {"gitlab-warden", "forward-proxy"} <= healthy:
@@ -64,7 +66,8 @@ def _ensure_infra(root: Path, out: Out, prefix: list[str] | None = None) -> None
         raise CliError("preflight failed — fix the ✘ above", EXIT_DOCTOR)
     _auto_sync_if_needed(root, out)
     out.warn("catraz: sandbox active (warden+squid) — protects network/git, NOT your files")
-    compose_run(root, ["up", "-d"], prefix=prefix, check=False)
+    # --build keeps infra images in step with the CLI's compose wiring.
+    compose_run(root, ["up", "-d", "--build", "--quiet-build"], prefix=prefix, check=False)
 
 
 def cmd_run(root: Path, args: argparse.Namespace, out: Out) -> int:

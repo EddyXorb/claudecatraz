@@ -130,7 +130,7 @@ forges, databases, …) — without touching the sandbox or the security kernel.
 | `catraz run shell` | Open a shell in a one-off sandbox container |
 | `catraz audit --web` | Open the read-only GitLab decision viewer |
 | `catraz status` / `ps` | Health, URLs, quota snapshot / list active agent containers |
-| `catraz reload` | Rebuild + restart infra whose `.catraz` config changed (`--force` for all) |
+| `catraz reload` | Recreate infra for changes that cannot apply live (`.env`, endpoint hosts; `--force` for all) |
 | `catraz build` | Rebuild the agent image now; new Claude Code releases otherwise build in the background and apply on the next start |
 | `catraz allow <path>…` | Append GitLab project(s) to the Warden allowlist |
 | `catraz sync` | Re-import the host's Claude credentials into the sandbox |
@@ -157,7 +157,10 @@ max_writes_per_hour = 60
 allowed_projects    = ["group/sub/project-a", "group/sub/project-b"]
 ```
 
-The Warden and Squid read their config once at startup; run `catraz reload` after an edit.
+Edits to `warden.toml`, the token files, `squid.conf` and `allowlist.txt` apply live within
+seconds: each is validated first, and an invalid file stops that service (all its traffic
+denied) until fixed — `catraz status` shows the reason. `.env` changes and added/removed
+endpoint hosts need `catraz reload`.
 `allowed_projects` entries are full, concrete project paths — no wildcards, no group
 prefixes (an explicit, enumerable allowlist keeps the read surface small).
 
