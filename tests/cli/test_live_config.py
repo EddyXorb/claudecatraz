@@ -369,3 +369,21 @@ def test_allow_confirms_live_apply(
     setup._confirm_live_apply(tmp_path, _out(), running)
     captured = capsys.readouterr()
     assert expected in captured.out + captured.err
+
+
+@pytest.mark.parametrize(("drifted", "ups"), [(set(), 0), ({PROXY}, 1), (None, 1)])
+def test_ensure_infra_recreates_drifted_healthy_infra(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, drifted: set[str] | None, ups: int
+) -> None:
+    """Healthy is not enough: infra from an older config (or an unknown one) is
+    brought up again, so a catraz update applies on the next run."""
+    _seed(tmp_path)
+    rows = [{"Service": s, "Name": s, "State": "running"} for s in (WARDEN, PROXY)]
+    calls: list[list[str]] = []
+    monkeypatch.setattr(run_cmd, "compose_ps", lambda *a, **kw: rows)
+    monkeypatch.setattr(compose, "drifted_services", lambda *a, **kw: drifted)
+    monkeypatch.setattr(run_cmd, "_security_preflight", lambda root, out: False)
+    monkeypatch.setattr(run_cmd, "_auto_sync_if_needed", lambda root, out: None)
+    monkeypatch.setattr(run_cmd, "compose_run", lambda root, args, **kw: calls.append(args))
+    run_cmd._ensure_infra(tmp_path, _out())
+    assert len(calls) == ups

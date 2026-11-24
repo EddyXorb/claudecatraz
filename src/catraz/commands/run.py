@@ -54,13 +54,16 @@ def _prune_agent_logs(log_dir: Path, keep: int = 50) -> None:
 
 
 def _ensure_infra(root: Path, out: Out, prefix: list[str] | None = None) -> None:
-    """Lazy infra: if warden+squid are already healthy, return fast; otherwise run the
-    security preflight + auto-sync, warn about the trust boundary, and start infra only.
+    """Lazy infra: if warden+squid are healthy and match the compose config, return
+    fast; otherwise run the security preflight + auto-sync, warn about the trust
+    boundary, and (re)start infra only — a catraz update thus applies on the next run.
     A config an infra supervisor rejected is reported first: it denies all traffic."""
     live_config.report(root, out)
     rows = compose_ps(root, prefix=prefix)
     healthy = {r.get("Service") for r in rows if _row_ready(r)}
-    if {"gitlab-warden", "forward-proxy"} <= healthy:
+    if set(compose.INFRA_SERVICES) <= healthy and (
+        compose.drifted_services(root, rows, prefix=prefix) == set()
+    ):
         return
     if _security_preflight(root, out):
         raise CliError("preflight failed — fix the ✘ above", EXIT_DOCTOR)
